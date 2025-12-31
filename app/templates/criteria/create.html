@@ -73,7 +73,13 @@
                             <div id="value-help">
                                 <strong>Examples:</strong><br>
                                 <span id="mtime-help" style="display: none;">
-                                    Days since modification (e.g., "30" for files older than 30 days)
+                                    Minutes since modification (e.g., "30" for files older than 30 minutes, "1440" for 1 day)
+                                </span>
+                                <span id="atime-help" style="display: none;">
+                                    Minutes since access (e.g., "30" for files older than 30 minutes, "1440" for 1 day)
+                                </span>
+                                <span id="ctime-help" style="display: none;">
+                                    Minutes since change (e.g., "30" for files older than 30 minutes, "1440" for 1 day)
                                 </span>
                                 <span id="size-help" style="display: none;">
                                     Size with optional suffix: c (bytes), k (KB), M (MB), G (GB)<br>
@@ -127,7 +133,8 @@
             </div>
             <div class="card-body">
                 <ul class="list-unstyled mb-0">
-                    <li><strong>Files older than 30 days:</strong> Type: mtime, Operator: >, Value: 30</li>
+                    <li><strong>Files older than 30 minutes:</strong> Type: mtime, Operator: >, Value: 30</li>
+                    <li><strong>Files older than 1 day (1440 minutes):</strong> Type: mtime, Operator: >, Value: 1440</li>
                     <li><strong>Files larger than 1GB:</strong> Type: size, Operator: >, Value: 1G</li>
                     <li><strong>All .log files:</strong> Type: name, Operator: matches, Value: *.log</li>
                     <li><strong>Files containing "backup":</strong> Type: name, Operator: contains, Value: backup</li>

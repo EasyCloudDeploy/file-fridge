@@ -42,11 +42,26 @@ uv sync
 
 This will create a virtual environment and install all dependencies automatically.
 
-4. (Optional) Create a `.env` file for configuration:
+4. (Optional) Configure via environment variables or `.env` file:
+
+You can set configuration via environment variables:
 ```bash
-cp .env.example .env
-# Edit .env with your settings
+export LOG_LEVEL=DEBUG
+export DATABASE_URL=sqlite:///./file_fridge.db
+export SECRET_KEY=your-secret-key-here
 ```
+
+Or create a `.env` file in the project root:
+```bash
+LOG_LEVEL=INFO
+DATABASE_URL=sqlite:///./file_fridge.db
+SECRET_KEY=your-secret-key-here
+```
+
+Available environment variables:
+- `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default: INFO
+- `DATABASE_URL`: SQLite database URL. Default: sqlite:///./file_fridge.db
+- `SECRET_KEY`: Secret key for session management. Default: file-fridge-secret-key-change-in-production
 
 ### Using pip (Alternative)
 
@@ -67,11 +82,7 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-4. (Optional) Create a `.env` file for configuration:
-```bash
-cp .env.example .env
-# Edit .env with your settings
-```
+4. (Optional) Configure via environment variables or `.env` file (see above).
 
 ## Usage
 
@@ -118,7 +129,7 @@ The web interface will be available at `http://localhost:8000`
 
 2. **Add Criteria** (via API):
    - Use the REST API to add criteria for each path
-   - Example: Move files older than 30 days
+   - Example: Move files older than 30 minutes (or 1440 for 1 day)
    - Example: Move files larger than 1GB
 
 3. **Manual Scans**:
@@ -141,7 +152,7 @@ curl -X POST "http://localhost:8000/api/v1/paths" \
   }'
 ```
 
-**Add a criteria (files older than 30 days):**
+**Add a criteria (files older than 30 minutes):**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/criteria/path/1" \
   -H "Content-Type: application/json" \
@@ -153,6 +164,12 @@ curl -X POST "http://localhost:8000/api/v1/criteria/path/1" \
   }'
 ```
 
+**Note:** Time-based criteria (mtime, atime, ctime) use minutes, not days. For example:
+- 30 minutes = `"30"`
+- 1 hour = `"60"`
+- 1 day = `"1440"`
+- 1 week = `"10080"`
+
 **Get statistics:**
 ```bash
 curl "http://localhost:8000/api/v1/stats"
@@ -162,9 +179,9 @@ curl "http://localhost:8000/api/v1/stats"
 
 File Fridge supports find-compatible criteria:
 
-- **mtime**: Modification time (days)
-- **atime**: Access time (days)
-- **ctime**: Change time (days)
+- **mtime**: Modification time (minutes)
+- **atime**: Access time (minutes)
+- **ctime**: Change time (minutes)
 - **size**: File size (supports suffixes: c, k, M, G)
 - **name**: Filename (glob patterns)
 - **iname**: Case-insensitive filename

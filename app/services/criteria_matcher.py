@@ -3,42 +3,82 @@ import os
 import re
 import stat
 import fnmatch
+import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from app.models import CriterionType, Operator, Criteria
+
+logger = logging.getLogger(__name__)
 
 
 class CriteriaMatcher:
     """Matches files against criteria (find-compatible)."""
     
     @staticmethod
-    def match_file(file_path: Path, criteria: List[Criteria]) -> tuple[bool, List[int]]:
+    def match_file(file_path: Path, criteria: List[Criteria], actual_file_path: Optional[Path] = None) -> tuple[bool, List[int]]:
         """
         Check if file matches all enabled criteria.
+        
+        Args:
+            file_path: The file path to check (may be a symlink)
+            criteria: List of criteria to match against
+            actual_file_path: Optional path to the actual file (for symlinks, this should be the resolved target)
         
         Returns:
             (matches: bool, matched_criteria_ids: List[int])
         """
         if not criteria:
+            logger.debug(f"File {file_path}: No criteria defined, matching by default")
             return True, []
         
         enabled_criteria = [c for c in criteria if c.enabled]
         if not enabled_criteria:
+            logger.debug(f"File {file_path}: No enabled criteria, matching by default")
             return True, []
         
         matched_ids = []
         
+        # If actual_file_path is provided (e.g., for symlinks), use it for stat operations
+        # Otherwise, resolve symlinks to get the actual file
+        stat_path = actual_file_path if actual_file_path else file_path
+        
+        # If file_path is a symlink and no actual_file_path provided, try to resolve it
+        if file_path.is_symlink() and not actual_file_path:
+            try:
+                stat_path = file_path.resolve(strict=True)
+                logger.debug(f"File {file_path}: Resolved symlink to {stat_path}")
+            except (OSError, RuntimeError):
+                # If resolution fails, fall back to the symlink itself
+                stat_path = file_path
+                logger.debug(f"File {file_path}: Could not resolve symlink, using symlink itself")
+        
         try:
-            stat_info = file_path.stat()
-        except (OSError, FileNotFoundError):
+            # Use lstat for symlink metadata, stat for actual file metadata
+            if actual_file_path or (file_path.is_symlink() and stat_path != file_path):
+                # Check the actual file, not the symlink
+                stat_info = stat_path.stat()
+                logger.debug(f"File {file_path}: Checking actual file at {stat_path} (symlink target)")
+            else:
+                # Regular file, use normal stat
+                stat_info = file_path.stat()
+                logger.debug(f"File {file_path}: Checking regular file")
+        except (OSError, FileNotFoundError) as e:
+            logger.debug(f"File {file_path}: Cannot stat file - {e}")
             return False, []
         
-        for criterion in enabled_criteria:
-            if not CriteriaMatcher._match_criterion(file_path, stat_info, criterion):
-                return False, []
-            matched_ids.append(criterion.id)
+        logger.debug(f"File {file_path}: Evaluating {len(enabled_criteria)} enabled criteria")
         
+        for criterion in enabled_criteria:
+            matches = CriteriaMatcher._match_criterion(file_path, stat_info, criterion)
+            if matches:
+                logger.debug(f"File {file_path}: ✓ Criterion {criterion.id} ({criterion.criterion_type.value} {criterion.operator.value} {criterion.value}) MATCHED")
+                matched_ids.append(criterion.id)
+            else:
+                logger.debug(f"File {file_path}: ✗ Criterion {criterion.id} ({criterion.criterion_type.value} {criterion.operator.value} {criterion.value}) NOT MATCHED")
+                return False, []
+        
+        logger.debug(f"File {file_path}: All {len(matched_ids)} criteria matched - FILE WILL BE MOVED")
         return True, matched_ids
     
     @staticmethod
@@ -79,24 +119,24 @@ class CriteriaMatcher:
     
     @staticmethod
     def _match_time(timestamp: float, operator: Operator, value: str, time_type: str) -> bool:
-        """Match time-based criteria (mtime, atime, ctime)."""
+        """Match time-based criteria (mtime, atime, ctime). Value is in minutes."""
         try:
-            days = float(value)
-            # Convert to days since epoch
-            file_days = timestamp / 86400.0
-            now_days = datetime.now().timestamp() / 86400.0
-            age_days = now_days - file_days
+            minutes = float(value)
+            # Convert to minutes since epoch
+            file_minutes = timestamp / 60.0
+            now_minutes = datetime.now().timestamp() / 60.0
+            age_minutes = now_minutes - file_minutes
             
             if operator == Operator.GT:
-                return age_days > days
+                return age_minutes > minutes
             elif operator == Operator.LT:
-                return age_days < days
+                return age_minutes < minutes
             elif operator == Operator.EQ:
-                return abs(age_days - days) < 0.5  # Within half a day
+                return abs(age_minutes - minutes) < 0.5  # Within half a minute
             elif operator == Operator.GTE:
-                return age_days >= days
+                return age_minutes >= minutes
             elif operator == Operator.LTE:
-                return age_days <= days
+                return age_minutes <= minutes
         except (ValueError, TypeError):
             return False
         return False

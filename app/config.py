@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./file_fridge.db"
     
     # Application
-    log_level: str = "INFO"
+    log_level: str = "INFO"  # Can be overridden via LOG_LEVEL environment variable
     max_file_size_mb: int = 10240
     default_check_interval: int = 3600
     
