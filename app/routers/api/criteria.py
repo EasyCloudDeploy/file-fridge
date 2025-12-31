@@ -1,4 +1,5 @@
 """API routes for criteria management."""
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
@@ -6,6 +7,8 @@ from app.database import get_db
 from app.models import Criteria, MonitoredPath
 from app.schemas import CriteriaCreate, CriteriaUpdate, Criteria as CriteriaSchema
 from app.services.scheduler import scheduler_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/criteria", tags=["criteria"])
 
@@ -74,7 +77,7 @@ def update_criteria(criteria_id: int, criteria_update: CriteriaUpdate, db: Sessi
 
 @router.delete("/{criteria_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_criteria(criteria_id: int, db: Session = Depends(get_db)):
-    """Delete a criterion."""
+    """Delete a criterion. If it's the last criterion, all files are moved back from cold storage."""
     criteria = db.query(Criteria).filter(Criteria.id == criteria_id).first()
     if not criteria:
         raise HTTPException(
@@ -82,7 +85,26 @@ def delete_criteria(criteria_id: int, db: Session = Depends(get_db)):
             detail=f"Criteria with id {criteria_id} not found"
         )
     
+    path_id = criteria.path_id
+    
+    # Delete the criterion
     db.delete(criteria)
     db.commit()
+    
+    # Check if there are any remaining enabled criteria for this path
+    remaining_criteria = db.query(Criteria).filter(
+        Criteria.path_id == path_id,
+        Criteria.enabled == True
+    ).count()
+    
+    # If no criteria remain, reverse all operations (move files back)
+    if remaining_criteria == 0:
+        from app.services.path_reverser import PathReverser
+        logger.info(f"No criteria remaining for path {path_id}, reversing all file operations")
+        results = PathReverser.reverse_path_operations(path_id, db)
+        if results["errors"]:
+            logger.warning(f"Some errors occurred while reversing operations: {results['errors']}")
+        logger.info(f"Reversed {results['files_reversed']} files for path {path_id}")
+    
     return None
 

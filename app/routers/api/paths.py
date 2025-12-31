@@ -1,5 +1,6 @@
 """API routes for path management."""
-from fastapi import APIRouter, Depends, HTTPException, status
+import logging
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List
 from pathlib import Path
@@ -7,6 +8,8 @@ from app.database import get_db
 from app.models import MonitoredPath
 from app.schemas import MonitoredPathCreate, MonitoredPathUpdate, MonitoredPath as MonitoredPathSchema
 from app.services.scheduler import scheduler_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/paths", tags=["paths"])
 
@@ -130,9 +133,20 @@ def update_path(path_id: int, path_update: MonitoredPathUpdate, db: Session = De
     return path
 
 
-@router.delete("/{path_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_path(path_id: int, db: Session = Depends(get_db)):
-    """Delete a monitored path."""
+@router.delete("/{path_id}", status_code=status.HTTP_200_OK)
+def delete_path(
+    path_id: int,
+    undo_operations: bool = Query(False, description="If True, move all files back from cold storage before deleting"),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a monitored path.
+    
+    Args:
+        path_id: The path ID to delete
+        undo_operations: If True, move all files back from cold storage before deleting
+    """
+    
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
     if not path:
         raise HTTPException(
@@ -140,12 +154,29 @@ def delete_path(path_id: int, db: Session = Depends(get_db)):
             detail=f"Path with id {path_id} not found"
         )
     
+    results = {
+        "path_id": path_id,
+        "undo_operations": undo_operations,
+        "files_reversed": 0,
+        "errors": []
+    }
+    
+    # If undo_operations is True, reverse all file operations first
+    if undo_operations:
+        from app.services.path_reverser import PathReverser
+        logger.info(f"Undoing operations for path {path_id} before deletion")
+        reverse_results = PathReverser.reverse_path_operations(path_id, db)
+        results["files_reversed"] = reverse_results["files_reversed"]
+        results["errors"] = reverse_results["errors"]
+    
     # Remove from scheduler
     scheduler_service.remove_path_job(path_id)
     
+    # Delete the path
     db.delete(path)
     db.commit()
-    return None
+    
+    return results
 
 
 @router.post("/{path_id}/scan", status_code=status.HTTP_202_ACCEPTED)

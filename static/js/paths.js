@@ -227,15 +227,32 @@ async function loadPathDetail(pathId) {
 
 // Path actions
 async function deletePath(pathId) {
-    if (!confirm('Are you sure you want to delete this path?')) return;
+    // Ask if user wants to undo operations
+    const undoOps = confirm(
+        'Do you want to move all files back from cold storage before deleting?\n\n' +
+        'Click OK to undo operations (move files back)\n' +
+        'Click Cancel to delete without moving files back'
+    );
+    
+    if (!confirm(`Are you sure you want to delete this path?${undoOps ? '\n\nAll files will be moved back from cold storage.' : ''}`)) {
+        return;
+    }
     
     try {
-        const response = await fetch(`${API_BASE_URL}/paths/${pathId}`, {
+        const response = await fetch(`${API_BASE_URL}/paths/${pathId}?undo_operations=${undoOps}`, {
             method: 'DELETE'
         });
         
         if (response.ok) {
-            showFlashMessage('Path deleted successfully');
+            const result = await response.json();
+            let message = 'Path deleted successfully';
+            if (undoOps && result.files_reversed > 0) {
+                message += `. ${result.files_reversed} file(s) moved back from cold storage.`;
+            }
+            if (result.errors && result.errors.length > 0) {
+                message += ` ${result.errors.length} error(s) occurred.`;
+            }
+            showFlashMessage(message, result.errors && result.errors.length > 0 ? 'warning' : 'success');
             window.location.href = '/paths';
         } else {
             const error = await response.json();

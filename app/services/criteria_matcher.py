@@ -34,13 +34,13 @@ class CriteriaMatcher:
             (matches: bool, matched_criteria_ids: List[int])
         """
         if not criteria:
-            logger.debug(f"File {file_path}: No criteria defined, matching by default")
-            return True, []
+            logger.debug(f"File {file_path}: No criteria defined, NOT matching (files should be moved back from cold storage)")
+            return False, []
         
         enabled_criteria = [c for c in criteria if c.enabled]
         if not enabled_criteria:
-            logger.debug(f"File {file_path}: No enabled criteria, matching by default")
-            return True, []
+            logger.debug(f"File {file_path}: No enabled criteria, NOT matching (files should be moved back from cold storage)")
+            return False, []
         
         # If this is a symlink pointing to cold storage, check both the symlink and the actual file
         if file_path.is_symlink() and actual_file_path:
