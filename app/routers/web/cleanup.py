@@ -1,20 +1,21 @@
-"""File cleanup web routes - redirects to API."""
-from fastapi import APIRouter, Request
+"""File cleanup web routes - no longer needed, handled by JavaScript."""
+from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
 
 router = APIRouter()
 
-
 @router.post("/cleanup")
-async def cleanup_files(request: Request):
-    """Cleanup - handled by JavaScript/AJAX."""
-    # This route is now handled by JavaScript/AJAX in the template
+async def cleanup_files():
+    """Manually trigger cleanup of missing files - handled by JavaScript."""
+    # This route is kept for backwards compatibility but should not be used
+    # JavaScript handles the API call directly
     return RedirectResponse(url="/files", status_code=303)
 
 
 @router.post("/cleanup/duplicates")
-async def cleanup_duplicate_files(request: Request):
-    """Duplicate cleanup - handled by JavaScript/AJAX."""
-    # This route is now handled by JavaScript/AJAX in the template
+async def cleanup_duplicate_files():
+    """Manually trigger cleanup of duplicate file records - handled by JavaScript."""
+    # This route is kept for backwards compatibility but should not be used
+    # JavaScript handles the API call directly
     return RedirectResponse(url="/files", status_code=303)
 

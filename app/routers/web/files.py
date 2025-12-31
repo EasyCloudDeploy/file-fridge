@@ -1,31 +1,18 @@
-"""File browser web routes."""
-from fastapi import APIRouter, Depends, Request, Query
-from fastapi.responses import HTMLResponse
-from starlette.templating import Jinja2Templates
-from typing import Optional
-from app.utils.flash import get_flash
-from app.routers.api import files as api_files, paths as api_paths
+"""File browser web routes - serves static HTML, data loaded via API."""
+from fastapi import APIRouter
+from fastapi.responses import FileResponse
+from pathlib import Path
 
 router = APIRouter()
-# Templates directory relative to project root
-templates = Jinja2Templates(directory="app/templates")
 
 
-@router.get("/files", response_class=HTMLResponse)
-async def browse_files(
-    request: Request,
-    path_id: Optional[int] = Query(None)
-):
-    """File browser - uses API to fetch data."""
-    # Get flash messages from session
-    error = get_flash(request, "error")
-    message = get_flash(request, "message")
-    
-    return templates.TemplateResponse("files/browser.html", {
-        "request": request,
-        "active_page": "files",
-        "selected_path_id": path_id,
-        "error": error,
-        "message": message
-    })
+@router.get("/files")
+async def browse_files():
+    """File browser - serves static HTML, data loaded via API."""
+    html_path = Path("static/html/files.html")
+    if html_path.exists():
+        return FileResponse(html_path, media_type="text/html")
+    else:
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content="<h1>Files</h1><p>Static HTML file not found. Please check static/html/files.html</p>", status_code=404)
 

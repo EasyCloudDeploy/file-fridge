@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title id="page-title">Create Path - File Fridge</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-snow"></i> File Fridge
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/paths">
+                            <i class="bi bi-folder"></i> Paths
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/files">
+                            <i class="bi bi-file-earmark"></i> Files
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/stats">
+                            <i class="bi bi-graph-up"></i> Statistics
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12 col-md-8 offset-md-2">
+                <h1 class="mb-4" id="form-title">
+                    <i class="bi bi-plus-circle"></i> Create Monitored Path
+                </h1>
+
+                <div class="card">
+                    <div class="card-body">
+                        <form id="path-form">
+                            <div class="mb-3">
+                                <label for="name" class="form-label">Name *</label>
+                                <input type="text" class="form-control" id="name" name="name" required>
+                                <small class="form-text text-muted">A descriptive name for this monitored path</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="source_path" class="form-label">Source Path *</label>
+                                <input type="text" class="form-control" id="source_path" name="source_path" required>
+                                <small class="form-text text-muted">The directory to monitor for files</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="cold_storage_path" class="form-label">Cold Storage Path *</label>
+                                <input type="text" class="form-control" id="cold_storage_path" name="cold_storage_path" required>
+                                <small class="form-text text-muted">Destination directory for cold storage</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="operation_type" class="form-label">Operation Type *</label>
+                                <select class="form-select" id="operation_type" name="operation_type" required>
+                                    <option value="move">Move</option>
+                                    <option value="copy">Copy</option>
+                                    <option value="symlink">Move & Create Symlink</option>
+                                </select>
+                                <small class="form-text text-muted">
+                                    Move: Move file to cold storage<br>
+                                    Copy: Copy file, keep original<br>
+                                    Symlink: Move file, create symlink at original location
+                                </small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="check_interval_seconds" class="form-label">Check Interval (seconds) *</label>
+                                <input type="number" class="form-control" id="check_interval_seconds" name="check_interval_seconds" 
+                                       value="3600" min="60" required>
+                                <small class="form-text text-muted">How often to check for files matching criteria (minimum 60 seconds)</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="enabled" name="enabled" checked>
+                                    <label class="form-check-label" for="enabled">
+                                        Enabled
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted">Enable automatic scanning for this path</small>
+                            </div>
+
+                            <div class="d-flex justify-content-between">
+                                <a href="/paths" class="btn btn-secondary">Cancel</a>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-save"></i> <span id="submit-text">Create</span> Path
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="mt-5 py-3 bg-light text-center">
+        <div class="container">
+            <small class="text-muted">File Fridge v1.0.0 - File Cold Storage Management</small>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/paths.js"></script>
+</body>
+</html>
+

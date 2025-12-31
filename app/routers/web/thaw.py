@@ -1,15 +1,14 @@
-"""File thawing web routes - redirects to API."""
-from fastapi import APIRouter, Request
+"""File thawing web routes - no longer needed, handled by JavaScript."""
+from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
-from app.utils.flash import set_flash, set_error
 
 router = APIRouter()
 
 
 @router.post("/files/{file_id}/thaw")
-async def thaw_file(request: Request, file_id: int):
-    """Thaw a file - redirects to API endpoint."""
-    # This route is now handled by JavaScript/AJAX in the template
-    # Redirect to files page - the JavaScript will handle the API call
+async def thaw_file(file_id: int):
+    """Thaw a file - handled by JavaScript, redirect to files page."""
+    # This route is kept for backwards compatibility but should not be used
+    # JavaScript handles the API call directly
     return RedirectResponse(url="/files", status_code=303)
 
