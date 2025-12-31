@@ -22,7 +22,7 @@
                 <h5 class="card-title">
                     <i class="bi bi-file-earmark"></i> Total Files Moved
                 </h5>
-                <h2 class="mb-0">{{ total_files }}</h2>
+                <h2 class="mb-0" id="totalFiles">0</h2>
             </div>
         </div>
     </div>
@@ -32,7 +32,7 @@
                 <h5 class="card-title">
                     <i class="bi bi-hdd"></i> Total Size Moved
                 </h5>
-                <h2 class="mb-0">{{ "%.2f" | format(total_size / 1024 / 1024 / 1024) }} GB</h2>
+                <h2 class="mb-0" id="totalSize">0.00 GB</h2>
             </div>
         </div>
     </div>
@@ -58,7 +58,6 @@
                 <h5 class="mb-0">Files by Path</h5>
             </div>
             <div class="card-body">
-                {% if path_stats %}
                 <div class="table-responsive">
                     <table class="table table-hover">
                         <thead>
@@ -68,50 +67,23 @@
                                 <th>Total Size</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            {% for stat in path_stats %}
+                        <tbody id="pathStatsBody">
                             <tr>
-                                <td><strong>{{ stat.path.name }}</strong></td>
-                                <td>{{ stat.count }}</td>
-                                <td>{{ "%.2f" | format(stat.size / 1024 / 1024 / 1024) }} GB</td>
+                                <td colspan="3" class="text-center">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                </td>
                             </tr>
-                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
-                {% else %}
-                <p class="text-muted">No statistics available yet.</p>
-                {% endif %}
             </div>
         </div>
     </div>
 </div>
-
-<script>
-const dailyData = {{ daily_stats | tojson }};
-const ctx = document.getElementById('dailyChart').getContext('2d');
-new Chart(ctx, {
-    type: 'line',
-    data: {
-        labels: dailyData.map(d => d.date),
-        datasets: [{
-            label: 'Files Moved',
-            data: dailyData.map(d => d.count),
-            borderColor: 'rgb(75, 192, 192)',
-            backgroundColor: 'rgba(75, 192, 192, 0.2)',
-            tension: 0.1
-        }]
-    },
-    options: {
-        responsive: true,
-        maintainAspectRatio: true,
-        scales: {
-            y: {
-                beginAtZero: true
-            }
-        }
-    }
-});
-</script>
 {% endblock %}
 
+{% block extra_scripts %}
+<script src="/static/js/stats.js"></script>
+{% endblock %}

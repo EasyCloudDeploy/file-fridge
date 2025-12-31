@@ -1,8 +1,9 @@
 """File scanning service."""
 import os
 from pathlib import Path
-from typing import List, Tuple
-from app.models import MonitoredPath, Criteria
+from typing import List, Tuple, Optional
+from sqlalchemy.orm import Session
+from app.models import MonitoredPath, Criteria, PinnedFile
 from app.services.criteria_matcher import CriteriaMatcher
 
 
@@ -10,9 +11,13 @@ class FileScanner:
     """Scans directories for files matching criteria."""
     
     @staticmethod
-    def scan_path(path: MonitoredPath) -> List[Tuple[Path, List[int]]]:
+    def scan_path(path: MonitoredPath, db: Optional[Session] = None) -> List[Tuple[Path, List[int]]]:
         """
         Scan a monitored path for files matching criteria.
+        
+        Args:
+            path: The monitored path to scan
+            db: Database session to check for pinned files
         
         Returns:
             List of (file_path, matched_criteria_ids) tuples
@@ -26,6 +31,14 @@ class FileScanner:
         # Get all criteria for this path
         criteria = path.criteria
         
+        # Get list of pinned files if db is provided
+        pinned_paths = set()
+        if db:
+            pinned = db.query(PinnedFile).filter(
+                PinnedFile.path_id == path.id
+            ).all()
+            pinned_paths = {Path(p.file_path) for p in pinned}
+        
         # Walk through directory
         for root, dirs, files in os.walk(source_path):
             # Skip hidden directories
@@ -37,6 +50,10 @@ class FileScanner:
                     continue
                 
                 file_path = Path(root) / filename
+                
+                # Skip pinned files
+                if file_path in pinned_paths:
+                    continue
                 
                 try:
                     matches, matched_ids = CriteriaMatcher.match_file(file_path, criteria)

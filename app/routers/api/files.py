@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models import FileRecord, MonitoredPath
 from app.schemas import FileRecord as FileRecordSchema, FileMoveRequest
 from app.services.file_mover import FileMover
+from app.services.file_thawer import FileThawer
 from app.models import OperationType
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
@@ -57,15 +58,28 @@ def move_file(request: FileMoveRequest, db: Session = Depends(get_db)):
     try:
         file_size = destination.stat().st_size if destination.exists() else source.stat().st_size
         
-        file_record = FileRecord(
-            path_id=None,  # Manual move, not associated with a path
-            original_path=str(source),
-            cold_storage_path=str(destination),
-            file_size=file_size,
-            operation_type=request.operation_type,
-            criteria_matched=None
-        )
-        db.add(file_record)
+        # Check if a record already exists to prevent duplicates
+        existing_record = db.query(FileRecord).filter(
+            (FileRecord.original_path == str(source)) |
+            (FileRecord.cold_storage_path == str(destination))
+        ).first()
+        
+        if existing_record:
+            # Update existing record
+            existing_record.cold_storage_path = str(destination)
+            existing_record.file_size = file_size
+            existing_record.operation_type = request.operation_type
+        else:
+            # Create new record
+            file_record = FileRecord(
+                path_id=None,  # Manual move, not associated with a path
+                original_path=str(source),
+                cold_storage_path=str(destination),
+                file_size=file_size,
+                operation_type=request.operation_type,
+                criteria_matched=None
+            )
+            db.add(file_record)
         db.commit()
     except Exception:
         # If recording fails, that's okay - the file was moved successfully
@@ -85,10 +99,27 @@ def browse_files(
         dir_path = Path(directory)
         
         # Security: prevent directory traversal
-        if ".." in directory or directory.startswith("/") and not directory.startswith("/tmp"):
+        # Resolve the path to prevent .. attacks
+        try:
+            # Check for directory traversal attempts in the input
+            if ".." in str(dir_path) or "//" in str(dir_path):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid directory path: directory traversal not allowed"
+                )
+            # Resolve to get absolute path
+            resolved_path = dir_path.resolve()
+            # Ensure it's actually a directory
+            if not resolved_path.is_dir():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Path is not a directory"
+                )
+            dir_path = resolved_path
+        except (OSError, ValueError) as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid directory path"
+                detail=f"Invalid directory path: {str(e)}"
             )
         
         if not dir_path.exists() or not dir_path.is_dir():
@@ -130,4 +161,37 @@ def browse_files(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error browsing directory: {str(e)}"
         )
+
+
+@router.post("/thaw/{file_id}")
+def thaw_file(
+    file_id: int,
+    pin: bool = False,
+    db: Session = Depends(get_db)
+):
+    """Thaw a file (move back from cold storage to hot storage)."""
+    file_record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
+    if not file_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File record with id {file_id} not found"
+        )
+    
+    success, error = FileThawer.thaw_file(file_record, pin=pin, db=db)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error or "Failed to thaw file"
+        )
+    
+    # Delete the file record so it no longer appears in the File Browser
+    db.delete(file_record)
+    db.commit()
+    
+    return {
+        "message": f"File thawed successfully{' and pinned' if pin else ''}",
+        "file_id": file_id,
+        "pinned": pin
+    }
 

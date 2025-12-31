@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     app_name: str = "File Fridge"
     app_version: str = "1.0.0"
     
+    # Session
+    secret_key: str = "file-fridge-secret-key-change-in-production"
+    
     class Config:
         env_file = ".env"
         case_sensitive = False

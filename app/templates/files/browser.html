@@ -12,20 +12,29 @@
 </div>
 
 <div class="row mb-3">
-    <div class="col-md-4">
-        <form method="get" action="/files">
+    <div class="col-md-6">
+        <form method="get" action="/files" class="d-inline">
             <div class="input-group">
                 <label class="input-group-text" for="path_id">Filter by Path:</label>
                 <select class="form-select" id="path_id" name="path_id" onchange="this.form.submit()">
                     <option value="">All Paths</option>
-                    {% for path in paths %}
-                    <option value="{{ path.id }}" {% if selected_path_id == path.id %}selected{% endif %}>
-                        {{ path.name }}
-                    </option>
-                    {% endfor %}
                 </select>
             </div>
         </form>
+    </div>
+    <div class="col-md-6 text-end">
+        <div class="btn-group">
+            <form method="post" action="/cleanup" class="d-inline">
+                <button type="submit" class="btn btn-outline-secondary" title="Clean up records for files that no longer exist">
+                    <i class="bi bi-trash"></i> Cleanup Missing
+                </button>
+            </form>
+            <form method="post" action="/cleanup/duplicates" class="d-inline">
+                <button type="submit" class="btn btn-outline-warning" title="Remove duplicate file records">
+                    <i class="bi bi-files"></i> Remove Duplicates
+                </button>
+            </form>
+        </div>
     </div>
 </div>
 
@@ -33,9 +42,8 @@
     <div class="col-12">
         <div class="card">
             <div class="card-body">
-                {% if files %}
                 <div class="table-responsive">
-                    <table class="table table-hover">
+                    <table id="filesTable" class="table table-hover">
                         <thead>
                             <tr>
                                 <th>Original Path</th>
@@ -43,32 +51,27 @@
                                 <th>Size</th>
                                 <th>Operation</th>
                                 <th>Moved At</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {% for file in files %}
                             <tr>
-                                <td><code>{{ file.original_path }}</code></td>
-                                <td><code>{{ file.cold_storage_path }}</code></td>
-                                <td>{{ "%.2f" | format(file.file_size / 1024 / 1024) }} MB</td>
-                                <td>
-                                    <span class="badge bg-info">{{ file.operation_type.value }}</span>
+                                <td colspan="6" class="text-center">
+                                    <div class="spinner-border" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
                                 </td>
-                                <td>{{ file.moved_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
                             </tr>
-                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
-                {% else %}
-                <div class="text-center py-5">
-                    <i class="bi bi-file-earmark-x display-1 text-muted"></i>
-                    <p class="text-muted mt-3">No files have been moved yet.</p>
-                </div>
-                {% endif %}
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/files.js"></script>
 {% endblock %}
 

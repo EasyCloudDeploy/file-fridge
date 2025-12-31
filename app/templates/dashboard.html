@@ -18,7 +18,7 @@
                 <h5 class="card-title">
                     <i class="bi bi-file-earmark"></i> Total Files Moved
                 </h5>
-                <h2 class="mb-0">{{ total_files | default(0) }}</h2>
+                <h2 class="mb-0" id="totalFiles">0</h2>
             </div>
         </div>
     </div>
@@ -28,7 +28,7 @@
                 <h5 class="card-title">
                     <i class="bi bi-hdd"></i> Total Size Moved
                 </h5>
-                <h2 class="mb-0">{{ "%.2f" | format(total_size / 1024 / 1024 / 1024) }} GB</h2>
+                <h2 class="mb-0" id="totalSize">0.00 GB</h2>
             </div>
         </div>
     </div>
@@ -38,7 +38,7 @@
                 <h5 class="card-title">
                     <i class="bi bi-folder"></i> Monitored Paths
                 </h5>
-                <h2 class="mb-0">{{ paths | length }}</h2>
+                <h2 class="mb-0" id="pathsCount">0</h2>
             </div>
         </div>
     </div>
@@ -48,7 +48,7 @@
                 <h5 class="card-title">
                     <i class="bi bi-clock-history"></i> Last 24 Hours
                 </h5>
-                <h2 class="mb-0">{{ recent_count | default(0) }}</h2>
+                <h2 class="mb-0" id="recentCount">0</h2>
             </div>
         </div>
     </div>
@@ -63,46 +63,13 @@
                 </h5>
             </div>
             <div class="card-body">
-                {% if paths %}
-                <div class="table-responsive">
-                    <table class="table table-hover">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Status</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for path in paths %}
-                            <tr>
-                                <td>
-                                    <strong>{{ path.name }}</strong><br>
-                                    <small class="text-muted">{{ path.source_path }}</small>
-                                </td>
-                                <td>
-                                    {% if path.enabled %}
-                                    <span class="badge bg-success">Enabled</span>
-                                    {% else %}
-                                    <span class="badge bg-secondary">Disabled</span>
-                                    {% endif %}
-                                </td>
-                                <td>
-                                    <a href="/paths/{{ path.id }}" class="btn btn-sm btn-outline-primary">
-                                        <i class="bi bi-eye"></i> View
-                                    </a>
-                                </td>
-                            </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+                <div id="pathsList">
+                    <div class="text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
                 </div>
-                {% else %}
-                <p class="text-muted">No monitored paths configured yet.</p>
-                <a href="/paths/new" class="btn btn-primary">
-                    <i class="bi bi-plus-circle"></i> Add Path
-                </a>
-                {% endif %}
             </div>
         </div>
     </div>
@@ -114,7 +81,6 @@
                 </h5>
             </div>
             <div class="card-body">
-                {% if recent_files %}
                 <div class="table-responsive">
                     <table class="table table-sm">
                         <thead>
@@ -124,30 +90,24 @@
                                 <th>Time</th>
                             </tr>
                         </thead>
-                        <tbody>
-                            {% for file in recent_files %}
+                        <tbody id="recentFilesList">
                             <tr>
-                                <td>
-                                    <small>{{ file.original_path | truncate(40) }}</small>
-                                </td>
-                                <td>
-                                    <small>{{ "%.2f" | format(file.file_size / 1024) }} KB</small>
-                                </td>
-                                <td>
-                                    <small>{{ file.moved_at.strftime("%Y-%m-%d %H:%M") }}</small>
+                                <td colspan="3" class="text-center">
+                                    <div class="spinner-border spinner-border-sm" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
                                 </td>
                             </tr>
-                            {% endfor %}
                         </tbody>
                     </table>
                 </div>
                 <a href="/files" class="btn btn-sm btn-outline-primary">View All Files</a>
-                {% else %}
-                <p class="text-muted">No recent activity.</p>
-                {% endif %}
             </div>
         </div>
     </div>
 </div>
 {% endblock %}
 
+{% block extra_scripts %}
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

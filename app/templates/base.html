@@ -21,22 +21,22 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="/">
+                        <a class="nav-link {% if active_page == 'dashboard' %}active{% endif %}" href="/">
                             <i class="bi bi-speedometer2"></i> Dashboard
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/paths">
+                        <a class="nav-link {% if active_page == 'paths' %}active{% endif %}" href="/paths">
                             <i class="bi bi-folder"></i> Paths
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/files">
+                        <a class="nav-link {% if active_page == 'files' %}active{% endif %}" href="/files">
                             <i class="bi bi-file-earmark"></i> Files
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/stats">
+                        <a class="nav-link {% if active_page == 'stats' %}active{% endif %}" href="/stats">
                             <i class="bi bi-graph-up"></i> Statistics
                         </a>
                     </li>

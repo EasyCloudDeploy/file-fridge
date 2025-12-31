@@ -87,3 +87,16 @@ class FileRecord(Base):
     
     path = relationship("MonitoredPath", back_populates="file_records")
 
+
+class PinnedFile(Base):
+    """Files that are pinned (excluded from future scans)."""
+    __tablename__ = "pinned_files"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    path_id = Column(Integer, ForeignKey("monitored_paths.id"), nullable=True)
+    file_path = Column(String, nullable=False, index=True)
+    pinned_at = Column(DateTime(timezone=True), server_default=func.now())
+    pinned_by = Column(String, nullable=True)  # Optional: who/what pinned it
+    
+    path = relationship("MonitoredPath")
+
