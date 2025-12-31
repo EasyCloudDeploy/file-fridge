@@ -27,8 +27,7 @@ function updateStats(stats) {
     // Update total size
     const totalSizeEl = document.getElementById('totalSize');
     if (totalSizeEl) {
-        const sizeGB = ((stats.total_size_moved || 0) / 1024 / 1024 / 1024).toFixed(2);
-        totalSizeEl.textContent = sizeGB + ' GB';
+        totalSizeEl.textContent = formatBytes(stats.total_size_moved || 0);
     }
     
     // Update recent count (last 24 hours)
@@ -155,7 +154,11 @@ function escapeHtml(text) {
 }
 
 function formatBytes(bytes) {
-    return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+    if (bytes === 0) return '0 Bytes';
+    if (bytes < 1024) return bytes + ' Bytes';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+    return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
 function formatDate(dateString) {

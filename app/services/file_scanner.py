@@ -59,10 +59,19 @@ class FileScanner:
                 logger.debug(f"Path {path.name}: {len(pinned_paths)} pinned files will be skipped")
         
         file_count = 0
-        # Walk through directory
-        for root, dirs, files in os.walk(source_path):
-            # Skip hidden directories
+        # Walk through directory recursively
+        # Note: os.walk() by default does NOT follow symlinks to directories (followlinks=False)
+        # This is intentional for security, but means symlinked directories won't be scanned
+        # Convert Path to string for os.walk() compatibility
+        source_path_str = str(source_path.resolve())
+        logger.debug(f"Path {path.name}: Starting recursive directory walk from {source_path_str}")
+        for root, dirs, files in os.walk(source_path_str, followlinks=False):
+            logger.debug(f"Path {path.name}: Walking directory: {root} (found {len(files)} files, {len(dirs)} subdirectories)")
+            # Skip hidden directories (modifying dirs in-place prevents os.walk from descending into them)
+            original_dir_count = len(dirs)
             dirs[:] = [d for d in dirs if not d.startswith('.')]
+            if len(dirs) < original_dir_count:
+                logger.debug(f"Path {path.name}: Skipped {original_dir_count - len(dirs)} hidden directories in {root}")
             
             for filename in files:
                 # Skip hidden files

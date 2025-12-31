@@ -30,8 +30,7 @@ function updateStats(stats) {
     // Update total size
     const totalSizeEl = document.getElementById('totalSize');
     if (totalSizeEl) {
-        const sizeGB = ((stats.total_size_moved || 0) / 1024 / 1024 / 1024).toFixed(2);
-        totalSizeEl.textContent = sizeGB + ' GB';
+        totalSizeEl.textContent = formatBytes(stats.total_size_moved || 0);
     }
 }
 
@@ -83,12 +82,11 @@ function updatePathStats(stats) {
     
     pathStatsBody.innerHTML = paths.map(pathName => {
         const stat = filesByPath[pathName];
-        const sizeGB = ((stat.size || 0) / 1024 / 1024 / 1024).toFixed(2);
         return `
             <tr>
                 <td><strong>${escapeHtml(pathName)}</strong></td>
                 <td>${stat.count || 0}</td>
-                <td>${sizeGB} GB</td>
+                <td>${formatBytes(stat.size || 0)}</td>
             </tr>
         `;
     }).join('');
@@ -106,6 +104,14 @@ function showError(message) {
         container.insertBefore(alertDiv, container.firstChild);
         setTimeout(() => alertDiv.remove(), 5000);
     }
+}
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    if (bytes < 1024) return bytes + ' Bytes';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+    return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
 
 function escapeHtml(text) {
