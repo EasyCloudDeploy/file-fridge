@@ -1,10 +1,12 @@
 """File scanning service."""
 import os
 import logging
+import hashlib
 from pathlib import Path
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
+from datetime import datetime
 from sqlalchemy.orm import Session
-from app.models import MonitoredPath, Criteria, PinnedFile
+from app.models import MonitoredPath, Criteria, PinnedFile, FileInventory, StorageType, FileStatus
 from app.services.criteria_matcher import CriteriaMatcher
 
 logger = logging.getLogger(__name__)
@@ -16,16 +18,17 @@ class FileScanner:
     @staticmethod
     def scan_path(path: MonitoredPath, db: Optional[Session] = None) -> dict:
         """
-        Scan a monitored path for files matching criteria.
-        
+        Scan a monitored path for files matching criteria and update file inventory.
+
         Args:
             path: The monitored path to scan
-            db: Database session to check for pinned files
-        
+            db: Database session for inventory management and pinned files
+
         Returns:
             dict with:
             - 'to_cold': List of (file_path, matched_criteria_ids) tuples for files to move to cold storage
             - 'to_hot': List of (symlink_path, cold_storage_path) tuples for files to move back to hot storage
+            - 'inventory_updated': Number of inventory entries updated
         """
         matching_files = []
         files_to_thaw = []  # Symlinks pointing to cold storage where file doesn't match
@@ -130,5 +133,134 @@ class FileScanner:
                     continue
         
         logger.debug(f"Path {path.name}: Scanned {file_count} files, {len(matching_files)} matched criteria, {len(files_to_thaw)} need to be moved back")
-        return {"to_cold": matching_files, "to_hot": files_to_thaw}
+
+        # Update file inventory for both hot and cold storage
+        inventory_updated = 0
+        if db:
+            inventory_updated = FileScanner._update_file_inventory(path, db)
+
+        return {
+            "to_cold": matching_files,
+            "to_hot": files_to_thaw,
+            "inventory_updated": inventory_updated
+        }
+
+    @staticmethod
+    def _update_file_inventory(path: MonitoredPath, db: Session) -> int:
+        """
+        Update file inventory for both hot and cold storage.
+
+        Returns:
+            Number of inventory entries updated/created
+        """
+        updated_count = 0
+
+        # Scan hot storage
+        hot_files = FileScanner._scan_directory(path.source_path, StorageType.HOT)
+        updated_count += FileScanner._update_inventory_for_storage(path, hot_files, StorageType.HOT, db)
+
+        # Scan cold storage
+        cold_files = FileScanner._scan_directory(path.cold_storage_path, StorageType.COLD)
+        updated_count += FileScanner._update_inventory_for_storage(path, cold_files, StorageType.COLD, db)
+
+        # Mark files not seen recently as missing
+        cutoff_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)  # Files not seen today
+        missing_count = db.query(FileInventory).filter(
+            FileInventory.path_id == path.id,
+            FileInventory.last_seen < cutoff_time,
+            FileInventory.status == FileStatus.ACTIVE
+        ).update({"status": FileStatus.MISSING})
+        updated_count += missing_count
+
+        if missing_count > 0:
+            logger.info(f"Path {path.name}: Marked {missing_count} files as missing")
+
+        db.commit()
+        logger.debug(f"Path {path.name}: Updated {updated_count} inventory entries")
+        return updated_count
+
+    @staticmethod
+    def _scan_directory(directory_path: str, storage_type: StorageType) -> List[Dict]:
+        """
+        Scan a directory and return file information.
+
+        Returns:
+            List of dicts with file info: {'path': str, 'size': int, 'mtime': datetime, 'checksum': str}
+        """
+        files = []
+        directory = Path(directory_path)
+
+        if not directory.exists() or not directory.is_dir():
+            logger.warning(f"Directory does not exist or is not a directory: {directory_path}")
+            return files
+
+        for root, dirs, files_in_dir in os.walk(str(directory), followlinks=False):
+            # Skip hidden directories
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+
+            for filename in files_in_dir:
+                # Skip hidden files
+                if filename.startswith('.'):
+                    continue
+
+                file_path = Path(root) / filename
+                try:
+                    stat_info = file_path.stat()
+                    file_info = {
+                        'path': str(file_path),
+                        'size': stat_info.st_size,
+                        'mtime': datetime.fromtimestamp(stat_info.st_mtime),
+                        'checksum': None  # We'll compute this if needed
+                    }
+                    files.append(file_info)
+                except (OSError, PermissionError) as e:
+                    logger.debug(f"Could not stat file {file_path}: {e}")
+                    continue
+
+        return files
+
+    @staticmethod
+    def _update_inventory_for_storage(path: MonitoredPath, files: List[Dict],
+                                   storage_type: StorageType, db: Session) -> int:
+        """
+        Update inventory entries for files in a specific storage location.
+
+        Returns:
+            Number of entries updated/created
+        """
+        updated_count = 0
+
+        for file_info in files:
+            file_path = file_info['path']
+
+            # Check if inventory entry exists
+            inventory_entry = db.query(FileInventory).filter(
+                FileInventory.path_id == path.id,
+                FileInventory.file_path == file_path
+            ).first()
+
+            if inventory_entry:
+                # Update existing entry
+                if (inventory_entry.file_size != file_info['size'] or
+                    inventory_entry.file_mtime != file_info['mtime'] or
+                    inventory_entry.status != FileStatus.ACTIVE):
+                    inventory_entry.file_size = file_info['size']
+                    inventory_entry.file_mtime = file_info['mtime']
+                    inventory_entry.status = FileStatus.ACTIVE
+                    inventory_entry.storage_type = storage_type
+                    updated_count += 1
+            else:
+                # Create new entry
+                new_entry = FileInventory(
+                    path_id=path.id,
+                    file_path=file_path,
+                    storage_type=storage_type,
+                    file_size=file_info['size'],
+                    file_mtime=file_info['mtime'],
+                    status=FileStatus.ACTIVE
+                )
+                db.add(new_entry)
+                updated_count += 1
+
+        return updated_count
 

@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from pathlib import Path
 from app.database import get_db
-from app.models import FileRecord, MonitoredPath
-from app.schemas import FileRecord as FileRecordSchema, FileMoveRequest
+from app.models import FileRecord, MonitoredPath, FileInventory, StorageType
+from app.schemas import FileInventory as FileInventorySchema, FileMoveRequest, StorageType
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
 from app.models import OperationType
@@ -13,20 +13,24 @@ from app.models import OperationType
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 
 
-@router.get("", response_model=List[FileRecordSchema])
+@router.get("", response_model=List[FileInventorySchema])
 def list_files(
     path_id: Optional[int] = None,
+    storage_type: Optional[StorageType] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """List file records."""
-    query = db.query(FileRecord)
-    
+    """List files in inventory."""
+    query = db.query(FileInventory)
+
     if path_id:
-        query = query.filter(FileRecord.path_id == path_id)
-    
-    files = query.order_by(FileRecord.moved_at.desc()).offset(skip).limit(limit).all()
+        query = query.filter(FileInventory.path_id == path_id)
+
+    if storage_type:
+        query = query.filter(FileInventory.storage_type == storage_type)
+
+    files = query.order_by(FileInventory.last_seen.desc()).offset(skip).limit(limit).all()
     return files
 
 
@@ -163,35 +167,51 @@ def browse_files(
         )
 
 
-@router.post("/thaw/{file_id}")
+@router.post("/thaw/{inventory_id}")
 def thaw_file(
-    file_id: int,
+    inventory_id: int,
     pin: bool = False,
     db: Session = Depends(get_db)
 ):
     """Thaw a file (move back from cold storage to hot storage)."""
-    file_record = db.query(FileRecord).filter(FileRecord.id == file_id).first()
+    # Find the inventory entry
+    inventory_entry = db.query(FileInventory).filter(
+        FileInventory.id == inventory_id,
+        FileInventory.storage_type == StorageType.COLD
+    ).first()
+
+    if not inventory_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File inventory entry with id {inventory_id} not found in cold storage"
+        )
+
+    # Find the associated file record by matching paths
+    file_record = db.query(FileRecord).filter(
+        FileRecord.cold_storage_path == inventory_entry.file_path
+    ).first()
+
     if not file_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File record with id {file_id} not found"
+            detail=f"No file record found for inventory entry {inventory_id}"
         )
-    
+
     success, error = FileThawer.thaw_file(file_record, pin=pin, db=db)
-    
+
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error or "Failed to thaw file"
         )
-    
-    # Delete the file record so it no longer appears in the File Browser
-    db.delete(file_record)
+
+    # Update the inventory entry status
+    inventory_entry.status = "active"  # FileStatus.ACTIVE
     db.commit()
-    
+
     return {
         "message": f"File thawed successfully{' and pinned' if pin else ''}",
-        "file_id": file_id,
+        "inventory_id": inventory_id,
         "pinned": pin
     }
 

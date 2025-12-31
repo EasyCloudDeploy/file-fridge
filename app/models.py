@@ -55,6 +55,7 @@ class MonitoredPath(Base):
     
     criteria = relationship("Criteria", back_populates="path", cascade="all, delete-orphan")
     file_records = relationship("FileRecord", back_populates="path", cascade="all, delete-orphan")
+    file_inventory = relationship("FileInventory", back_populates="path", cascade="all, delete-orphan")
 
 
 class Criteria(Base):
@@ -75,7 +76,7 @@ class Criteria(Base):
 class FileRecord(Base):
     """Record of moved files."""
     __tablename__ = "file_records"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     path_id = Column(Integer, ForeignKey("monitored_paths.id"), nullable=True)
     original_path = Column(String, nullable=False)
@@ -84,19 +85,55 @@ class FileRecord(Base):
     moved_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     operation_type = Column(SQLEnum(OperationType), nullable=False)
     criteria_matched = Column(Text)  # JSON string of matched criteria IDs
-    
+
     path = relationship("MonitoredPath", back_populates="file_records")
+    # Note: Relationship to FileInventory is handled via back-reference from FileInventory
+
+
+class StorageType(str, enum.Enum):
+    """Storage location types."""
+    HOT = "hot"
+    COLD = "cold"
+
+
+class FileStatus(str, enum.Enum):
+    """File status in inventory."""
+    ACTIVE = "active"      # File exists and is accessible
+    MOVED = "moved"        # File has been moved to cold storage
+    DELETED = "deleted"    # File was deleted
+    MISSING = "missing"    # File should exist but is not found
+
+
+class FileInventory(Base):
+    """Inventory of all files in both hot and cold storage."""
+    __tablename__ = "file_inventory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    path_id = Column(Integer, ForeignKey("monitored_paths.id"), nullable=False, index=True)
+    file_path = Column(String, nullable=False, index=True)  # Absolute path to the file
+    storage_type = Column(SQLEnum(StorageType), nullable=False, index=True)
+    file_size = Column(Integer, nullable=False)
+    file_mtime = Column(DateTime(timezone=True), nullable=False)  # File modification time
+    checksum = Column(String, nullable=True)  # Optional checksum for change detection
+    status = Column(SQLEnum(FileStatus), default=FileStatus.ACTIVE)
+    last_seen = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationship back to monitored path
+    path = relationship("MonitoredPath", back_populates="file_inventory")
+
+    # Note: Relationship to FileRecord can be established if needed in the future
 
 
 class PinnedFile(Base):
     """Files that are pinned (excluded from future scans)."""
     __tablename__ = "pinned_files"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     path_id = Column(Integer, ForeignKey("monitored_paths.id"), nullable=True)
     file_path = Column(String, nullable=False, index=True)
     pinned_at = Column(DateTime(timezone=True), server_default=func.now())
     pinned_by = Column(String, nullable=True)  # Optional: who/what pinned it
-    
+
     path = relationship("MonitoredPath")
 

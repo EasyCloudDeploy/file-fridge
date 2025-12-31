@@ -1,234 +1,7 @@
-// File browser JavaScript - uses API to load data and handle actions
-document.addEventListener('DOMContentLoaded', function() {
-    const pathId = new URLSearchParams(window.location.search).get('path_id');
-    loadFiles(pathId);
-    setupEventHandlers();
-});
+// Files browser JavaScript - client-side rendering
+const API_BASE_URL = '/api/v1';
 
-function loadFiles(pathId) {
-    let url = '/api/v1/files?limit=100';
-    if (pathId) {
-        url += `&path_id=${pathId}`;
-    }
-    
-    fetch(url)
-        .then(response => response.json())
-        .then(data => {
-            renderFiles(data);
-            loadPaths();
-        })
-        .catch(error => {
-            console.error('Error loading files:', error);
-            showError('Failed to load files');
-        });
-}
-
-function loadPaths() {
-    fetch('/api/v1/paths')
-        .then(response => response.json())
-        .then(paths => {
-            const select = document.getElementById('path_id');
-            if (select) {
-                const currentPathId = new URLSearchParams(window.location.search).get('path_id');
-                select.innerHTML = '<option value="">All Paths</option>' +
-                    paths.map(p => `<option value="${p.id}" ${currentPathId == p.id ? 'selected' : ''}>${p.name}</option>`).join('');
-            }
-        })
-        .catch(error => {
-            console.error('Error loading paths:', error);
-        });
-}
-
-function renderFiles(files) {
-    const tbody = document.querySelector('#filesTable tbody');
-    if (!tbody) return;
-    
-    if (files.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center">No files have been moved yet.</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = files.map(file => `
-        <tr>
-            <td><code>${escapeHtml(file.original_path)}</code></td>
-            <td><code>${escapeHtml(file.cold_storage_path)}</code></td>
-            <td>${formatBytes(file.file_size)}</td>
-            <td><span class="badge bg-info">${file.operation_type}</span></td>
-            <td>${formatDate(file.moved_at)}</td>
-            <td>
-                <button type="button" class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#thawModal${file.id}" data-file-id="${file.id}">
-                    <i class="bi bi-fire"></i> Thaw
-                </button>
-            </td>
-        </tr>
-    `).join('');
-    
-    // Add modals for each file
-    files.forEach(file => {
-        addThawModal(file);
-    });
-}
-
-function addThawModal(file) {
-    const modalHtml = `
-        <div class="modal fade" id="thawModal${file.id}" tabindex="-1">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">Thaw File</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <form id="thawForm${file.id}">
-                        <div class="modal-body">
-                            <p>Move this file back from cold storage to hot storage?</p>
-                            <p><strong>File:</strong> <code>${escapeHtml(file.original_path)}</code></p>
-                            <p><strong>Cold Storage:</strong> <code>${escapeHtml(file.cold_storage_path)}</code></p>
-                            
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="pin" id="pinTemp${file.id}" value="false" checked>
-                                    <label class="form-check-label" for="pinTemp${file.id}">
-                                        <strong>Temporary</strong> - Move back, but file may be moved again on next scan if it matches criteria
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="mb-3">
-                                <div class="form-check">
-                                    <input class="form-check-input" type="radio" name="pin" id="pinPermanent${file.id}" value="true">
-                                    <label class="form-check-label" for="pinPermanent${file.id}">
-                                        <strong>Pinned</strong> - Move back and exclude from future scans
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="modal-footer">
-                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                            <button type="submit" class="btn btn-warning">
-                                <i class="bi bi-fire"></i> Thaw File
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    
-    document.getElementById(`thawForm${file.id}`).addEventListener('submit', function(e) {
-        e.preventDefault();
-        const pin = this.querySelector('input[name="pin"]:checked').value === 'true';
-        thawFile(file.id, pin);
-    });
-}
-
-function thawFile(fileId, pin) {
-    fetch(`/api/v1/files/thaw/${fileId}?pin=${pin}`, {
-        method: 'POST'
-    })
-    .then(response => {
-        if (!response.ok) {
-            return response.json().then(err => { throw new Error(err.detail || 'Failed to thaw file'); });
-        }
-        return response.json();
-    })
-    .then(data => {
-        showMessage('File thawed successfully' + (pin ? ' and pinned' : ''));
-        // Close modal
-        const modal = bootstrap.Modal.getInstance(document.getElementById(`thawModal${fileId}`));
-        if (modal) modal.hide();
-        // Reload files
-        const pathId = new URLSearchParams(window.location.search).get('path_id');
-        loadFiles(pathId);
-    })
-    .catch(error => {
-        showError(error.message);
-    });
-}
-
-function setupEventHandlers() {
-    // Cleanup buttons
-    document.querySelectorAll('form[action="/cleanup"]').forEach(form => {
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const pathId = new URLSearchParams(window.location.search).get('path_id');
-            cleanupMissing(pathId);
-        });
-    });
-    
-    document.querySelectorAll('form[action="/cleanup/duplicates"]').forEach(form => {
-        form.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const pathId = new URLSearchParams(window.location.search).get('path_id');
-            cleanupDuplicates(pathId);
-        });
-    });
-}
-
-function cleanupMissing(pathId) {
-    let url = '/api/v1/cleanup';
-    if (pathId) {
-        url += `?path_id=${pathId}`;
-    }
-    
-    fetch(url, { method: 'POST' })
-        .then(response => response.json())
-        .then(data => {
-            const message = `Cleanup complete: checked ${data.checked} files, removed ${data.removed} missing file records`;
-            showMessage(message);
-            loadFiles(pathId);
-        })
-        .catch(error => {
-            showError('Failed to cleanup missing files: ' + error.message);
-        });
-}
-
-function cleanupDuplicates(pathId) {
-    let url = '/api/v1/cleanup/duplicates';
-    if (pathId) {
-        url += `?path_id=${pathId}`;
-    }
-    
-    fetch(url, { method: 'POST' })
-        .then(response => response.json())
-        .then(data => {
-            const message = `Duplicate cleanup complete: checked ${data.checked} files, removed ${data.removed} duplicate records`;
-            showMessage(message);
-            loadFiles(pathId);
-        })
-        .catch(error => {
-            showError('Failed to cleanup duplicates: ' + error.message);
-        });
-}
-
-function showMessage(message) {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = 'alert alert-success alert-dismissible fade show';
-    alertDiv.innerHTML = `
-        ${escapeHtml(message)}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    const container = document.querySelector('main.container-fluid');
-    if (container) {
-        container.insertBefore(alertDiv, container.firstChild);
-        setTimeout(() => alertDiv.remove(), 5000);
-    }
-}
-
-function showError(error) {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = 'alert alert-danger alert-dismissible fade show';
-    alertDiv.innerHTML = `
-        ${escapeHtml(error)}
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    const container = document.querySelector('main.container-fluid');
-    if (container) {
-        container.insertBefore(alertDiv, container.firstChild);
-        setTimeout(() => alertDiv.remove(), 5000);
-    }
-}
-
+// Utility functions
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
@@ -247,4 +20,246 @@ function formatDate(dateString) {
     const date = new Date(dateString);
     return date.toLocaleString();
 }
+
+function showFlashMessage(message, category = 'success') {
+    const flashContainer = document.querySelector('main.container-fluid');
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${category} alert-dismissible fade show`;
+    alertDiv.setAttribute('role', 'alert');
+    alertDiv.innerHTML = `
+        ${escapeHtml(message)}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    flashContainer.prepend(alertDiv);
+    setTimeout(() => {
+        const alert = bootstrap.Alert.getInstance(alertDiv);
+        if (alert) alert.close();
+    }, 5000);
+}
+
+// Load and render files list
+async function loadFilesList(pathId = null, storageType = null) {
+    const loadingEl = document.getElementById('files-loading');
+    const contentEl = document.getElementById('files-content');
+    const emptyEl = document.getElementById('no-files-message');
+    const tableBody = document.querySelector('#filesTable tbody');
+
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (contentEl) contentEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (tableBody) tableBody.innerHTML = '';
+
+    try {
+        let url = `${API_BASE_URL}/files?limit=100`;
+        if (pathId) {
+            url += `&path_id=${pathId}`;
+        }
+        if (storageType) {
+            url += `&storage_type=${storageType}`;
+        }
+
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const files = await response.json();
+
+        if (files.length === 0) {
+            if (emptyEl) emptyEl.style.display = 'block';
+        } else {
+            if (tableBody) {
+                files.forEach(file => {
+                    const row = tableBody.insertRow();
+                    const storageBadge = file.storage_type === 'hot'
+                        ? '<span class="badge bg-success">Hot Storage</span>'
+                        : '<span class="badge bg-info">Cold Storage</span>';
+
+                    const actionButton = file.storage_type === 'cold'
+                        ? `<button type="button" class="btn btn-sm btn-warning" onclick="showThawModal(${file.id}, '${escapeHtml(file.file_path)}')">
+                               <i class="bi bi-fire"></i> Thaw
+                           </button>`
+                        : '<span class="text-muted">In Hot Storage</span>';
+
+                    row.innerHTML = `
+                        <td><code>${escapeHtml(file.file_path)}</code></td>
+                        <td>${storageBadge}</td>
+                        <td>${formatBytes(file.file_size)}</td>
+                        <td><span class="badge bg-secondary">${escapeHtml(file.status)}</span></td>
+                        <td>${formatDate(file.last_seen)}</td>
+                        <td>${actionButton}</td>
+                    `;
+                });
+            }
+            if (contentEl) contentEl.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error loading files:', error);
+        showFlashMessage(`Failed to load files: ${error.message}`, 'danger');
+        if (emptyEl) emptyEl.style.display = 'block';
+    } finally {
+        if (loadingEl) loadingEl.style.display = 'none';
+    }
+}
+
+// Load paths for filter dropdown
+async function loadPathsForFilter() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/paths`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const paths = await response.json();
+
+        const select = document.getElementById('path_id_filter');
+        if (select) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const currentPathId = urlParams.get('path_id');
+
+            select.innerHTML = '<option value="">All Paths</option>' +
+                paths.map(p => `<option value="${p.id}" ${currentPathId == p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+
+            // Add change event listener
+            select.addEventListener('change', function() {
+                updateFilters();
+            });
+        }
+
+        // Setup storage filter
+        const storageSelect = document.getElementById('storage_filter');
+        if (storageSelect) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const currentStorage = urlParams.get('storage_type');
+            if (currentStorage) {
+                storageSelect.value = currentStorage;
+            }
+
+            storageSelect.addEventListener('change', function() {
+                updateFilters();
+            });
+        }
+    } catch (error) {
+        console.error('Error loading paths for filter:', error);
+        showFlashMessage(`Failed to load paths: ${error.message}`, 'danger');
+    }
+}
+
+// Update filters and reload files
+function updateFilters() {
+    const pathSelect = document.getElementById('path_id_filter');
+    const storageSelect = document.getElementById('storage_filter');
+
+    const pathId = pathSelect ? pathSelect.value : null;
+    const storageType = storageSelect ? storageSelect.value : null;
+
+    loadFilesList(pathId, storageType);
+}
+
+// Show thaw modal
+function showThawModal(inventoryId, filePath) {
+    const modal = document.getElementById('thawModal');
+    if (!modal) return;
+
+    // Update modal content
+    document.getElementById('thawFileName').textContent = filePath;
+
+    // Set inventory ID for the confirm button
+    document.getElementById('confirmThawBtn').dataset.inventoryId = inventoryId;
+
+    // Show modal
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+}
+
+// Thaw file action
+async function thawFile() {
+    const button = document.getElementById('confirmThawBtn');
+    const inventoryId = button.dataset.inventoryId;
+    const pin = document.querySelector('input[name="pin_file"]:checked').value === 'true';
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/files/thaw/${inventoryId}?pin=${pin}`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to thaw file');
+        }
+
+        const data = await response.json();
+        showFlashMessage('File thawed successfully' + (pin ? ' and pinned' : ''));
+
+        // Close modal
+        const modal = bootstrap.Modal.getInstance(document.getElementById('thawModal'));
+        if (modal) modal.hide();
+
+        // Reload files
+        const urlParams = new URLSearchParams(window.location.search);
+        const pathId = urlParams.get('path_id');
+        loadFilesList(pathId);
+    } catch (error) {
+        console.error('Error thawing file:', error);
+        showFlashMessage(`Error thawing file: ${error.message}`, 'danger');
+    }
+}
+
+// Cleanup actions
+async function cleanupMissingFiles() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const pathId = urlParams.get('path_id');
+    const storageType = urlParams.get('storage_type');
+
+    try {
+        let url = `${API_BASE_URL}/cleanup`;
+        if (pathId) {
+            url += `?path_id=${pathId}`;
+        }
+
+        const response = await fetch(url, { method: 'POST' });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const data = await response.json();
+        const message = `Cleanup complete: checked ${data.checked} files, removed ${data.removed} missing file records`;
+        showFlashMessage(message);
+
+        loadFilesList(pathId, storageType);
+    } catch (error) {
+        console.error('Error cleaning up missing files:', error);
+        showFlashMessage(`Failed to cleanup missing files: ${error.message}`, 'danger');
+    }
+}
+
+async function cleanupDuplicates() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const pathId = urlParams.get('path_id');
+    const storageType = urlParams.get('storage_type');
+
+    try {
+        let url = `${API_BASE_URL}/cleanup/duplicates`;
+        if (pathId) {
+            url += `?path_id=${pathId}`;
+        }
+
+        const response = await fetch(url, { method: 'POST' });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const data = await response.json();
+        const message = `Duplicate cleanup complete: checked ${data.checked} files, removed ${data.removed} duplicate records`;
+        showFlashMessage(message);
+
+        loadFilesList(pathId, storageType);
+    } catch (error) {
+        console.error('Error cleaning up duplicates:', error);
+        showFlashMessage(`Failed to cleanup duplicates: ${error.message}`, 'danger');
+    }
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const pathId = urlParams.get('path_id');
+    const storageType = urlParams.get('storage_type');
+
+    loadFilesList(pathId, storageType);
+    loadPathsForFilter();
+
+    // Setup event handlers
+    document.getElementById('confirmThawBtn').addEventListener('click', thawFile);
+});
 

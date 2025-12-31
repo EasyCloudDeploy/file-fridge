@@ -2,7 +2,7 @@
 from pydantic import BaseModel, Field, validator
 from typing import Optional, List
 from datetime import datetime
-from app.models import OperationType, CriterionType, Operator
+from app.models import OperationType, CriterionType, Operator, StorageType, FileStatus
 
 
 class CriteriaBase(BaseModel):
@@ -67,7 +67,8 @@ class MonitoredPath(MonitoredPathBase):
     created_at: datetime
     updated_at: Optional[datetime]
     criteria: List[Criteria] = []
-    
+    file_inventory: List["FileInventory"] = []
+
     class Config:
         from_attributes = True
 
@@ -86,7 +87,41 @@ class FileRecord(FileRecordBase):
     id: int
     path_id: int
     moved_at: datetime
-    
+
+    class Config:
+        from_attributes = True
+
+
+class FileInventoryBase(BaseModel):
+    """Base file inventory schema."""
+    file_path: str
+    storage_type: StorageType
+    file_size: int
+    file_mtime: datetime
+    checksum: Optional[str] = None
+    status: FileStatus = FileStatus.ACTIVE
+
+
+class FileInventoryCreate(FileInventoryBase):
+    """Schema for creating file inventory entry."""
+    path_id: int
+
+
+class FileInventoryUpdate(BaseModel):
+    """Schema for updating file inventory entry."""
+    file_size: Optional[int] = None
+    file_mtime: Optional[datetime] = None
+    checksum: Optional[str] = None
+    status: Optional[FileStatus] = None
+
+
+class FileInventory(FileInventoryBase):
+    """Schema for file inventory response."""
+    id: int
+    path_id: int
+    last_seen: datetime
+    created_at: datetime
+
     class Config:
         from_attributes = True
 
@@ -104,6 +139,16 @@ class Statistics(BaseModel):
     total_size_moved: int
     files_by_path: dict
     recent_activity: List[FileRecord]
+
+
+class FileInventoryStats(BaseModel):
+    """Schema for file inventory statistics."""
+    total_files_hot: int
+    total_files_cold: int
+    total_size_hot: int
+    total_size_cold: int
+    files_by_path: dict
+    storage_distribution: dict
 
 
 class ScanResult(BaseModel):

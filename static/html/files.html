@@ -54,7 +54,7 @@
         </div>
 
         <div class="row mb-3">
-            <div class="col-md-6">
+            <div class="col-md-4">
                 <div class="input-group">
                     <label class="input-group-text" for="path_id_filter">Filter by Path:</label>
                     <select class="form-select" id="path_id_filter">
@@ -62,7 +62,17 @@
                     </select>
                 </div>
             </div>
-            <div class="col-md-6 text-end">
+            <div class="col-md-4">
+                <div class="input-group">
+                    <label class="input-group-text" for="storage_filter">Storage:</label>
+                    <select class="form-select" id="storage_filter">
+                        <option value="">All Storage</option>
+                        <option value="hot">Hot Storage</option>
+                        <option value="cold">Cold Storage</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-4 text-end">
                 <div class="btn-group">
                     <button type="button" class="btn btn-outline-secondary" onclick="cleanupMissingFiles()" title="Clean up records for files that no longer exist">
                         <i class="bi bi-trash"></i> Cleanup Missing
@@ -89,11 +99,11 @@
                                 <table class="table table-hover" id="filesTable">
                                     <thead>
                                         <tr>
-                                            <th>Original Path</th>
-                                            <th>Cold Storage Path</th>
+                                            <th>File Path</th>
+                                            <th>Storage Location</th>
                                             <th>Size</th>
-                                            <th>Operation</th>
-                                            <th>Moved At</th>
+                                            <th>Status</th>
+                                            <th>Last Seen</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
@@ -117,11 +127,12 @@
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title" id="thawModalLabel">Thaw File</h5>
+                        <h5 class="modal-title" id="thawModalLabel">Move File to Hot Storage</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <p>Are you sure you want to thaw <strong id="thawFileName"></strong>?</p>
+                        <p>Move this file from cold storage back to hot storage?</p>
+                        <p><strong>File:</strong> <code id="thawFileName"></code></p>
                         <div class="mb-3">
                             <div class="form-check">
                                 <input class="form-check-input" type="radio" name="pin_file" id="pinTemp" value="false" checked>
@@ -142,7 +153,7 @@
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                         <button type="button" class="btn btn-warning" id="confirmThawBtn">
-                            <i class="bi bi-fire"></i> Thaw File
+                            <i class="bi bi-arrow-left-circle"></i> Move to Hot Storage
                         </button>
                     </div>
                 </div>
