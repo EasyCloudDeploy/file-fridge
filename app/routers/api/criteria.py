@@ -1,0 +1,88 @@
+"""API routes for criteria management."""
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from app.database import get_db
+from app.models import Criteria, MonitoredPath
+from app.schemas import CriteriaCreate, CriteriaUpdate, Criteria as CriteriaSchema
+from app.services.scheduler import scheduler_service
+
+router = APIRouter(prefix="/api/v1/criteria", tags=["criteria"])
+
+
+@router.get("/path/{path_id}", response_model=List[CriteriaSchema])
+def list_criteria(path_id: int, db: Session = Depends(get_db)):
+    """List all criteria for a path."""
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
+    if not path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Path with id {path_id} not found"
+        )
+    return path.criteria
+
+
+@router.post("/path/{path_id}", response_model=CriteriaSchema, status_code=status.HTTP_201_CREATED)
+def create_criteria(path_id: int, criteria: CriteriaCreate, db: Session = Depends(get_db)):
+    """Create a new criterion for a path."""
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
+    if not path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Path with id {path_id} not found"
+        )
+    
+    db_criteria = Criteria(path_id=path_id, **criteria.model_dump())
+    db.add(db_criteria)
+    db.commit()
+    db.refresh(db_criteria)
+    
+    return db_criteria
+
+
+@router.get("/{criteria_id}", response_model=CriteriaSchema)
+def get_criteria(criteria_id: int, db: Session = Depends(get_db)):
+    """Get a specific criterion."""
+    criteria = db.query(Criteria).filter(Criteria.id == criteria_id).first()
+    if not criteria:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Criteria with id {criteria_id} not found"
+        )
+    return criteria
+
+
+@router.put("/{criteria_id}", response_model=CriteriaSchema)
+def update_criteria(criteria_id: int, criteria_update: CriteriaUpdate, db: Session = Depends(get_db)):
+    """Update a criterion."""
+    criteria = db.query(Criteria).filter(Criteria.id == criteria_id).first()
+    if not criteria:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Criteria with id {criteria_id} not found"
+        )
+    
+    update_data = criteria_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(criteria, field, value)
+    
+    db.commit()
+    db.refresh(criteria)
+    
+    return criteria
+
+
+@router.delete("/{criteria_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_criteria(criteria_id: int, db: Session = Depends(get_db)):
+    """Delete a criterion."""
+    criteria = db.query(Criteria).filter(Criteria.id == criteria_id).first()
+    if not criteria:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Criteria with id {criteria_id} not found"
+        )
+    
+    db.delete(criteria)
+    db.commit()
+    return None
+

@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - File Fridge{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">
+            <i class="bi bi-speedometer2"></i> Dashboard
+        </h1>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-file-earmark"></i> Total Files Moved
+                </h5>
+                <h2 class="mb-0">{{ total_files | default(0) }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-hdd"></i> Total Size Moved
+                </h5>
+                <h2 class="mb-0">{{ "%.2f" | format(total_size / 1024 / 1024 / 1024) }} GB</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-info">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-folder"></i> Monitored Paths
+                </h5>
+                <h2 class="mb-0">{{ paths | length }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-warning">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-clock-history"></i> Last 24 Hours
+                </h5>
+                <h2 class="mb-0">{{ recent_count | default(0) }}</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-folder"></i> Monitored Paths
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if paths %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for path in paths %}
+                            <tr>
+                                <td>
+                                    <strong>{{ path.name }}</strong><br>
+                                    <small class="text-muted">{{ path.source_path }}</small>
+                                </td>
+                                <td>
+                                    {% if path.enabled %}
+                                    <span class="badge bg-success">Enabled</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">Disabled</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <a href="/paths/{{ path.id }}" class="btn btn-sm btn-outline-primary">
+                                        <i class="bi bi-eye"></i> View
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No monitored paths configured yet.</p>
+                <a href="/paths/new" class="btn btn-primary">
+                    <i class="bi bi-plus-circle"></i> Add Path
+                </a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-clock-history"></i> Recent Activity
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if recent_files %}
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>File</th>
+                                <th>Size</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for file in recent_files %}
+                            <tr>
+                                <td>
+                                    <small>{{ file.original_path | truncate(40) }}</small>
+                                </td>
+                                <td>
+                                    <small>{{ "%.2f" | format(file.file_size / 1024) }} KB</small>
+                                </td>
+                                <td>
+                                    <small>{{ file.moved_at.strftime("%Y-%m-%d %H:%M") }}</small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <a href="/files" class="btn btn-sm btn-outline-primary">View All Files</a>
+                {% else %}
+                <p class="text-muted">No recent activity.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

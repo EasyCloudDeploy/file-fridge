@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}{{ path.name }} - File Fridge{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="bi bi-folder"></i> {{ path.name }}
+            </h1>
+            <div>
+                <a href="/paths/{{ path.id }}/edit" class="btn btn-secondary">
+                    <i class="bi bi-pencil"></i> Edit
+                </a>
+                <form method="post" action="/paths/{{ path.id }}/scan" class="d-inline">
+                    <button type="submit" class="btn btn-info">
+                        <i class="bi bi-arrow-repeat"></i> Scan Now
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Path Configuration</h5>
+            </div>
+            <div class="card-body">
+                <table class="table table-borderless">
+                    <tr>
+                        <th width="40%">Name:</th>
+                        <td><strong>{{ path.name }}</strong></td>
+                    </tr>
+                    <tr>
+                        <th>Source Path:</th>
+                        <td><code>{{ path.source_path }}</code></td>
+                    </tr>
+                    <tr>
+                        <th>Cold Storage:</th>
+                        <td><code>{{ path.cold_storage_path }}</code></td>
+                    </tr>
+                    <tr>
+                        <th>Operation Type:</th>
+                        <td><span class="badge bg-info">{{ path.operation_type.value }}</span></td>
+                    </tr>
+                    <tr>
+                        <th>Check Interval:</th>
+                        <td>{{ path.check_interval_seconds // 60 }} minutes</td>
+                    </tr>
+                    <tr>
+                        <th>Status:</th>
+                        <td>
+                            {% if path.enabled %}
+                            <span class="badge bg-success">Enabled</span>
+                            {% else %}
+                            <span class="badge bg-secondary">Disabled</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Created:</th>
+                        <td>{{ path.created_at.strftime("%Y-%m-%d %H:%M:%S") }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Criteria</h5>
+                <a href="/api/v1/criteria/path/{{ path.id }}" class="btn btn-sm btn-primary">
+                    <i class="bi bi-plus"></i> Add Criteria
+                </a>
+            </div>
+            <div class="card-body">
+                {% if path.criteria %}
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>Operator</th>
+                                <th>Value</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for criterion in path.criteria %}
+                            <tr>
+                                <td><code>{{ criterion.criterion_type.value }}</code></td>
+                                <td><code>{{ criterion.operator.value }}</code></td>
+                                <td><code>{{ criterion.value }}</code></td>
+                                <td>
+                                    {% if criterion.enabled %}
+                                    <span class="badge bg-success">Enabled</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">Disabled</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">No criteria configured. Files will match all criteria (move all files).</p>
+                <p class="text-muted">
+                    <small>Use the API to add criteria. Example criteria types: mtime, size, name, type, etc.</small>
+                </p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Recent File Moves</h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">File move history for this path will appear here.</p>
+                <a href="/files?path_id={{ path.id }}" class="btn btn-outline-primary">
+                    <i class="bi bi-file-earmark"></i> View All Files
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
