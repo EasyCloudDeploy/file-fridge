@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="File Fridge - Intelligent cold storage management for your files">
+    <title id="page-title">File Fridge</title>
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="/static/css/style.css" rel="stylesheet">
+
+    <!-- Favicon (using snowflake icon) -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text x='0' y='14' font-size='14'>❄️</text></svg>">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-snow"></i> File Fridge
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/" id="nav-dashboard">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/paths" id="nav-paths">
+                            <i class="bi bi-folder"></i> Paths
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/files" id="nav-files">
+                            <i class="bi bi-file-earmark"></i> Files
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/stats" id="nav-stats">
+                            <i class="bi bi-graph-up"></i> Statistics
+                        </a>
+                    </li>
+                </ul>
+                <div class="d-flex align-items-center">
+                    <span class="badge bg-light text-dark">
+                        <i class="bi bi-thermometer-snow"></i> v1.0.0
+                    </span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="container-fluid mt-4" id="main-content">
+        <!-- Content will be loaded here dynamically -->
+    </main>
+
+    <!-- Footer -->
+    <footer class="mt-5 py-4 bg-light text-center">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-12">
+                    <p class="text-muted mb-2">
+                        <i class="bi bi-snow me-2"></i>
+                        <strong>File Fridge</strong> - Intelligent Cold Storage Management
+                    </p>
+                    <small class="text-muted">
+                        Keep your hot storage warm and your cold storage frozen
+                    </small>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- App JavaScript (must load before page-specific scripts) -->
+    <script src="/static/js/app.js"></script>
+
+    <!-- Navigation Active State -->
+    <script>
+        // Set active nav link based on current page
+        document.addEventListener('DOMContentLoaded', function() {
+            const path = window.location.pathname;
+            const navLinks = {
+                '/': 'nav-dashboard',
+                '/paths': 'nav-paths',
+                '/files': 'nav-files',
+                '/stats': 'nav-stats'
+            };
+
+            // Check if path matches (including subpaths)
+            for (const [route, id] of Object.entries(navLinks)) {
+                if (path === route || path.startsWith(route + '/')) {
+                    const navEl = document.getElementById(id);
+                    if (navEl) {
+                        navEl.classList.add('active');
+                    }
+                    break;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
