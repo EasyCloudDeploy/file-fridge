@@ -11,7 +11,7 @@ services:
 
     environment:
       # Database configuration
-      - DATABASE_URL=sqlite:///./data/file_fridge.db
+      - DATABASE_PATH=./data/file_fridge.db
 
       # Logging
       - LOG_LEVEL=INFO
