@@ -131,7 +131,7 @@ class FileReconciliation:
                 expected_symlink_path.symlink_to(cold_file_path)
 
                 stats["symlinks_created"] += 1
-                logger.info(f"✅ Recreated missing symlink: {expected_symlink_path} -> {cold_file_path}")
+                logger.info(f"Recreated missing symlink: {expected_symlink_path} -> {cold_file_path}")
 
             except Exception as e:
                 error_msg = f"Failed to create symlink {expected_symlink_path} -> {cold_file_path}: {str(e)}"

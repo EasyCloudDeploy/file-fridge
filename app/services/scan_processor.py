@@ -88,17 +88,17 @@ class ScanProcessor:
                         actual_file = file_path.resolve(strict=True)
                         original_stat = actual_file.stat()
                         file_size = original_stat.st_size
-                        logger.info(f"  📊 TIMESTAMP CAPTURE (symlink->actual): atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
+                        logger.info(f"  TIMESTAMP CAPTURE (symlink->actual): atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
                         logger.debug(f"  File is symlink, using actual file size: {file_size} bytes")
                     except (OSError, RuntimeError):
                         original_stat = file_path.stat()
                         file_size = original_stat.st_size
-                        logger.info(f"  📊 TIMESTAMP CAPTURE (symlink): atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
+                        logger.info(f"  TIMESTAMP CAPTURE (symlink): atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
                         logger.debug(f"  Could not resolve symlink, using symlink size: {file_size} bytes")
                 else:
                     original_stat = file_path.stat()
                     file_size = original_stat.st_size
-                    logger.info(f"  📊 TIMESTAMP CAPTURE (regular file): atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
+                    logger.info(f"  TIMESTAMP CAPTURE (regular file): atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
                     logger.debug(f"  File size: {file_size} bytes")
             except (OSError, FileNotFoundError) as e:
                 logger.debug(f"  Could not get file stats: {e}")
@@ -133,25 +133,25 @@ class ScanProcessor:
                     if original_stat and dest_path.exists():
                         # Check timestamps BEFORE syncing
                         pre_sync_stat = dest_path.stat()
-                        logger.info(f"  📊 BEFORE os.utime(): atime={pre_sync_stat.st_atime} ({time.ctime(pre_sync_stat.st_atime)}), mtime={pre_sync_stat.st_mtime} ({time.ctime(pre_sync_stat.st_mtime)})")
+                        logger.info(f"  BEFORE os.utime(): atime={pre_sync_stat.st_atime} ({time.ctime(pre_sync_stat.st_atime)}), mtime={pre_sync_stat.st_mtime} ({time.ctime(pre_sync_stat.st_mtime)})")
 
                         # Preserve original atime and mtime
-                        logger.info(f"  🔧 CALLING os.utime() with: atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
+                        logger.info(f"  CALLING os.utime() with: atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
                         os.utime(dest_path, (original_stat.st_atime, original_stat.st_mtime))
 
                         # Verify timestamps AFTER syncing
                         post_sync_stat = dest_path.stat()
-                        logger.info(f"  ✅ AFTER os.utime(): atime={post_sync_stat.st_atime} ({time.ctime(post_sync_stat.st_atime)}), mtime={post_sync_stat.st_mtime} ({time.ctime(post_sync_stat.st_mtime)})")
+                        logger.info(f"  AFTER os.utime(): atime={post_sync_stat.st_atime} ({time.ctime(post_sync_stat.st_atime)}), mtime={post_sync_stat.st_mtime} ({time.ctime(post_sync_stat.st_mtime)})")
 
                         # Check if preservation worked
                         atime_diff = abs(post_sync_stat.st_atime - original_stat.st_atime)
                         mtime_diff = abs(post_sync_stat.st_mtime - original_stat.st_mtime)
                         if atime_diff > 1 or mtime_diff > 1:
-                            logger.error(f"  ❌ TIMESTAMP PRESERVATION FAILED! atime diff={atime_diff}s, mtime diff={mtime_diff}s")
+                            logger.error(f"  TIMESTAMP PRESERVATION FAILED! atime diff={atime_diff}s, mtime diff={mtime_diff}s")
                         else:
-                            logger.info(f"  ✅ TIMESTAMP PRESERVATION VERIFIED (atime diff={atime_diff}s, mtime diff={mtime_diff}s)")
+                            logger.info(f"  TIMESTAMP PRESERVATION VERIFIED (atime diff={atime_diff}s, mtime diff={mtime_diff}s)")
                 except (OSError, FileNotFoundError) as e:
-                    logger.error(f"  ❌ Could not sync timestamps to {dest_path}: {e} (file may appear 'new' on next scan)")
+                    logger.error(f"  Could not sync timestamps to {dest_path}: {e} (file may appear 'new' on next scan)")
                 
                 # Record the file immediately in database
                 file_record_id = self._record_file_in_db(
@@ -162,9 +162,9 @@ class ScanProcessor:
                 final_stat = dest_path.stat()
                 final_atime_diff = abs(final_stat.st_atime - original_stat.st_atime)
                 if final_atime_diff > 1:
-                    logger.error(f"  ❌❌❌ ATIME CORRUPTED AFTER DATABASE OPERATIONS! diff={final_atime_diff}s, final_atime={final_stat.st_atime} ({time.ctime(final_stat.st_atime)})")
+                    logger.error(f"  ATIME CORRUPTED AFTER DATABASE OPERATIONS! diff={final_atime_diff}s, final_atime={final_stat.st_atime} ({time.ctime(final_stat.st_atime)})")
                 else:
-                    logger.info(f"  ✅ Final verification: atime still preserved after DB operations")
+                    logger.info(f"  Final verification: atime still preserved after DB operations")
 
                 result["success"] = True
                 result["file_record_id"] = file_record_id

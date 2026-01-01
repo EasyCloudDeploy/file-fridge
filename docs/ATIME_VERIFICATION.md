@@ -8,34 +8,34 @@
 
 ### Operations Used by File Fridge
 
-1. **`stat()` / `Path.stat()`** - ✅ SAFE
+1. **`stat()` / `Path.stat()`** - SAFE
    - Gets file metadata (size, timestamps, permissions)
    - Does NOT open or read the file
    - Does NOT update atime
    - Used in: `file_scanner.py`, `criteria_matcher.py`
 
-2. **`scandir()`** - ✅ SAFE
+2. **`scandir()`** - SAFE
    - Efficient directory listing
    - Returns DirEntry objects with cached stat info
    - Does NOT update atime
    - Used in: `file_scanner.py`
 
-3. **`Path.resolve()`** - ✅ SAFE
+3. **`Path.resolve()`** - SAFE
    - Resolves symlinks to target path
    - Does NOT read file contents
    - Does NOT update atime
    - Used in: `file_scanner.py`
 
-4. **`mdls` (macOS only)** - ✅ SAFE
+4. **`mdls` (macOS only)** - SAFE
    - Queries Spotlight metadata
    - Does NOT update atime
    - Used in: `criteria_matcher.py` for "Last Open" time
 
 ### Operations NOT Used (that would update atime)
 
-- ❌ `open()` - NOT USED
-- ❌ `read()` - NOT USED
-- ❌ Reading file contents - NOT USED
+- `open()` - NOT USED
+- `read()` - NOT USED
+- Reading file contents - NOT USED
 
 ## Verification Script
 
@@ -65,9 +65,9 @@ echo "atime after:  $ATIME_AFTER"
 
 # Compare
 if [ "$ATIME_BEFORE" = "$ATIME_AFTER" ]; then
-    echo "✅ PASS: atime NOT updated by stat()"
+    echo "PASS: atime NOT updated by stat()"
 else
-    echo "❌ FAIL: atime WAS updated (check filesystem mount options)"
+    echo "FAIL: atime WAS updated (check filesystem mount options)"
 fi
 
 # Now read the file (which SHOULD update atime)
@@ -77,9 +77,9 @@ ATIME_AFTER_READ=$(stat -f %a "$TEST_FILE" 2>/dev/null || stat -c %X "$TEST_FILE
 echo "atime after read: $ATIME_AFTER_READ"
 
 if [ "$ATIME_AFTER" != "$ATIME_AFTER_READ" ]; then
-    echo "✅ atime correctly updated by read operation"
+    echo "atime correctly updated by read operation"
 else
-    echo "⚠️  atime NOT updated by read (filesystem may be mounted with noatime/relatime)"
+    echo "atime NOT updated by read (filesystem may be mounted with noatime/relatime)"
 fi
 
 # Cleanup
@@ -101,17 +101,17 @@ While File Fridge doesn't update atime, the **filesystem mount options** affect 
   - Previous atime is older than mtime or ctime, OR
   - Previous atime is more than 24 hours old
 - Good balance of performance and tracking
-- **Recommendation:** ✅ GOOD for File Fridge
+- **Recommendation:** GOOD for File Fridge
 
 ### 3. `noatime` (Best Performance)
 - NEVER updates atime
 - Best performance (no write overhead)
-- **Recommendation:** ⚠️ DO NOT USE if you need atime-based criteria
+- **Recommendation:** DO NOT USE if you need atime-based criteria
 
 ### 4. `lazytime` (Linux 4.0+)
 - Delays atime updates to memory
 - Writes to disk less frequently
-- **Recommendation:** ✅ GOOD for File Fridge
+- **Recommendation:** GOOD for File Fridge
 
 ## macOS Considerations
 
@@ -151,8 +151,8 @@ Created: Today
 Last Open: None (never opened)
 atime: Today (set at creation)
 
-Without fix: atime = Today → Kept in hot storage ❌
-With fix: Last Open = None → Treated as epoch → Moved to cold ✅
+Without fix: atime = Today → Kept in hot storage (INCORRECT)
+With fix: Last Open = None → Treated as epoch → Moved to cold (CORRECT)
 ```
 
 ## Network Mounts (SMB/NFS)
@@ -205,7 +205,7 @@ If using atime-based criteria with network mounts:
 
 ## Conclusion
 
-✅ **File Fridge does NOT update atime during scanning**
+**File Fridge does NOT update atime during scanning**
 
 The application only uses metadata operations (`stat()`) that do not trigger atime updates. However, verify your filesystem mount options to ensure atime is being tracked as expected for your use case.
 

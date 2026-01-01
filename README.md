@@ -50,6 +50,8 @@ docker-compose up -d
 
 5. Access the web interface at `http://localhost:8000`
 
+**Important for Symlink Operations**: If you're using the "move and symlink" operation type, you may need to configure path translation. See the [Docker Deployment Guide](DOCKER.md#symlink-operations-in-docker) for details.
+
 For detailed Docker documentation, see [DOCKER.md](DOCKER.md).
 
 ### Using uv (Recommended for Development)
@@ -91,6 +93,10 @@ Available environment variables:
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default: INFO
 - `LOG_FILE_PATH`: Optional path to log file. If not set, logs only to stdout. Default: None
 - `DATABASE_PATH`: Database file path. Default: ./data/file_fridge.db
+- `CONTAINER_PATH_PREFIX`: Path prefix inside container (for symlink operations in Docker). Default: None
+- `HOST_PATH_PREFIX`: Path prefix on host system (for symlink operations in Docker). Default: None
+
+For Docker deployments using symlink operations, see [DOCKER.md](DOCKER.md#symlink-operations-in-docker) for path translation configuration.
 
 ### Using pip (Alternative)
 
@@ -145,7 +151,7 @@ The web interface will be available at `http://localhost:8000`
 
 ### Configuration
 
-**⚠️ Important:** The scan interval must be properly aligned with your criteria thresholds. See [Configuration Best Practices](docs/CONFIGURATION_GUIDE.md) for details.
+**Important:** The scan interval must be properly aligned with your criteria thresholds. See [Configuration Best Practices](docs/CONFIGURATION_GUIDE.md) for details.
 
 **Rule of Thumb:** Scan interval should be ≤ 1/3 of your smallest time-based criterion threshold.
 
@@ -242,9 +248,9 @@ Examples:
 - Scanning will not affect your files' access times
 
 **Filesystem mount options affect atime tracking:**
-- `relatime` (default on modern Linux) - ✅ Recommended: Updates atime intelligently
+- `relatime` (default on modern Linux) - Recommended: Updates atime intelligently
 - `strictatime` - Updates atime on every access (performance impact)
-- `noatime` - ⚠️ Never updates atime (DO NOT USE if you need atime-based criteria)
+- `noatime` - Never updates atime (DO NOT USE if you need atime-based criteria)
 
 **For macOS users:**
 - File Fridge uses both `atime` and Spotlight's "Last Open" time

@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     # Override via DEFAULT_CHECK_INTERVAL environment variable
     default_check_interval: int = 3600
 
+    # Path prefix translation for containerized environments
+    # Override via CONTAINER_PATH_PREFIX environment variable
+    # This is the path prefix as seen inside the container (e.g., "/data")
+    container_path_prefix: Optional[str] = None
+
+    # Override via HOST_PATH_PREFIX environment variable
+    # This is the path prefix as seen on the host (e.g., "/mnt/data")
+    # Used when creating symlinks to ensure they work from the host perspective
+    host_path_prefix: Optional[str] = None
+
     # UI
     # Override via APP_NAME environment variable
     app_name: str = "File Fridge"
@@ -80,4 +90,44 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def translate_path_for_symlink(container_path: str) -> str:
+    """
+    Translate a container path to a host path for symlink creation.
+
+    This is needed when running in Docker: symlinks must point to paths
+    as they appear on the host system, not as they appear in the container.
+
+    Example:
+        Container sees: /data/cold_storage/file.txt
+        Host sees: /mnt/data/cold_storage/file.txt
+
+        container_path_prefix = "/data"
+        host_path_prefix = "/mnt/data"
+
+        Result: /mnt/data/cold_storage/file.txt
+
+    Args:
+        container_path: Path as seen inside the container
+
+    Returns:
+        Path as it should appear on the host (for symlinks)
+    """
+    # If no translation configured, return as-is
+    if not settings.container_path_prefix or not settings.host_path_prefix:
+        return container_path
+
+    # Normalize prefixes (remove trailing slashes)
+    container_prefix = settings.container_path_prefix.rstrip('/')
+    host_prefix = settings.host_path_prefix.rstrip('/')
+
+    # If path starts with container prefix, replace with host prefix
+    if container_path.startswith(container_prefix):
+        # Replace the prefix
+        relative_path = container_path[len(container_prefix):]
+        return host_prefix + relative_path
+
+    # Path doesn't match container prefix, return as-is
+    return container_path
 

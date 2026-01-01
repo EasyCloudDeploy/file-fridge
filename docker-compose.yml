@@ -27,6 +27,12 @@ services:
       # Network mount settings (set to true if monitoring network mounts)
       - ALLOW_ATIME_OVER_NETWORK_MOUNTS=false
 
+      # Path translation for symlinks (only needed for symlink operations)
+      # Uncomment if hot/cold storage is mounted from host filesystem
+      # and you're using the "move and symlink" operation type
+      # - CONTAINER_PATH_PREFIX=/data
+      # - HOST_PATH_PREFIX=/mnt/data
+
     volumes:
       # Database persistence
       - ./data:/app/data

@@ -16,7 +16,7 @@ Files age between scans. If your scan interval is too long, files can age past y
 
 ### Examples
 
-#### ❌ BAD Configuration
+#### BAD Configuration
 ```
 Criterion:      atime < 3 minutes (keep files accessed in last 3 min)
 Scan Interval:  60 minutes
@@ -26,7 +26,7 @@ Problem:        Files age 60 minutes between scans
                 The 3-minute window is completely missed!
 ```
 
-#### ✅ GOOD Configuration
+#### GOOD Configuration
 ```
 Criterion:      atime < 3 minutes
 Scan Interval:  1 minute (or less)
@@ -34,7 +34,7 @@ Result:         Files checked every minute
                 Recently accessed files stay hot as expected
 ```
 
-#### ✅ GOOD Configuration (longer timeframes)
+#### GOOD Configuration (longer timeframes)
 ```
 Criterion:      atime < 1440 minutes (1 day)
 Scan Interval:  360 minutes (6 hours)
@@ -175,13 +175,13 @@ size > 1G       (keep large files in hot storage)
 
 ## Summary
 
-✅ **DO:**
+**DO:**
 - Set scan interval ≤ 1/3 of your smallest criterion threshold
 - Use realistic time scales (≥ 30 min for network storage)
 - Monitor application logs for warnings
 - Test with actual files before production
 
-❌ **DON'T:**
+**DON'T:**
 - Use scan intervals much larger than criteria thresholds
 - Use very small thresholds (< 1 min) on network storage
 - Ignore configuration warnings in logs

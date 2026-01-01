@@ -26,22 +26,22 @@ class IndexingManager:
 
             # Create directory if it doesn't exist
             if not dir_path.exists():
-                logger.info(f"📁 Creating directory for .noindex: {directory}")
+                logger.info(f"Creating directory for .noindex: {directory}")
                 dir_path.mkdir(parents=True, exist_ok=True)
 
             noindex_path = dir_path / IndexingManager.NOINDEX_FILENAME
 
             # Create .noindex file if it doesn't exist
             if not noindex_path.exists():
-                logger.info(f"🚫 Creating .noindex file to prevent Spotlight indexing: {noindex_path}")
+                logger.info(f"Creating .noindex file to prevent Spotlight indexing: {noindex_path}")
                 noindex_path.touch()
                 return True
             else:
-                logger.debug(f"✅ .noindex file already exists: {noindex_path}")
+                logger.debug(f".noindex file already exists: {noindex_path}")
                 return True
 
         except Exception as e:
-            logger.error(f"❌ Failed to create .noindex file in {directory}: {e}")
+            logger.error(f"Failed to create .noindex file in {directory}: {e}")
             return False
 
     @staticmethod
@@ -59,22 +59,22 @@ class IndexingManager:
             dir_path = Path(directory)
 
             if not dir_path.exists():
-                logger.debug(f"📁 Directory doesn't exist, nothing to remove: {directory}")
+                logger.debug(f"Directory doesn't exist, nothing to remove: {directory}")
                 return True
 
             noindex_path = dir_path / IndexingManager.NOINDEX_FILENAME
 
             # Remove .noindex file if it exists
             if noindex_path.exists():
-                logger.info(f"✅ Removing .noindex file to allow Spotlight indexing: {noindex_path}")
+                logger.info(f"Removing .noindex file to allow Spotlight indexing: {noindex_path}")
                 noindex_path.unlink()
                 return True
             else:
-                logger.debug(f"📂 .noindex file doesn't exist: {noindex_path}")
+                logger.debug(f".noindex file doesn't exist: {noindex_path}")
                 return True
 
         except Exception as e:
-            logger.error(f"❌ Failed to remove .noindex file from {directory}: {e}")
+            logger.error(f"Failed to remove .noindex file from {directory}: {e}")
             return False
 
     @staticmethod
@@ -90,7 +90,7 @@ class IndexingManager:
         Returns:
             True if operation succeeded for both directories, False otherwise
         """
-        logger.info(f"🔧 Managing .noindex files (prevent_indexing={prevent_indexing})")
+        logger.info(f"Managing .noindex files (prevent_indexing={prevent_indexing})")
         logger.info(f"   Hot storage: {source_path}")
         logger.info(f"   Cold storage: {cold_storage_path}")
 
@@ -105,8 +105,8 @@ class IndexingManager:
 
         success = hot_success and cold_success
         if success:
-            logger.info(f"✅ Successfully managed .noindex files for both directories")
+            logger.info(f"Successfully managed .noindex files for both directories")
         else:
-            logger.warning(f"⚠️ Failed to manage .noindex files for one or more directories")
+            logger.warning(f"Failed to manage .noindex files for one or more directories")
 
         return success

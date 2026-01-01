@@ -5,6 +5,7 @@ from pathlib import Path
 import logging
 from typing import Optional, Callable
 from app.models import OperationType, MonitoredPath
+from app.config import translate_path_for_symlink
 
 logger = logging.getLogger(__name__)
 
@@ -65,21 +66,12 @@ class FileMover:
                     else:
                         resolved_target = (source.parent / symlink_target).resolve()
 
-                    # If symlink points to destination, file is already in cold storage
-                    # For MOVE operation: move the file back to hot storage first, then to cold storage
-                    # This ensures the file is actually moved, not just the symlink removed
+                    # If symlink points to destination, file is already in cold storage at the correct location
+                    # For MOVE operation: just remove the symlink, file is already where it needs to be
                     if resolved_target.resolve() == destination.resolve():
-                        # Remove the symlink first
+                        logger.info(f"  File already at destination in cold storage, removing symlink")
                         source.unlink()
-                        # Move the actual file from cold storage back to hot storage
-                        try:
-                            destination.rename(source)
-                        except OSError:
-                            # Cross-filesystem - preserve timestamps
-                            FileMover._move_with_timestamps(destination, source)
-                        # Now move it to cold storage (normal move - source is now the actual file)
-                        # Recursively call _move, but now source is a regular file, not a symlink
-                        return FileMover._move(source, destination, progress_callback)
+                        return True, None
                     else:
                         # Symlink points elsewhere - move the actual file (not the symlink)
                         actual_file = source.resolve(strict=True)
@@ -105,13 +97,13 @@ class FileMover:
             # Regular file - normal move
             # Try atomic rename first (same filesystem - preserves all timestamps)
             try:
-                logger.info(f"  🔧 Attempting atomic rename: {source} -> {destination}")
+                logger.info(f"  Attempting atomic rename: {source} -> {destination}")
                 source.rename(destination)
-                logger.info(f"  ✅ Atomic rename successful (same filesystem, timestamps preserved)")
+                logger.info(f"  Atomic rename successful (same filesystem, timestamps preserved)")
                 return True, None
             except OSError as e:
                 # Cross-filesystem move - use copy with timestamp preservation
-                logger.info(f"  ⚠️ Atomic rename failed ({e}), using cross-filesystem move with timestamp preservation")
+                logger.info(f"  Atomic rename failed ({e}), using cross-filesystem move with timestamp preservation")
                 FileMover._move_with_timestamps(source, destination, progress_callback)
                 return True, None
         except Exception as e:
@@ -125,14 +117,14 @@ class FileMover:
         # Get original timestamps before copying
         stat_info = source.stat()
         file_size = stat_info.st_size
-        logger.info(f"  📊 _move_with_timestamps: SOURCE timestamps - atime={stat_info.st_atime} ({time_module.ctime(stat_info.st_atime)}), mtime={stat_info.st_mtime} ({time_module.ctime(stat_info.st_mtime)})")
+        logger.info(f"  _move_with_timestamps: SOURCE timestamps - atime={stat_info.st_atime} ({time_module.ctime(stat_info.st_atime)}), mtime={stat_info.st_mtime} ({time_module.ctime(stat_info.st_mtime)})")
 
         # Check if file is large enough to report progress
         should_report_progress = progress_callback and file_size > (PROGRESS_THRESHOLD_MB * 1024 * 1024)
 
         if should_report_progress:
             # Use manual copy with progress tracking for large files
-            logger.info(f"  🔧 Copying large file ({file_size / 1024 / 1024:.1f} MB) with progress tracking")
+            logger.info(f"  Copying large file ({file_size / 1024 / 1024:.1f} MB) with progress tracking")
             bytes_transferred = 0
             last_report = 0
 
@@ -158,31 +150,31 @@ class FileMover:
             shutil.copystat(str(source), str(destination))
         else:
             # Use fast copy for small files
-            logger.info(f"  🔧 Calling shutil.copy2({source} -> {destination})")
+            logger.info(f"  Calling shutil.copy2({source} -> {destination})")
             shutil.copy2(str(source), str(destination))
 
         # Check timestamps after copy
         post_copy_stat = destination.stat()
-        logger.info(f"  📊 AFTER copy: atime={post_copy_stat.st_atime} ({time_module.ctime(post_copy_stat.st_atime)}), mtime={post_copy_stat.st_mtime} ({time_module.ctime(post_copy_stat.st_mtime)})")
+        logger.info(f"  AFTER copy: atime={post_copy_stat.st_atime} ({time_module.ctime(post_copy_stat.st_atime)}), mtime={post_copy_stat.st_mtime} ({time_module.ctime(post_copy_stat.st_mtime)})")
 
         # Explicitly set atime and mtime to original values
-        logger.info(f"  🔧 Calling os.utime() with nanoseconds: atime_ns={stat_info.st_atime_ns}, mtime_ns={stat_info.st_mtime_ns}")
+        logger.info(f"  Calling os.utime() with nanoseconds: atime_ns={stat_info.st_atime_ns}, mtime_ns={stat_info.st_mtime_ns}")
         os.utime(str(destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
 
         # Verify timestamps after os.utime
         post_utime_stat = destination.stat()
-        logger.info(f"  ✅ AFTER os.utime(): atime={post_utime_stat.st_atime} ({time_module.ctime(post_utime_stat.st_atime)}), mtime={post_utime_stat.st_mtime} ({time_module.ctime(post_utime_stat.st_mtime)})")
+        logger.info(f"  AFTER os.utime(): atime={post_utime_stat.st_atime} ({time_module.ctime(post_utime_stat.st_atime)}), mtime={post_utime_stat.st_mtime} ({time_module.ctime(post_utime_stat.st_mtime)})")
 
         # Check if preservation worked
         atime_diff = abs(post_utime_stat.st_atime - stat_info.st_atime)
         mtime_diff = abs(post_utime_stat.st_mtime - stat_info.st_mtime)
         if atime_diff > 0.001 or mtime_diff > 0.001:  # 1ms tolerance
-            logger.error(f"  ❌ TIMESTAMP MISMATCH in _move_with_timestamps! atime diff={atime_diff}s, mtime diff={mtime_diff}s")
+            logger.error(f"  TIMESTAMP MISMATCH in _move_with_timestamps! atime diff={atime_diff}s, mtime diff={mtime_diff}s")
         else:
-            logger.info(f"  ✅ Timestamps preserved correctly in _move_with_timestamps")
+            logger.info(f"  Timestamps preserved correctly in _move_with_timestamps")
 
         # Remove original file
-        logger.info(f"  🗑️ Unlinking source file: {source}")
+        logger.info(f"  Unlinking source file: {source}")
         source.unlink()
     
     @staticmethod
@@ -198,10 +190,10 @@ class FileMover:
     def _move_and_symlink(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> tuple[bool, Optional[str]]:
         """Move file and create symlink at original location."""
         try:
-            # If source is already a symlink pointing to destination, we need to:
-            # 1. Remove the symlink
-            # 2. Move the actual file from cold storage back to hot storage
-            # 3. Then move it to cold storage again and create new symlink
+            # Save the original source location for symlink creation
+            original_source = source
+
+            # If source is already a symlink, handle it specially
             if source.is_symlink():
                 try:
                     symlink_target = source.readlink()
@@ -210,48 +202,49 @@ class FileMover:
                         resolved_target = Path(symlink_target)
                     else:
                         resolved_target = (source.parent / symlink_target).resolve()
-                    
-                    # If symlink points to destination, move the actual file back first
+
+                    # If symlink points to destination, file is already in place with correct symlink
                     if resolved_target.resolve() == destination.resolve():
-                        # Remove the symlink first
-                        source.unlink()
-                        # Move the actual file from cold storage back to hot storage
-                        try:
-                            destination.rename(source)
-                        except OSError:
-                            # Cross-filesystem - use shutil
-                            shutil.move(str(destination), str(source))
-                        # Now continue with normal move and symlink operation
-                        # (file is now in hot storage, will be moved to cold storage)
+                        logger.info(f"  File already at destination with symlink in place, nothing to do")
+                        return True, None
                     else:
-                        # Symlink points elsewhere - get the actual file
+                        # Symlink points elsewhere - need to move the actual file to new destination
                         actual_file = source.resolve(strict=True)
-                        # Remove symlink and use actual file as source
+                        logger.info(f"  Symlink points to {actual_file}, moving to {destination}")
+                        # Remove symlink first
                         source.unlink()
-                        source = actual_file
+                        # Move the actual file from old location to new destination
+                        success, error = FileMover._move(actual_file, destination, progress_callback)
+                        if not success:
+                            logger.error(f"Move failed: {error}")
+                            return False, error
+                        # Continue to create symlink at original source location
                 except (OSError, RuntimeError) as e:
                     return False, f"Failed to handle existing symlink: {str(e)}"
-            
-            # Regular file - normal move and symlink
-            # Move the file
-            logger.info(f"  🔧 _move_and_symlink: Moving file from {source} to {destination}")
-            success, error = FileMover._move(source, destination, progress_callback)
-            if not success:
-                logger.error(f"Move failed: {error}")
-                return False, error
+            else:
+                # Regular file - normal move
+                logger.info(f"  _move_and_symlink: Moving file from {source} to {destination}")
+                success, error = FileMover._move(source, destination, progress_callback)
+                if not success:
+                    logger.error(f"Move failed: {error}")
+                    return False, error
 
-            logger.info(f"  ✅ File moved successfully, now creating symlink")
+            logger.info(f"  File moved successfully, now creating symlink")
 
             # Create symlink at original location
             try:
-                logger.info(f"  🔧 Creating symlink: {source} -> {destination}")
-                source.symlink_to(destination)
-                logger.info(f"  ✅ Symlink created successfully")
+                # Translate destination path for symlink (container -> host path)
+                symlink_target = translate_path_for_symlink(str(destination))
+                logger.info(f"  Creating symlink: {original_source} -> {symlink_target}")
+                if symlink_target != str(destination):
+                    logger.info(f"  Path translated for symlink: {destination} -> {symlink_target}")
+                original_source.symlink_to(symlink_target)
+                logger.info(f"  Symlink created successfully")
                 return True, None
             except OSError as e:
                 # If symlink creation fails, try to move file back
                 try:
-                    destination.rename(source)
+                    destination.rename(original_source)
                 except:
                     pass
                 return False, f"Symlink creation failed: {str(e)}"
