@@ -3,7 +3,6 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from starlette.middleware.sessions import SessionMiddleware
 from app.config import settings
 from app.database import init_db
 from app.routers.api import paths as api_paths, criteria as api_criteria, files as api_files, stats as api_stats, cleanup as api_cleanup
@@ -11,13 +10,16 @@ from app.routers.web import dashboard, paths as web_paths, files as web_files, s
 from app.services.scheduler import scheduler_service
 
 # Configure logging
+handlers = [logging.StreamHandler()]  # Always log to stdout
+
+# Add file logging if LOG_FILE_PATH is set
+if settings.log_file_path:
+    handlers.append(logging.FileHandler(settings.log_file_path, mode='a'))
+
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(),  # Console output
-        logging.FileHandler('/Users/martino/repos/file-fridge/app_detailed.log', mode='a')  # File output
-    ]
+    handlers=handlers
 )
 
 logger = logging.getLogger(__name__)
@@ -48,9 +50,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add session middleware for flash messages
-app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
-
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -73,7 +72,11 @@ app.include_router(web_cleanup.router)
 @app.get("/health")
 def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "version": settings.app_version}
+    return {
+        "status": "healthy",
+        "version": settings.app_version,
+        "app_name": settings.app_name
+    }
 
 
 def main():

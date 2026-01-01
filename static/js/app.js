@@ -329,6 +329,57 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ========================================
+// App Information Loader
+// ========================================
+
+/**
+ * Load and display app name and version from the health endpoint
+ * Updates elements with specific IDs:
+ * - app-name-title, app-name-navbar, app-name-footer: App name
+ * - app-version: Version in navbar badge (with 'v' prefix)
+ * - footer-app-version: Version in footer (without prefix)
+ */
+function loadAppInfo() {
+    fetch('/health')
+        .then(response => response.json())
+        .then(data => {
+            const version = data.version || '0.0.0';
+            const appName = data.app_name || 'File Fridge';
+
+            // Update app name in multiple places
+            const appNameEls = ['app-name-title', 'app-name-navbar', 'app-name-footer'];
+            appNameEls.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.textContent = appName;
+            });
+
+            // Update navbar version
+            const versionEl = document.getElementById('app-version');
+            if (versionEl) {
+                versionEl.textContent = 'v' + version;
+            }
+
+            // Update footer version
+            const footerVersionEl = document.getElementById('footer-app-version');
+            if (footerVersionEl) {
+                footerVersionEl.textContent = version;
+            }
+        })
+        .catch(error => {
+            console.error('Failed to fetch app info:', error);
+            // Set fallback values on error
+            const versionEl = document.getElementById('app-version');
+            if (versionEl) {
+                versionEl.textContent = 'v0.0.0';
+            }
+            const footerVersionEl = document.getElementById('footer-app-version');
+            if (footerVersionEl) {
+                footerVersionEl.textContent = '0.0.0';
+            }
+        });
+}
+
+// ========================================
 // Export functions to global scope
 // ========================================
 window.showToast = showToast;
@@ -338,3 +389,4 @@ window.formatBytes = formatBytes;
 window.formatRelativeTime = formatRelativeTime;
 window.debounce = debounce;
 window.escapeHtml = escapeHtml;
+window.loadAppInfo = loadAppInfo;
