@@ -13,7 +13,11 @@ from app.services.scheduler import scheduler_service
 # Configure logging
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Console output
+        logging.FileHandler('/Users/martino/repos/file-fridge/app_detailed.log', mode='a')  # File output
+    ]
 )
 
 logger = logging.getLogger(__name__)

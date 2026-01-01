@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from app.database import get_db
-from app.models import Criteria, MonitoredPath
+from app.models import Criteria, MonitoredPath, CriterionType
 from app.schemas import CriteriaCreate, CriteriaUpdate, Criteria as CriteriaSchema
 from app.services.scheduler import scheduler_service
+from app.utils.network_detection import check_atime_availability
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +36,26 @@ def create_criteria(path_id: int, criteria: CriteriaCreate, db: Session = Depend
             detail=f"Path with id {path_id} not found"
         )
     
+    # Validate: Check if atime criteria is being created and cold storage is a network mount
+    if criteria.criterion_type == CriterionType.ATIME and criteria.enabled:
+        atime_available, error_msg = check_atime_availability(path.cold_storage_path)
+        if not atime_available:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_msg
+            )
+    
     db_criteria = Criteria(path_id=path_id, **criteria.model_dump())
     db.add(db_criteria)
     db.commit()
     db.refresh(db_criteria)
+    
+    # Re-validate path configuration to update error state
+    from app.routers.api.paths import validate_path_configuration
+    try:
+        validate_path_configuration(path, db)
+    except HTTPException:
+        pass  # Error already set on path
     
     return db_criteria
 
@@ -65,12 +82,34 @@ def update_criteria(criteria_id: int, criteria_update: CriteriaUpdate, db: Sessi
             detail=f"Criteria with id {criteria_id} not found"
         )
     
+    path = criteria.path
+    
+    # Check if we're enabling atime criteria or changing to atime type
     update_data = criteria_update.model_dump(exclude_unset=True)
+    will_be_atime = update_data.get("criterion_type", criteria.criterion_type) == CriterionType.ATIME
+    will_be_enabled = update_data.get("enabled", criteria.enabled if "enabled" not in update_data else True)
+    
+    # Validate: Check if atime criteria is being enabled and cold storage is a network mount
+    if will_be_atime and will_be_enabled:
+        atime_available, error_msg = check_atime_availability(path.cold_storage_path)
+        if not atime_available:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_msg
+            )
+    
     for field, value in update_data.items():
         setattr(criteria, field, value)
     
     db.commit()
     db.refresh(criteria)
+    
+    # Re-validate path configuration to update error state
+    from app.routers.api.paths import validate_path_configuration
+    try:
+        validate_path_configuration(path, db)
+    except HTTPException:
+        pass  # Error already set on path
     
     return criteria
 

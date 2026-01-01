@@ -1,6 +1,7 @@
 """Processes scans and moves files."""
 import logging
 import json
+import os
 import shutil
 import threading
 import time
@@ -9,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy.orm import Session
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.models import MonitoredPath, FileRecord, OperationType
+from app.models import MonitoredPath, FileRecord, FileInventory, FileStatus, OperationType
 from app.services.file_scanner import FileScanner
 from app.services.file_mover import FileMover
 from app.services.file_cleanup import FileCleanup
@@ -76,22 +77,31 @@ class ScanProcessor:
                     result["error"] = "File already at destination"
                     return result
 
-            # Get file size before moving
+            # Get original file stats BEFORE moving (critical for timestamp preservation)
+            original_stat = None
+            file_size = 0
             try:
                 if file_path.is_symlink():
                     try:
                         actual_file = file_path.resolve(strict=True)
-                        file_size = actual_file.stat().st_size
+                        original_stat = actual_file.stat()
+                        file_size = original_stat.st_size
+                        logger.info(f"  📊 TIMESTAMP CAPTURE (symlink->actual): atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
                         logger.debug(f"  File is symlink, using actual file size: {file_size} bytes")
                     except (OSError, RuntimeError):
-                        file_size = file_path.stat().st_size
+                        original_stat = file_path.stat()
+                        file_size = original_stat.st_size
+                        logger.info(f"  📊 TIMESTAMP CAPTURE (symlink): atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
                         logger.debug(f"  Could not resolve symlink, using symlink size: {file_size} bytes")
                 else:
-                    file_size = file_path.stat().st_size
+                    original_stat = file_path.stat()
+                    file_size = original_stat.st_size
+                    logger.info(f"  📊 TIMESTAMP CAPTURE (regular file): atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
                     logger.debug(f"  File size: {file_size} bytes")
             except (OSError, FileNotFoundError) as e:
-                file_size = 0
-                logger.debug(f"  Could not get file size: {e}")
+                logger.debug(f"  Could not get file stats: {e}")
+                result["error"] = f"Cannot stat source file: {e}"
+                return result
 
             # Move the file
             logger.debug(f"  Moving file using operation: {path.operation_type.value}")
@@ -101,10 +111,48 @@ class ScanProcessor:
 
             if success:
                 logger.debug(f"  File move successful")
+                
+                # CRITICAL: Sync timestamps to prevent immediate "Move Back" due to cross-fs copy
+                # When moving between different filesystems (hot macOS -> cold Linux network mount),
+                # shutil.copy2() creates a new file with current timestamps, causing the file to
+                # immediately fail "older than X" criteria. We must preserve the original timestamps.
+                try:
+                    if original_stat and dest_path.exists():
+                        # Check timestamps BEFORE syncing
+                        pre_sync_stat = dest_path.stat()
+                        logger.info(f"  📊 BEFORE os.utime(): atime={pre_sync_stat.st_atime} ({time.ctime(pre_sync_stat.st_atime)}), mtime={pre_sync_stat.st_mtime} ({time.ctime(pre_sync_stat.st_mtime)})")
+
+                        # Preserve original atime and mtime
+                        logger.info(f"  🔧 CALLING os.utime() with: atime={original_stat.st_atime} ({time.ctime(original_stat.st_atime)}), mtime={original_stat.st_mtime} ({time.ctime(original_stat.st_mtime)})")
+                        os.utime(dest_path, (original_stat.st_atime, original_stat.st_mtime))
+
+                        # Verify timestamps AFTER syncing
+                        post_sync_stat = dest_path.stat()
+                        logger.info(f"  ✅ AFTER os.utime(): atime={post_sync_stat.st_atime} ({time.ctime(post_sync_stat.st_atime)}), mtime={post_sync_stat.st_mtime} ({time.ctime(post_sync_stat.st_mtime)})")
+
+                        # Check if preservation worked
+                        atime_diff = abs(post_sync_stat.st_atime - original_stat.st_atime)
+                        mtime_diff = abs(post_sync_stat.st_mtime - original_stat.st_mtime)
+                        if atime_diff > 1 or mtime_diff > 1:
+                            logger.error(f"  ❌ TIMESTAMP PRESERVATION FAILED! atime diff={atime_diff}s, mtime diff={mtime_diff}s")
+                        else:
+                            logger.info(f"  ✅ TIMESTAMP PRESERVATION VERIFIED (atime diff={atime_diff}s, mtime diff={mtime_diff}s)")
+                except (OSError, FileNotFoundError) as e:
+                    logger.error(f"  ❌ Could not sync timestamps to {dest_path}: {e} (file may appear 'new' on next scan)")
+                
                 # Record the file immediately in database
                 file_record_id = self._record_file_in_db(
                     db, path, file_path, dest_path, file_size, matched_criteria_ids
                 )
+
+                # FINAL VERIFICATION: Check if timestamps are still preserved after database operations
+                final_stat = dest_path.stat()
+                final_atime_diff = abs(final_stat.st_atime - original_stat.st_atime)
+                if final_atime_diff > 1:
+                    logger.error(f"  ❌❌❌ ATIME CORRUPTED AFTER DATABASE OPERATIONS! diff={final_atime_diff}s, final_atime={final_stat.st_atime} ({time.ctime(final_stat.st_atime)})")
+                else:
+                    logger.info(f"  ✅ Final verification: atime still preserved after DB operations")
+
                 result["success"] = True
                 result["file_record_id"] = file_record_id
                 logger.info(f"Successfully processed and recorded: {file_path} -> {dest_path}")
@@ -141,7 +189,7 @@ class ScanProcessor:
             existing_record.path_id = path.id
             db.commit()
             logger.debug(f"Updated existing FileRecord ID: {existing_record.id}")
-            return existing_record.id
+            file_record_id = existing_record.id
         else:
             # Create new record
             file_record = FileRecord(
@@ -156,7 +204,22 @@ class ScanProcessor:
             db.commit()
             db.refresh(file_record)
             logger.debug(f"Created new FileRecord ID: {file_record.id}")
-            return file_record.id
+            file_record_id = file_record.id
+
+        # Update file inventory to mark the hot storage entry as moved
+        hot_inventory = db.query(FileInventory).filter(
+            FileInventory.path_id == path.id,
+            FileInventory.file_path == str(file_path),
+            FileInventory.storage_type == "hot"
+        ).first()
+
+        if hot_inventory:
+            # Mark the hot storage entry as moved
+            hot_inventory.status = FileStatus.MOVED
+            db.commit()
+            logger.debug(f"Marked hot storage inventory entry as moved: {file_path}")
+
+        return file_record_id
 
     def process_path(self, path: MonitoredPath, db: Session) -> dict:
         """
@@ -166,11 +229,27 @@ class ScanProcessor:
         Returns:
             dict with scan results
         """
+        # Check if path is in error state - if so, skip processing
+        if path.error_message:
+            logger.warning(
+                f"Path {path.name} (ID: {path.id}) is in error state and will not be processed. "
+                f"Error: {path.error_message}"
+            )
+            return {
+                "path_id": path.id,
+                "files_found": 0,
+                "files_moved": 0,
+                "files_cleaned": 0,
+                "errors": [f"Path is in error state: {path.error_message}"]
+            }
+        
         results = {
             "path_id": path.id,
             "files_found": 0,
             "files_moved": 0,
             "files_cleaned": 0,
+            "files_skipped": 0,
+            "total_scanned": 0,
             "errors": []
         }
         
@@ -198,17 +277,25 @@ class ScanProcessor:
             matching_files = scan_results["to_cold"]
             files_to_thaw = scan_results["to_hot"]
             results["files_found"] = len(matching_files)
-            logger.debug(f"Path {path.id}: Found {len(matching_files)} files matching criteria, {len(files_to_thaw)} files to move back")
+            results["files_skipped"] = scan_results.get("skipped_hot", 0) + scan_results.get("skipped_cold", 0)
+            results["total_scanned"] = scan_results.get("total_scanned", 0)
+            logger.debug(
+                f"Path {path.id}: Scanned {results['total_scanned']} files, "
+                f"found {len(matching_files)} to move, {len(files_to_thaw)} to thaw, "
+                f"{results['files_skipped']} correctly placed"
+            )
             
             source_base = Path(path.source_path)
             dest_base = Path(path.cold_storage_path)
 
-            # First, handle files that need to be moved back from cold storage
+            # Process selective thawing for recently accessed files
             if files_to_thaw:
-                logger.info(f"Processing {len(files_to_thaw)} files to thaw for path {path.id}")
+                logger.info(f"Processing {len(files_to_thaw)} recently accessed files to thaw back to hot storage")
 
                 # Process thawing concurrently
-                with ThreadPoolExecutor(max_workers=min(3, len(files_to_thaw))) as executor:
+                max_workers = min(2, len(files_to_thaw))
+                logger.debug(f"Using {max_workers} worker threads for thawing {len(files_to_thaw)} files")
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     future_to_thaw = {
                         executor.submit(self._thaw_single_file, symlink_path, cold_storage_path):
                         (symlink_path, cold_storage_path)
@@ -222,12 +309,12 @@ class ScanProcessor:
                             thaw_result = future.result()
                             if thaw_result["success"]:
                                 results["files_moved"] += 1
-                                logger.debug(f"Successfully thawed file: {cold_storage_path}")
+                                logger.debug(f"Successfully thawed recently accessed file: {cold_storage_path}")
                             else:
                                 results["errors"].append(thaw_result["error"])
-                                logger.error(f"Failed to thaw file {cold_storage_path}: {thaw_result['error']}")
+                                logger.error(f"Failed to thaw recently accessed file {cold_storage_path}: {thaw_result['error']}")
                         except Exception as e:
-                            error_msg = f"Exception thawing {cold_storage_path}: {str(e)}"
+                            error_msg = f"Exception thawing recently accessed file {cold_storage_path}: {str(e)}"
                             results["errors"].append(error_msg)
                             logger.error(error_msg, exc_info=True)
 
@@ -236,7 +323,10 @@ class ScanProcessor:
                 logger.info(f"Processing {len(matching_files)} files concurrently for path {path.id}")
 
                 # Use ThreadPoolExecutor to process files concurrently
-                with ThreadPoolExecutor(max_workers=min(5, len(matching_files))) as executor:
+                # Limit to 3 workers to avoid overwhelming the system
+                max_workers = min(3, len(matching_files))
+                logger.debug(f"Using {max_workers} worker threads for {len(matching_files)} files")
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
                     # Submit all file processing tasks
                     future_to_file = {
                         executor.submit(self.process_single_file, file_path, matched_criteria_ids, path):
@@ -271,7 +361,7 @@ class ScanProcessor:
 
     def _thaw_single_file(self, symlink_path: Path, cold_storage_path: Path) -> dict:
         """
-        Thaw a single file (move back from cold storage to hot storage).
+        Thaw a single file (move back from cold storage to hot storage) while preserving timestamps.
         Returns processing results.
         """
         result = {
@@ -291,12 +381,26 @@ class ScanProcessor:
                 symlink_path.unlink()
                 logger.debug(f"  Removed symlink: {symlink_path}")
 
-            # Move the file back from cold storage to hot storage
+            # Move the file back from cold storage to hot storage, preserving timestamps
             try:
                 # Ensure destination directory exists
                 symlink_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(cold_storage_path), str(symlink_path))
-                logger.debug(f"  Moved file back: {cold_storage_path} -> {symlink_path}")
+
+                # Get original timestamps before moving
+                stat_info = cold_storage_path.stat()
+
+                # Try atomic rename first (same filesystem - preserves all timestamps)
+                try:
+                    cold_storage_path.rename(symlink_path)
+                    logger.debug(f"  Moved file back (atomic rename): {cold_storage_path} -> {symlink_path}")
+                except OSError:
+                    # Cross-filesystem move - copy with timestamp preservation
+                    shutil.copy2(str(cold_storage_path), str(symlink_path))
+                    # Explicitly preserve timestamps
+                    os.utime(str(symlink_path), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
+                    # Remove original file
+                    cold_storage_path.unlink()
+                    logger.debug(f"  Moved file back (cross-filesystem with timestamp preservation): {cold_storage_path} -> {symlink_path}")
 
                 # Find and remove the FileRecord for this file
                 file_record = db.query(FileRecord).filter(
@@ -308,6 +412,9 @@ class ScanProcessor:
                     db.commit()
                     result["success"] = True
                     logger.info(f"Removed FileRecord for thawed file: {cold_storage_path}")
+
+                    # Update file inventory - the file should now be back in hot storage
+                    # The inventory scanning will pick this up on the next scan
                 else:
                     result["success"] = True
                     logger.debug(f"  No FileRecord found for {cold_storage_path}")

@@ -47,8 +47,18 @@ async function loadPathsList() {
             if (tableBody) {
                 paths.forEach(path => {
                     const row = tableBody.insertRow();
+                    if (path.error_message) {
+                        row.classList.add('table-danger');
+                    }
                     row.innerHTML = `
-                        <td><strong>${escapeHtml(path.name)}</strong></td>
+                        <td>
+                            <strong>${escapeHtml(path.name)}</strong>
+                            ${path.error_message ? `
+                                <div class="alert alert-danger alert-sm mt-1 mb-0 py-1 px-2" role="alert">
+                                    <i class="bi bi-exclamation-triangle-fill"></i> <strong>Error:</strong> ${escapeHtml(path.error_message)}
+                                </div>
+                            ` : ''}
+                        </td>
                         <td><code>${escapeHtml(path.source_path)}</code></td>
                         <td><code>${escapeHtml(path.cold_storage_path)}</code></td>
                         <td><span class="badge bg-info">${escapeHtml(path.operation_type)}</span></td>
@@ -57,6 +67,11 @@ async function loadPathsList() {
                             <span class="badge bg-${path.enabled ? 'success' : 'secondary'}">
                                 ${path.enabled ? 'Enabled' : 'Disabled'}
                             </span>
+                            ${path.error_message ? `
+                                <br><span class="badge bg-danger mt-1">
+                                    <i class="bi bi-exclamation-triangle-fill"></i> Error State
+                                </span>
+                            ` : ''}
                         </td>
                         <td>
                             <div class="btn-group btn-group-sm">
@@ -66,7 +81,7 @@ async function loadPathsList() {
                                 <a href="/paths/${path.id}/edit" class="btn btn-outline-secondary" title="Edit">
                                     <i class="bi bi-pencil"></i>
                                 </a>
-                                <button type="button" class="btn btn-outline-info" onclick="triggerScan(${path.id})" title="Scan Now">
+                                <button type="button" class="btn btn-outline-info scan-btn-${path.id}" onclick="triggerScan(${path.id}, this)" title="Scan Now" ${path.error_message ? 'disabled' : ''}>
                                     <i class="bi bi-arrow-repeat"></i>
                                 </button>
                                 <button type="button" class="btn btn-outline-danger" onclick="deletePath(${path.id})" title="Delete">
@@ -118,9 +133,39 @@ async function loadPathDetail(pathId) {
         // Update page title
         document.title = `${path.name} - File Fridge`;
         
+        // Show error state if present
+        if (path.error_message) {
+            const errorAlert = document.createElement('div');
+            errorAlert.className = 'alert alert-danger alert-dismissible fade show';
+            errorAlert.setAttribute('role', 'alert');
+            errorAlert.innerHTML = `
+                <h5 class="alert-heading">
+                    <i class="bi bi-exclamation-triangle-fill"></i> Path in Error State
+                </h5>
+                <p class="mb-0"><strong>This path is not processing files due to a configuration error:</strong></p>
+                <p class="mb-2">${escapeHtml(path.error_message)}</p>
+                <hr>
+                <p class="mb-0"><small>Please fix the configuration issue to resume file processing. You can edit the path or criteria to resolve this.</small></p>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            `;
+            const mainContent = document.querySelector('main.container-fluid');
+            if (mainContent) {
+                mainContent.insertBefore(errorAlert, mainContent.firstChild);
+            }
+        }
+        
         // Render path details
         const pathNameEl = document.getElementById('path-name');
-        if (pathNameEl) pathNameEl.textContent = path.name;
+        if (pathNameEl) {
+            pathNameEl.innerHTML = `
+                ${escapeHtml(path.name)}
+                ${path.error_message ? `
+                    <span class="badge bg-danger ms-2">
+                        <i class="bi bi-exclamation-triangle-fill"></i> Error State
+                    </span>
+                ` : ''}
+            `;
+        }
         
         const pathConfigBody = document.querySelector('#pathConfigTable tbody');
         if (pathConfigBody) {
@@ -151,8 +196,23 @@ async function loadPathDetail(pathId) {
                         <span class="badge bg-${path.enabled ? 'success' : 'secondary'}">
                             ${path.enabled ? 'Enabled' : 'Disabled'}
                         </span>
+                        ${path.error_message ? `
+                            <span class="badge bg-danger ms-2">
+                                <i class="bi bi-exclamation-triangle-fill"></i> Error State
+                            </span>
+                        ` : ''}
                     </td>
                 </tr>
+                ${path.error_message ? `
+                    <tr class="table-danger">
+                        <th>Error Message:</th>
+                        <td>
+                            <div class="alert alert-danger mb-0 py-2" role="alert">
+                                <i class="bi bi-exclamation-triangle-fill"></i> ${escapeHtml(path.error_message)}
+                            </div>
+                        </td>
+                    </tr>
+                ` : ''}
                 <tr>
                     <th>Created:</th>
                     <td>${new Date(path.created_at).toLocaleString()}</td>
@@ -205,7 +265,13 @@ async function loadPathDetail(pathId) {
         if (editBtn) editBtn.href = `/paths/${pathId}/edit`;
         
         const scanBtn = document.getElementById('scan-path-btn');
-        if (scanBtn) scanBtn.onclick = () => triggerScan(pathId);
+        if (scanBtn) {
+            scanBtn.onclick = (e) => triggerScan(pathId, e.currentTarget);
+            if (path.error_message) {
+                scanBtn.disabled = true;
+                scanBtn.title = 'Cannot scan: Path is in error state';
+            }
+        }
         
         const addCriteriaBtn = document.getElementById('add-criteria-btn');
         if (addCriteriaBtn) addCriteriaBtn.href = `/paths/${pathId}/criteria/new`;
@@ -264,15 +330,59 @@ async function deletePath(pathId) {
     }
 }
 
-async function triggerScan(pathId) {
+async function triggerScan(pathId, buttonElement = null) {
+    // Find the button element if not provided
+    if (!buttonElement) {
+        buttonElement = event ? event.currentTarget : document.getElementById('scan-path-btn');
+    }
+
+    // Save original button content
+    const originalContent = buttonElement ? buttonElement.innerHTML : null;
+
     try {
+        // Update button to show loading state
+        if (buttonElement) {
+            buttonElement.disabled = true;
+            buttonElement.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Scanning...';
+        }
+
         const response = await fetch(`${API_BASE_URL}/paths/${pathId}/scan`, {
             method: 'POST'
         });
-        
+
         if (response.ok) {
             const result = await response.json();
-            showFlashMessage(result.message || 'Scan triggered successfully');
+
+            // Build detailed success message
+            let message = 'Scan completed successfully';
+            if (result.total_scanned !== undefined) {
+                // Detailed scan results available
+                const parts = [`Scanned ${result.total_scanned} file(s)`];
+
+                if (result.files_moved !== undefined && result.files_moved > 0) {
+                    parts.push(`moved ${result.files_moved}`);
+                }
+
+                if (result.files_skipped !== undefined && result.files_skipped > 0) {
+                    parts.push(`${result.files_skipped} already correctly placed`);
+                }
+
+                message = `Scan complete: ${parts.join(', ')}`;
+            } else if (result.files_found !== undefined && result.files_moved !== undefined) {
+                message = `Scan completed: Found ${result.files_found} file(s), moved ${result.files_moved} file(s)`;
+            } else if (result.message) {
+                message = result.message;
+            }
+
+            showFlashMessage(message, 'success');
+
+            // Reload path detail if on detail page
+            if (window.location.pathname.match(/^\/paths\/\d+$/)) {
+                setTimeout(() => loadPathDetail(pathId), 1000);
+            } else {
+                // Reload paths list if on list page
+                setTimeout(() => loadPathsList(), 1000);
+            }
         } else {
             const error = await response.json();
             showFlashMessage(error.detail || 'Failed to trigger scan', 'danger');
@@ -280,6 +390,12 @@ async function triggerScan(pathId) {
     } catch (error) {
         console.error('Error triggering scan:', error);
         showFlashMessage(`Error triggering scan: ${error.message}`, 'danger');
+    } finally {
+        // Restore button to original state
+        if (buttonElement && originalContent) {
+            buttonElement.disabled = false;
+            buttonElement.innerHTML = originalContent;
+        }
     }
 }
 
@@ -319,7 +435,8 @@ function setupPathForm() {
             cold_storage_path: formData.get('cold_storage_path'),
             operation_type: formData.get('operation_type'),
             check_interval_seconds: parseInt(formData.get('check_interval_seconds')),
-            enabled: formData.get('enabled') === 'on'
+            enabled: formData.get('enabled') === 'on',
+            prevent_indexing: formData.get('prevent_indexing') === 'on'
         };
         
         const pathId = form.dataset.pathId;
@@ -447,6 +564,7 @@ async function loadPathForEdit(pathId) {
         document.getElementById('operation_type').value = path.operation_type;
         document.getElementById('check_interval_seconds').value = path.check_interval_seconds;
         document.getElementById('enabled').checked = path.enabled;
+        document.getElementById('prevent_indexing').checked = path.prevent_indexing;
         
         // Set form data attribute
         const form = document.getElementById('path-form');

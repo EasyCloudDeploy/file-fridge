@@ -5,13 +5,50 @@ from sqlalchemy.orm import Session
 from typing import List
 from pathlib import Path
 from app.database import get_db
-from app.models import MonitoredPath
+from app.models import MonitoredPath, CriterionType
 from app.schemas import MonitoredPathCreate, MonitoredPathUpdate, MonitoredPath as MonitoredPathSchema
 from app.services.scheduler import scheduler_service
+from app.utils.network_detection import check_atime_availability
+from app.utils.indexing import IndexingManager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/paths", tags=["paths"])
+
+
+def validate_path_configuration(path: MonitoredPath, db: Session) -> None:
+    """
+    Validate path configuration and check for incompatible settings.
+    
+    Sets error_message on the path if validation fails.
+    
+    Args:
+        path: The MonitoredPath to validate
+        db: Database session
+    """
+    # Check if cold storage is a network mount and if atime criteria exist
+    atime_available, error_msg = check_atime_availability(path.cold_storage_path)
+    
+    if not atime_available:
+        # Check if any enabled criteria use ATIME
+        atime_criteria = [
+            c for c in path.criteria 
+            if c.enabled and c.criterion_type == CriterionType.ATIME
+        ]
+        
+        if atime_criteria:
+            # Path has atime criteria but cold storage is on network mount
+            path.error_message = error_msg
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_msg
+            )
+    
+    # Clear error message if validation passes
+    if path.error_message:
+        path.error_message = None
+        db.commit()
 
 
 @router.get("", response_model=List[MonitoredPathSchema])
@@ -54,11 +91,27 @@ def create_path(path: MonitoredPathCreate, db: Session = Depends(get_db)):
     db.add(db_path)
     db.commit()
     db.refresh(db_path)
-    
+
+    # Validate path configuration (check for atime + network mount incompatibility)
+    try:
+        validate_path_configuration(db_path, db)
+    except HTTPException:
+        # If validation fails, remove the path we just created
+        db.delete(db_path)
+        db.commit()
+        raise
+
+    # Manage .noindex files based on prevent_indexing setting
+    IndexingManager.manage_noindex_files(
+        db_path.source_path,
+        db_path.cold_storage_path,
+        db_path.prevent_indexing
+    )
+
     # Add to scheduler
     if db_path.enabled:
         scheduler_service.add_path_job(db_path)
-    
+
     return db_path
 
 
@@ -121,15 +174,26 @@ def update_path(path_id: int, path_update: MonitoredPathUpdate, db: Session = De
     # Update fields
     for field, value in update_data.items():
         setattr(path, field, value)
-    
+
     db.commit()
     db.refresh(path)
-    
+
+    # Validate path configuration (check for atime + network mount incompatibility)
+    validate_path_configuration(path, db)
+
+    # Manage .noindex files if prevent_indexing or paths were updated
+    if "prevent_indexing" in update_data or "source_path" in update_data or "cold_storage_path" in update_data:
+        IndexingManager.manage_noindex_files(
+            path.source_path,
+            path.cold_storage_path,
+            path.prevent_indexing
+        )
+
     # Update scheduler job
     scheduler_service.remove_path_job(path_id)
     if path.enabled:
         scheduler_service.add_path_job(path)
-    
+
     return path
 
 

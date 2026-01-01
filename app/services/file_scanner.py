@@ -1,266 +1,273 @@
-"""File scanning service."""
+"""File scanning service - optimized for macOS and Linux network mounts."""
 import os
 import logging
-import hashlib
+import fnmatch
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Iterator
 from datetime import datetime
 from sqlalchemy.orm import Session
-from app.models import MonitoredPath, Criteria, PinnedFile, FileInventory, StorageType, FileStatus
+from app.models import MonitoredPath, Criteria, PinnedFile, FileInventory, StorageType, FileStatus, CriterionType
 from app.services.criteria_matcher import CriteriaMatcher
+from app.utils.network_detection import check_atime_availability
 
 logger = logging.getLogger(__name__)
 
-
 class FileScanner:
-    """Scans directories for files matching criteria."""
+    """Scans directories for files matching criteria using high-performance scandir."""
     
+    # Metadata files to ignore to prevent false access triggers on network mounts
+    IGNORED_PATTERNS = {
+        ".DS_Store", "._*", ".Spotlight-V100", ".Trashes", 
+        ".fseventsd", ".TemporaryItems", "desktop.ini", "thumbs.db"
+    }
+
     @staticmethod
     def scan_path(path: MonitoredPath, db: Optional[Session] = None) -> dict:
         """
         Scan a monitored path for files matching criteria and update file inventory.
-
-        Args:
-            path: The monitored path to scan
-            db: Database session for inventory management and pinned files
-
-        Returns:
-            dict with:
-            - 'to_cold': List of (file_path, matched_criteria_ids) tuples for files to move to cold storage
-            - 'to_hot': List of (symlink_path, cold_storage_path) tuples for files to move back to hot storage
-            - 'inventory_updated': Number of inventory entries updated
         """
         matching_files = []
-        files_to_thaw = []  # Symlinks pointing to cold storage where file doesn't match
+        files_to_thaw = []
+        files_skipped_hot = 0  # Files correctly in hot storage
+        files_skipped_cold = 0  # Files correctly in cold storage
         source_path = Path(path.source_path)
         dest_base = Path(path.cold_storage_path)
-        
-        logger.debug(f"Scanning path: {path.name} (ID: {path.id})")
-        logger.debug(f"  Source: {source_path}")
-        logger.debug(f"  Cold Storage: {path.cold_storage_path}")
-        logger.debug(f"  Operation: {path.operation_type.value}")
-        
+
+        logger.debug(f"Starting scan: {path.name} (ID: {path.id})")
+
         if not source_path.exists() or not source_path.is_dir():
-            logger.warning(f"Path {path.name}: Source path does not exist or is not a directory: {source_path}")
-            return {"to_cold": [], "to_hot": []}
-        
-        # Get all criteria for this path
-        criteria = path.criteria
-        enabled_criteria = [c for c in criteria if c.enabled]
-        logger.debug(f"Path {path.name}: {len(enabled_criteria)} enabled criteria out of {len(criteria)} total")
-        for criterion in enabled_criteria:
-            logger.debug(f"  - Criterion {criterion.id}: {criterion.criterion_type.value} {criterion.operator.value} {criterion.value}")
-        
-        # Get list of pinned files if db is provided
+            logger.warning(f"Path {path.name}: Source path unreachable: {source_path}")
+            return {"to_cold": [], "to_hot": [], "inventory_updated": 0, "skipped_hot": 0, "skipped_cold": 0}
+
+        # 1. Validate Criteria vs Filesystem (atime check)
+        enabled_criteria = [c for c in path.criteria if c.enabled]
+        if db:
+            atime_used = any(c.criterion_type == CriterionType.ATIME for c in enabled_criteria)
+            if atime_used:
+                atime_available, error_msg = check_atime_availability(path.cold_storage_path)
+                if not atime_available:
+                    path.error_message = error_msg
+                    db.commit()
+                    logger.error(f"Scan aborted for {path.name}: {error_msg}")
+                    return {"to_cold": [], "to_hot": [], "inventory_updated": 0, "skipped_hot": 0, "skipped_cold": 0}
+                elif path.error_message:
+                    path.error_message = None
+                    db.commit()
+
+        # Validate scan interval vs time-based criteria
+        if enabled_criteria:
+            scan_interval_minutes = path.check_interval_seconds / 60
+            for criterion in enabled_criteria:
+                if criterion.criterion_type in [CriterionType.ATIME, CriterionType.MTIME, CriterionType.CTIME]:
+                    try:
+                        threshold_minutes = float(criterion.value)
+                        # Warn if scan interval is more than 3x the threshold
+                        if scan_interval_minutes > threshold_minutes * 3:
+                            logger.warning(
+                                f"Path {path.name}: Scan interval ({scan_interval_minutes:.0f} min) is {scan_interval_minutes/threshold_minutes:.1f}x larger than "
+                                f"{criterion.criterion_type.value} threshold ({threshold_minutes:.0f} min). "
+                                f"Files may age significantly between scans, reducing effectiveness. "
+                                f"Consider reducing scan interval to ~{threshold_minutes:.0f} min or less."
+                            )
+                    except (ValueError, TypeError):
+                        pass
+
+        # 2. Load Pinned Files
         pinned_paths = set()
         if db:
-            pinned = db.query(PinnedFile).filter(
-                PinnedFile.path_id == path.id
-            ).all()
+            pinned = db.query(PinnedFile).filter(PinnedFile.path_id == path.id).all()
             pinned_paths = {Path(p.file_path) for p in pinned}
-            if pinned_paths:
-                logger.debug(f"Path {path.name}: {len(pinned_paths)} pinned files will be skipped")
-        
+
+        # 3. Perform Recursive Scan
         file_count = 0
-        # Walk through directory recursively
-        # Note: os.walk() by default does NOT follow symlinks to directories (followlinks=False)
-        # This is intentional for security, but means symlinked directories won't be scanned
-        # Convert Path to string for os.walk() compatibility
-        source_path_str = str(source_path.resolve())
-        logger.debug(f"Path {path.name}: Starting recursive directory walk from {source_path_str}")
-        for root, dirs, files in os.walk(source_path_str, followlinks=False):
-            logger.debug(f"Path {path.name}: Walking directory: {root} (found {len(files)} files, {len(dirs)} subdirectories)")
-            # Skip hidden directories (modifying dirs in-place prevents os.walk from descending into them)
-            original_dir_count = len(dirs)
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
-            if len(dirs) < original_dir_count:
-                logger.debug(f"Path {path.name}: Skipped {original_dir_count - len(dirs)} hidden directories in {root}")
+        for entry in FileScanner._recursive_scandir(source_path):
+            file_path = Path(entry.path)
+            file_count += 1
             
-            for filename in files:
-                # Skip hidden files
-                if filename.startswith('.'):
-                    continue
-                
-                file_path = Path(root) / filename
-                file_count += 1
-                
-                # Skip pinned files
-                if file_path in pinned_paths:
-                    logger.debug(f"File {file_path}: SKIPPED (pinned)")
-                    continue
-                
-                # If this is a symlink, resolve it to check the actual file in cold storage
-                actual_file_path = None
-                is_symlink_to_cold = False
-                if file_path.is_symlink():
-                    try:
-                        resolved = file_path.resolve(strict=True)
-                        # Check if the symlink points to cold storage
-                        try:
-                            # Check if resolved path is under the cold storage base
-                            resolved.relative_to(dest_base)
-                            is_symlink_to_cold = True
-                        except ValueError:
-                            # Not in cold storage
-                            pass
-                        
-                        # If the resolved path is in cold storage, use it for criteria checking
-                        # This ensures we check the actual file's metadata, not the symlink's
-                        actual_file_path = resolved
-                        logger.debug(f"File {file_path}: Is symlink, will check actual file at {resolved}")
-                        if is_symlink_to_cold:
-                            logger.debug(f"File {file_path}: Symlink points to cold storage")
-                    except (OSError, RuntimeError) as e:
-                        # If resolution fails, skip this file
-                        logger.debug(f"File {file_path}: Symlink resolution failed - {e}")
-                        continue
-                
+            if file_path in pinned_paths:
+                continue
+
+            # Handle Symlinks (Potential Cold Storage Files)
+            actual_file_path = None
+            is_symlink_to_cold = False
+            
+            if entry.is_symlink():
                 try:
-                    matches, matched_ids = CriteriaMatcher.match_file(file_path, criteria, actual_file_path)
-                    if matches:
-                        logger.debug(f"File {file_path}: MATCHED - will be moved")
+                    resolved = file_path.resolve(strict=True)
+                    actual_file_path = resolved
+                    # Check if target is in the configured cold storage
+                    try:
+                        resolved.relative_to(dest_base)
+                        is_symlink_to_cold = True
+                    except ValueError:
+                        pass # Symlink points elsewhere, process as normal file
+                except (OSError, RuntimeError):
+                    continue # Broken symlink
+
+            # 4. Evaluation Logic
+            try:
+                # is_active is True if the file matches the criteria (should be kept in HOT storage)
+                # Criteria define what files to KEEP active/hot, not what to move to cold
+                # Example: "atime < 3" means "keep files accessed in last 3 minutes in hot storage"
+                # Simple, direct criteria evaluation without hysteresis
+                is_active, matched_ids = CriteriaMatcher.match_file(
+                    file_path, path.criteria, actual_file_path
+                )
+
+                if is_active:
+                    # File matches criteria (is ACTIVE/HOT)
+                    if is_symlink_to_cold and actual_file_path:
+                        # File is active but currently in COLD storage -> THAW back to HOT
+                        logger.info(f"File {file_path}: Active file in cold storage -> THAWING")
+                        files_to_thaw.append((file_path, actual_file_path))
+                    else:
+                        # File is active and in HOT storage -> CORRECTLY PLACED, SKIP
+                        # No action needed, file is where it should be
+                        files_skipped_hot += 1
+                        continue  # Skip to next file, no further processing needed
+                else:
+                    # File does NOT match criteria (is INACTIVE/OLD)
+                    if not is_symlink_to_cold:
+                        # File is inactive but still in HOT storage -> MOVE TO COLD
+                        logger.info(f"File {file_path}: Inactive file, moving to cold storage")
                         matching_files.append((file_path, matched_ids))
                     else:
-                        logger.debug(f"File {file_path}: NOT MATCHED - will not be moved")
-                        # If this is a symlink pointing to cold storage and it doesn't match,
-                        # we need to move the file back to hot storage
-                        if is_symlink_to_cold and actual_file_path:
-                            logger.debug(f"File {file_path}: Symlink to cold storage doesn't match - will move back to hot storage")
-                            files_to_thaw.append((file_path, actual_file_path))
-                except (OSError, PermissionError) as e:
-                    # Skip files we can't access
-                    logger.debug(f"File {file_path}: SKIPPED (access error: {e})")
-                    continue
-        
-        logger.debug(f"Path {path.name}: Scanned {file_count} files, {len(matching_files)} matched criteria, {len(files_to_thaw)} need to be moved back")
+                        # File is inactive and already in COLD -> CORRECTLY PLACED, SKIP
+                        # No action needed, file is where it should be
+                        files_skipped_cold += 1
+                        continue  # Skip to next file, no further processing needed
+            
+            except (OSError, PermissionError) as e:
+                logger.debug(f"Access error for {file_path}: {e}")
+                continue
 
-        # Update file inventory for both hot and cold storage
+        # 5. Inventory Management
         inventory_updated = 0
         if db:
             inventory_updated = FileScanner._update_file_inventory(path, db)
 
+        # Log scan summary
+        total_scanned = file_count
+        total_actions = len(matching_files) + len(files_to_thaw)
+        total_skipped = files_skipped_hot + files_skipped_cold
+        logger.info(
+            f"Scan complete for {path.name}: "
+            f"Scanned {total_scanned} files, "
+            f"{len(matching_files)} to cold, "
+            f"{len(files_to_thaw)} to hot, "
+            f"{total_skipped} correctly placed ({files_skipped_hot} hot, {files_skipped_cold} cold)"
+        )
+
         return {
             "to_cold": matching_files,
             "to_hot": files_to_thaw,
-            "inventory_updated": inventory_updated
+            "inventory_updated": inventory_updated,
+            "skipped_hot": files_skipped_hot,
+            "skipped_cold": files_skipped_cold,
+            "total_scanned": total_scanned
         }
 
     @staticmethod
+    def _recursive_scandir(path: Path) -> Iterator[os.DirEntry]:
+        """Generator implementation of os.scandir for high performance."""
+        try:
+            with os.scandir(str(path)) as it:
+                for entry in it:
+                    # Filter out hidden files and macOS metadata
+                    if entry.name.startswith('.'):
+                        continue
+                    if any(fnmatch.fnmatch(entry.name, p) for p in FileScanner.IGNORED_PATTERNS):
+                        continue
+
+                    if entry.is_dir(follow_symlinks=False):
+                        yield from FileScanner._recursive_scandir(Path(entry.path))
+                    else:
+                        yield entry
+        except (OSError, PermissionError):
+            pass
+
+    @staticmethod
     def _update_file_inventory(path: MonitoredPath, db: Session) -> int:
-        """
-        Update file inventory for both hot and cold storage.
-
-        Returns:
-            Number of inventory entries updated/created
-        """
+        """Updates the database inventory for both storage tiers."""
         updated_count = 0
+        
+        # Sync Hot Tier
+        hot_files = FileScanner._scan_flat_list(path.source_path)
+        updated_count += FileScanner._update_db_entries(path, hot_files, StorageType.HOT, db)
 
-        # Scan hot storage
-        hot_files = FileScanner._scan_directory(path.source_path, StorageType.HOT)
-        updated_count += FileScanner._update_inventory_for_storage(path, hot_files, StorageType.HOT, db)
+        # Sync Cold Tier
+        cold_files = FileScanner._scan_flat_list(path.cold_storage_path)
+        updated_count += FileScanner._update_db_entries(path, cold_files, StorageType.COLD, db)
 
-        # Scan cold storage
-        cold_files = FileScanner._scan_directory(path.cold_storage_path, StorageType.COLD)
-        updated_count += FileScanner._update_inventory_for_storage(path, cold_files, StorageType.COLD, db)
-
-        # Mark files not seen recently as missing
-        cutoff_time = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)  # Files not seen today
-        missing_count = db.query(FileInventory).filter(
+        # Mark "Ghost" files as missing
+        cutoff = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        missing = db.query(FileInventory).filter(
             FileInventory.path_id == path.id,
-            FileInventory.last_seen < cutoff_time,
+            FileInventory.last_seen < cutoff,
             FileInventory.status == FileStatus.ACTIVE
         ).update({"status": FileStatus.MISSING})
-        updated_count += missing_count
-
-        if missing_count > 0:
-            logger.info(f"Path {path.name}: Marked {missing_count} files as missing")
-
+        
         db.commit()
-        logger.debug(f"Path {path.name}: Updated {updated_count} inventory entries")
-        return updated_count
+        return updated_count + missing
 
     @staticmethod
-    def _scan_directory(directory_path: str, storage_type: StorageType) -> List[Dict]:
-        """
-        Scan a directory and return file information.
+    def _scan_flat_list(directory_path: str) -> List[Dict]:
+        """Helper to get metadata for inventory updates."""
+        results = []
+        if not os.path.exists(directory_path):
+            return results
 
-        Returns:
-            List of dicts with file info: {'path': str, 'size': int, 'mtime': datetime, 'checksum': str}
-        """
-        files = []
-        directory = Path(directory_path)
+        for entry in FileScanner._recursive_scandir(Path(directory_path)):
+            try:
+                stat = entry.stat(follow_symlinks=False)
 
-        if not directory.exists() or not directory.is_dir():
-            logger.warning(f"Directory does not exist or is not a directory: {directory_path}")
-            return files
+                # Check if this is a symlink - if so, we need to know where it points
+                is_symlink = Path(entry.path).is_symlink()
 
-        for root, dirs, files_in_dir in os.walk(str(directory), followlinks=False):
-            # Skip hidden directories
-            dirs[:] = [d for d in dirs if not d.startswith('.')]
-
-            for filename in files_in_dir:
-                # Skip hidden files
-                if filename.startswith('.'):
-                    continue
-
-                file_path = Path(root) / filename
-                try:
-                    stat_info = file_path.stat()
-                    file_info = {
-                        'path': str(file_path),
-                        'size': stat_info.st_size,
-                        'mtime': datetime.fromtimestamp(stat_info.st_mtime),
-                        'checksum': None  # We'll compute this if needed
-                    }
-                    files.append(file_info)
-                except (OSError, PermissionError) as e:
-                    logger.debug(f"Could not stat file {file_path}: {e}")
-                    continue
-
-        return files
+                results.append({
+                    'path': entry.path,
+                    'size': stat.st_size,
+                    'mtime': datetime.fromtimestamp(stat.st_mtime),
+                    'atime': datetime.fromtimestamp(stat.st_atime),
+                    'ctime': datetime.fromtimestamp(stat.st_ctime),
+                    'is_symlink': is_symlink
+                })
+            except OSError:
+                continue
+        return results
 
     @staticmethod
-    def _update_inventory_for_storage(path: MonitoredPath, files: List[Dict],
-                                   storage_type: StorageType, db: Session) -> int:
-        """
-        Update inventory entries for files in a specific storage location.
+    def _update_db_entries(path: MonitoredPath, files: List[Dict], tier: StorageType, db: Session) -> int:
+        """Synchronizes file metadata with the database FileInventory table."""
+        count = 0
+        for info in files:
+            # Determine the actual storage tier
+            # If this is a symlink in hot storage, the actual file is in cold storage
+            actual_tier = tier
+            if tier == StorageType.HOT and info.get('is_symlink', False):
+                # Symlinks in hot storage point to cold storage
+                actual_tier = StorageType.COLD
 
-        Returns:
-            Number of entries updated/created
-        """
-        updated_count = 0
-
-        for file_info in files:
-            file_path = file_info['path']
-
-            # Check if inventory entry exists
-            inventory_entry = db.query(FileInventory).filter(
+            entry = db.query(FileInventory).filter(
                 FileInventory.path_id == path.id,
-                FileInventory.file_path == file_path
+                FileInventory.file_path == info['path']
             ).first()
 
-            if inventory_entry:
-                # Update existing entry
-                if (inventory_entry.file_size != file_info['size'] or
-                    inventory_entry.file_mtime != file_info['mtime'] or
-                    inventory_entry.status != FileStatus.ACTIVE):
-                    inventory_entry.file_size = file_info['size']
-                    inventory_entry.file_mtime = file_info['mtime']
-                    inventory_entry.status = FileStatus.ACTIVE
-                    inventory_entry.storage_type = storage_type
-                    updated_count += 1
+            if entry:
+                if entry.file_size != info['size'] or entry.status != FileStatus.ACTIVE or entry.storage_type != actual_tier:
+                    entry.file_size = info['size']
+                    entry.file_mtime = info['mtime']
+                    entry.file_atime = info['atime']
+                    entry.file_ctime = info['ctime']
+                    entry.status = FileStatus.ACTIVE
+                    entry.storage_type = actual_tier
+                    count += 1
             else:
-                # Create new entry
-                new_entry = FileInventory(
-                    path_id=path.id,
-                    file_path=file_path,
-                    storage_type=storage_type,
-                    file_size=file_info['size'],
-                    file_mtime=file_info['mtime'],
-                    status=FileStatus.ACTIVE
-                )
-                db.add(new_entry)
-                updated_count += 1
-
-        return updated_count
-
+                db.add(FileInventory(
+                    path_id=path.id, file_path=info['path'],
+                    storage_type=actual_tier, file_size=info['size'],
+                    file_mtime=info['mtime'], file_atime=info['atime'],
+                    file_ctime=info['ctime'], status=FileStatus.ACTIVE
+                ))
+                count += 1
+        return count

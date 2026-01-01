@@ -92,13 +92,23 @@ function updatePaths(paths) {
                 </thead>
                 <tbody>
                     ${paths.map(path => `
-                        <tr>
+                        <tr ${path.error_message ? 'class="table-danger"' : ''}>
                             <td>
                                 <strong>${escapeHtml(path.name)}</strong><br>
                                 <small class="text-muted">${escapeHtml(path.source_path)}</small>
+                                ${path.error_message ? `
+                                    <div class="alert alert-danger alert-sm mt-2 mb-0 py-1 px-2" role="alert">
+                                        <i class="bi bi-exclamation-triangle-fill"></i> <strong>Error:</strong> ${escapeHtml(path.error_message)}
+                                    </div>
+                                ` : ''}
                             </td>
                             <td>
                                 <span class="badge bg-${path.enabled ? 'success' : 'secondary'}">${path.enabled ? 'Enabled' : 'Disabled'}</span>
+                                ${path.error_message ? `
+                                    <br><span class="badge bg-danger mt-1">
+                                        <i class="bi bi-exclamation-triangle-fill"></i> Error State
+                                    </span>
+                                ` : ''}
                             </td>
                             <td>
                                 <a href="/paths/${path.id}" class="btn btn-sm btn-outline-primary">

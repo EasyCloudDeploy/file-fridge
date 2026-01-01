@@ -99,11 +99,30 @@
                                 <table class="table table-hover" id="filesTable">
                                     <thead>
                                         <tr>
-                                            <th>File Path</th>
-                                            <th>Storage Location</th>
-                                            <th>Size</th>
-                                            <th>Status</th>
-                                            <th>Last Seen</th>
+                                            <th class="sortable" data-sort="file_path">
+                                                File Path <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="storage_type">
+                                                Storage Location <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="file_size">
+                                                Size <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="file_mtime">
+                                                Modified Time <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="file_atime">
+                                                Access Time <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="file_ctime">
+                                                Change Time <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="status">
+                                                Status <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="last_seen">
+                                                Last Seen <i class="bi bi-arrow-down-up"></i>
+                                            </th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>

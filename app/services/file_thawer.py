@@ -21,32 +21,32 @@ class FileThawer:
         db: Optional[Session] = None
     ) -> Tuple[bool, Optional[str]]:
         """
-        Move a file back from cold storage to hot storage.
-        
+        Move a file back from cold storage to hot storage while preserving timestamps.
+
         Args:
             file_record: The FileRecord of the file to thaw
             pin: If True, pin the file to exclude from future scans
             db: Database session (required if pin=True)
-        
+
         Returns:
             (success: bool, error_message: Optional[str])
         """
         try:
             cold_path = Path(file_record.cold_storage_path)
             original_path = Path(file_record.original_path)
-            
+
             # Check if file exists in cold storage
             if not cold_path.exists():
                 return False, f"File not found in cold storage: {cold_path}"
-            
+
             # If original was a symlink, we need to handle it differently
             if file_record.operation_type.value == "symlink":
                 # Remove the symlink at original location if it exists
                 if original_path.exists() and original_path.is_symlink():
                     original_path.unlink()
-                # Move file back from cold storage
+                # Move file back from cold storage, preserving timestamps
                 try:
-                    shutil.move(str(cold_path), str(original_path))
+                    FileThawer._move_preserving_timestamps(cold_path, original_path)
                 except Exception as e:
                     return False, f"Failed to move file back: {str(e)}"
             elif file_record.operation_type.value == "copy":
@@ -54,9 +54,9 @@ class FileThawer:
                 # Actually, if it was copied, the original should still exist
                 # But if we're thawing, we might want to ensure it's in hot storage
                 if not original_path.exists():
-                    # Original doesn't exist, move from cold storage
+                    # Original doesn't exist, move from cold storage, preserving timestamps
                     try:
-                        shutil.move(str(cold_path), str(original_path))
+                        FileThawer._move_preserving_timestamps(cold_path, original_path)
                     except Exception as e:
                         return False, f"Failed to move file back: {str(e)}"
                 else:
@@ -66,21 +66,21 @@ class FileThawer:
                     except Exception as e:
                         return False, f"Failed to remove from cold storage: {str(e)}"
             else:  # MOVE
-                # Move file back from cold storage to original location
+                # Move file back from cold storage to original location, preserving timestamps
                 try:
                     # Ensure destination directory exists
                     original_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(cold_path), str(original_path))
+                    FileThawer._move_preserving_timestamps(cold_path, original_path)
                 except Exception as e:
                     return False, f"Failed to move file back: {str(e)}"
-            
+
             # If pinning, add to pinned files
             if pin and db:
                 # Check if already pinned
                 existing = db.query(PinnedFile).filter(
                     PinnedFile.file_path == str(original_path)
                 ).first()
-                
+
                 if not existing:
                     pinned = PinnedFile(
                         path_id=file_record.path_id,
@@ -89,11 +89,32 @@ class FileThawer:
                     db.add(pinned)
                     db.commit()
                     logger.info(f"Pinned file: {original_path}")
-            
+
             logger.info(f"Thawed file: {cold_path} -> {original_path} (pinned: {pin})")
             return True, None
-            
+
         except Exception as e:
             logger.error(f"Error thawing file: {str(e)}")
             return False, str(e)
+
+    @staticmethod
+    def _move_preserving_timestamps(source: Path, destination: Path) -> None:
+        """Move file while preserving all timestamps (mtime, atime)."""
+        # Get original timestamps before moving
+        stat_info = source.stat()
+
+        # Try atomic rename first (same filesystem - preserves all timestamps)
+        try:
+            source.rename(destination)
+        except OSError:
+            # Cross-filesystem move - copy with timestamp preservation
+            # Copy file with metadata (preserves mtime and atime)
+            shutil.copy2(str(source), str(destination))
+
+            # Explicitly set atime and mtime to original values to ensure preservation
+            # Note: ctime cannot be set directly as it's managed by the filesystem
+            os.utime(str(destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
+
+            # Remove original file
+            source.unlink()
 

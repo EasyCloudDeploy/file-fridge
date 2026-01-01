@@ -116,6 +116,10 @@ The web interface will be available at `http://localhost:8000`
 
 ### Configuration
 
+**⚠️ Important:** The scan interval must be properly aligned with your criteria thresholds. See [Configuration Best Practices](docs/CONFIGURATION_GUIDE.md) for details.
+
+**Rule of Thumb:** Scan interval should be ≤ 1/3 of your smallest time-based criterion threshold.
+
 1. **Add a Monitored Path**:
    - Navigate to "Paths" in the web UI
    - Click "Add Path"
@@ -125,6 +129,9 @@ The web interface will be available at `http://localhost:8000`
      - Cold Storage Path: Destination for moved files
      - Operation Type: Move, Copy, or Symlink
      - Check Interval: How often to scan (in seconds, minimum 60)
+       - **For atime/mtime < 3 min:** Use 60 seconds (1 min)
+       - **For atime/mtime < 60 min:** Use 300-600 seconds (5-10 min)
+       - **For atime/mtime < 1440 min (1 day):** Use 1800-3600 seconds (30-60 min)
      - Enabled: Enable/disable automatic scanning
 
 2. **Add Criteria** (via API):
@@ -189,6 +196,41 @@ File Fridge supports find-compatible criteria:
 - **perm**: Permissions (octal or symbolic)
 - **user**: File owner (username or UID)
 - **group**: File group (groupname or GID)
+
+### Important: How Criteria Work
+
+**Criteria define what files to KEEP in hot storage (active files), not what to move to cold.**
+
+Examples:
+- `atime < 3` → "Keep files accessed in the last 3 minutes in hot storage"
+- `mtime > 1440` → "Keep files older than 1 day in hot storage"
+- Files that DON'T match criteria are moved to cold storage
+
+### Access Time (atime) Considerations
+
+**Does File Fridge update atime when scanning?**
+- **NO** - File Fridge only uses metadata operations (`stat()`) that do not update atime
+- Scanning will not affect your files' access times
+
+**Filesystem mount options affect atime tracking:**
+- `relatime` (default on modern Linux) - ✅ Recommended: Updates atime intelligently
+- `strictatime` - Updates atime on every access (performance impact)
+- `noatime` - ⚠️ Never updates atime (DO NOT USE if you need atime-based criteria)
+
+**For macOS users:**
+- File Fridge uses both `atime` and Spotlight's "Last Open" time
+- Takes the most recent of the two for better accuracy
+- **Important:** If "Last Open" is `None` (file never opened), it's treated as "infinitely old" (epoch time)
+- This ensures files that have never been opened are moved to cold storage
+- More reliable for tracking actual user file access than `atime` alone
+
+**For network mounts (SMB/NFS):**
+- Verify atime is enabled on the server
+- Test with a few files before relying on atime-based criteria
+- Consider using `mtime` instead if atime is unreliable
+
+**Verification:**
+See `docs/ATIME_VERIFICATION.md` for a script to verify atime behavior on your filesystem.
 
 ## Operation Types
 

@@ -103,6 +103,20 @@
                                 <small class="form-text text-muted">Enable automatic scanning for this path</small>
                             </div>
 
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="prevent_indexing" name="prevent_indexing" checked>
+                                    <label class="form-check-label" for="prevent_indexing">
+                                        Prevent Spotlight Indexing (Recommended)
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted">
+                                    <i class="bi bi-info-circle"></i> Creates a <code>.noindex</code> file in both hot and cold storage directories to prevent macOS Spotlight from accessing files.
+                                    This prevents timestamp corruption that can cause files to move back and forth between hot and cold storage.
+                                    <strong>Recommended to keep enabled unless you specifically need Spotlight indexing.</strong>
+                                </small>
+                            </div>
+
                             <div class="d-flex justify-content-between">
                                 <a href="/paths" class="btn btn-secondary">Cancel</a>
                                 <button type="submit" class="btn btn-primary">

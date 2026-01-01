@@ -50,6 +50,8 @@ class MonitoredPath(Base):
     operation_type = Column(SQLEnum(OperationType), default=OperationType.MOVE)
     check_interval_seconds = Column(Integer, default=3600)
     enabled = Column(Boolean, default=True)
+    prevent_indexing = Column(Boolean, default=True, nullable=False)  # Create .noindex file to prevent macOS Spotlight from corrupting timestamps
+    error_message = Column(Text, nullable=True)  # Error state message (e.g., atime unavailable on network mount)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
@@ -114,10 +116,17 @@ class FileInventory(Base):
     storage_type = Column(SQLEnum(StorageType), nullable=False, index=True)
     file_size = Column(Integer, nullable=False)
     file_mtime = Column(DateTime(timezone=True), nullable=False)  # File modification time
+    file_atime = Column(DateTime(timezone=True), nullable=True)  # File access time
+    file_ctime = Column(DateTime(timezone=True), nullable=True)  # File change/creation time
     checksum = Column(String, nullable=True)  # Optional checksum for change detection
-    status = Column(SQLEnum(FileStatus), default=FileStatus.ACTIVE)
+    status = Column(SQLEnum(FileStatus), default=FileStatus.ACTIVE, index=True)
     last_seen = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Composite index for common queries (path_id + storage_type + status)
+    __table_args__ = (
+        {'sqlite_autoincrement': True},  # For SQLite
+    )
 
     # Relationship back to monitored path
     path = relationship("MonitoredPath", back_populates="file_inventory")

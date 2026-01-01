@@ -56,6 +56,52 @@ code {
     border-radius: 0.25rem;
 }
 
+/* Small alert for inline error messages */
+.alert-sm {
+    font-size: 0.875rem;
+    padding: 0.375rem 0.5rem;
+    margin-bottom: 0;
+}
+
+/* Sortable table headers */
+th.sortable {
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+}
+
+th.sortable:hover {
+    background-color: #f8f9fa;
+}
+
+th.sortable i {
+    opacity: 0.3;
+    font-size: 0.8em;
+    margin-left: 0.25rem;
+}
+
+th.sortable.sort-asc i.bi-arrow-down-up {
+    display: none;
+}
+
+th.sortable.sort-asc::after {
+    content: "\F145";
+    font-family: "bootstrap-icons";
+    margin-left: 0.25rem;
+    opacity: 1;
+}
+
+th.sortable.sort-desc i.bi-arrow-down-up {
+    display: none;
+}
+
+th.sortable.sort-desc::after {
+    content: "\F148";
+    font-family: "bootstrap-icons";
+    margin-left: 0.25rem;
+    opacity: 1;
+}
+
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .table-responsive {

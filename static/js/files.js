@@ -1,6 +1,11 @@
 // Files browser JavaScript - client-side rendering
 const API_BASE_URL = '/api/v1';
 
+// Sorting state
+let currentFiles = [];
+let currentSortColumn = 'file_path';
+let currentSortDirection = 'asc';
+
 // Utility functions
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -37,6 +42,102 @@ function showFlashMessage(message, category = 'success') {
     }, 5000);
 }
 
+// Sorting functions
+function sortFiles(column, direction) {
+    currentSortColumn = column;
+    currentSortDirection = direction;
+
+    currentFiles.sort((a, b) => {
+        let aVal = a[column];
+        let bVal = b[column];
+
+        // Handle null/undefined values
+        if (aVal === null || aVal === undefined) aVal = '';
+        if (bVal === null || bVal === undefined) bVal = '';
+
+        // Convert dates to timestamps for comparison
+        if (column === 'file_mtime' || column === 'file_atime' || column === 'file_ctime' || column === 'last_seen') {
+            aVal = aVal ? new Date(aVal).getTime() : 0;
+            bVal = bVal ? new Date(bVal).getTime() : 0;
+        }
+
+        // Compare values
+        let comparison = 0;
+        if (typeof aVal === 'string' && typeof bVal === 'string') {
+            comparison = aVal.toLowerCase().localeCompare(bVal.toLowerCase());
+        } else {
+            comparison = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
+        }
+
+        return direction === 'asc' ? comparison : -comparison;
+    });
+
+    updateSortIndicators();
+}
+
+function updateSortIndicators() {
+    // Remove all sort classes
+    document.querySelectorAll('th.sortable').forEach(th => {
+        th.classList.remove('sort-asc', 'sort-desc');
+    });
+
+    // Add current sort class
+    const currentHeader = document.querySelector(`th[data-sort="${currentSortColumn}"]`);
+    if (currentHeader) {
+        currentHeader.classList.add(`sort-${currentSortDirection}`);
+    }
+}
+
+function handleSortClick(column) {
+    if (currentSortColumn === column) {
+        // Toggle direction
+        currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        // New column, default to ascending
+        currentSortDirection = 'asc';
+    }
+
+    sortFiles(column, currentSortDirection);
+    renderFilesTable();
+}
+
+function renderFilesTable() {
+    const tableBody = document.querySelector('#filesTable tbody');
+    if (!tableBody) return;
+
+    tableBody.innerHTML = '';
+
+    currentFiles.forEach(file => {
+        const row = tableBody.insertRow();
+        const storageBadge = file.storage_type === 'hot'
+            ? '<span class="badge bg-success">Hot Storage</span>'
+            : '<span class="badge bg-info">Cold Storage</span>';
+
+        const actionButton = file.storage_type === 'cold'
+            ? `<button type="button" class="btn btn-sm btn-warning" onclick="showThawModal(${file.id}, '${escapeHtml(file.file_path)}')">
+                   <i class="bi bi-fire"></i> Thaw
+               </button>`
+            : '<span class="text-muted">In Hot Storage</span>';
+
+        // Format criteria times
+        const mtime = file.file_mtime ? formatDate(file.file_mtime) : '<span class="text-muted">N/A</span>';
+        const atime = file.file_atime ? formatDate(file.file_atime) : '<span class="text-muted">N/A</span>';
+        const ctime = file.file_ctime ? formatDate(file.file_ctime) : '<span class="text-muted">N/A</span>';
+
+        row.innerHTML = `
+            <td><code>${escapeHtml(file.file_path)}</code></td>
+            <td>${storageBadge}</td>
+            <td>${formatBytes(file.file_size)}</td>
+            <td><small>${mtime}</small></td>
+            <td><small>${atime}</small></td>
+            <td><small>${ctime}</small></td>
+            <td><span class="badge bg-secondary">${escapeHtml(file.status)}</span></td>
+            <td><small>${formatDate(file.last_seen)}</small></td>
+            <td>${actionButton}</td>
+        `;
+    });
+}
+
 // Load and render files list
 async function loadFilesList(pathId = null, storageType = null) {
     const loadingEl = document.getElementById('files-loading');
@@ -62,32 +163,16 @@ async function loadFilesList(pathId = null, storageType = null) {
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const files = await response.json();
 
+        // Store files for sorting
+        currentFiles = files;
+
+        // Sort by default column
+        sortFiles(currentSortColumn, currentSortDirection);
+        renderFilesTable();
+
         if (files.length === 0) {
             if (emptyEl) emptyEl.style.display = 'block';
         } else {
-            if (tableBody) {
-                files.forEach(file => {
-                    const row = tableBody.insertRow();
-                    const storageBadge = file.storage_type === 'hot'
-                        ? '<span class="badge bg-success">Hot Storage</span>'
-                        : '<span class="badge bg-info">Cold Storage</span>';
-
-                    const actionButton = file.storage_type === 'cold'
-                        ? `<button type="button" class="btn btn-sm btn-warning" onclick="showThawModal(${file.id}, '${escapeHtml(file.file_path)}')">
-                               <i class="bi bi-fire"></i> Thaw
-                           </button>`
-                        : '<span class="text-muted">In Hot Storage</span>';
-
-                    row.innerHTML = `
-                        <td><code>${escapeHtml(file.file_path)}</code></td>
-                        <td>${storageBadge}</td>
-                        <td>${formatBytes(file.file_size)}</td>
-                        <td><span class="badge bg-secondary">${escapeHtml(file.status)}</span></td>
-                        <td>${formatDate(file.last_seen)}</td>
-                        <td>${actionButton}</td>
-                    `;
-                });
-            }
             if (contentEl) contentEl.style.display = 'block';
         }
     } catch (error) {
@@ -250,6 +335,16 @@ async function cleanupDuplicates() {
     }
 }
 
+// Setup sortable column click handlers
+function setupSortHandlers() {
+    document.querySelectorAll('th.sortable').forEach(header => {
+        header.addEventListener('click', function() {
+            const column = this.getAttribute('data-sort');
+            handleSortClick(column);
+        });
+    });
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     const urlParams = new URLSearchParams(window.location.search);
@@ -258,6 +353,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     loadFilesList(pathId, storageType);
     loadPathsForFilter();
+    setupSortHandlers();
 
     // Setup event handlers
     document.getElementById('confirmThawBtn').addEventListener('click', thawFile);

@@ -44,6 +44,8 @@ class MonitoredPathBase(BaseModel):
     operation_type: OperationType = OperationType.MOVE
     check_interval_seconds: int = Field(..., ge=60)  # Minimum 1 minute
     enabled: bool = True
+    prevent_indexing: bool = True  # Create .noindex file to prevent macOS Spotlight from corrupting timestamps
+    error_message: str | None = None  # Error state message
 
 
 class MonitoredPathCreate(MonitoredPathBase):
@@ -59,6 +61,7 @@ class MonitoredPathUpdate(BaseModel):
     operation_type: Optional[OperationType] = None
     check_interval_seconds: Optional[int] = Field(None, ge=60)
     enabled: Optional[bool] = None
+    prevent_indexing: Optional[bool] = None
 
 
 class MonitoredPath(MonitoredPathBase):
@@ -98,6 +101,8 @@ class FileInventoryBase(BaseModel):
     storage_type: StorageType
     file_size: int
     file_mtime: datetime
+    file_atime: Optional[datetime] = None
+    file_ctime: Optional[datetime] = None
     checksum: Optional[str] = None
     status: FileStatus = FileStatus.ACTIVE
 
@@ -111,6 +116,8 @@ class FileInventoryUpdate(BaseModel):
     """Schema for updating file inventory entry."""
     file_size: Optional[int] = None
     file_mtime: Optional[datetime] = None
+    file_atime: Optional[datetime] = None
+    file_ctime: Optional[datetime] = None
     checksum: Optional[str] = None
     status: Optional[FileStatus] = None
 
