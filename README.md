@@ -15,9 +15,10 @@ File Fridge is a full-stack Python application for managing file cold storage. I
 ## Requirements
 
 - Python 3.8+ (Python 3.11+ recommended)
-- SQLite (included with Python)
 - Linux/Unix system (for file operations)
 - uv (recommended) or pip for installation
+
+**Database:** Uses SQLite (included with Python) - no additional database server needed
 
 ## Installation
 
@@ -31,9 +32,9 @@ git clone <repository-url>
 cd file-fridge
 ```
 
-2. Create necessary directories:
+2. Create storage directories:
 ```bash
-mkdir -p data hot-storage cold-storage
+mkdir -p hot-storage cold-storage
 ```
 
 3. (Optional) Configure environment variables:
@@ -77,19 +78,19 @@ This will create a virtual environment and install all dependencies automaticall
 You can set configuration via environment variables:
 ```bash
 export LOG_LEVEL=DEBUG
-export DATABASE_URL=sqlite:///./file_fridge.db
+export DATABASE_PATH=./file_fridge.db
 ```
 
 Or create a `.env` file in the project root:
 ```bash
 LOG_LEVEL=INFO
-DATABASE_URL=sqlite:///./file_fridge.db
+DATABASE_PATH=./file_fridge.db
 ```
 
 Available environment variables:
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default: INFO
 - `LOG_FILE_PATH`: Optional path to log file. If not set, logs only to stdout. Default: None
-- `DATABASE_URL`: SQLite database URL. Default: sqlite:///./file_fridge.db
+- `DATABASE_PATH`: Database file path. Default: ./data/file_fridge.db
 
 ### Using pip (Alternative)
 

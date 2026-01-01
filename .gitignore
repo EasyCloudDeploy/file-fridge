@@ -147,5 +147,11 @@ file_fridge.db-journal
 *.db
 *.db-journal
 
+# Runtime data directories
+data/
+hot-storage/
+cold-storage/
+logs/
+
 # uv
 .uv/

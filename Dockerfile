@@ -35,6 +35,9 @@ COPY --from=builder --chown=filefridge:filefridge /app/.venv /app/.venv
 
 COPY --from=builder --chown=filefridge:filefridge /app /app
 
+# Create data directory with proper permissions
+RUN mkdir -p /app/data && chown -R filefridge:filefridge /app/data
+
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1
@@ -43,4 +46,5 @@ USER filefridge
 
 EXPOSE 8000
 
-CMD ["python", "app/main.py"]
+# Use uvicorn directly for better production deployment
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
