@@ -14,6 +14,8 @@ from app.models import MonitoredPath, FileRecord, FileInventory, FileStatus, Ope
 from app.services.file_scanner import FileScanner
 from app.services.file_mover import FileMover
 from app.services.file_cleanup import FileCleanup
+from app.services.file_reconciliation import FileReconciliation
+from app.services.scan_progress import scan_progress_manager
 from app.database import engine
 
 logger = logging.getLogger(__name__)
@@ -103,10 +105,21 @@ class ScanProcessor:
                 result["error"] = f"Cannot stat source file: {e}"
                 return result
 
+            # Create progress callback for this file
+            file_name = file_path.name
+            operation = "move_to_cold"  # Default operation type
+
+            def progress_callback(bytes_transferred: int):
+                """Update progress for this file."""
+                scan_progress_manager.update_file_progress(path.id, file_name, bytes_transferred)
+
+            # Start tracking this file operation
+            scan_progress_manager.start_file_operation(path.id, file_name, operation, file_size)
+
             # Move the file
             logger.debug(f"  Moving file using operation: {path.operation_type.value}")
             success, error = FileMover.move_file(
-                file_path, dest_path, path.operation_type, path
+                file_path, dest_path, path.operation_type, path, progress_callback
             )
 
             if success:
@@ -156,9 +169,15 @@ class ScanProcessor:
                 result["success"] = True
                 result["file_record_id"] = file_record_id
                 logger.info(f"Successfully processed and recorded: {file_path} -> {dest_path}")
+
+                # Mark file operation as complete
+                scan_progress_manager.complete_file_operation(path.id, file_name, operation, success=True)
             else:
                 result["error"] = f"Failed to move {file_path}: {error}"
                 logger.error(f"Failed to move {file_path}: {error}")
+
+                # Mark file operation as failed
+                scan_progress_manager.complete_file_operation(path.id, file_name, operation, success=False, error=error)
 
         except Exception as e:
             result["error"] = f"Error processing {file_path}: {str(e)}"
@@ -225,139 +244,183 @@ class ScanProcessor:
         """
         Process a monitored path: scan, match, and move files.
         Also cleans up records for files that no longer exist.
-        
+
         Returns:
             dict with scan results
         """
-        # Check if path is in error state - if so, skip processing
-        if path.error_message:
-            logger.warning(
-                f"Path {path.name} (ID: {path.id}) is in error state and will not be processed. "
-                f"Error: {path.error_message}"
-            )
+        # Start tracking scan progress
+        scan_id = scan_progress_manager.start_scan(path.id, total_files=0)
+        logger.info(f"Started scan progress tracking: {scan_id} for path {path.id}")
+
+        try:
+            # Check if path is in error state - if so, skip processing
+            if path.error_message:
+                logger.warning(
+                    f"Path {path.name} (ID: {path.id}) is in error state and will not be processed. "
+                    f"Error: {path.error_message}"
+                )
+                scan_progress_manager.finish_scan(path.id, status="failed")
+                return {
+                    "path_id": path.id,
+                    "files_found": 0,
+                    "files_moved": 0,
+                    "files_cleaned": 0,
+                    "errors": [f"Path is in error state: {path.error_message}"]
+                }
+
+            results = {
+                "path_id": path.id,
+                "files_found": 0,
+                "files_moved": 0,
+                "files_cleaned": 0,
+                "files_skipped": 0,
+                "total_scanned": 0,
+                "errors": []
+            }
+
+            # First, clean up any missing files and duplicates for this path
+            try:
+                # Clean up missing files
+                cleanup_results = FileCleanup.cleanup_missing_files(db, path_id=path.id)
+                results["files_cleaned"] = cleanup_results["removed"]
+                if cleanup_results["errors"]:
+                    results["errors"].extend(cleanup_results["errors"])
+
+                # Clean up duplicates
+                duplicate_results = FileCleanup.cleanup_duplicates(db, path_id=path.id)
+                results["files_cleaned"] += duplicate_results["removed"]
+                if duplicate_results["errors"]:
+                    results["errors"].extend(duplicate_results["errors"])
+            except Exception as e:
+                logger.warning(f"Error during cleanup for path {path.id}: {str(e)}")
+                # Don't fail the scan if cleanup fails
+
+            try:
+                # Scan for matching files (pass db to check for pinned files)
+                logger.debug(f"Processing path {path.id} ({path.name})")
+                scan_results = FileScanner.scan_path(path, db)
+                matching_files = scan_results["to_cold"]
+                files_to_thaw = scan_results["to_hot"]
+                results["files_found"] = len(matching_files)
+                results["files_skipped"] = scan_results.get("skipped_hot", 0) + scan_results.get("skipped_cold", 0)
+                results["total_scanned"] = scan_results.get("total_scanned", 0)
+                logger.debug(
+                    f"Path {path.id}: Scanned {results['total_scanned']} files, "
+                    f"found {len(matching_files)} to move, {len(files_to_thaw)} to thaw, "
+                    f"{results['files_skipped']} correctly placed"
+                )
+
+                # Update total files count for progress tracking
+                total_files_to_process = len(matching_files) + len(files_to_thaw)
+                scan_progress_manager.update_total_files(path.id, total_files_to_process)
+
+                source_base = Path(path.source_path)
+                dest_base = Path(path.cold_storage_path)
+
+                # Process selective thawing for recently accessed files
+                if files_to_thaw:
+                    logger.info(f"Processing {len(files_to_thaw)} recently accessed files to thaw back to hot storage")
+
+                    # Process thawing concurrently
+                    max_workers = min(2, len(files_to_thaw))
+                    logger.debug(f"Using {max_workers} worker threads for thawing {len(files_to_thaw)} files")
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        future_to_thaw = {
+                            executor.submit(self._thaw_single_file, symlink_path, cold_storage_path):
+                            (symlink_path, cold_storage_path)
+                            for symlink_path, cold_storage_path in files_to_thaw
+                        }
+
+                        # Collect results as they complete
+                        for future in as_completed(future_to_thaw):
+                            symlink_path, cold_storage_path = future_to_thaw[future]
+                            try:
+                                thaw_result = future.result()
+                                if thaw_result["success"]:
+                                    results["files_moved"] += 1
+                                    logger.debug(f"Successfully thawed recently accessed file: {cold_storage_path}")
+                                else:
+                                    results["errors"].append(thaw_result["error"])
+                                    logger.error(f"Failed to thaw recently accessed file {cold_storage_path}: {thaw_result['error']}")
+                            except Exception as e:
+                                error_msg = f"Exception thawing recently accessed file {cold_storage_path}: {str(e)}"
+                                results["errors"].append(error_msg)
+                                logger.error(error_msg, exc_info=True)
+
+                # Process files concurrently to record them immediately
+                if matching_files:
+                    logger.info(f"Processing {len(matching_files)} files concurrently for path {path.id}")
+
+                    # Use ThreadPoolExecutor to process files concurrently
+                    # Limit to 3 workers to avoid overwhelming the system
+                    max_workers = min(3, len(matching_files))
+                    logger.debug(f"Using {max_workers} worker threads for {len(matching_files)} files")
+                    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                        # Submit all file processing tasks
+                        future_to_file = {
+                            executor.submit(self.process_single_file, file_path, matched_criteria_ids, path):
+                            (file_path, matched_criteria_ids)
+                            for file_path, matched_criteria_ids in matching_files
+                        }
+
+                        # Collect results as they complete
+                        for future in as_completed(future_to_file):
+                            file_path, matched_criteria_ids = future_to_file[future]
+                            try:
+                                file_result = future.result()
+                                if file_result["success"]:
+                                    results["files_moved"] += 1
+                                    logger.debug(f"Successfully processed file: {file_path}")
+                                else:
+                                    results["errors"].append(file_result["error"])
+                                    logger.error(f"Failed to process file {file_path}: {file_result['error']}")
+                            except Exception as e:
+                                error_msg = f"Exception processing {file_path}: {str(e)}"
+                                results["errors"].append(error_msg)
+                                logger.error(error_msg, exc_info=True)
+
+                    logger.info(f"Completed concurrent processing of {len(matching_files)} files for path {path.id}")
+
+                # Reconcile missing symlinks for files in cold storage
+                logger.info(f"Running symlink reconciliation for path {path.id}")
+                try:
+                    reconciliation_stats = FileReconciliation.reconcile_missing_symlinks(path, db)
+                    if reconciliation_stats["symlinks_created"] > 0:
+                        logger.info(
+                            f"Reconciliation complete: Created {reconciliation_stats['symlinks_created']} missing symlinks"
+                        )
+                    if reconciliation_stats["errors"]:
+                        results["errors"].extend(reconciliation_stats["errors"])
+                except Exception as e:
+                    error_msg = f"Error during symlink reconciliation for path {path.id}: {str(e)}"
+                    logger.warning(error_msg)
+                    results["errors"].append(error_msg)
+
+            except Exception as e:
+                error_msg = f"Error processing path {path.id}: {str(e)}"
+                results["errors"].append(error_msg)
+                logger.error(error_msg)
+                # Mark scan as failed
+                scan_progress_manager.finish_scan(path.id, status="failed")
+                return results
+
+            # Mark scan as completed
+            scan_status = "completed" if not results["errors"] else "completed"  # Completed with errors is still completed
+            scan_progress_manager.finish_scan(path.id, status=scan_status)
+            logger.info(f"Scan {scan_id} finished with status: {scan_status}")
+
+            return results
+        except Exception as outer_e:
+            # Catch any errors in the outer try block
+            logger.error(f"Unexpected error in process_path for path {path.id}: {str(outer_e)}", exc_info=True)
+            scan_progress_manager.finish_scan(path.id, status="failed")
             return {
                 "path_id": path.id,
                 "files_found": 0,
                 "files_moved": 0,
                 "files_cleaned": 0,
-                "errors": [f"Path is in error state: {path.error_message}"]
+                "errors": [f"Unexpected error: {str(outer_e)}"]
             }
-        
-        results = {
-            "path_id": path.id,
-            "files_found": 0,
-            "files_moved": 0,
-            "files_cleaned": 0,
-            "files_skipped": 0,
-            "total_scanned": 0,
-            "errors": []
-        }
-        
-        # First, clean up any missing files and duplicates for this path
-        try:
-            # Clean up missing files
-            cleanup_results = FileCleanup.cleanup_missing_files(db, path_id=path.id)
-            results["files_cleaned"] = cleanup_results["removed"]
-            if cleanup_results["errors"]:
-                results["errors"].extend(cleanup_results["errors"])
-            
-            # Clean up duplicates
-            duplicate_results = FileCleanup.cleanup_duplicates(db, path_id=path.id)
-            results["files_cleaned"] += duplicate_results["removed"]
-            if duplicate_results["errors"]:
-                results["errors"].extend(duplicate_results["errors"])
-        except Exception as e:
-            logger.warning(f"Error during cleanup for path {path.id}: {str(e)}")
-            # Don't fail the scan if cleanup fails
-        
-        try:
-            # Scan for matching files (pass db to check for pinned files)
-            logger.debug(f"Processing path {path.id} ({path.name})")
-            scan_results = FileScanner.scan_path(path, db)
-            matching_files = scan_results["to_cold"]
-            files_to_thaw = scan_results["to_hot"]
-            results["files_found"] = len(matching_files)
-            results["files_skipped"] = scan_results.get("skipped_hot", 0) + scan_results.get("skipped_cold", 0)
-            results["total_scanned"] = scan_results.get("total_scanned", 0)
-            logger.debug(
-                f"Path {path.id}: Scanned {results['total_scanned']} files, "
-                f"found {len(matching_files)} to move, {len(files_to_thaw)} to thaw, "
-                f"{results['files_skipped']} correctly placed"
-            )
-            
-            source_base = Path(path.source_path)
-            dest_base = Path(path.cold_storage_path)
-
-            # Process selective thawing for recently accessed files
-            if files_to_thaw:
-                logger.info(f"Processing {len(files_to_thaw)} recently accessed files to thaw back to hot storage")
-
-                # Process thawing concurrently
-                max_workers = min(2, len(files_to_thaw))
-                logger.debug(f"Using {max_workers} worker threads for thawing {len(files_to_thaw)} files")
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    future_to_thaw = {
-                        executor.submit(self._thaw_single_file, symlink_path, cold_storage_path):
-                        (symlink_path, cold_storage_path)
-                        for symlink_path, cold_storage_path in files_to_thaw
-                    }
-
-                    # Collect results as they complete
-                    for future in as_completed(future_to_thaw):
-                        symlink_path, cold_storage_path = future_to_thaw[future]
-                        try:
-                            thaw_result = future.result()
-                            if thaw_result["success"]:
-                                results["files_moved"] += 1
-                                logger.debug(f"Successfully thawed recently accessed file: {cold_storage_path}")
-                            else:
-                                results["errors"].append(thaw_result["error"])
-                                logger.error(f"Failed to thaw recently accessed file {cold_storage_path}: {thaw_result['error']}")
-                        except Exception as e:
-                            error_msg = f"Exception thawing recently accessed file {cold_storage_path}: {str(e)}"
-                            results["errors"].append(error_msg)
-                            logger.error(error_msg, exc_info=True)
-
-            # Process files concurrently to record them immediately
-            if matching_files:
-                logger.info(f"Processing {len(matching_files)} files concurrently for path {path.id}")
-
-                # Use ThreadPoolExecutor to process files concurrently
-                # Limit to 3 workers to avoid overwhelming the system
-                max_workers = min(3, len(matching_files))
-                logger.debug(f"Using {max_workers} worker threads for {len(matching_files)} files")
-                with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    # Submit all file processing tasks
-                    future_to_file = {
-                        executor.submit(self.process_single_file, file_path, matched_criteria_ids, path):
-                        (file_path, matched_criteria_ids)
-                        for file_path, matched_criteria_ids in matching_files
-                    }
-
-                    # Collect results as they complete
-                    for future in as_completed(future_to_file):
-                        file_path, matched_criteria_ids = future_to_file[future]
-                        try:
-                            file_result = future.result()
-                            if file_result["success"]:
-                                results["files_moved"] += 1
-                                logger.debug(f"Successfully processed file: {file_path}")
-                            else:
-                                results["errors"].append(file_result["error"])
-                                logger.error(f"Failed to process file {file_path}: {file_result['error']}")
-                        except Exception as e:
-                            error_msg = f"Exception processing {file_path}: {str(e)}"
-                            results["errors"].append(error_msg)
-                            logger.error(error_msg, exc_info=True)
-
-                logger.info(f"Completed concurrent processing of {len(matching_files)} files for path {path.id}")
-
-        except Exception as e:
-            error_msg = f"Error processing path {path.id}: {str(e)}"
-            results["errors"].append(error_msg)
-            logger.error(error_msg)
-
-        return results
 
     def _thaw_single_file(self, symlink_path: Path, cold_storage_path: Path) -> dict:
         """

@@ -10,11 +10,8 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite:///./file_fridge.db"
 
-    # Allow atime over network mounts
-    if environ.get('ALLOW_ATIME_OVER_NETWORK_MOUNTS'):
-        allow_atime_over_network_mounts = environ.get('ALLOW_ATIME_OVER_NETWORK_MOUNTS').lower() == 'true'
-    else:
-        allow_atime_over_network_mounts: bool = False
+    # Allow atime over network mounts (can be set via ALLOW_ATIME_OVER_NETWORK_MOUNTS env var)
+    allow_atime_over_network_mounts: bool = False
     
     # Application
     log_level: str = "INFO"  # Can be overridden via LOG_LEVEL environment variable

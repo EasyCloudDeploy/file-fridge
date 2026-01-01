@@ -1,6 +1,10 @@
 // Paths management JavaScript - client-side rendering
 const API_BASE_URL = '/api/v1';
 
+// Progress polling state
+let progressPollingInterval = null;
+let currentPathId = null;
+
 // Utility functions
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -351,51 +355,173 @@ async function triggerScan(pathId, buttonElement = null) {
         });
 
         if (response.ok) {
-            const result = await response.json();
+            showFlashMessage('Scan started. Progress will appear below.', 'info');
 
-            // Build detailed success message
-            let message = 'Scan completed successfully';
-            if (result.total_scanned !== undefined) {
-                // Detailed scan results available
-                const parts = [`Scanned ${result.total_scanned} file(s)`];
-
-                if (result.files_moved !== undefined && result.files_moved > 0) {
-                    parts.push(`moved ${result.files_moved}`);
-                }
-
-                if (result.files_skipped !== undefined && result.files_skipped > 0) {
-                    parts.push(`${result.files_skipped} already correctly placed`);
-                }
-
-                message = `Scan complete: ${parts.join(', ')}`;
-            } else if (result.files_found !== undefined && result.files_moved !== undefined) {
-                message = `Scan completed: Found ${result.files_found} file(s), moved ${result.files_moved} file(s)`;
-            } else if (result.message) {
-                message = result.message;
-            }
-
-            showFlashMessage(message, 'success');
-
-            // Reload path detail if on detail page
-            if (window.location.pathname.match(/^\/paths\/\d+$/)) {
-                setTimeout(() => loadPathDetail(pathId), 1000);
-            } else {
-                // Reload paths list if on list page
-                setTimeout(() => loadPathsList(), 1000);
-            }
+            // Start polling for progress
+            startProgressPolling(pathId);
         } else {
             const error = await response.json();
             showFlashMessage(error.detail || 'Failed to trigger scan', 'danger');
+
+            // Restore button
+            if (buttonElement && originalContent) {
+                buttonElement.disabled = false;
+                buttonElement.innerHTML = originalContent;
+            }
         }
     } catch (error) {
         console.error('Error triggering scan:', error);
         showFlashMessage(`Error triggering scan: ${error.message}`, 'danger');
-    } finally {
-        // Restore button to original state
+
+        // Restore button
         if (buttonElement && originalContent) {
             buttonElement.disabled = false;
             buttonElement.innerHTML = originalContent;
         }
+    }
+}
+
+function startProgressPolling(pathId) {
+    currentPathId = pathId;
+
+    // Show progress container
+    const progressContainer = document.getElementById('scan-progress-container');
+    if (progressContainer) {
+        progressContainer.style.display = 'block';
+    }
+
+    // Clear any existing interval
+    if (progressPollingInterval) {
+        clearInterval(progressPollingInterval);
+    }
+
+    // Poll every 500ms
+    progressPollingInterval = setInterval(() => pollProgress(pathId), 500);
+
+    // Also poll immediately
+    pollProgress(pathId);
+}
+
+function stopProgressPolling() {
+    if (progressPollingInterval) {
+        clearInterval(progressPollingInterval);
+        progressPollingInterval = null;
+    }
+}
+
+async function pollProgress(pathId) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/paths/${pathId}/scan/progress`);
+        if (!response.ok) {
+            console.error('Failed to fetch progress');
+            return;
+        }
+
+        const progress = await response.json();
+        updateProgressDisplay(progress);
+
+        // Stop polling if scan is complete or failed
+        if (progress.status === 'completed' || progress.status === 'failed') {
+            stopProgressPolling();
+
+            // Hide progress after a delay
+            setTimeout(() => {
+                const progressContainer = document.getElementById('scan-progress-container');
+                if (progressContainer) {
+                    progressContainer.style.display = 'none';
+                }
+
+                // Reload page to show updated data
+                if (window.location.pathname.match(/^\/paths\/\d+$/)) {
+                    loadPathDetail(pathId);
+                } else {
+                    loadPathsList();
+                }
+
+                // Restore scan button
+                const scanBtn = document.getElementById('scan-path-btn');
+                if (scanBtn) {
+                    scanBtn.disabled = false;
+                    scanBtn.innerHTML = '<i class="bi bi-arrow-repeat"></i> Scan Now';
+                }
+            }, 2000);
+
+            // Show completion message
+            if (progress.status === 'completed') {
+                const movedCount = progress.progress.files_moved_to_cold + progress.progress.files_moved_to_hot;
+                showFlashMessage(`Scan completed! Processed ${progress.progress.files_processed} files, moved ${movedCount} files.`, 'success');
+            } else {
+                showFlashMessage('Scan failed. Check errors below.', 'danger');
+            }
+        }
+    } catch (error) {
+        console.error('Error polling progress:', error);
+    }
+}
+
+function updateProgressDisplay(progress) {
+    // Update overall progress bar
+    const progressBar = document.getElementById('scan-progress-bar');
+    if (progressBar) {
+        const percent = progress.progress?.percent || 0;
+        progressBar.style.width = `${percent}%`;
+        progressBar.setAttribute('aria-valuenow', percent);
+        progressBar.textContent = `${percent}%`;
+    }
+
+    // Update progress text
+    const progressText = document.getElementById('scan-progress-text');
+    if (progressText) {
+        const p = progress.progress || {};
+        progressText.textContent = `Processing: ${p.files_processed || 0} / ${p.total_files || 0} files`;
+    }
+
+    // Update stats
+    const statsContainer = document.getElementById('scan-progress-stats');
+    if (statsContainer && progress.progress) {
+        const p = progress.progress;
+        statsContainer.innerHTML = `
+            <div class="d-flex justify-content-between flex-wrap">
+                <div class="me-3"><i class="bi bi-arrow-down-circle text-primary"></i> To Cold: ${p.files_moved_to_cold || 0}</div>
+                <div class="me-3"><i class="bi bi-arrow-up-circle text-success"></i> To Hot: ${p.files_moved_to_hot || 0}</div>
+                <div><i class="bi bi-check-circle text-secondary"></i> Skipped: ${p.files_skipped || 0}</div>
+            </div>
+        `;
+    }
+
+    // Update current operations
+    const operationsContainer = document.getElementById('current-operations');
+    if (operationsContainer && progress.current_operations) {
+        if (progress.current_operations.length === 0) {
+            operationsContainer.innerHTML = '<small class="text-muted">No active file operations</small>';
+        } else {
+            operationsContainer.innerHTML = progress.current_operations.map(op => `
+                <div class="mb-2">
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <small class="text-truncate me-2" style="max-width: 70%;">${escapeHtml(op.file_name)}</small>
+                        <small class="text-muted">${op.percent}%</small>
+                    </div>
+                    <div class="progress" style="height: 4px;">
+                        <div class="progress-bar" role="progressbar" style="width: ${op.percent}%"></div>
+                    </div>
+                </div>
+            `).join('');
+        }
+    }
+
+    // Update errors
+    const errorsContainer = document.getElementById('scan-errors');
+    if (errorsContainer && progress.errors && progress.errors.length > 0) {
+        errorsContainer.innerHTML = `
+            <div class="alert alert-danger alert-sm p-2 mt-2">
+                <strong>Errors:</strong>
+                <ul class="mb-0 mt-1">
+                    ${progress.errors.map(err => `<li><small>${escapeHtml(err)}</small></li>`).join('')}
+                </ul>
+            </div>
+        `;
+    } else if (errorsContainer) {
+        errorsContainer.innerHTML = '';
     }
 }
 
@@ -421,6 +547,132 @@ async function deleteCriteria(criteriaId, pathId) {
 }
 
 // Form submission handlers
+async function handleColdStoragePathChange(conflictData, pathId, pathData) {
+    /**
+     * Handle cold storage path change confirmation dialog.
+     * Shows options to move files, abandon files, or cancel.
+     */
+    const { message, file_counts, old_path, new_path } = conflictData;
+
+    // Create modal HTML
+    const modalHtml = `
+        <div class="modal fade" id="coldStorageChangeModal" tabindex="-1" aria-labelledby="coldStorageChangeModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header bg-warning text-dark">
+                        <h5 class="modal-title" id="coldStorageChangeModalLabel">
+                            <i class="bi bi-exclamation-triangle-fill"></i> Cold Storage Path Change Warning
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="lead">${escapeHtml(message)}</p>
+
+                        <div class="alert alert-info">
+                            <h6><i class="bi bi-info-circle"></i> File Details:</h6>
+                            <ul class="mb-0">
+                                <li><strong>Filesystem:</strong> ${file_counts.filesystem} files found</li>
+                                <li><strong>Database Records:</strong> ${file_counts.database_records} records</li>
+                                <li><strong>Inventory:</strong> ${file_counts.inventory} entries</li>
+                            </ul>
+                        </div>
+
+                        <div class="alert alert-secondary">
+                            <strong>Old Path:</strong> <code>${escapeHtml(old_path)}</code><br>
+                            <strong>New Path:</strong> <code>${escapeHtml(new_path)}</code>
+                        </div>
+
+                        <p><strong>What would you like to do with the files in the old location?</strong></p>
+
+                        <div class="d-grid gap-3">
+                            <button type="button" class="btn btn-primary btn-lg" id="move-files-btn">
+                                <i class="bi bi-arrow-right-circle"></i> Move Files
+                                <br><small class="text-white-50">Physically move all files from old location to new location (Recommended)</small>
+                            </button>
+
+                            <button type="button" class="btn btn-outline-danger btn-lg" id="abandon-files-btn">
+                                <i class="bi bi-trash"></i> Abandon Files
+                                <br><small>Leave files in old location (they will become orphaned)</small>
+                            </button>
+
+                            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                                <i class="bi bi-x-circle"></i> Cancel
+                                <br><small>Don't change the cold storage path</small>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if any
+    const existingModal = document.getElementById('coldStorageChangeModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    const modal = new bootstrap.Modal(document.getElementById('coldStorageChangeModal'));
+    modal.show();
+
+    // Handle button clicks
+    return new Promise((resolve) => {
+        document.getElementById('move-files-btn').addEventListener('click', async () => {
+            modal.hide();
+            await retryPathUpdate(pathId, pathData, 'move');
+            resolve();
+        });
+
+        document.getElementById('abandon-files-btn').addEventListener('click', async () => {
+            if (confirm('Are you sure you want to abandon these files? They will remain in the old location but won\'t be tracked by File Fridge.')) {
+                modal.hide();
+                await retryPathUpdate(pathId, pathData, 'abandon');
+                resolve();
+            }
+        });
+
+        // Clean up modal on close
+        document.getElementById('coldStorageChangeModal').addEventListener('hidden.bs.modal', () => {
+            document.getElementById('coldStorageChangeModal').remove();
+            resolve();
+        });
+    });
+}
+
+async function retryPathUpdate(pathId, pathData, migrationAction) {
+    /**
+     * Retry path update with migration action confirmed.
+     */
+    const url = `${API_BASE_URL}/paths/${pathId}?confirm_cold_storage_change=true&migration_action=${migrationAction}`;
+
+    try {
+        showFlashMessage(`${migrationAction === 'move' ? 'Moving' : 'Abandoning'} files... This may take a moment.`, 'info');
+
+        const response = await fetch(url, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(pathData)
+        });
+
+        if (response.ok) {
+            const path = await response.json();
+            showFlashMessage(`Path updated successfully! Files were ${migrationAction === 'move' ? 'moved to new location' : 'left in old location'}.`, 'success');
+            window.location.href = `/paths/${path.id}`;
+        } else {
+            const error = await response.json();
+            showFlashMessage(error.detail || 'Failed to update path after confirmation', 'danger');
+        }
+    } catch (error) {
+        console.error('Error retrying path update:', error);
+        showFlashMessage(`Error updating path: ${error.message}`, 'danger');
+    }
+}
+
 function setupPathForm() {
     const form = document.getElementById('path-form');
     if (!form) return;
@@ -451,11 +703,19 @@ function setupPathForm() {
                 },
                 body: JSON.stringify(pathData)
             });
-            
+
             if (response.ok) {
                 const path = await response.json();
                 showFlashMessage(`Path ${pathId ? 'updated' : 'created'} successfully`);
                 window.location.href = `/paths/${path.id}`;
+            } else if (response.status === 409) {
+                // Cold storage path change detected - show confirmation dialog
+                const errorData = await response.json();
+                if (errorData.detail && errorData.detail.error === 'cold_storage_path_has_files') {
+                    await handleColdStoragePathChange(errorData.detail, pathId, pathData);
+                } else {
+                    showFlashMessage(errorData.detail || 'Conflict error', 'danger');
+                }
             } else {
                 const error = await response.json();
                 showFlashMessage(error.detail || `Failed to ${pathId ? 'update' : 'create'} path`, 'danger');

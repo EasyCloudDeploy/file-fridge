@@ -8,6 +8,8 @@ from app.database import get_db
 from app.models import MonitoredPath, CriterionType
 from app.schemas import MonitoredPathCreate, MonitoredPathUpdate, MonitoredPath as MonitoredPathSchema
 from app.services.scheduler import scheduler_service
+from app.services.scan_progress import scan_progress_manager
+from app.services.path_migration import PathMigrationService
 from app.utils.network_detection import check_atime_availability
 from app.utils.indexing import IndexingManager
 
@@ -128,7 +130,13 @@ def get_path(path_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{path_id}", response_model=MonitoredPathSchema)
-def update_path(path_id: int, path_update: MonitoredPathUpdate, db: Session = Depends(get_db)):
+def update_path(
+    path_id: int,
+    path_update: MonitoredPathUpdate,
+    confirm_cold_storage_change: bool = Query(False, description="Confirm cold storage path change"),
+    migration_action: str = Query(None, description="Migration action: 'move' or 'abandon'"),
+    db: Session = Depends(get_db)
+):
     """Update a monitored path."""
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
     if not path:
@@ -136,9 +144,63 @@ def update_path(path_id: int, path_update: MonitoredPathUpdate, db: Session = De
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Path with id {path_id} not found"
         )
-    
+
     # Validate paths if being updated
     update_data = path_update.model_dump(exclude_unset=True)
+
+    # CRITICAL: Check if cold_storage_path is being changed
+    if "cold_storage_path" in update_data and update_data["cold_storage_path"] != path.cold_storage_path:
+        old_cold_path = path.cold_storage_path
+        new_cold_path = update_data["cold_storage_path"]
+
+        logger.info(f"Cold storage path change detected: {old_cold_path} -> {new_cold_path}")
+
+        # Check for existing files in old location
+        check_result = PathMigrationService.check_existing_files(old_cold_path, path_id, db)
+
+        if check_result["has_files"]:
+            # Files exist - require confirmation
+            if not confirm_cold_storage_change:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "cold_storage_path_has_files",
+                        "message": f"The old cold storage path '{old_cold_path}' contains {check_result['filesystem_count']} files. Please confirm what to do with these files.",
+                        "file_counts": {
+                            "filesystem": check_result["filesystem_count"],
+                            "database_records": check_result["file_records_count"],
+                            "inventory": check_result["inventory_count"]
+                        },
+                        "old_path": old_cold_path,
+                        "new_path": new_cold_path
+                    }
+                )
+
+            # Confirmation provided - execute the action
+            if migration_action == "move":
+                logger.info(f"Migrating files from {old_cold_path} to {new_cold_path}")
+                success, error, stats = PathMigrationService.migrate_files(
+                    old_cold_path, new_cold_path, path_id, db
+                )
+
+                if not success:
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail=f"File migration failed: {error}. Stats: {stats}"
+                    )
+
+                logger.info(f"Migration successful: {stats}")
+
+            elif migration_action == "abandon":
+                logger.warning(f"Abandoning files in {old_cold_path}")
+                success, message = PathMigrationService.abandon_files(old_cold_path, path_id, db)
+                logger.info(message)
+
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="migration_action must be either 'move' or 'abandon' when confirm_cold_storage_change=true"
+                )
     
     if "source_path" in update_data:
         source = Path(update_data["source_path"])
@@ -252,9 +314,52 @@ def trigger_scan(path_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Path with id {path_id} not found"
         )
-    
+
     # Trigger scan asynchronously
     scheduler_service.trigger_scan(path_id)
-    
+
     return {"message": f"Scan triggered for path {path_id}"}
+
+
+@router.get("/{path_id}/scan/progress")
+def get_scan_progress(path_id: int, db: Session = Depends(get_db)):
+    """
+    Get real-time progress of the current scan for a path.
+
+    Returns progress information including:
+    - Overall progress (files processed / total files)
+    - Current file operations in progress
+    - Errors encountered
+    - Scan status (running, completed, failed)
+    """
+    # Verify path exists
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
+    if not path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Path with id {path_id} not found"
+        )
+
+    # Get progress from manager
+    progress = scan_progress_manager.get_progress(path_id)
+
+    if progress is None:
+        # No active or recent scan
+        return {
+            "scan_id": None,
+            "path_id": path_id,
+            "status": "idle",
+            "progress": {
+                "total_files": 0,
+                "files_processed": 0,
+                "files_moved_to_cold": 0,
+                "files_moved_to_hot": 0,
+                "files_skipped": 0,
+                "percent": 0
+            },
+            "current_operations": [],
+            "errors": []
+        }
+
+    return progress
 

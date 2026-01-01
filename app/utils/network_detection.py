@@ -26,6 +26,9 @@ def is_network_mount(path: str) -> bool:
         path_obj = Path(path).resolve()
         
         if platform.system() == "Darwin":  # macOS
+
+            # Test if the path is a mount
+            
             # Check if it's under /Volumes (common mount point for network shares)
             if str(path_obj).startswith("/Volumes/"):
                 # Get the volume name (first component after /Volumes/)
@@ -88,7 +91,7 @@ def check_atime_availability(cold_storage_path: str) -> tuple[bool, Optional[str
     
     if is_network_mount(cold_storage_path):
         # Check if atime is allowed via settings
-        if settings.allow_atime_on_network_mounts:
+        if settings.allow_atime_over_network_mounts:
             return True, None
         
         # Otherwise, atime is unavailable

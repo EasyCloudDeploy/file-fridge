@@ -78,19 +78,19 @@ class FileScanner:
             pinned = db.query(PinnedFile).filter(PinnedFile.path_id == path.id).all()
             pinned_paths = {Path(p.file_path) for p in pinned}
 
-        # 3. Perform Recursive Scan
+        # 3. Perform Recursive Scan - HOT STORAGE
         file_count = 0
         for entry in FileScanner._recursive_scandir(source_path):
             file_path = Path(entry.path)
             file_count += 1
-            
+
             if file_path in pinned_paths:
                 continue
 
             # Handle Symlinks (Potential Cold Storage Files)
             actual_file_path = None
             is_symlink_to_cold = False
-            
+
             if entry.is_symlink():
                 try:
                     resolved = file_path.resolve(strict=True)
@@ -104,7 +104,7 @@ class FileScanner:
                 except (OSError, RuntimeError):
                     continue # Broken symlink
 
-            # 4. Evaluation Logic
+            # 4. Evaluation Logic - HOT STORAGE
             try:
                 # is_active is True if the file matches the criteria (should be kept in HOT storage)
                 # Criteria define what files to KEEP active/hot, not what to move to cold
@@ -136,10 +136,55 @@ class FileScanner:
                         # No action needed, file is where it should be
                         files_skipped_cold += 1
                         continue  # Skip to next file, no further processing needed
-            
+
             except (OSError, PermissionError) as e:
                 logger.debug(f"Access error for {file_path}: {e}")
                 continue
+
+        # 4.5. SCAN COLD STORAGE DIRECTLY (for MOVE operations)
+        # This is needed to detect files that were moved to cold storage (no symlink left behind)
+        # and have been updated since being moved. Such files should be moved back to hot storage.
+        if dest_base.exists() and dest_base.is_dir():
+            logger.debug(f"Scanning cold storage directly: {dest_base}")
+            for entry in FileScanner._recursive_scandir(dest_base):
+                cold_file_path = Path(entry.path)
+                file_count += 1
+
+                # Calculate the corresponding hot storage path
+                try:
+                    relative_path = cold_file_path.relative_to(dest_base)
+                    hot_file_path = source_path / relative_path
+                except ValueError:
+                    logger.debug(f"Could not calculate hot path for {cold_file_path}")
+                    continue
+
+                # Skip if there's already a file or symlink at the hot location
+                # (already handled in hot storage scan above)
+                if hot_file_path.exists():
+                    continue
+
+                # Check if file is pinned
+                if cold_file_path in pinned_paths or hot_file_path in pinned_paths:
+                    continue
+
+                # Evaluate if this cold storage file should be in hot storage
+                try:
+                    # Check criteria against the actual cold storage file
+                    is_active, matched_ids = CriteriaMatcher.match_file(
+                        hot_file_path, path.criteria, cold_file_path
+                    )
+
+                    if is_active:
+                        # File in cold storage matches active criteria -> should be in hot storage
+                        logger.info(f"File {cold_file_path}: Active file in cold storage (MOVE operation) -> THAWING")
+                        files_to_thaw.append((hot_file_path, cold_file_path))
+                    else:
+                        # File is inactive and in cold storage -> correctly placed
+                        files_skipped_cold += 1
+
+                except (OSError, PermissionError) as e:
+                    logger.debug(f"Access error for {cold_file_path}: {e}")
+                    continue
 
         # 5. Inventory Management
         inventory_updated = 0
