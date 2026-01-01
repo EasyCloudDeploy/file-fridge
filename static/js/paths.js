@@ -12,20 +12,9 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function showFlashMessage(message, category = 'success') {
-    const flashContainer = document.querySelector('main.container-fluid');
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${category} alert-dismissible fade show`;
-    alertDiv.setAttribute('role', 'alert');
-    alertDiv.innerHTML = `
-        ${escapeHtml(message)}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    `;
-    flashContainer.prepend(alertDiv);
-    setTimeout(() => {
-        const alert = bootstrap.Alert.getInstance(alertDiv);
-        if (alert) alert.close();
-    }, 5000);
+// Notification function - uses toast notifications from app.js
+function showNotification(message, type = 'success') {
+    showToast(message, type);
 }
 
 // Load and render paths list
@@ -100,7 +89,7 @@ async function loadPathsList() {
         }
     } catch (error) {
         console.error('Error loading paths:', error);
-        showFlashMessage(`Failed to load paths: ${error.message}`, 'danger');
+        showNotification(`Failed to load paths: ${error.message}`, 'error');
         if (emptyEl) emptyEl.style.display = 'block';
     } finally {
         if (loadingEl) loadingEl.style.display = 'none';
@@ -297,16 +286,21 @@ async function loadPathDetail(pathId) {
 
 // Path actions
 async function deletePath(pathId) {
-    // Ask if user wants to undo operations
-    const undoOps = confirm(
-        'Do you want to move all files back from cold storage before deleting?\n\n' +
-        'Click OK to undo operations (move files back)\n' +
-        'Click Cancel to delete without moving files back'
-    );
-    
-    if (!confirm(`Are you sure you want to delete this path?${undoOps ? '\n\nAll files will be moved back from cold storage.' : ''}`)) {
+    // Ask if user wants to undo operations using a modal with checkbox
+    const result = await showConfirmModalWithCheckbox({
+        title: 'Delete Path',
+        message: 'Are you sure you want to delete this path?',
+        checkboxLabel: 'Move all files back from cold storage before deleting',
+        checkboxDefault: true,
+        confirmText: 'Delete Path',
+        dangerous: true
+    });
+
+    if (!result.confirmed) {
         return;
     }
+
+    const undoOps = result.checked;
     
     try {
         const response = await fetch(`${API_BASE_URL}/paths/${pathId}?undo_operations=${undoOps}`, {
@@ -322,15 +316,15 @@ async function deletePath(pathId) {
             if (result.errors && result.errors.length > 0) {
                 message += ` ${result.errors.length} error(s) occurred.`;
             }
-            showFlashMessage(message, result.errors && result.errors.length > 0 ? 'warning' : 'success');
+            showNotification(message, result.errors && result.errors.length > 0 ? 'warning' : 'success');
             window.location.href = '/paths';
         } else {
             const error = await response.json();
-            showFlashMessage(error.detail || 'Failed to delete path', 'danger');
+            showNotification(error.detail || 'Failed to delete path', 'error');
         }
     } catch (error) {
         console.error('Error deleting path:', error);
-        showFlashMessage(`Error deleting path: ${error.message}`, 'danger');
+        showNotification(`Error deleting path: ${error.message}`, 'error');
     }
 }
 
@@ -355,13 +349,13 @@ async function triggerScan(pathId, buttonElement = null) {
         });
 
         if (response.ok) {
-            showFlashMessage('Scan started. Progress will appear below.', 'info');
+            showNotification('Scan started. Progress will appear below.', 'info');
 
             // Start polling for progress
             startProgressPolling(pathId);
         } else {
             const error = await response.json();
-            showFlashMessage(error.detail || 'Failed to trigger scan', 'danger');
+            showNotification(error.detail || 'Failed to trigger scan', 'error');
 
             // Restore button
             if (buttonElement && originalContent) {
@@ -371,7 +365,7 @@ async function triggerScan(pathId, buttonElement = null) {
         }
     } catch (error) {
         console.error('Error triggering scan:', error);
-        showFlashMessage(`Error triggering scan: ${error.message}`, 'danger');
+        showNotification(`Error triggering scan: ${error.message}`, 'error');
 
         // Restore button
         if (buttonElement && originalContent) {
@@ -449,9 +443,9 @@ async function pollProgress(pathId) {
             // Show completion message
             if (progress.status === 'completed') {
                 const movedCount = progress.progress.files_moved_to_cold + progress.progress.files_moved_to_hot;
-                showFlashMessage(`Scan completed! Processed ${progress.progress.files_processed} files, moved ${movedCount} files.`, 'success');
+                showNotification(`Scan completed! Processed ${progress.progress.files_processed} files, moved ${movedCount} files.`, 'success');
             } else {
-                showFlashMessage('Scan failed. Check errors below.', 'danger');
+                showNotification('Scan failed. Check errors below.', 'error');
             }
         }
     } catch (error) {
@@ -526,23 +520,30 @@ function updateProgressDisplay(progress) {
 }
 
 async function deleteCriteria(criteriaId, pathId) {
-    if (!confirm('Are you sure you want to delete this criterion?')) return;
-    
+    const confirmed = await showConfirmModal({
+        title: 'Delete Criterion',
+        message: 'Are you sure you want to delete this criterion?',
+        confirmText: 'Delete',
+        dangerous: true
+    });
+
+    if (!confirmed) return;
+
     try {
         const response = await fetch(`${API_BASE_URL}/criteria/${criteriaId}`, {
             method: 'DELETE'
         });
         
         if (response.ok) {
-            showFlashMessage('Criterion deleted successfully');
+            showNotification('Criterion deleted successfully');
             loadPathDetail(pathId);
         } else {
             const error = await response.json();
-            showFlashMessage(error.detail || 'Failed to delete criterion', 'danger');
+            showNotification(error.detail || 'Failed to delete criterion', 'error');
         }
     } catch (error) {
         console.error('Error deleting criterion:', error);
-        showFlashMessage(`Error deleting criterion: ${error.message}`, 'danger');
+        showNotification(`Error deleting criterion: ${error.message}`, 'error');
     }
 }
 
@@ -627,7 +628,14 @@ async function handleColdStoragePathChange(conflictData, pathId, pathData) {
         });
 
         document.getElementById('abandon-files-btn').addEventListener('click', async () => {
-            if (confirm('Are you sure you want to abandon these files? They will remain in the old location but won\'t be tracked by File Fridge.')) {
+            const confirmed = await showConfirmModal({
+                title: 'Abandon Files',
+                message: 'Are you sure you want to abandon these files? They will remain in the old location but won\'t be tracked by File Fridge.',
+                confirmText: 'Abandon Files',
+                dangerous: true
+            });
+
+            if (confirmed) {
                 modal.hide();
                 await retryPathUpdate(pathId, pathData, 'abandon');
                 resolve();
@@ -649,7 +657,7 @@ async function retryPathUpdate(pathId, pathData, migrationAction) {
     const url = `${API_BASE_URL}/paths/${pathId}?confirm_cold_storage_change=true&migration_action=${migrationAction}`;
 
     try {
-        showFlashMessage(`${migrationAction === 'move' ? 'Moving' : 'Abandoning'} files... This may take a moment.`, 'info');
+        showNotification(`${migrationAction === 'move' ? 'Moving' : 'Abandoning'} files... This may take a moment.`, 'info');
 
         const response = await fetch(url, {
             method: 'PUT',
@@ -661,15 +669,15 @@ async function retryPathUpdate(pathId, pathData, migrationAction) {
 
         if (response.ok) {
             const path = await response.json();
-            showFlashMessage(`Path updated successfully! Files were ${migrationAction === 'move' ? 'moved to new location' : 'left in old location'}.`, 'success');
+            showNotification(`Path updated successfully! Files were ${migrationAction === 'move' ? 'moved to new location' : 'left in old location'}.`, 'success');
             window.location.href = `/paths/${path.id}`;
         } else {
             const error = await response.json();
-            showFlashMessage(error.detail || 'Failed to update path after confirmation', 'danger');
+            showNotification(error.detail || 'Failed to update path after confirmation', 'error');
         }
     } catch (error) {
         console.error('Error retrying path update:', error);
-        showFlashMessage(`Error updating path: ${error.message}`, 'danger');
+        showNotification(`Error updating path: ${error.message}`, 'error');
     }
 }
 
@@ -706,7 +714,7 @@ function setupPathForm() {
 
             if (response.ok) {
                 const path = await response.json();
-                showFlashMessage(`Path ${pathId ? 'updated' : 'created'} successfully`);
+                showNotification(`Path ${pathId ? 'updated' : 'created'} successfully`);
                 window.location.href = `/paths/${path.id}`;
             } else if (response.status === 409) {
                 // Cold storage path change detected - show confirmation dialog
@@ -714,15 +722,15 @@ function setupPathForm() {
                 if (errorData.detail && errorData.detail.error === 'cold_storage_path_has_files') {
                     await handleColdStoragePathChange(errorData.detail, pathId, pathData);
                 } else {
-                    showFlashMessage(errorData.detail || 'Conflict error', 'danger');
+                    showNotification(errorData.detail || 'Conflict error', 'error');
                 }
             } else {
                 const error = await response.json();
-                showFlashMessage(error.detail || `Failed to ${pathId ? 'update' : 'create'} path`, 'danger');
+                showNotification(error.detail || `Failed to ${pathId ? 'update' : 'create'} path`, 'error');
             }
         } catch (error) {
             console.error('Error saving path:', error);
-            showFlashMessage(`Error saving path: ${error.message}`, 'danger');
+            showNotification(`Error saving path: ${error.message}`, 'error');
         }
     });
 }
@@ -746,7 +754,7 @@ function setupCriteriaForm() {
         const pathId = form.dataset.pathId;
         
         if (!pathId) {
-            showFlashMessage('Path ID is required', 'danger');
+            showNotification('Path ID is required', 'error');
             return;
         }
         
@@ -763,15 +771,15 @@ function setupCriteriaForm() {
             });
             
             if (response.ok) {
-                showFlashMessage(`Criterion ${criteriaId ? 'updated' : 'created'} successfully`);
+                showNotification(`Criterion ${criteriaId ? 'updated' : 'created'} successfully`);
                 window.location.href = `/paths/${pathId}`;
             } else {
                 const error = await response.json();
-                showFlashMessage(error.detail || `Failed to ${criteriaId ? 'update' : 'create'} criterion`, 'danger');
+                showNotification(error.detail || `Failed to ${criteriaId ? 'update' : 'create'} criterion`, 'error');
             }
         } catch (error) {
             console.error('Error saving criterion:', error);
-            showFlashMessage(`Error saving criterion: ${error.message}`, 'danger');
+            showNotification(`Error saving criterion: ${error.message}`, 'error');
         }
     });
 }
@@ -831,7 +839,7 @@ async function loadPathForEdit(pathId) {
         if (form) form.dataset.pathId = pathId;
     } catch (error) {
         console.error('Error loading path for edit:', error);
-        showFlashMessage(`Failed to load path: ${error.message}`, 'danger');
+        showNotification(`Failed to load path: ${error.message}`, 'error');
     }
 }
 
@@ -859,7 +867,7 @@ async function loadPathForCriteriaForm(pathId) {
         if (cancelLink) cancelLink.href = `/paths/${pathId}`;
     } catch (error) {
         console.error('Error loading path for criteria form:', error);
-        showFlashMessage(`Failed to load path: ${error.message}`, 'danger');
+        showNotification(`Failed to load path: ${error.message}`, 'error');
     }
 }
 
@@ -905,7 +913,7 @@ async function loadCriteriaForEdit(criteriaId) {
         if (typeSelect) typeSelect.dispatchEvent(new Event('change'));
     } catch (error) {
         console.error('Error loading criterion for edit:', error);
-        showFlashMessage(`Failed to load criterion: ${error.message}`, 'danger');
+        showNotification(`Failed to load criterion: ${error.message}`, 'error');
     }
 }
 

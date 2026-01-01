@@ -26,20 +26,9 @@ function formatDate(dateString) {
     return date.toLocaleString();
 }
 
-function showFlashMessage(message, category = 'success') {
-    const flashContainer = document.querySelector('main.container-fluid');
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${category} alert-dismissible fade show`;
-    alertDiv.setAttribute('role', 'alert');
-    alertDiv.innerHTML = `
-        ${escapeHtml(message)}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    `;
-    flashContainer.prepend(alertDiv);
-    setTimeout(() => {
-        const alert = bootstrap.Alert.getInstance(alertDiv);
-        if (alert) alert.close();
-    }, 5000);
+// Notification function - uses toast notifications from app.js
+function showNotification(message, type = 'success') {
+    showToast(message, type);
 }
 
 // Sorting functions
@@ -177,7 +166,7 @@ async function loadFilesList(pathId = null, storageType = null) {
         }
     } catch (error) {
         console.error('Error loading files:', error);
-        showFlashMessage(`Failed to load files: ${error.message}`, 'danger');
+        showNotification(`Failed to load files: ${error.message}`, 'error');
         if (emptyEl) emptyEl.style.display = 'block';
     } finally {
         if (loadingEl) loadingEl.style.display = 'none';
@@ -220,7 +209,7 @@ async function loadPathsForFilter() {
         }
     } catch (error) {
         console.error('Error loading paths for filter:', error);
-        showFlashMessage(`Failed to load paths: ${error.message}`, 'danger');
+        showNotification(`Failed to load paths: ${error.message}`, 'error');
     }
 }
 
@@ -268,7 +257,7 @@ async function thawFile() {
         }
 
         const data = await response.json();
-        showFlashMessage('File thawed successfully' + (pin ? ' and pinned' : ''));
+        showNotification('File thawed successfully' + (pin ? ' and pinned' : ''));
 
         // Close modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('thawModal'));
@@ -280,7 +269,7 @@ async function thawFile() {
         loadFilesList(pathId);
     } catch (error) {
         console.error('Error thawing file:', error);
-        showFlashMessage(`Error thawing file: ${error.message}`, 'danger');
+        showNotification(`Error thawing file: ${error.message}`, 'error');
     }
 }
 
@@ -301,12 +290,12 @@ async function cleanupMissingFiles() {
 
         const data = await response.json();
         const message = `Cleanup complete: checked ${data.checked} files, removed ${data.removed} missing file records`;
-        showFlashMessage(message);
+        showNotification(message);
 
         loadFilesList(pathId, storageType);
     } catch (error) {
         console.error('Error cleaning up missing files:', error);
-        showFlashMessage(`Failed to cleanup missing files: ${error.message}`, 'danger');
+        showNotification(`Failed to cleanup missing files: ${error.message}`, 'error');
     }
 }
 
@@ -326,12 +315,12 @@ async function cleanupDuplicates() {
 
         const data = await response.json();
         const message = `Duplicate cleanup complete: checked ${data.checked} files, removed ${data.removed} duplicate records`;
-        showFlashMessage(message);
+        showNotification(message);
 
         loadFilesList(pathId, storageType);
     } catch (error) {
         console.error('Error cleaning up duplicates:', error);
-        showFlashMessage(`Failed to cleanup duplicates: ${error.message}`, 'danger');
+        showNotification(`Failed to cleanup duplicates: ${error.message}`, 'error');
     }
 }
 
