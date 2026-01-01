@@ -43,5 +43,4 @@ USER filefridge
 
 EXPOSE 8000
 
-# Entry point (change 'main.py' to your entry point)
-CMD ["python", "main.py"]
+CMD ["python", "app/main.py"]
