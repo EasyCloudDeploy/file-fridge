@@ -1,0 +1,71 @@
+version: '3.8'
+
+services:
+  file-fridge:
+    image: martinoj2009/file-fridge:latest
+    container_name: file-fridge
+    restart: unless-stopped
+
+    ports:
+      - "8000:8000"
+
+    environment:
+      # Database configuration
+      - DATABASE_PATH=./data/file_fridge.db
+
+      # Logging
+      - LOG_LEVEL=INFO
+
+      # You can set the app name for branding
+      # TODO: update the UI with their branding
+      - APP_NAME=File Fridge
+
+      # File handling
+      - MAX_FILE_SIZE_MB=10240
+      - DEFAULT_CHECK_INTERVAL=3600
+
+      # Network mount settings (set to true if monitoring network mounts)
+      - ALLOW_ATIME_OVER_NETWORK_MOUNTS=false
+
+      # Path translation for symlinks (only needed for symlink operations)
+      # Uncomment if hot/cold storage is mounted from host filesystem
+      # and you're using the "move and symlink" operation type
+      # - CONTAINER_PATH_PREFIX=/data
+      # - HOST_PATH_PREFIX=/mnt/data
+
+    volumes:
+      # Database persistence
+      - ./data:/app/data
+
+      # Example volume mounts for hot storage (source paths to monitor)
+      # Customize these paths based on your needs
+      - ./hot-storage:/hot-storage
+
+      # Example volume mounts for cold storage (destination paths)
+      # Customize these paths based on your needs
+      - ./cold-storage:/cold-storage
+
+      # Additional example mounts (uncomment and modify as needed):
+      # - /path/to/your/logs:/logs
+      # - /path/to/your/media:/media
+      # - /mnt/nas/hot:/mnt/hot
+      # - /mnt/nas/cold:/mnt/cold
+
+    # Optional: Run as specific user/group (uncomment if needed)
+    # user: "1000:1000"
+
+    # Optional: Resource limits (uncomment if needed)
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '2'
+    #       memory: 2G
+    #     reservations:
+    #       cpus: '0.5'
+    #       memory: 512M
+
+# Optional: Create named volumes instead of bind mounts
+# volumes:
+#   file-fridge-data:
+#   hot-storage:
+#   cold-storage:

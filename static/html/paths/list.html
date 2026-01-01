@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Paths - <span id="app-name-title">File Fridge</span></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-snow"></i> <span id="app-name-navbar">File Fridge</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/paths">
+                            <i class="bi bi-folder"></i> Paths
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/files">
+                            <i class="bi bi-file-earmark"></i> Files
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/stats">
+                            <i class="bi bi-graph-up"></i> Statistics
+                        </a>
+                    </li>
+                </ul>
+                <div class="d-flex align-items-center">
+                    <span class="badge bg-light text-dark">
+                        <i class="bi bi-thermometer-snow"></i> <span id="app-version">Loading...</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h1>
+                        <i class="bi bi-folder"></i> Monitored Paths
+                    </h1>
+                    <a href="/paths/new" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> Add Path
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <div id="paths-loading" class="text-center py-5">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading paths...</span>
+                            </div>
+                            <p class="text-muted mt-3">Loading paths...</p>
+                        </div>
+                        <div id="paths-content" style="display: none;">
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="pathsTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Source Path</th>
+                                            <th>Cold Storage</th>
+                                            <th>Operation</th>
+                                            <th>Interval</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Paths will be loaded here by JavaScript -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div id="no-paths-message" class="text-center py-5" style="display: none;">
+                            <i class="bi bi-folder-x display-1 text-muted"></i>
+                            <p class="text-muted mt-3">No monitored paths configured yet.</p>
+                            <a href="/paths/new" class="btn btn-primary">
+                                <i class="bi bi-plus-circle"></i> Add Your First Path
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="mt-5 py-3 bg-light text-center">
+        <div class="container">
+            <small class="text-muted"><span id="app-name-footer">File Fridge</span> v<span id="footer-app-version">Loading...</span> - File Cold Storage Management</small>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/paths.js"></script>
+    <script>
+        // Load app information on page load
+        document.addEventListener('DOMContentLoaded', loadAppInfo);
+    </script>
+</body>
+</html>
+
