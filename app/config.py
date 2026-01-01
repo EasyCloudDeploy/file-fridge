@@ -1,7 +1,11 @@
 """Application configuration."""
 from pydantic_settings import BaseSettings
 from typing import Optional
-from os import environ
+from os import environ, path
+from io import TextIOWrapper
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -15,16 +19,23 @@ class Settings(BaseSettings):
     
     # Application
     log_level: str = "INFO"  # Can be overridden via LOG_LEVEL environment variable
+    log_file_path: Optional[str] = None  # Optional file path for logging
     max_file_size_mb: int = 10240
     default_check_interval: int = 3600
     
     # UI
     app_name: str = "File Fridge"
-    app_version: str = "1.0.0"
+    app_version: str = "0.0.0"
+
+    f: TextIOWrapper = None
+    if path.exists("VERSION"):
+        try:
+            with open("VERSION", "r") as f:
+                app_version = f.read().strip()
+        except Exception as e:
+            logging.exception(f"Error reading VERSION file: {e}")
     
-    # Session
-    secret_key: str = "file-fridge-secret-key-change-in-production"
-    
+
     class Config:
         env_file = ".env"
         case_sensitive = False

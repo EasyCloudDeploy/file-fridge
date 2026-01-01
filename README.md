@@ -21,7 +21,37 @@ File Fridge is a full-stack Python application for managing file cold storage. I
 
 ## Installation
 
-### Using uv (Recommended)
+### Using Docker (Recommended for Production)
+
+The easiest way to run File Fridge is with Docker:
+
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd file-fridge
+```
+
+2. Create necessary directories:
+```bash
+mkdir -p data hot-storage cold-storage
+```
+
+3. (Optional) Configure environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your settings
+```
+
+4. Start with Docker Compose:
+```bash
+docker-compose up -d
+```
+
+5. Access the web interface at `http://localhost:8000`
+
+For detailed Docker documentation, see [DOCKER.md](DOCKER.md).
+
+### Using uv (Recommended for Development)
 
 1. Install `uv` if you haven't already:
 ```bash
@@ -48,20 +78,18 @@ You can set configuration via environment variables:
 ```bash
 export LOG_LEVEL=DEBUG
 export DATABASE_URL=sqlite:///./file_fridge.db
-export SECRET_KEY=your-secret-key-here
 ```
 
 Or create a `.env` file in the project root:
 ```bash
 LOG_LEVEL=INFO
 DATABASE_URL=sqlite:///./file_fridge.db
-SECRET_KEY=your-secret-key-here
 ```
 
 Available environment variables:
 - `LOG_LEVEL`: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL). Default: INFO
+- `LOG_FILE_PATH`: Optional path to log file. If not set, logs only to stdout. Default: None
 - `DATABASE_URL`: SQLite database URL. Default: sqlite:///./file_fridge.db
-- `SECRET_KEY`: Secret key for session management. Default: file-fridge-secret-key-change-in-production
 
 ### Using pip (Alternative)
 
@@ -249,9 +277,8 @@ file-fridge/
 │   ├── models.py            # SQLAlchemy models
 │   ├── schemas.py           # Pydantic schemas
 │   ├── services/            # Core services
-│   ├── routers/             # API and web routes
-│   └── templates/           # HTML templates
-├── static/                  # Static files (CSS, JS)
+│   └── routers/             # API and web routes
+├── static/                  # Static files (CSS, JS, HTML)
 ├── requirements.txt         # Python dependencies
 └── README.md               # This file
 ```
