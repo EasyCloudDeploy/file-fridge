@@ -1,6 +1,15 @@
 // Paths management JavaScript - client-side rendering
 const API_BASE_URL = '/api/v1';
 
+function formatBytes(bytes, decimals = 2) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const dm = decimals < 0 ? 0 : decimals;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
 // Progress polling state
 let progressPollingInterval = null;
 let currentPathId = null;
@@ -107,9 +116,10 @@ async function loadPathDetail(pathId) {
     if (errorEl) errorEl.style.display = 'none';
     
     try {
-        const [pathResponse, criteriaResponse] = await Promise.all([
+        const [pathResponse, criteriaResponse, storageResponse] = await Promise.all([
             fetch(`${API_BASE_URL}/paths/${pathId}`),
-            fetch(`${API_BASE_URL}/criteria/path/${pathId}`)
+            fetch(`${API_BASE_URL}/criteria/path/${pathId}`),
+            fetch(`${API_BASE_URL}/storage/stats`)
         ]);
         
         if (!pathResponse.ok) {
@@ -122,6 +132,7 @@ async function loadPathDetail(pathId) {
         
         const path = await pathResponse.json();
         const criteria = await criteriaResponse.ok ? await criteriaResponse.json() : [];
+        const storageStats = await storageResponse.ok ? await storageResponse.json() : [];
         
         // Update page title
         document.title = `${path.name} - File Fridge`;
@@ -211,6 +222,44 @@ async function loadPathDetail(pathId) {
                     <td>${new Date(path.created_at).toLocaleString()}</td>
                 </tr>
             `;
+        }
+        
+        // Render storage status
+        const storageCardBody = document.getElementById('storage-status-card');
+        if (storageCardBody) {
+            const relevantStat = storageStats.find(s => path.cold_storage_path.startsWith(s.path));
+            if (relevantStat) {
+                if (relevantStat.error) {
+                    storageCardBody.innerHTML = `
+                        <div class="alert alert-danger">
+                            <strong>Error:</strong> ${escapeHtml(relevantStat.error)}
+                        </div>`;
+                } else {
+                    const usedPercent = (relevantStat.used_bytes / relevantStat.total_bytes) * 100;
+                    let progressBarClass = 'bg-success';
+                    if (usedPercent > 70) {
+                        progressBarClass = 'bg-danger';
+                    } else if (usedPercent > 50) {
+                        progressBarClass = 'bg-warning';
+                    }
+                    storageCardBody.innerHTML = `
+                        <div>
+                            <strong>${escapeHtml(relevantStat.path)}</strong>
+                            <div class="progress mt-2" style="height: 20px;">
+                                <div class="progress-bar ${progressBarClass}" role="progressbar" style="width: ${usedPercent.toFixed(2)}%;" aria-valuenow="${usedPercent.toFixed(2)}" aria-valuemin="0" aria-valuemax="100">
+                                    ${usedPercent.toFixed(2)}%
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-between text-muted small mt-1">
+                                <span>Used: ${formatBytes(relevantStat.used_bytes)}</span>
+                                <span>Free: ${formatBytes(relevantStat.free_bytes)}</span>
+                                <span>Total: ${formatBytes(relevantStat.total_bytes)}</span>
+                            </div>
+                        </div>`;
+                }
+            } else {
+                storageCardBody.innerHTML = '<p class="text-muted">Storage stats not available for this path.</p>';
+            }
         }
         
         // Render criteria

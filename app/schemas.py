@@ -206,6 +206,15 @@ class ScanResult(BaseModel):
     errors: List[str] = []
 
 
+class StorageStats(BaseModel):
+    """Schema for storage volume statistics."""
+    path: str
+    total_bytes: int
+    used_bytes: int
+    free_bytes: int
+    error: Optional[str] = None
+
+
 class PaginatedFileInventory(BaseModel):
     """Paginated file inventory response."""
     items: List["FileInventory"]
