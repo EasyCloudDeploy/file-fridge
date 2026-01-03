@@ -54,7 +54,7 @@ docker-compose up -d
 
 For detailed Docker documentation, see [DOCKER.md](DOCKER.md).
 
-### Using uv (Recommended for Development)
+### Using uv
 
 1. Install `uv` if you haven't already:
 ```bash
@@ -273,50 +273,35 @@ See `docs/ATIME_VERIFICATION.md` for a script to verify atime behavior on your f
 - **copy**: Copy file to cold storage (keep original)
 - **symlink**: Move file and create symlink at original location
 
-## Project Structure
-
-```
-file-fridge/
-├── app/
-│   ├── main.py              # Application entry point
-│   ├── config.py            # Configuration
-│   ├── database.py          # Database setup
-│   ├── models.py            # SQLAlchemy models
-│   ├── schemas.py           # Pydantic schemas
-│   ├── services/            # Core services
-│   └── routers/             # API and web routes
-├── static/                  # Static files (CSS, JS, HTML)
-├── requirements.txt         # Python dependencies
-└── README.md               # This file
-```
-
 ## Security Considerations
 
 - The application does not include authentication by default (assumes trusted network)
 - All path inputs are validated to prevent directory traversal
 - File operations respect system permissions
-- Consider adding authentication for production use
+- Consider adding authentication for production use (reverse proxy with authentication recommended)
+- Run the application with appropriate user permissions (avoid running as root)
 
-## Development
+## Troubleshooting
 
-### Running Tests
+### Common Issues
 
-```bash
-# Add tests to tests/ directory
-pytest
-```
+**Files not being moved:**
+- Verify criteria are configured correctly
+- Check that the path is enabled
+- Ensure scan interval is appropriate for your criteria thresholds
+- Review logs for errors
 
-### Database Migrations
+**Permission errors:**
+- Ensure the application has read/write access to both source and cold storage paths
+- Check file ownership and permissions
 
-The application uses SQLAlchemy with automatic table creation. For production, consider using Alembic for migrations.
+**Database locked errors:**
+- SQLite may have limitations with concurrent access
+- Ensure only one instance of the application is running
 
 ## License
 
 Apache License 2.0 - See LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.
 
 ## Support
 
