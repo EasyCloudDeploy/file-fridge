@@ -1,58 +1,167 @@
 """API routes for file management."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, and_
 from typing import List, Optional
 from pathlib import Path
+from datetime import datetime
 from starlette.concurrency import run_in_threadpool
 from app.database import get_db
-from app.models import FileRecord, MonitoredPath, FileInventory, StorageType
-from app.schemas import FileInventory as FileInventorySchema, FileMoveRequest, StorageType
+from app.models import FileRecord, MonitoredPath, FileInventory, StorageType, FileStatus
+from app.schemas import FileInventory as FileInventorySchema, FileMoveRequest, StorageType as StorageTypeSchema, PaginatedFileInventory
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
 from app.models import OperationType
+import math
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 
 
-@router.get("", response_model=List[FileInventorySchema])
+@router.get("", response_model=PaginatedFileInventory)
 async def list_files(
-    path_id: Optional[int] = None,
-    storage_type: Optional[StorageType] = None,
-    skip: int = 0,
-    limit: int = 100,
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(50, ge=1, le=500, description="Items per page (max 500)"),
+    path_id: Optional[int] = Query(None, description="Filter by monitored path ID"),
+    storage_type: Optional[StorageTypeSchema] = Query(None, description="Filter by storage type (hot/cold)"),
+    status: Optional[str] = Query(None, description="Filter by file status"),
+    search: Optional[str] = Query(None, description="Search in file path"),
+    extension: Optional[str] = Query(None, description="Filter by file extension (e.g., .pdf, .jpg)"),
+    mime_type: Optional[str] = Query(None, description="Filter by MIME type"),
+    has_checksum: Optional[bool] = Query(None, description="Filter files with/without checksum"),
+    tag_ids: Optional[str] = Query(None, description="Filter by tag IDs (comma-separated)"),
+    sort_by: str = Query("last_seen", description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)"),
+    sort_order: str = Query("desc", description="Sort order (asc/desc)"),
     db: Session = Depends(get_db)
 ):
-    """List files in inventory."""
-    # Enforce reasonable limits to prevent overwhelming the database
-    limit = min(limit, 500)  # Max 500 files per request
-    skip = max(skip, 0)      # Ensure non-negative skip
+    """
+    List files in inventory with pagination, search, and filtering.
+
+    Supports:
+    - Pagination with page and page_size
+    - Filtering by path, storage type, status, extension, MIME type, and tags
+    - Search by filename/path
+    - Sorting by multiple fields
+    """
+    # Parse tag IDs if provided
+    tag_id_list = None
+    if tag_ids:
+        try:
+            tag_id_list = [int(tid.strip()) for tid in tag_ids.split(',') if tid.strip()]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid tag_ids format. Must be comma-separated integers."
+            )
 
     # Run database query in thread pool to avoid blocking the event loop
-    files = await run_in_threadpool(_query_files_inventory, db, path_id, storage_type, skip, limit)
-    return files
+    result = await run_in_threadpool(
+        _query_files_inventory_paginated,
+        db, page, page_size, path_id, storage_type, status, search,
+        extension, mime_type, has_checksum, tag_id_list, sort_by, sort_order
+    )
+    return result
 
 
-def _query_files_inventory(
+def _query_files_inventory_paginated(
     db: Session,
+    page: int,
+    page_size: int,
     path_id: Optional[int],
-    storage_type: Optional[StorageType],
-    skip: int,
-    limit: int
-) -> List[FileInventory]:
-    """Query files inventory (runs in thread pool)."""
+    storage_type: Optional[StorageTypeSchema],
+    status: Optional[str],
+    search: Optional[str],
+    extension: Optional[str],
+    mime_type: Optional[str],
+    has_checksum: Optional[bool],
+    tag_ids: Optional[List[int]],
+    sort_by: str,
+    sort_order: str
+) -> PaginatedFileInventory:
+    """Query files inventory with pagination (runs in thread pool)."""
+    from app.models import FileTag, Tag
+
+    # Build base query
     query = db.query(FileInventory)
 
+    # Apply filters
     if path_id:
         query = query.filter(FileInventory.path_id == path_id)
 
     if storage_type:
         query = query.filter(FileInventory.storage_type == storage_type)
 
-    # Only show active files by default for better performance
-    query = query.filter(FileInventory.status == "active")
+    if status:
+        query = query.filter(FileInventory.status == status)
+    else:
+        # Only show active files by default for better performance
+        query = query.filter(FileInventory.status == FileStatus.ACTIVE)
 
-    files = query.order_by(FileInventory.last_seen.desc()).offset(skip).limit(limit).all()
-    return files
+    # Search filter (case-insensitive partial match on file_path)
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(FileInventory.file_path.ilike(search_pattern))
+
+    # Extension filter
+    if extension:
+        # Ensure extension starts with dot
+        ext = extension if extension.startswith('.') else f'.{extension}'
+        query = query.filter(FileInventory.file_extension == ext.lower())
+
+    # MIME type filter
+    if mime_type:
+        query = query.filter(FileInventory.mime_type.ilike(f"%{mime_type}%"))
+
+    # Checksum filter
+    if has_checksum is not None:
+        if has_checksum:
+            query = query.filter(FileInventory.checksum.isnot(None))
+        else:
+            query = query.filter(FileInventory.checksum.is_(None))
+
+    # Tag filter
+    if tag_ids:
+        # Files that have ANY of the specified tags
+        query = query.join(FileInventory.tags).filter(
+            FileTag.tag_id.in_(tag_ids)
+        ).distinct()
+
+    # Get total count before pagination
+    total_count = query.count()
+
+    # Apply sorting
+    valid_sort_fields = {
+        "file_path": FileInventory.file_path,
+        "file_size": FileInventory.file_size,
+        "last_seen": FileInventory.last_seen,
+        "storage_type": FileInventory.storage_type,
+        "file_mtime": FileInventory.file_mtime,
+        "file_atime": FileInventory.file_atime,
+        "file_extension": FileInventory.file_extension
+    }
+
+    sort_field = valid_sort_fields.get(sort_by, FileInventory.last_seen)
+
+    if sort_order.lower() == "asc":
+        query = query.order_by(sort_field.asc())
+    else:
+        query = query.order_by(sort_field.desc())
+
+    # Calculate pagination
+    skip = (page - 1) * page_size
+    total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+
+    # Execute query with pagination
+    files = query.offset(skip).limit(page_size).all()
+
+    return PaginatedFileInventory(
+        items=files,
+        total=total_count,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        has_next=page < total_pages,
+        has_prev=page > 1
+    )
 
 
 @router.post("/move", status_code=status.HTTP_202_ACCEPTED)
@@ -255,5 +364,58 @@ def _thaw_file_operation(db: Session, inventory_id: int, pin: bool) -> dict:
         "message": f"File thawed successfully{' and pinned' if pin else ''}",
         "inventory_id": inventory_id,
         "pinned": pin
+    }
+
+
+@router.post("/metadata/backfill", status_code=status.HTTP_200_OK)
+async def backfill_metadata(
+    path_id: Optional[int] = None,
+    batch_size: int = Query(100, ge=1, le=1000, description="Files to process per batch"),
+    compute_checksum: bool = Query(True, description="Whether to compute file checksums"),
+    db: Session = Depends(get_db)
+):
+    """
+    Backfill metadata (extension, MIME type, checksum) for existing files.
+
+    This endpoint processes files in batches for scalability.
+    - If path_id is provided, only files from that path are processed
+    - If path_id is None, all files in inventory are processed
+    - Batch processing prevents memory issues with large file counts
+    - Progress is logged and committed after each batch
+    """
+    result = await run_in_threadpool(
+        _backfill_metadata_operation,
+        db, path_id, batch_size, compute_checksum
+    )
+    return result
+
+
+def _backfill_metadata_operation(
+    db: Session,
+    path_id: Optional[int],
+    batch_size: int,
+    compute_checksum: bool
+) -> dict:
+    """Backfill metadata operation (runs in thread pool)."""
+    from app.services.metadata_backfill import MetadataBackfillService
+
+    service = MetadataBackfillService(db)
+
+    if path_id:
+        result = service.backfill_path(
+            path_id=path_id,
+            batch_size=batch_size,
+            compute_checksum=compute_checksum
+        )
+    else:
+        result = service.backfill_all(
+            batch_size=batch_size,
+            compute_checksum=compute_checksum
+        )
+
+    return {
+        "success": True,
+        "message": "Metadata backfill completed",
+        **result
     }
 

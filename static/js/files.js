@@ -1,10 +1,17 @@
 // Files browser JavaScript - client-side rendering
 const API_BASE_URL = '/api/v1';
 
-// Sorting state
-let currentFiles = [];
-let currentSortColumn = 'file_path';
-let currentSortDirection = 'asc';
+// Pagination and filter state
+let currentPage = 1;
+let currentPageSize = 50;
+let currentSearch = '';
+let currentPathId = null;
+let currentStorageType = null;
+let currentTagIds = [];
+let currentSortBy = 'last_seen';
+let currentSortOrder = 'desc';
+let totalPages = 1;
+let totalItems = 0;
 
 // Utility functions
 function escapeHtml(text) {
@@ -31,37 +38,20 @@ function showNotification(message, type = 'success') {
     showToast(message, type);
 }
 
-// Sorting functions
-function sortFiles(column, direction) {
-    currentSortColumn = column;
-    currentSortDirection = direction;
+// Sorting functions (server-side sorting now)
+function handleSortClick(column) {
+    if (currentSortBy === column) {
+        // Toggle direction
+        currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        // New column, default to descending
+        currentSortBy = column;
+        currentSortOrder = 'desc';
+    }
 
-    currentFiles.sort((a, b) => {
-        let aVal = a[column];
-        let bVal = b[column];
-
-        // Handle null/undefined values
-        if (aVal === null || aVal === undefined) aVal = '';
-        if (bVal === null || bVal === undefined) bVal = '';
-
-        // Convert dates to timestamps for comparison
-        if (column === 'file_mtime' || column === 'file_atime' || column === 'file_ctime' || column === 'last_seen') {
-            aVal = aVal ? new Date(aVal).getTime() : 0;
-            bVal = bVal ? new Date(bVal).getTime() : 0;
-        }
-
-        // Compare values
-        let comparison = 0;
-        if (typeof aVal === 'string' && typeof bVal === 'string') {
-            comparison = aVal.toLowerCase().localeCompare(bVal.toLowerCase());
-        } else {
-            comparison = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
-        }
-
-        return direction === 'asc' ? comparison : -comparison;
-    });
-
-    updateSortIndicators();
+    // Reset to page 1 when sorting changes
+    currentPage = 1;
+    loadFilesList();
 }
 
 function updateSortIndicators() {
@@ -71,32 +61,24 @@ function updateSortIndicators() {
     });
 
     // Add current sort class
-    const currentHeader = document.querySelector(`th[data-sort="${currentSortColumn}"]`);
+    const currentHeader = document.querySelector(`th[data-sort="${currentSortBy}"]`);
     if (currentHeader) {
-        currentHeader.classList.add(`sort-${currentSortDirection}`);
+        currentHeader.classList.add(`sort-${currentSortOrder}`);
     }
 }
 
-function handleSortClick(column) {
-    if (currentSortColumn === column) {
-        // Toggle direction
-        currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
-    } else {
-        // New column, default to ascending
-        currentSortDirection = 'asc';
-    }
-
-    sortFiles(column, currentSortDirection);
-    renderFilesTable();
-}
-
-function renderFilesTable() {
+function renderFilesTable(files) {
     const tableBody = document.querySelector('#filesTable tbody');
     if (!tableBody) return;
 
     tableBody.innerHTML = '';
 
-    currentFiles.forEach(file => {
+    if (!files || files.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No files found</td></tr>';
+        return;
+    }
+
+    files.forEach(file => {
         const row = tableBody.insertRow();
         const storageBadge = file.storage_type === 'hot'
             ? '<span class="badge bg-success">Hot Storage</span>'
@@ -113,6 +95,19 @@ function renderFilesTable() {
         const atime = file.file_atime ? formatDate(file.file_atime) : '<span class="text-muted">N/A</span>';
         const ctime = file.file_ctime ? formatDate(file.file_ctime) : '<span class="text-muted">N/A</span>';
 
+        // Render tags
+        let tagsHtml = '';
+        if (file.tags && file.tags.length > 0) {
+            tagsHtml = file.tags.map(ft => {
+                const color = ft.tag && ft.tag.color ? ft.tag.color : '#6c757d';
+                const name = ft.tag && ft.tag.name ? ft.tag.name : 'Unknown';
+                return `<span class="badge me-1" style="background-color: ${color};">${escapeHtml(name)}</span>`;
+            }).join('');
+        }
+        tagsHtml += `<button type="button" class="btn btn-sm btn-outline-primary" onclick="showManageTagsModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Manage tags">
+            <i class="bi bi-tags"></i>
+        </button>`;
+
         row.innerHTML = `
             <td><code>${escapeHtml(file.file_path)}</code></td>
             <td>${storageBadge}</td>
@@ -122,13 +117,80 @@ function renderFilesTable() {
             <td><small>${ctime}</small></td>
             <td><span class="badge bg-secondary">${escapeHtml(file.status)}</span></td>
             <td><small>${formatDate(file.last_seen)}</small></td>
+            <td>${tagsHtml}</td>
             <td>${actionButton}</td>
         `;
     });
 }
 
+function renderPagination() {
+    const paginationEl = document.getElementById('pagination-controls');
+    if (!paginationEl) return;
+
+    if (totalPages <= 1) {
+        paginationEl.innerHTML = '';
+        return;
+    }
+
+    let html = '<nav><ul class="pagination justify-content-center">';
+
+    // Previous button
+    html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">Previous</a>
+    </li>`;
+
+    // Page numbers
+    const maxPagesToShow = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
+    let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+
+    if (endPage - startPage < maxPagesToShow - 1) {
+        startPage = Math.max(1, endPage - maxPagesToShow + 1);
+    }
+
+    if (startPage > 1) {
+        html += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(1); return false;">1</a></li>`;
+        if (startPage > 2) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+            <a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>
+        </li>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+        html += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(${totalPages}); return false;">${totalPages}</a></li>`;
+    }
+
+    // Next button
+    html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">Next</a>
+    </li>`;
+
+    html += '</ul></nav>';
+
+    // Add page info
+    const start = (currentPage - 1) * currentPageSize + 1;
+    const end = Math.min(currentPage * currentPageSize, totalItems);
+    html += `<p class="text-center text-muted">Showing ${start}-${end} of ${totalItems} files</p>`;
+
+    paginationEl.innerHTML = html;
+}
+
+function changePage(newPage) {
+    if (newPage < 1 || newPage > totalPages || newPage === currentPage) return;
+    currentPage = newPage;
+    loadFilesList();
+}
+
 // Load and render files list
-async function loadFilesList(pathId = null, storageType = null) {
+async function loadFilesList() {
     const loadingEl = document.getElementById('files-loading');
     const contentEl = document.getElementById('files-content');
     const emptyEl = document.getElementById('no-files-message');
@@ -140,26 +202,44 @@ async function loadFilesList(pathId = null, storageType = null) {
     if (tableBody) tableBody.innerHTML = '';
 
     try {
-        let url = `${API_BASE_URL}/files?limit=100`;
-        if (pathId) {
-            url += `&path_id=${pathId}`;
+        // Build URL with all parameters
+        const params = new URLSearchParams({
+            page: currentPage,
+            page_size: currentPageSize,
+            sort_by: currentSortBy,
+            sort_order: currentSortOrder
+        });
+
+        if (currentPathId) {
+            params.append('path_id', currentPathId);
         }
-        if (storageType) {
-            url += `&storage_type=${storageType}`;
+        if (currentStorageType) {
+            params.append('storage_type', currentStorageType);
+        }
+        if (currentSearch) {
+            params.append('search', currentSearch);
+        }
+        if (currentTagIds.length > 0) {
+            params.append('tag_ids', currentTagIds.join(','));
         }
 
+        const url = `${API_BASE_URL}/files?${params.toString()}`;
         const response = await fetch(url);
+
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const files = await response.json();
 
-        // Store files for sorting
-        currentFiles = files;
+        const data = await response.json();
 
-        // Sort by default column
-        sortFiles(currentSortColumn, currentSortDirection);
-        renderFilesTable();
+        // Update pagination state
+        totalPages = data.total_pages;
+        totalItems = data.total;
 
-        if (files.length === 0) {
+        // Render table and pagination
+        renderFilesTable(data.items);
+        renderPagination();
+        updateSortIndicators();
+
+        if (data.items.length === 0) {
             if (emptyEl) emptyEl.style.display = 'block';
         } else {
             if (contentEl) contentEl.style.display = 'block';
@@ -171,6 +251,23 @@ async function loadFilesList(pathId = null, storageType = null) {
     } finally {
         if (loadingEl) loadingEl.style.display = 'none';
     }
+}
+
+// Search function
+function performSearch() {
+    const searchInput = document.getElementById('search_input');
+    currentSearch = searchInput ? searchInput.value.trim() : '';
+    currentPage = 1; // Reset to first page on search
+    loadFilesList();
+}
+
+// Clear search
+function clearSearch() {
+    const searchInput = document.getElementById('search_input');
+    if (searchInput) searchInput.value = '';
+    currentSearch = '';
+    currentPage = 1;
+    loadFilesList();
 }
 
 // Load paths for filter dropdown
@@ -217,11 +314,61 @@ async function loadPathsForFilter() {
 function updateFilters() {
     const pathSelect = document.getElementById('path_id_filter');
     const storageSelect = document.getElementById('storage_filter');
+    const tagSelect = document.getElementById('tag_filter');
 
-    const pathId = pathSelect ? pathSelect.value : null;
-    const storageType = storageSelect ? storageSelect.value : null;
+    currentPathId = pathSelect && pathSelect.value ? parseInt(pathSelect.value) : null;
+    currentStorageType = storageSelect && storageSelect.value ? storageSelect.value : null;
 
-    loadFilesList(pathId, storageType);
+    // Get selected tag IDs from multi-select
+    if (tagSelect) {
+        const selectedOptions = Array.from(tagSelect.selectedOptions);
+        currentTagIds = selectedOptions
+            .map(opt => opt.value)
+            .filter(val => val !== '') // Filter out "All Tags" option
+            .map(val => parseInt(val));
+    }
+
+    currentPage = 1; // Reset to first page on filter change
+    loadFilesList();
+}
+
+// Load tags for filter dropdown
+async function loadTagsForFilter() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const tags = await response.json();
+
+        const select = document.getElementById('tag_filter');
+        if (select) {
+            select.innerHTML = '<option value="">All Tags</option>' +
+                tags.map(tag => {
+                    const color = tag.color || '#6c757d';
+                    return `<option value="${tag.id}" style="background-color: ${color}20;">${escapeHtml(tag.name)} (${tag.file_count})</option>`;
+                }).join('');
+
+            // Add change event listener
+            select.addEventListener('change', function() {
+                updateFilters();
+            });
+        }
+    } catch (error) {
+        console.error('Error loading tags for filter:', error);
+        showNotification(`Failed to load tags: ${error.message}`, 'error');
+    }
+}
+
+// Clear tag filter
+function clearTagFilter() {
+    const tagSelect = document.getElementById('tag_filter');
+    if (tagSelect) {
+        tagSelect.selectedIndex = 0;
+        // Clear all selections
+        Array.from(tagSelect.options).forEach(opt => opt.selected = false);
+    }
+    currentTagIds = [];
+    currentPage = 1;
+    loadFilesList();
 }
 
 // Show thaw modal
@@ -264,9 +411,7 @@ async function thawFile() {
         if (modal) modal.hide();
 
         // Reload files
-        const urlParams = new URLSearchParams(window.location.search);
-        const pathId = urlParams.get('path_id');
-        loadFilesList(pathId);
+        loadFilesList();
     } catch (error) {
         console.error('Error thawing file:', error);
         showNotification(`Error thawing file: ${error.message}`, 'error');
@@ -275,14 +420,10 @@ async function thawFile() {
 
 // Cleanup actions
 async function cleanupMissingFiles() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const pathId = urlParams.get('path_id');
-    const storageType = urlParams.get('storage_type');
-
     try {
         let url = `${API_BASE_URL}/cleanup`;
-        if (pathId) {
-            url += `?path_id=${pathId}`;
+        if (currentPathId) {
+            url += `?path_id=${currentPathId}`;
         }
 
         const response = await fetch(url, { method: 'POST' });
@@ -292,7 +433,7 @@ async function cleanupMissingFiles() {
         const message = `Cleanup complete: checked ${data.checked} files, removed ${data.removed} missing file records`;
         showNotification(message);
 
-        loadFilesList(pathId, storageType);
+        loadFilesList();
     } catch (error) {
         console.error('Error cleaning up missing files:', error);
         showNotification(`Failed to cleanup missing files: ${error.message}`, 'error');
@@ -300,14 +441,10 @@ async function cleanupMissingFiles() {
 }
 
 async function cleanupDuplicates() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const pathId = urlParams.get('path_id');
-    const storageType = urlParams.get('storage_type');
-
     try {
         let url = `${API_BASE_URL}/cleanup/duplicates`;
-        if (pathId) {
-            url += `?path_id=${pathId}`;
+        if (currentPathId) {
+            url += `?path_id=${currentPathId}`;
         }
 
         const response = await fetch(url, { method: 'POST' });
@@ -317,7 +454,7 @@ async function cleanupDuplicates() {
         const message = `Duplicate cleanup complete: checked ${data.checked} files, removed ${data.removed} duplicate records`;
         showNotification(message);
 
-        loadFilesList(pathId, storageType);
+        loadFilesList();
     } catch (error) {
         console.error('Error cleaning up duplicates:', error);
         showNotification(`Failed to cleanup duplicates: ${error.message}`, 'error');
@@ -334,17 +471,255 @@ function setupSortHandlers() {
     });
 }
 
+// Tag Management Functions
+let currentFileId = null;
+let allAvailableTags = [];
+let manageTagsModal = null;
+
+// Load all available tags
+async function loadAvailableTags() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        allAvailableTags = await response.json();
+        return allAvailableTags;
+    } catch (error) {
+        console.error('Error loading tags:', error);
+        showNotification(`Failed to load tags: ${error.message}`, 'error');
+        return [];
+    }
+}
+
+// Show manage tags modal
+async function showManageTagsModal(fileId, filePath) {
+    currentFileId = fileId;
+
+    const modal = document.getElementById('manageTagsModal');
+    if (!modal) return;
+
+    // Update modal content
+    document.getElementById('tagFileName').textContent = filePath;
+
+    // Load available tags if not already loaded
+    if (allAvailableTags.length === 0) {
+        await loadAvailableTags();
+    }
+
+    // Populate tag select dropdown
+    const selectEl = document.getElementById('addTagSelect');
+    if (selectEl) {
+        selectEl.innerHTML = '<option value="">Select a tag...</option>' +
+            allAvailableTags.map(tag => `<option value="${tag.id}">${escapeHtml(tag.name)}</option>`).join('');
+    }
+
+    // Load current tags for this file
+    await loadFileTags(fileId);
+
+    // Show modal
+    if (!manageTagsModal) {
+        manageTagsModal = new bootstrap.Modal(modal);
+    }
+    manageTagsModal.show();
+}
+
+// Load tags for a specific file
+async function loadFileTags(fileId) {
+    const currentTagsEl = document.getElementById('currentTags');
+    if (!currentTagsEl) return;
+
+    currentTagsEl.innerHTML = '<span class="text-muted">Loading...</span>';
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags/files/${fileId}/tags`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const fileTags = await response.json();
+
+        if (fileTags.length === 0) {
+            currentTagsEl.innerHTML = '<span class="text-muted">No tags assigned</span>';
+        } else {
+            currentTagsEl.innerHTML = fileTags.map(ft => {
+                const color = ft.tag && ft.tag.color ? ft.tag.color : '#6c757d';
+                const name = ft.tag && ft.tag.name ? ft.tag.name : 'Unknown';
+                const tagId = ft.tag_id;
+                return `
+                    <span class="badge me-2 mb-2" style="background-color: ${color};">
+                        ${escapeHtml(name)}
+                        <button type="button" class="btn-close btn-close-white ms-2" style="font-size: 0.6rem;"
+                                onclick="removeTag(${fileId}, ${tagId})" title="Remove tag"></button>
+                    </span>
+                `;
+            }).join('');
+        }
+    } catch (error) {
+        console.error('Error loading file tags:', error);
+        currentTagsEl.innerHTML = '<span class="text-danger">Error loading tags</span>';
+        showNotification(`Failed to load file tags: ${error.message}`, 'error');
+    }
+}
+
+// Add tag to file
+async function addTagToFile() {
+    const selectEl = document.getElementById('addTagSelect');
+    const tagId = selectEl ? parseInt(selectEl.value) : null;
+
+    if (!tagId || !currentFileId) return;
+
+    const errorEl = document.getElementById('tagError');
+    const successEl = document.getElementById('tagSuccess');
+
+    // Clear previous messages
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('d-none');
+    }
+    if (successEl) {
+        successEl.textContent = '';
+        successEl.classList.add('d-none');
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags/files/${currentFileId}/tags`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                tag_id: tagId,
+                tagged_by: 'user'
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to add tag');
+        }
+
+        // Show success message
+        if (successEl) {
+            successEl.textContent = 'Tag added successfully';
+            successEl.classList.remove('d-none');
+        }
+
+        // Reset select
+        if (selectEl) selectEl.value = '';
+
+        // Reload tags for this file
+        await loadFileTags(currentFileId);
+
+        // Reload files list to update the table
+        loadFilesList();
+    } catch (error) {
+        console.error('Error adding tag:', error);
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('d-none');
+        }
+    }
+}
+
+// Remove tag from file
+async function removeTag(fileId, tagId) {
+    const errorEl = document.getElementById('tagError');
+    const successEl = document.getElementById('tagSuccess');
+
+    // Clear previous messages
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('d-none');
+    }
+    if (successEl) {
+        successEl.textContent = '';
+        successEl.classList.add('d-none');
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags/files/${fileId}/tags/${tagId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to remove tag');
+        }
+
+        // Show success message
+        if (successEl) {
+            successEl.textContent = 'Tag removed successfully';
+            successEl.classList.remove('d-none');
+        }
+
+        // Reload tags for this file
+        await loadFileTags(fileId);
+
+        // Reload files list to update the table
+        loadFilesList();
+    } catch (error) {
+        console.error('Error removing tag:', error);
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('d-none');
+        }
+    }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     const urlParams = new URLSearchParams(window.location.search);
-    const pathId = urlParams.get('path_id');
-    const storageType = urlParams.get('storage_type');
+    currentPathId = urlParams.get('path_id') ? parseInt(urlParams.get('path_id')) : null;
+    currentStorageType = urlParams.get('storage_type') || null;
 
-    loadFilesList(pathId, storageType);
+    loadFilesList();
     loadPathsForFilter();
+    loadTagsForFilter();
     setupSortHandlers();
 
     // Setup event handlers
-    document.getElementById('confirmThawBtn').addEventListener('click', thawFile);
+    const confirmBtn = document.getElementById('confirmThawBtn');
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', thawFile);
+    }
+
+    // Setup search
+    const searchInput = document.getElementById('search_input');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+    }
+
+    const searchBtn = document.getElementById('search_btn');
+    if (searchBtn) {
+        searchBtn.addEventListener('click', performSearch);
+    }
+
+    const clearBtn = document.getElementById('clear_search_btn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearSearch);
+    }
+
+    // Setup tag management
+    const addTagSelect = document.getElementById('addTagSelect');
+    if (addTagSelect) {
+        addTagSelect.addEventListener('change', function() {
+            const addTagBtn = document.getElementById('addTagBtn');
+            if (addTagBtn) {
+                addTagBtn.disabled = !this.value;
+            }
+        });
+    }
+
+    const addTagBtn = document.getElementById('addTagBtn');
+    if (addTagBtn) {
+        addTagBtn.addEventListener('click', addTagToFile);
+    }
+
+    // Setup clear tag filter
+    const clearTagFilterBtn = document.getElementById('clear_tag_filter_btn');
+    if (clearTagFilterBtn) {
+        clearTagFilterBtn.addEventListener('click', clearTagFilter);
+    }
 });
 

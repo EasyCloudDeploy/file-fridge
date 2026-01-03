@@ -5,8 +5,9 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import init_db
-from app.routers.api import paths as api_paths, criteria as api_criteria, files as api_files, stats as api_stats, cleanup as api_cleanup
-from app.routers.web import dashboard, paths as web_paths, files as web_files, stats as web_stats, criteria as web_criteria, thaw as web_thaw, cleanup as web_cleanup
+from app.database_migrations import run_startup_migrations
+from app.routers.api import paths as api_paths, criteria as api_criteria, files as api_files, stats as api_stats, cleanup as api_cleanup, tags as api_tags, tag_rules as api_tag_rules
+from app.routers.web import dashboard, paths as web_paths, files as web_files, stats as web_stats, criteria as web_criteria, thaw as web_thaw, cleanup as web_cleanup, tags as web_tags
 from app.services.scheduler import scheduler_service
 
 # Configure logging
@@ -31,12 +32,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Initializing database...")
     init_db()
-    
+
+    logger.info("Running database migrations...")
+    run_startup_migrations()
+
     logger.info("Starting scheduler...")
     scheduler_service.start()
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Stopping scheduler...")
     scheduler_service.stop()
@@ -53,12 +57,14 @@ app = FastAPI(
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Include routers
+# Include API routers
 app.include_router(api_paths.router)
 app.include_router(api_criteria.router)
 app.include_router(api_files.router)
 app.include_router(api_stats.router)
 app.include_router(api_cleanup.router)
+app.include_router(api_tags.router)
+app.include_router(api_tag_rules.router)
 
 app.include_router(dashboard.router)
 app.include_router(web_paths.router)
@@ -67,6 +73,7 @@ app.include_router(web_stats.router)
 app.include_router(web_criteria.router)
 app.include_router(web_thaw.router)
 app.include_router(web_cleanup.router)
+app.include_router(web_tags.router)
 
 
 @app.get("/health")

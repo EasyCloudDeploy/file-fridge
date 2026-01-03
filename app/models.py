@@ -1,5 +1,5 @@
 """SQLAlchemy database models."""
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, Enum as SQLEnum, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
@@ -114,24 +114,33 @@ class FileInventory(Base):
     path_id = Column(Integer, ForeignKey("monitored_paths.id"), nullable=False, index=True)
     file_path = Column(String, nullable=False, index=True)  # Absolute path to the file
     storage_type = Column(SQLEnum(StorageType), nullable=False, index=True)
-    file_size = Column(Integer, nullable=False)
-    file_mtime = Column(DateTime(timezone=True), nullable=False)  # File modification time
-    file_atime = Column(DateTime(timezone=True), nullable=True)  # File access time
+    file_size = Column(Integer, nullable=False, index=True)  # Indexed for sorting
+    file_mtime = Column(DateTime(timezone=True), nullable=False, index=True)  # Indexed for sorting
+    file_atime = Column(DateTime(timezone=True), nullable=True, index=True)  # Indexed for sorting
     file_ctime = Column(DateTime(timezone=True), nullable=True)  # File change/creation time
-    checksum = Column(String, nullable=True)  # Optional checksum for change detection
+    checksum = Column(String, nullable=True, index=True)  # SHA256 hash for deduplication and verification
+    file_extension = Column(String, nullable=True, index=True)  # File extension (e.g., .pdf, .jpg)
+    mime_type = Column(String, nullable=True)  # MIME type (e.g., application/pdf)
     status = Column(SQLEnum(FileStatus), default=FileStatus.ACTIVE, index=True)
     last_seen = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Composite index for common queries (path_id + storage_type + status)
+    # Composite indexes for common query patterns
     __table_args__ = (
+        # Index for filtering by path, storage type, and status (common query pattern)
+        Index('idx_inventory_path_storage_status', 'path_id', 'storage_type', 'status'),
+        # Index for filtering by storage type and status with sorting by last_seen
+        Index('idx_inventory_storage_status_lastseen', 'storage_type', 'status', 'last_seen'),
+        # Index for searching by file extension
+        Index('idx_inventory_extension', 'file_extension'),
         {'sqlite_autoincrement': True},  # For SQLite
     )
 
     # Relationship back to monitored path
     path = relationship("MonitoredPath", back_populates="file_inventory")
 
-    # Note: Relationship to FileRecord can be established if needed in the future
+    # Relationship to tags
+    tags = relationship("FileTag", back_populates="file", cascade="all, delete-orphan")
 
 
 class PinnedFile(Base):
@@ -145,4 +154,66 @@ class PinnedFile(Base):
     pinned_by = Column(String, nullable=True)  # Optional: who/what pinned it
 
     path = relationship("MonitoredPath")
+
+
+class Tag(Base):
+    """User-defined tags for organizing files."""
+    __tablename__ = "tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True, index=True)
+    description = Column(String, nullable=True)
+    color = Column(String, nullable=True)  # Hex color code for UI display (e.g., #FF5733)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationship to file tags
+    file_tags = relationship("FileTag", back_populates="tag", cascade="all, delete-orphan")
+
+
+class FileTag(Base):
+    """Association table linking files to tags."""
+    __tablename__ = "file_tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    file_id = Column(Integer, ForeignKey("file_inventory.id"), nullable=False, index=True)
+    tag_id = Column(Integer, ForeignKey("tags.id"), nullable=False, index=True)
+    tagged_at = Column(DateTime(timezone=True), server_default=func.now())
+    tagged_by = Column(String, nullable=True)  # Optional: who added the tag
+
+    # Composite index for unique file-tag pairs
+    __table_args__ = (
+        Index('idx_file_tag_unique', 'file_id', 'tag_id', unique=True),
+        {'sqlite_autoincrement': True},
+    )
+
+    # Relationships
+    file = relationship("FileInventory", back_populates="tags")
+    tag = relationship("Tag", back_populates="file_tags")
+
+
+class TagRuleCriterionType(str, enum.Enum):
+    """Criteria types for automatic tag rules."""
+    EXTENSION = "extension"  # File extension (e.g., .pdf, .jpg)
+    PATH_PATTERN = "path_pattern"  # Path pattern matching (glob or regex)
+    MIME_TYPE = "mime_type"  # MIME type (e.g., image/*, application/pdf)
+    SIZE = "size"  # File size comparisons
+    NAME_PATTERN = "name_pattern"  # Filename pattern (not full path)
+
+
+class TagRule(Base):
+    """Automated rules for applying tags to files based on criteria."""
+    __tablename__ = "tag_rules"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tag_id = Column(Integer, ForeignKey("tags.id"), nullable=False, index=True)
+    criterion_type = Column(SQLEnum(TagRuleCriterionType), nullable=False)
+    operator = Column(SQLEnum(Operator), nullable=False)
+    value = Column(String, nullable=False)
+    enabled = Column(Boolean, default=True, nullable=False)
+    priority = Column(Integer, default=0, nullable=False)  # Higher priority = applied first
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    tag = relationship("Tag")
 

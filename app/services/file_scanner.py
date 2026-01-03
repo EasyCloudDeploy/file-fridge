@@ -284,7 +284,15 @@ class FileScanner:
     @staticmethod
     def _update_db_entries(path: MonitoredPath, files: List[Dict], tier: StorageType, db: Session) -> int:
         """Synchronizes file metadata with the database FileInventory table."""
+        from app.services.tag_rule_service import TagRuleService
+        from app.services.file_metadata import FileMetadataExtractor
+        from pathlib import Path as PathLib
+
         count = 0
+        tag_rule_service = TagRuleService(db)
+        new_files = []
+        updated_files = []
+
         for info in files:
             # Determine the actual storage tier
             # If this is a symlink in hot storage, the actual file is in cold storage
@@ -299,6 +307,8 @@ class FileScanner:
             ).first()
 
             if entry:
+                # Update existing entry
+                updated = False
                 if entry.file_size != info['size'] or entry.status != FileStatus.ACTIVE or entry.storage_type != actual_tier:
                     entry.file_size = info['size']
                     entry.file_mtime = info['mtime']
@@ -306,13 +316,71 @@ class FileScanner:
                     entry.file_ctime = info['ctime']
                     entry.status = FileStatus.ACTIVE
                     entry.storage_type = actual_tier
+                    updated = True
+
+                # Check if metadata is missing and populate it
+                if entry.file_extension is None or entry.mime_type is None:
+                    try:
+                        file_path = PathLib(info['path'])
+                        if file_path.exists():
+                            extension, mime_type, checksum = FileMetadataExtractor.extract_metadata(file_path)
+                            if entry.file_extension is None and extension:
+                                entry.file_extension = extension
+                                updated = True
+                            if entry.mime_type is None and mime_type:
+                                entry.mime_type = mime_type
+                                updated = True
+                            # Only compute checksum if file is small enough
+                            if entry.checksum is None and checksum and info['size'] < 1024 * 1024 * 100:  # 100MB limit
+                                entry.checksum = checksum
+                                updated = True
+                    except Exception as e:
+                        logger.debug(f"Could not extract metadata for {info['path']}: {e}")
+
+                if updated:
+                    updated_files.append(entry)
                     count += 1
             else:
-                db.add(FileInventory(
+                # Create new entry with metadata
+                extension = None
+                mime_type = None
+                checksum = None
+
+                try:
+                    file_path = PathLib(info['path'])
+                    if file_path.exists():
+                        extension, mime_type, checksum = FileMetadataExtractor.extract_metadata(file_path)
+                except Exception as e:
+                    logger.debug(f"Could not extract metadata for {info['path']}: {e}")
+
+                new_entry = FileInventory(
                     path_id=path.id, file_path=info['path'],
                     storage_type=actual_tier, file_size=info['size'],
                     file_mtime=info['mtime'], file_atime=info['atime'],
-                    file_ctime=info['ctime'], status=FileStatus.ACTIVE
-                ))
+                    file_ctime=info['ctime'], status=FileStatus.ACTIVE,
+                    file_extension=extension, mime_type=mime_type, checksum=checksum
+                )
+                db.add(new_entry)
+                new_files.append(new_entry)
                 count += 1
+
+        # Commit to ensure new files have IDs
+        if new_files or updated_files:
+            db.commit()
+
+            # Apply tag rules to newly added files
+            for file_entry in new_files:
+                db.refresh(file_entry)  # Ensure we have the ID
+                try:
+                    tag_rule_service.apply_rules_to_file(file_entry)
+                except Exception as e:
+                    logger.error(f"Error applying tag rules to file {file_entry.file_path}: {e}")
+
+            # Also apply tag rules to updated files that now have metadata
+            for file_entry in updated_files:
+                try:
+                    tag_rule_service.apply_rules_to_file(file_entry)
+                except Exception as e:
+                    logger.error(f"Error applying tag rules to file {file_entry.file_path}: {e}")
+
         return count
