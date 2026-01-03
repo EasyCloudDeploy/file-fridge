@@ -9,6 +9,7 @@ from app.models import MonitoredPath
 from app.services.file_scanner import FileScanner
 from app.services.file_mover import FileMover
 from app.services.scan_processor import ScanProcessor
+from app.services.stats_cleanup import cleanup_old_stats_job_func
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class SchedulerService:
                 import time
                 time.sleep(0.1)
                 self._load_existing_jobs()
+                self._add_stats_cleanup_job()
             except Exception as e:
                 logger.error(f"Error starting scheduler: {e}")
                 # Try to clean up
@@ -140,6 +142,31 @@ class SchedulerService:
     def _scan_path_job(self, path_id: int):
         """Job function to scan a path (kept for backward compatibility, but use scan_path_job_func instead)."""
         scan_path_job_func(path_id)
+
+    def _add_stats_cleanup_job(self):
+        """Add scheduled job for stats cleanup (runs daily at 2 AM)."""
+        if not self.scheduler.running:
+            logger.warning("Scheduler not running, skipping stats cleanup job addition")
+            return
+
+        job_id = "stats_cleanup"
+        try:
+            # Remove existing job if present
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            # Schedule to run daily at 2 AM
+            self.scheduler.add_job(
+                cleanup_old_stats_job_func,
+                'cron',
+                hour=2,
+                minute=0,
+                id=job_id,
+                replace_existing=True
+            )
+            logger.info("Added scheduled job for daily stats cleanup (runs at 2 AM)")
+        except Exception as e:
+            logger.error(f"Error adding stats cleanup job: {e}")
 
 
 def scan_path_job_func(path_id: int):

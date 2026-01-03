@@ -95,6 +95,8 @@ Available environment variables:
 - `DATABASE_PATH`: Database file path. Default: ./data/file_fridge.db
 - `CONTAINER_PATH_PREFIX`: Path prefix inside container (for symlink operations in Docker). Default: None
 - `HOST_PATH_PREFIX`: Path prefix on host system (for symlink operations in Docker). Default: None
+- `STATS_RETENTION_DAYS`: Number of days to retain statistics data. Older records are automatically deleted daily at 2 AM. Default: 30
+- `APP_NAME`: Custom application name for branding. Default: File Fridge
 
 For Docker deployments using symlink operations, see [DOCKER.md](DOCKER.md#symlink-operations-in-docker) for path translation configuration.
 
@@ -214,7 +216,14 @@ curl -X POST "http://localhost:8000/api/v1/criteria/path/1" \
 
 **Get statistics:**
 ```bash
+# Basic statistics
 curl "http://localhost:8000/api/v1/stats"
+
+# Detailed statistics (comprehensive metrics and trends)
+curl "http://localhost:8000/api/v1/stats/detailed"
+
+# Manually trigger stats cleanup (delete old records)
+curl -X POST "http://localhost:8000/api/v1/stats/cleanup"
 ```
 
 ## Criteria Types
@@ -280,6 +289,30 @@ See `docs/ATIME_VERIFICATION.md` for a script to verify atime behavior on your f
 - File operations respect system permissions
 - Consider adding authentication for production use (reverse proxy with authentication recommended)
 - Run the application with appropriate user permissions (avoid running as root)
+
+## Statistics and Data Retention
+
+File Fridge provides comprehensive statistics to help you monitor and optimize cold storage operations.
+
+### Statistics Features
+
+- **Capacity Metrics**: Track total storage, space saved, and hot/cold distribution
+- **Performance Metrics**: Monitor files moved per day, throughput, and trends
+- **Operational Metrics**: View active paths, criteria, and pinned files
+- **Historical Data**: Access daily activity trends and top-performing paths
+
+### Data Retention
+
+Statistics data is automatically managed to prevent database growth:
+
+- **Default Retention**: 30 days (configurable via `STATS_RETENTION_DAYS`)
+- **Automatic Cleanup**: Runs daily at 2 AM to remove old records
+- **Manual Cleanup**: Use the API endpoint `POST /api/v1/stats/cleanup` to trigger cleanup manually
+
+Access detailed statistics via:
+```bash
+curl "http://localhost:8000/api/v1/stats/detailed"
+```
 
 ## Troubleshooting
 
