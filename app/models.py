@@ -1,5 +1,5 @@
 """SQLAlchemy database models."""
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, Enum as SQLEnum, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
@@ -114,17 +114,21 @@ class FileInventory(Base):
     path_id = Column(Integer, ForeignKey("monitored_paths.id"), nullable=False, index=True)
     file_path = Column(String, nullable=False, index=True)  # Absolute path to the file
     storage_type = Column(SQLEnum(StorageType), nullable=False, index=True)
-    file_size = Column(Integer, nullable=False)
-    file_mtime = Column(DateTime(timezone=True), nullable=False)  # File modification time
-    file_atime = Column(DateTime(timezone=True), nullable=True)  # File access time
+    file_size = Column(Integer, nullable=False, index=True)  # Indexed for sorting
+    file_mtime = Column(DateTime(timezone=True), nullable=False, index=True)  # Indexed for sorting
+    file_atime = Column(DateTime(timezone=True), nullable=True, index=True)  # Indexed for sorting
     file_ctime = Column(DateTime(timezone=True), nullable=True)  # File change/creation time
     checksum = Column(String, nullable=True)  # Optional checksum for change detection
     status = Column(SQLEnum(FileStatus), default=FileStatus.ACTIVE, index=True)
     last_seen = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    # Composite index for common queries (path_id + storage_type + status)
+    # Composite indexes for common query patterns
     __table_args__ = (
+        # Index for filtering by path, storage type, and status (common query pattern)
+        Index('idx_inventory_path_storage_status', 'path_id', 'storage_type', 'status'),
+        # Index for filtering by storage type and status with sorting by last_seen
+        Index('idx_inventory_storage_status_lastseen', 'storage_type', 'status', 'last_seen'),
         {'sqlite_autoincrement': True},  # For SQLite
     )
 

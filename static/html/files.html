@@ -58,31 +58,47 @@
             </div>
         </div>
 
+        <!-- Search and Filters -->
         <div class="row mb-3">
-            <div class="col-md-4">
+            <div class="col-md-6">
                 <div class="input-group">
-                    <label class="input-group-text" for="path_id_filter">Filter by Path:</label>
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" id="search_input" placeholder="Search file paths...">
+                    <button class="btn btn-primary" type="button" id="search_btn">
+                        Search
+                    </button>
+                    <button class="btn btn-outline-secondary" type="button" id="clear_search_btn">
+                        Clear
+                    </button>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="input-group">
+                    <label class="input-group-text" for="path_id_filter">Path:</label>
                     <select class="form-select" id="path_id_filter">
                         <option value="">All Paths</option>
                     </select>
                 </div>
             </div>
-            <div class="col-md-4">
+            <div class="col-md-3">
                 <div class="input-group">
                     <label class="input-group-text" for="storage_filter">Storage:</label>
                     <select class="form-select" id="storage_filter">
-                        <option value="">All Storage</option>
-                        <option value="hot">Hot Storage</option>
-                        <option value="cold">Cold Storage</option>
+                        <option value="">All</option>
+                        <option value="hot">Hot</option>
+                        <option value="cold">Cold</option>
                     </select>
                 </div>
             </div>
-            <div class="col-md-4 text-end">
+        </div>
+
+        <div class="row mb-3">
+            <div class="col-12 text-end">
                 <div class="btn-group">
-                    <button type="button" class="btn btn-outline-secondary" onclick="cleanupMissingFiles()" title="Clean up records for files that no longer exist">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="cleanupMissingFiles()" title="Clean up records for files that no longer exist">
                         <i class="bi bi-trash"></i> Cleanup Missing
                     </button>
-                    <button type="button" class="btn btn-outline-warning" onclick="cleanupDuplicates()" title="Remove duplicate file records">
+                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()" title="Remove duplicate file records">
                         <i class="bi bi-files"></i> Remove Duplicates
                     </button>
                 </div>
@@ -139,10 +155,17 @@
                         </div>
                         <div id="no-files-message" class="text-center py-5" style="display: none;">
                             <i class="bi bi-file-earmark-x display-1 text-muted"></i>
-                            <p class="text-muted mt-3">No files have been moved yet.</p>
+                            <p class="text-muted mt-3">No files found.</p>
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="row mt-3">
+            <div class="col-12" id="pagination-controls">
+                <!-- Pagination will be rendered here by JavaScript -->
             </div>
         </div>
 

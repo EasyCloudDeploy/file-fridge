@@ -1,58 +1,120 @@
 """API routes for file management."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func, or_, and_
 from typing import List, Optional
 from pathlib import Path
+from datetime import datetime
 from starlette.concurrency import run_in_threadpool
 from app.database import get_db
-from app.models import FileRecord, MonitoredPath, FileInventory, StorageType
-from app.schemas import FileInventory as FileInventorySchema, FileMoveRequest, StorageType
+from app.models import FileRecord, MonitoredPath, FileInventory, StorageType, FileStatus
+from app.schemas import FileInventory as FileInventorySchema, FileMoveRequest, StorageType as StorageTypeSchema, PaginatedFileInventory
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
 from app.models import OperationType
+import math
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 
 
-@router.get("", response_model=List[FileInventorySchema])
+@router.get("", response_model=PaginatedFileInventory)
 async def list_files(
-    path_id: Optional[int] = None,
-    storage_type: Optional[StorageType] = None,
-    skip: int = 0,
-    limit: int = 100,
+    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    page_size: int = Query(50, ge=1, le=500, description="Items per page (max 500)"),
+    path_id: Optional[int] = Query(None, description="Filter by monitored path ID"),
+    storage_type: Optional[StorageTypeSchema] = Query(None, description="Filter by storage type (hot/cold)"),
+    status: Optional[str] = Query(None, description="Filter by file status"),
+    search: Optional[str] = Query(None, description="Search in file path"),
+    sort_by: str = Query("last_seen", description="Sort field (file_path, file_size, last_seen, storage_type)"),
+    sort_order: str = Query("desc", description="Sort order (asc/desc)"),
     db: Session = Depends(get_db)
 ):
-    """List files in inventory."""
-    # Enforce reasonable limits to prevent overwhelming the database
-    limit = min(limit, 500)  # Max 500 files per request
-    skip = max(skip, 0)      # Ensure non-negative skip
+    """
+    List files in inventory with pagination, search, and filtering.
 
+    Supports:
+    - Pagination with page and page_size
+    - Filtering by path, storage type, and status
+    - Search by filename/path
+    - Sorting by multiple fields
+    """
     # Run database query in thread pool to avoid blocking the event loop
-    files = await run_in_threadpool(_query_files_inventory, db, path_id, storage_type, skip, limit)
-    return files
+    result = await run_in_threadpool(
+        _query_files_inventory_paginated,
+        db, page, page_size, path_id, storage_type, status, search, sort_by, sort_order
+    )
+    return result
 
 
-def _query_files_inventory(
+def _query_files_inventory_paginated(
     db: Session,
+    page: int,
+    page_size: int,
     path_id: Optional[int],
-    storage_type: Optional[StorageType],
-    skip: int,
-    limit: int
-) -> List[FileInventory]:
-    """Query files inventory (runs in thread pool)."""
+    storage_type: Optional[StorageTypeSchema],
+    status: Optional[str],
+    search: Optional[str],
+    sort_by: str,
+    sort_order: str
+) -> PaginatedFileInventory:
+    """Query files inventory with pagination (runs in thread pool)."""
+    # Build base query
     query = db.query(FileInventory)
 
+    # Apply filters
     if path_id:
         query = query.filter(FileInventory.path_id == path_id)
 
     if storage_type:
         query = query.filter(FileInventory.storage_type == storage_type)
 
-    # Only show active files by default for better performance
-    query = query.filter(FileInventory.status == "active")
+    if status:
+        query = query.filter(FileInventory.status == status)
+    else:
+        # Only show active files by default for better performance
+        query = query.filter(FileInventory.status == FileStatus.ACTIVE)
 
-    files = query.order_by(FileInventory.last_seen.desc()).offset(skip).limit(limit).all()
-    return files
+    # Search filter (case-insensitive partial match on file_path)
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(FileInventory.file_path.ilike(search_pattern))
+
+    # Get total count before pagination
+    total_count = query.count()
+
+    # Apply sorting
+    valid_sort_fields = {
+        "file_path": FileInventory.file_path,
+        "file_size": FileInventory.file_size,
+        "last_seen": FileInventory.last_seen,
+        "storage_type": FileInventory.storage_type,
+        "file_mtime": FileInventory.file_mtime,
+        "file_atime": FileInventory.file_atime
+    }
+
+    sort_field = valid_sort_fields.get(sort_by, FileInventory.last_seen)
+
+    if sort_order.lower() == "asc":
+        query = query.order_by(sort_field.asc())
+    else:
+        query = query.order_by(sort_field.desc())
+
+    # Calculate pagination
+    skip = (page - 1) * page_size
+    total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+
+    # Execute query with pagination
+    files = query.offset(skip).limit(page_size).all()
+
+    return PaginatedFileInventory(
+        items=files,
+        total=total_count,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        has_next=page < total_pages,
+        has_prev=page > 1
+    )
 
 
 @router.post("/move", status_code=status.HTTP_202_ACCEPTED)

@@ -200,3 +200,14 @@ class ScanResult(BaseModel):
     files_moved: int
     errors: List[str] = []
 
+
+class PaginatedFileInventory(BaseModel):
+    """Paginated file inventory response."""
+    items: List["FileInventory"]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool
+

@@ -1,10 +1,16 @@
 // Files browser JavaScript - client-side rendering
 const API_BASE_URL = '/api/v1';
 
-// Sorting state
-let currentFiles = [];
-let currentSortColumn = 'file_path';
-let currentSortDirection = 'asc';
+// Pagination and filter state
+let currentPage = 1;
+let currentPageSize = 50;
+let currentSearch = '';
+let currentPathId = null;
+let currentStorageType = null;
+let currentSortBy = 'last_seen';
+let currentSortOrder = 'desc';
+let totalPages = 1;
+let totalItems = 0;
 
 // Utility functions
 function escapeHtml(text) {
@@ -31,37 +37,20 @@ function showNotification(message, type = 'success') {
     showToast(message, type);
 }
 
-// Sorting functions
-function sortFiles(column, direction) {
-    currentSortColumn = column;
-    currentSortDirection = direction;
+// Sorting functions (server-side sorting now)
+function handleSortClick(column) {
+    if (currentSortBy === column) {
+        // Toggle direction
+        currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+        // New column, default to descending
+        currentSortBy = column;
+        currentSortOrder = 'desc';
+    }
 
-    currentFiles.sort((a, b) => {
-        let aVal = a[column];
-        let bVal = b[column];
-
-        // Handle null/undefined values
-        if (aVal === null || aVal === undefined) aVal = '';
-        if (bVal === null || bVal === undefined) bVal = '';
-
-        // Convert dates to timestamps for comparison
-        if (column === 'file_mtime' || column === 'file_atime' || column === 'file_ctime' || column === 'last_seen') {
-            aVal = aVal ? new Date(aVal).getTime() : 0;
-            bVal = bVal ? new Date(bVal).getTime() : 0;
-        }
-
-        // Compare values
-        let comparison = 0;
-        if (typeof aVal === 'string' && typeof bVal === 'string') {
-            comparison = aVal.toLowerCase().localeCompare(bVal.toLowerCase());
-        } else {
-            comparison = aVal < bVal ? -1 : aVal > bVal ? 1 : 0;
-        }
-
-        return direction === 'asc' ? comparison : -comparison;
-    });
-
-    updateSortIndicators();
+    // Reset to page 1 when sorting changes
+    currentPage = 1;
+    loadFilesList();
 }
 
 function updateSortIndicators() {
@@ -71,32 +60,24 @@ function updateSortIndicators() {
     });
 
     // Add current sort class
-    const currentHeader = document.querySelector(`th[data-sort="${currentSortColumn}"]`);
+    const currentHeader = document.querySelector(`th[data-sort="${currentSortBy}"]`);
     if (currentHeader) {
-        currentHeader.classList.add(`sort-${currentSortDirection}`);
+        currentHeader.classList.add(`sort-${currentSortOrder}`);
     }
 }
 
-function handleSortClick(column) {
-    if (currentSortColumn === column) {
-        // Toggle direction
-        currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
-    } else {
-        // New column, default to ascending
-        currentSortDirection = 'asc';
-    }
-
-    sortFiles(column, currentSortDirection);
-    renderFilesTable();
-}
-
-function renderFilesTable() {
+function renderFilesTable(files) {
     const tableBody = document.querySelector('#filesTable tbody');
     if (!tableBody) return;
 
     tableBody.innerHTML = '';
 
-    currentFiles.forEach(file => {
+    if (!files || files.length === 0) {
+        tableBody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No files found</td></tr>';
+        return;
+    }
+
+    files.forEach(file => {
         const row = tableBody.insertRow();
         const storageBadge = file.storage_type === 'hot'
             ? '<span class="badge bg-success">Hot Storage</span>'
@@ -127,8 +108,74 @@ function renderFilesTable() {
     });
 }
 
+function renderPagination() {
+    const paginationEl = document.getElementById('pagination-controls');
+    if (!paginationEl) return;
+
+    if (totalPages <= 1) {
+        paginationEl.innerHTML = '';
+        return;
+    }
+
+    let html = '<nav><ul class="pagination justify-content-center">';
+
+    // Previous button
+    html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">Previous</a>
+    </li>`;
+
+    // Page numbers
+    const maxPagesToShow = 5;
+    let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
+    let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
+
+    if (endPage - startPage < maxPagesToShow - 1) {
+        startPage = Math.max(1, endPage - maxPagesToShow + 1);
+    }
+
+    if (startPage > 1) {
+        html += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(1); return false;">1</a></li>`;
+        if (startPage > 2) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+    }
+
+    for (let i = startPage; i <= endPage; i++) {
+        html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
+            <a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>
+        </li>`;
+    }
+
+    if (endPage < totalPages) {
+        if (endPage < totalPages - 1) {
+            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+        html += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(${totalPages}); return false;">${totalPages}</a></li>`;
+    }
+
+    // Next button
+    html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+        <a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">Next</a>
+    </li>`;
+
+    html += '</ul></nav>';
+
+    // Add page info
+    const start = (currentPage - 1) * currentPageSize + 1;
+    const end = Math.min(currentPage * currentPageSize, totalItems);
+    html += `<p class="text-center text-muted">Showing ${start}-${end} of ${totalItems} files</p>`;
+
+    paginationEl.innerHTML = html;
+}
+
+function changePage(newPage) {
+    if (newPage < 1 || newPage > totalPages || newPage === currentPage) return;
+    currentPage = newPage;
+    loadFilesList();
+}
+
 // Load and render files list
-async function loadFilesList(pathId = null, storageType = null) {
+async function loadFilesList() {
     const loadingEl = document.getElementById('files-loading');
     const contentEl = document.getElementById('files-content');
     const emptyEl = document.getElementById('no-files-message');
@@ -140,26 +187,41 @@ async function loadFilesList(pathId = null, storageType = null) {
     if (tableBody) tableBody.innerHTML = '';
 
     try {
-        let url = `${API_BASE_URL}/files?limit=100`;
-        if (pathId) {
-            url += `&path_id=${pathId}`;
+        // Build URL with all parameters
+        const params = new URLSearchParams({
+            page: currentPage,
+            page_size: currentPageSize,
+            sort_by: currentSortBy,
+            sort_order: currentSortOrder
+        });
+
+        if (currentPathId) {
+            params.append('path_id', currentPathId);
         }
-        if (storageType) {
-            url += `&storage_type=${storageType}`;
+        if (currentStorageType) {
+            params.append('storage_type', currentStorageType);
+        }
+        if (currentSearch) {
+            params.append('search', currentSearch);
         }
 
+        const url = `${API_BASE_URL}/files?${params.toString()}`;
         const response = await fetch(url);
+
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const files = await response.json();
 
-        // Store files for sorting
-        currentFiles = files;
+        const data = await response.json();
 
-        // Sort by default column
-        sortFiles(currentSortColumn, currentSortDirection);
-        renderFilesTable();
+        // Update pagination state
+        totalPages = data.total_pages;
+        totalItems = data.total;
 
-        if (files.length === 0) {
+        // Render table and pagination
+        renderFilesTable(data.items);
+        renderPagination();
+        updateSortIndicators();
+
+        if (data.items.length === 0) {
             if (emptyEl) emptyEl.style.display = 'block';
         } else {
             if (contentEl) contentEl.style.display = 'block';
@@ -171,6 +233,23 @@ async function loadFilesList(pathId = null, storageType = null) {
     } finally {
         if (loadingEl) loadingEl.style.display = 'none';
     }
+}
+
+// Search function
+function performSearch() {
+    const searchInput = document.getElementById('search_input');
+    currentSearch = searchInput ? searchInput.value.trim() : '';
+    currentPage = 1; // Reset to first page on search
+    loadFilesList();
+}
+
+// Clear search
+function clearSearch() {
+    const searchInput = document.getElementById('search_input');
+    if (searchInput) searchInput.value = '';
+    currentSearch = '';
+    currentPage = 1;
+    loadFilesList();
 }
 
 // Load paths for filter dropdown
@@ -218,10 +297,11 @@ function updateFilters() {
     const pathSelect = document.getElementById('path_id_filter');
     const storageSelect = document.getElementById('storage_filter');
 
-    const pathId = pathSelect ? pathSelect.value : null;
-    const storageType = storageSelect ? storageSelect.value : null;
+    currentPathId = pathSelect && pathSelect.value ? parseInt(pathSelect.value) : null;
+    currentStorageType = storageSelect && storageSelect.value ? storageSelect.value : null;
 
-    loadFilesList(pathId, storageType);
+    currentPage = 1; // Reset to first page on filter change
+    loadFilesList();
 }
 
 // Show thaw modal
@@ -264,9 +344,7 @@ async function thawFile() {
         if (modal) modal.hide();
 
         // Reload files
-        const urlParams = new URLSearchParams(window.location.search);
-        const pathId = urlParams.get('path_id');
-        loadFilesList(pathId);
+        loadFilesList();
     } catch (error) {
         console.error('Error thawing file:', error);
         showNotification(`Error thawing file: ${error.message}`, 'error');
@@ -275,14 +353,10 @@ async function thawFile() {
 
 // Cleanup actions
 async function cleanupMissingFiles() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const pathId = urlParams.get('path_id');
-    const storageType = urlParams.get('storage_type');
-
     try {
         let url = `${API_BASE_URL}/cleanup`;
-        if (pathId) {
-            url += `?path_id=${pathId}`;
+        if (currentPathId) {
+            url += `?path_id=${currentPathId}`;
         }
 
         const response = await fetch(url, { method: 'POST' });
@@ -292,7 +366,7 @@ async function cleanupMissingFiles() {
         const message = `Cleanup complete: checked ${data.checked} files, removed ${data.removed} missing file records`;
         showNotification(message);
 
-        loadFilesList(pathId, storageType);
+        loadFilesList();
     } catch (error) {
         console.error('Error cleaning up missing files:', error);
         showNotification(`Failed to cleanup missing files: ${error.message}`, 'error');
@@ -300,14 +374,10 @@ async function cleanupMissingFiles() {
 }
 
 async function cleanupDuplicates() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const pathId = urlParams.get('path_id');
-    const storageType = urlParams.get('storage_type');
-
     try {
         let url = `${API_BASE_URL}/cleanup/duplicates`;
-        if (pathId) {
-            url += `?path_id=${pathId}`;
+        if (currentPathId) {
+            url += `?path_id=${currentPathId}`;
         }
 
         const response = await fetch(url, { method: 'POST' });
@@ -317,7 +387,7 @@ async function cleanupDuplicates() {
         const message = `Duplicate cleanup complete: checked ${data.checked} files, removed ${data.removed} duplicate records`;
         showNotification(message);
 
-        loadFilesList(pathId, storageType);
+        loadFilesList();
     } catch (error) {
         console.error('Error cleaning up duplicates:', error);
         showNotification(`Failed to cleanup duplicates: ${error.message}`, 'error');
@@ -337,14 +407,37 @@ function setupSortHandlers() {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     const urlParams = new URLSearchParams(window.location.search);
-    const pathId = urlParams.get('path_id');
-    const storageType = urlParams.get('storage_type');
+    currentPathId = urlParams.get('path_id') ? parseInt(urlParams.get('path_id')) : null;
+    currentStorageType = urlParams.get('storage_type') || null;
 
-    loadFilesList(pathId, storageType);
+    loadFilesList();
     loadPathsForFilter();
     setupSortHandlers();
 
     // Setup event handlers
-    document.getElementById('confirmThawBtn').addEventListener('click', thawFile);
+    const confirmBtn = document.getElementById('confirmThawBtn');
+    if (confirmBtn) {
+        confirmBtn.addEventListener('click', thawFile);
+    }
+
+    // Setup search
+    const searchInput = document.getElementById('search_input');
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+    }
+
+    const searchBtn = document.getElementById('search_btn');
+    if (searchBtn) {
+        searchBtn.addEventListener('click', performSearch);
+    }
+
+    const clearBtn = document.getElementById('clear_search_btn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearSearch);
+    }
 });
 
