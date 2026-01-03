@@ -38,6 +38,21 @@ class FileMover:
             (success: bool, error_message: Optional[str])
         """
         try:
+            # Pre-flight check for available space, but only if we are not just moving a symlink
+            if operation_type in [OperationType.MOVE, OperationType.COPY] or (operation_type == OperationType.SYMLINK and not source.is_symlink()):
+                try:
+                    file_size = source.stat().st_size
+                    _, _, free_space = shutil.disk_usage(destination.parent)
+                    
+                    # Add a small buffer (1MB) to be safe
+                    if file_size + (1024 * 1024) > free_space:
+                        return False, f"Not enough space on destination device for {source.name}. Required: {file_size}, Available: {free_space}"
+                except FileNotFoundError:
+                    # Source file not found, will be caught later but good to handle
+                    return False, f"Source file not found: {source}"
+                except Exception as e:
+                    logger.warning(f"Could not check disk space for {destination.parent}: {e}")
+
             # Ensure destination directory exists
             destination.parent.mkdir(parents=True, exist_ok=True)
 
