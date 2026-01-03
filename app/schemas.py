@@ -2,7 +2,7 @@
 from pydantic import BaseModel, Field, validator
 from typing import Optional, List
 from datetime import datetime
-from app.models import OperationType, CriterionType, Operator, StorageType, FileStatus
+from app.models import OperationType, CriterionType, Operator, StorageType, FileStatus, TagRuleCriterionType
 
 
 class CriteriaBase(BaseModel):
@@ -104,6 +104,8 @@ class FileInventoryBase(BaseModel):
     file_atime: Optional[datetime] = None
     file_ctime: Optional[datetime] = None
     checksum: Optional[str] = None
+    file_extension: Optional[str] = None
+    mime_type: Optional[str] = None
     status: FileStatus = FileStatus.ACTIVE
 
 
@@ -119,6 +121,8 @@ class FileInventoryUpdate(BaseModel):
     file_atime: Optional[datetime] = None
     file_ctime: Optional[datetime] = None
     checksum: Optional[str] = None
+    file_extension: Optional[str] = None
+    mime_type: Optional[str] = None
     status: Optional[FileStatus] = None
 
 
@@ -128,6 +132,7 @@ class FileInventory(FileInventoryBase):
     path_id: int
     last_seen: datetime
     created_at: datetime
+    tags: List["FileTagResponse"] = []
 
     class Config:
         from_attributes = True
@@ -210,4 +215,89 @@ class PaginatedFileInventory(BaseModel):
     total_pages: int
     has_next: bool
     has_prev: bool
+
+
+class TagCreate(BaseModel):
+    """Schema for creating a new tag."""
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class TagUpdate(BaseModel):
+    """Schema for updating a tag."""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
+
+
+class Tag(BaseModel):
+    """Schema for tag response."""
+    id: int
+    name: str
+    description: Optional[str]
+    color: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TagWithCount(Tag):
+    """Schema for tag response with file count."""
+    file_count: int = 0
+
+
+class FileTagCreate(BaseModel):
+    """Schema for adding a tag to a file."""
+    tag_id: int
+    tagged_by: Optional[str] = None
+
+
+class FileTagResponse(BaseModel):
+    """Schema for file tag response."""
+    id: int
+    file_id: int
+    tag: Tag
+    tagged_at: datetime
+    tagged_by: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class TagRuleCreate(BaseModel):
+    """Schema for creating a tag rule."""
+    tag_id: int
+    criterion_type: TagRuleCriterionType
+    operator: Operator
+    value: str
+    enabled: bool = True
+    priority: int = 0
+
+
+class TagRuleUpdate(BaseModel):
+    """Schema for updating a tag rule."""
+    criterion_type: Optional[TagRuleCriterionType] = None
+    operator: Optional[Operator] = None
+    value: Optional[str] = None
+    enabled: Optional[bool] = None
+    priority: Optional[int] = None
+
+
+class TagRule(BaseModel):
+    """Schema for tag rule response."""
+    id: int
+    tag_id: int
+    tag: Tag
+    criterion_type: TagRuleCriterionType
+    operator: Operator
+    value: str
+    enabled: bool
+    priority: int
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
 

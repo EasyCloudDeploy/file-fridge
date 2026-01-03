@@ -7,6 +7,7 @@ let currentPageSize = 50;
 let currentSearch = '';
 let currentPathId = null;
 let currentStorageType = null;
+let currentTagIds = [];
 let currentSortBy = 'last_seen';
 let currentSortOrder = 'desc';
 let totalPages = 1;
@@ -73,7 +74,7 @@ function renderFilesTable(files) {
     tableBody.innerHTML = '';
 
     if (!files || files.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">No files found</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No files found</td></tr>';
         return;
     }
 
@@ -94,6 +95,19 @@ function renderFilesTable(files) {
         const atime = file.file_atime ? formatDate(file.file_atime) : '<span class="text-muted">N/A</span>';
         const ctime = file.file_ctime ? formatDate(file.file_ctime) : '<span class="text-muted">N/A</span>';
 
+        // Render tags
+        let tagsHtml = '';
+        if (file.tags && file.tags.length > 0) {
+            tagsHtml = file.tags.map(ft => {
+                const color = ft.tag && ft.tag.color ? ft.tag.color : '#6c757d';
+                const name = ft.tag && ft.tag.name ? ft.tag.name : 'Unknown';
+                return `<span class="badge me-1" style="background-color: ${color};">${escapeHtml(name)}</span>`;
+            }).join('');
+        }
+        tagsHtml += `<button type="button" class="btn btn-sm btn-outline-primary" onclick="showManageTagsModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Manage tags">
+            <i class="bi bi-tags"></i>
+        </button>`;
+
         row.innerHTML = `
             <td><code>${escapeHtml(file.file_path)}</code></td>
             <td>${storageBadge}</td>
@@ -103,6 +117,7 @@ function renderFilesTable(files) {
             <td><small>${ctime}</small></td>
             <td><span class="badge bg-secondary">${escapeHtml(file.status)}</span></td>
             <td><small>${formatDate(file.last_seen)}</small></td>
+            <td>${tagsHtml}</td>
             <td>${actionButton}</td>
         `;
     });
@@ -204,6 +219,9 @@ async function loadFilesList() {
         if (currentSearch) {
             params.append('search', currentSearch);
         }
+        if (currentTagIds.length > 0) {
+            params.append('tag_ids', currentTagIds.join(','));
+        }
 
         const url = `${API_BASE_URL}/files?${params.toString()}`;
         const response = await fetch(url);
@@ -296,11 +314,60 @@ async function loadPathsForFilter() {
 function updateFilters() {
     const pathSelect = document.getElementById('path_id_filter');
     const storageSelect = document.getElementById('storage_filter');
+    const tagSelect = document.getElementById('tag_filter');
 
     currentPathId = pathSelect && pathSelect.value ? parseInt(pathSelect.value) : null;
     currentStorageType = storageSelect && storageSelect.value ? storageSelect.value : null;
 
+    // Get selected tag IDs from multi-select
+    if (tagSelect) {
+        const selectedOptions = Array.from(tagSelect.selectedOptions);
+        currentTagIds = selectedOptions
+            .map(opt => opt.value)
+            .filter(val => val !== '') // Filter out "All Tags" option
+            .map(val => parseInt(val));
+    }
+
     currentPage = 1; // Reset to first page on filter change
+    loadFilesList();
+}
+
+// Load tags for filter dropdown
+async function loadTagsForFilter() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const tags = await response.json();
+
+        const select = document.getElementById('tag_filter');
+        if (select) {
+            select.innerHTML = '<option value="">All Tags</option>' +
+                tags.map(tag => {
+                    const color = tag.color || '#6c757d';
+                    return `<option value="${tag.id}" style="background-color: ${color}20;">${escapeHtml(tag.name)} (${tag.file_count})</option>`;
+                }).join('');
+
+            // Add change event listener
+            select.addEventListener('change', function() {
+                updateFilters();
+            });
+        }
+    } catch (error) {
+        console.error('Error loading tags for filter:', error);
+        showNotification(`Failed to load tags: ${error.message}`, 'error');
+    }
+}
+
+// Clear tag filter
+function clearTagFilter() {
+    const tagSelect = document.getElementById('tag_filter');
+    if (tagSelect) {
+        tagSelect.selectedIndex = 0;
+        // Clear all selections
+        Array.from(tagSelect.options).forEach(opt => opt.selected = false);
+    }
+    currentTagIds = [];
+    currentPage = 1;
     loadFilesList();
 }
 
@@ -404,6 +471,198 @@ function setupSortHandlers() {
     });
 }
 
+// Tag Management Functions
+let currentFileId = null;
+let allAvailableTags = [];
+let manageTagsModal = null;
+
+// Load all available tags
+async function loadAvailableTags() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        allAvailableTags = await response.json();
+        return allAvailableTags;
+    } catch (error) {
+        console.error('Error loading tags:', error);
+        showNotification(`Failed to load tags: ${error.message}`, 'error');
+        return [];
+    }
+}
+
+// Show manage tags modal
+async function showManageTagsModal(fileId, filePath) {
+    currentFileId = fileId;
+
+    const modal = document.getElementById('manageTagsModal');
+    if (!modal) return;
+
+    // Update modal content
+    document.getElementById('tagFileName').textContent = filePath;
+
+    // Load available tags if not already loaded
+    if (allAvailableTags.length === 0) {
+        await loadAvailableTags();
+    }
+
+    // Populate tag select dropdown
+    const selectEl = document.getElementById('addTagSelect');
+    if (selectEl) {
+        selectEl.innerHTML = '<option value="">Select a tag...</option>' +
+            allAvailableTags.map(tag => `<option value="${tag.id}">${escapeHtml(tag.name)}</option>`).join('');
+    }
+
+    // Load current tags for this file
+    await loadFileTags(fileId);
+
+    // Show modal
+    if (!manageTagsModal) {
+        manageTagsModal = new bootstrap.Modal(modal);
+    }
+    manageTagsModal.show();
+}
+
+// Load tags for a specific file
+async function loadFileTags(fileId) {
+    const currentTagsEl = document.getElementById('currentTags');
+    if (!currentTagsEl) return;
+
+    currentTagsEl.innerHTML = '<span class="text-muted">Loading...</span>';
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags/files/${fileId}/tags`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const fileTags = await response.json();
+
+        if (fileTags.length === 0) {
+            currentTagsEl.innerHTML = '<span class="text-muted">No tags assigned</span>';
+        } else {
+            currentTagsEl.innerHTML = fileTags.map(ft => {
+                const color = ft.tag && ft.tag.color ? ft.tag.color : '#6c757d';
+                const name = ft.tag && ft.tag.name ? ft.tag.name : 'Unknown';
+                const tagId = ft.tag_id;
+                return `
+                    <span class="badge me-2 mb-2" style="background-color: ${color};">
+                        ${escapeHtml(name)}
+                        <button type="button" class="btn-close btn-close-white ms-2" style="font-size: 0.6rem;"
+                                onclick="removeTag(${fileId}, ${tagId})" title="Remove tag"></button>
+                    </span>
+                `;
+            }).join('');
+        }
+    } catch (error) {
+        console.error('Error loading file tags:', error);
+        currentTagsEl.innerHTML = '<span class="text-danger">Error loading tags</span>';
+        showNotification(`Failed to load file tags: ${error.message}`, 'error');
+    }
+}
+
+// Add tag to file
+async function addTagToFile() {
+    const selectEl = document.getElementById('addTagSelect');
+    const tagId = selectEl ? parseInt(selectEl.value) : null;
+
+    if (!tagId || !currentFileId) return;
+
+    const errorEl = document.getElementById('tagError');
+    const successEl = document.getElementById('tagSuccess');
+
+    // Clear previous messages
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('d-none');
+    }
+    if (successEl) {
+        successEl.textContent = '';
+        successEl.classList.add('d-none');
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags/files/${currentFileId}/tags`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                tag_id: tagId,
+                tagged_by: 'user'
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to add tag');
+        }
+
+        // Show success message
+        if (successEl) {
+            successEl.textContent = 'Tag added successfully';
+            successEl.classList.remove('d-none');
+        }
+
+        // Reset select
+        if (selectEl) selectEl.value = '';
+
+        // Reload tags for this file
+        await loadFileTags(currentFileId);
+
+        // Reload files list to update the table
+        loadFilesList();
+    } catch (error) {
+        console.error('Error adding tag:', error);
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('d-none');
+        }
+    }
+}
+
+// Remove tag from file
+async function removeTag(fileId, tagId) {
+    const errorEl = document.getElementById('tagError');
+    const successEl = document.getElementById('tagSuccess');
+
+    // Clear previous messages
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('d-none');
+    }
+    if (successEl) {
+        successEl.textContent = '';
+        successEl.classList.add('d-none');
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags/files/${fileId}/tags/${tagId}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to remove tag');
+        }
+
+        // Show success message
+        if (successEl) {
+            successEl.textContent = 'Tag removed successfully';
+            successEl.classList.remove('d-none');
+        }
+
+        // Reload tags for this file
+        await loadFileTags(fileId);
+
+        // Reload files list to update the table
+        loadFilesList();
+    } catch (error) {
+        console.error('Error removing tag:', error);
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('d-none');
+        }
+    }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     const urlParams = new URLSearchParams(window.location.search);
@@ -412,6 +671,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     loadFilesList();
     loadPathsForFilter();
+    loadTagsForFilter();
     setupSortHandlers();
 
     // Setup event handlers
@@ -438,6 +698,28 @@ document.addEventListener('DOMContentLoaded', function() {
     const clearBtn = document.getElementById('clear_search_btn');
     if (clearBtn) {
         clearBtn.addEventListener('click', clearSearch);
+    }
+
+    // Setup tag management
+    const addTagSelect = document.getElementById('addTagSelect');
+    if (addTagSelect) {
+        addTagSelect.addEventListener('change', function() {
+            const addTagBtn = document.getElementById('addTagBtn');
+            if (addTagBtn) {
+                addTagBtn.disabled = !this.value;
+            }
+        });
+    }
+
+    const addTagBtn = document.getElementById('addTagBtn');
+    if (addTagBtn) {
+        addTagBtn.addEventListener('click', addTagToFile);
+    }
+
+    // Setup clear tag filter
+    const clearTagFilterBtn = document.getElementById('clear_tag_filter_btn');
+    if (clearTagFilterBtn) {
+        clearTagFilterBtn.addEventListener('click', clearTagFilter);
     }
 });
 

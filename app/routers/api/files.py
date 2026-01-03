@@ -25,7 +25,11 @@ async def list_files(
     storage_type: Optional[StorageTypeSchema] = Query(None, description="Filter by storage type (hot/cold)"),
     status: Optional[str] = Query(None, description="Filter by file status"),
     search: Optional[str] = Query(None, description="Search in file path"),
-    sort_by: str = Query("last_seen", description="Sort field (file_path, file_size, last_seen, storage_type)"),
+    extension: Optional[str] = Query(None, description="Filter by file extension (e.g., .pdf, .jpg)"),
+    mime_type: Optional[str] = Query(None, description="Filter by MIME type"),
+    has_checksum: Optional[bool] = Query(None, description="Filter files with/without checksum"),
+    tag_ids: Optional[str] = Query(None, description="Filter by tag IDs (comma-separated)"),
+    sort_by: str = Query("last_seen", description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)"),
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
     db: Session = Depends(get_db)
 ):
@@ -34,14 +38,26 @@ async def list_files(
 
     Supports:
     - Pagination with page and page_size
-    - Filtering by path, storage type, and status
+    - Filtering by path, storage type, status, extension, MIME type, and tags
     - Search by filename/path
     - Sorting by multiple fields
     """
+    # Parse tag IDs if provided
+    tag_id_list = None
+    if tag_ids:
+        try:
+            tag_id_list = [int(tid.strip()) for tid in tag_ids.split(',') if tid.strip()]
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid tag_ids format. Must be comma-separated integers."
+            )
+
     # Run database query in thread pool to avoid blocking the event loop
     result = await run_in_threadpool(
         _query_files_inventory_paginated,
-        db, page, page_size, path_id, storage_type, status, search, sort_by, sort_order
+        db, page, page_size, path_id, storage_type, status, search,
+        extension, mime_type, has_checksum, tag_id_list, sort_by, sort_order
     )
     return result
 
@@ -54,10 +70,16 @@ def _query_files_inventory_paginated(
     storage_type: Optional[StorageTypeSchema],
     status: Optional[str],
     search: Optional[str],
+    extension: Optional[str],
+    mime_type: Optional[str],
+    has_checksum: Optional[bool],
+    tag_ids: Optional[List[int]],
     sort_by: str,
     sort_order: str
 ) -> PaginatedFileInventory:
     """Query files inventory with pagination (runs in thread pool)."""
+    from app.models import FileTag, Tag
+
     # Build base query
     query = db.query(FileInventory)
 
@@ -79,6 +101,30 @@ def _query_files_inventory_paginated(
         search_pattern = f"%{search}%"
         query = query.filter(FileInventory.file_path.ilike(search_pattern))
 
+    # Extension filter
+    if extension:
+        # Ensure extension starts with dot
+        ext = extension if extension.startswith('.') else f'.{extension}'
+        query = query.filter(FileInventory.file_extension == ext.lower())
+
+    # MIME type filter
+    if mime_type:
+        query = query.filter(FileInventory.mime_type.ilike(f"%{mime_type}%"))
+
+    # Checksum filter
+    if has_checksum is not None:
+        if has_checksum:
+            query = query.filter(FileInventory.checksum.isnot(None))
+        else:
+            query = query.filter(FileInventory.checksum.is_(None))
+
+    # Tag filter
+    if tag_ids:
+        # Files that have ANY of the specified tags
+        query = query.join(FileInventory.tags).filter(
+            FileTag.tag_id.in_(tag_ids)
+        ).distinct()
+
     # Get total count before pagination
     total_count = query.count()
 
@@ -89,7 +135,8 @@ def _query_files_inventory_paginated(
         "last_seen": FileInventory.last_seen,
         "storage_type": FileInventory.storage_type,
         "file_mtime": FileInventory.file_mtime,
-        "file_atime": FileInventory.file_atime
+        "file_atime": FileInventory.file_atime,
+        "file_extension": FileInventory.file_extension
     }
 
     sort_field = valid_sort_fields.get(sort_by, FileInventory.last_seen)
@@ -317,5 +364,58 @@ def _thaw_file_operation(db: Session, inventory_id: int, pin: bool) -> dict:
         "message": f"File thawed successfully{' and pinned' if pin else ''}",
         "inventory_id": inventory_id,
         "pinned": pin
+    }
+
+
+@router.post("/metadata/backfill", status_code=status.HTTP_200_OK)
+async def backfill_metadata(
+    path_id: Optional[int] = None,
+    batch_size: int = Query(100, ge=1, le=1000, description="Files to process per batch"),
+    compute_checksum: bool = Query(True, description="Whether to compute file checksums"),
+    db: Session = Depends(get_db)
+):
+    """
+    Backfill metadata (extension, MIME type, checksum) for existing files.
+
+    This endpoint processes files in batches for scalability.
+    - If path_id is provided, only files from that path are processed
+    - If path_id is None, all files in inventory are processed
+    - Batch processing prevents memory issues with large file counts
+    - Progress is logged and committed after each batch
+    """
+    result = await run_in_threadpool(
+        _backfill_metadata_operation,
+        db, path_id, batch_size, compute_checksum
+    )
+    return result
+
+
+def _backfill_metadata_operation(
+    db: Session,
+    path_id: Optional[int],
+    batch_size: int,
+    compute_checksum: bool
+) -> dict:
+    """Backfill metadata operation (runs in thread pool)."""
+    from app.services.metadata_backfill import MetadataBackfillService
+
+    service = MetadataBackfillService(db)
+
+    if path_id:
+        result = service.backfill_path(
+            path_id=path_id,
+            batch_size=batch_size,
+            compute_checksum=compute_checksum
+        )
+    else:
+        result = service.backfill_all(
+            batch_size=batch_size,
+            compute_checksum=compute_checksum
+        )
+
+    return {
+        "success": True,
+        "message": "Metadata backfill completed",
+        **result
     }
 

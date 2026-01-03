@@ -35,6 +35,11 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="/tags">
+                            <i class="bi bi-tags"></i> Tags
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="/stats">
                             <i class="bi bi-graph-up"></i> Statistics
                         </a>
@@ -92,8 +97,21 @@
             </div>
         </div>
 
+        <!-- Tag Filter -->
         <div class="row mb-3">
-            <div class="col-12 text-end">
+            <div class="col-md-6">
+                <div class="input-group">
+                    <label class="input-group-text" for="tag_filter"><i class="bi bi-tags"></i> Tags:</label>
+                    <select class="form-select" id="tag_filter" multiple size="1">
+                        <option value="">All Tags</option>
+                    </select>
+                    <button class="btn btn-outline-secondary" type="button" id="clear_tag_filter_btn">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </button>
+                </div>
+                <div class="form-text">Select one or more tags to filter files (hold Ctrl/Cmd to select multiple)</div>
+            </div>
+            <div class="col-md-6 text-end">
                 <div class="btn-group">
                     <button type="button" class="btn btn-outline-secondary btn-sm" onclick="cleanupMissingFiles()" title="Clean up records for files that no longer exist">
                         <i class="bi bi-trash"></i> Cleanup Missing
@@ -144,6 +162,7 @@
                                             <th class="sortable" data-sort="last_seen">
                                                 Last Seen <i class="bi bi-arrow-down-up"></i>
                                             </th>
+                                            <th>Tags</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
@@ -202,6 +221,47 @@
                         <button type="button" class="btn btn-warning" id="confirmThawBtn">
                             <i class="bi bi-arrow-left-circle"></i> Move to Hot Storage
                         </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manage Tags Modal -->
+        <div class="modal fade" id="manageTagsModal" tabindex="-1" aria-labelledby="manageTagsModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="manageTagsModalLabel">Manage Tags</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p><strong>File:</strong> <code id="tagFileName"></code></p>
+
+                        <div class="mb-3">
+                            <label class="form-label">Current Tags</label>
+                            <div id="currentTags" class="mb-2">
+                                <span class="text-muted">Loading...</span>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="addTagSelect" class="form-label">Add Tag</label>
+                            <div class="input-group">
+                                <select class="form-select" id="addTagSelect">
+                                    <option value="">Select a tag...</option>
+                                </select>
+                                <button class="btn btn-primary" type="button" id="addTagBtn" disabled>
+                                    <i class="bi bi-plus-circle"></i> Add
+                                </button>
+                            </div>
+                            <div class="form-text">Select a tag from the list to add it to this file</div>
+                        </div>
+
+                        <div id="tagError" class="alert alert-danger d-none" role="alert"></div>
+                        <div id="tagSuccess" class="alert alert-success d-none" role="alert"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                     </div>
                 </div>
             </div>
