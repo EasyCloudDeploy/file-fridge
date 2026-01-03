@@ -346,8 +346,11 @@ function loadAppInfo() {
             const version = data.version || '0.0.0';
             const appName = data.app_name || 'File Fridge';
 
-            // Update app name in multiple places
-            const appNameEls = ['app-name-title', 'app-name-navbar', 'app-name-footer'];
+            // Update app name in page title
+            document.title = document.title.replace('File Fridge', appName);
+
+            // Update app name in navbar and footer
+            const appNameEls = ['app-name-navbar', 'app-name-footer'];
             appNameEls.forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.textContent = appName;

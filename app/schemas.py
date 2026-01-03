@@ -158,6 +158,41 @@ class FileInventoryStats(BaseModel):
     storage_distribution: dict
 
 
+class DetailedStatistics(BaseModel):
+    """Comprehensive statistics with detailed metrics and trends."""
+    # Capacity metrics
+    total_files_moved: int
+    total_size_moved: int
+    total_files_hot: int
+    total_files_cold: int
+    total_size_hot: int
+    total_size_cold: int
+    space_saved: int  # Space freed from hot storage
+    average_file_size: int
+
+    # Performance metrics
+    files_moved_last_24h: int
+    files_moved_last_7d: int
+    size_moved_last_24h: int
+    size_moved_last_7d: int
+    average_files_per_day: float
+    average_size_per_day: float
+
+    # Operational metrics
+    total_paths: int
+    active_paths: int
+    total_criteria: int
+    pinned_files: int
+
+    # Trend data (last 30 days by default)
+    daily_activity: list  # List of {date, files_moved, size_moved}
+    storage_trend: list  # List of {date, hot_storage, cold_storage}
+
+    # Path-specific metrics
+    top_paths_by_files: list  # Top 5 paths by file count
+    top_paths_by_size: list  # Top 5 paths by size
+
+
 class ScanResult(BaseModel):
     """Schema for scan result."""
     path_id: int

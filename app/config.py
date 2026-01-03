@@ -73,6 +73,11 @@ class Settings(BaseSettings):
     # If not set, will read from VERSION file if it exists
     app_version: str = "0.0.0"
 
+    # Statistics retention period in days
+    # Override via STATS_RETENTION_DAYS environment variable
+    # FileRecord entries older than this will be automatically deleted
+    stats_retention_days: int = 30
+
     @model_validator(mode='after')
     def read_version_file(self):
         """Read version from VERSION file if app_version is still default and file exists."""

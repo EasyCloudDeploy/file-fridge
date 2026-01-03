@@ -54,7 +54,7 @@ docker-compose up -d
 
 For detailed Docker documentation, see [DOCKER.md](DOCKER.md).
 
-### Using uv (Recommended for Development)
+### Using uv
 
 1. Install `uv` if you haven't already:
 ```bash
@@ -95,6 +95,8 @@ Available environment variables:
 - `DATABASE_PATH`: Database file path. Default: ./data/file_fridge.db
 - `CONTAINER_PATH_PREFIX`: Path prefix inside container (for symlink operations in Docker). Default: None
 - `HOST_PATH_PREFIX`: Path prefix on host system (for symlink operations in Docker). Default: None
+- `STATS_RETENTION_DAYS`: Number of days to retain statistics data. Older records are automatically deleted daily at 2 AM. Default: 30
+- `APP_NAME`: Custom application name for branding. Default: File Fridge
 
 For Docker deployments using symlink operations, see [DOCKER.md](DOCKER.md#symlink-operations-in-docker) for path translation configuration.
 
@@ -214,7 +216,14 @@ curl -X POST "http://localhost:8000/api/v1/criteria/path/1" \
 
 **Get statistics:**
 ```bash
+# Basic statistics
 curl "http://localhost:8000/api/v1/stats"
+
+# Detailed statistics (comprehensive metrics and trends)
+curl "http://localhost:8000/api/v1/stats/detailed"
+
+# Manually trigger stats cleanup (delete old records)
+curl -X POST "http://localhost:8000/api/v1/stats/cleanup"
 ```
 
 ## Criteria Types
@@ -273,50 +282,59 @@ See `docs/ATIME_VERIFICATION.md` for a script to verify atime behavior on your f
 - **copy**: Copy file to cold storage (keep original)
 - **symlink**: Move file and create symlink at original location
 
-## Project Structure
-
-```
-file-fridge/
-├── app/
-│   ├── main.py              # Application entry point
-│   ├── config.py            # Configuration
-│   ├── database.py          # Database setup
-│   ├── models.py            # SQLAlchemy models
-│   ├── schemas.py           # Pydantic schemas
-│   ├── services/            # Core services
-│   └── routers/             # API and web routes
-├── static/                  # Static files (CSS, JS, HTML)
-├── requirements.txt         # Python dependencies
-└── README.md               # This file
-```
-
 ## Security Considerations
 
 - The application does not include authentication by default (assumes trusted network)
 - All path inputs are validated to prevent directory traversal
 - File operations respect system permissions
-- Consider adding authentication for production use
+- Consider adding authentication for production use (reverse proxy with authentication recommended)
+- Run the application with appropriate user permissions (avoid running as root)
 
-## Development
+## Statistics and Data Retention
 
-### Running Tests
+File Fridge provides comprehensive statistics to help you monitor and optimize cold storage operations.
 
+### Statistics Features
+
+- **Capacity Metrics**: Track total storage, space saved, and hot/cold distribution
+- **Performance Metrics**: Monitor files moved per day, throughput, and trends
+- **Operational Metrics**: View active paths, criteria, and pinned files
+- **Historical Data**: Access daily activity trends and top-performing paths
+
+### Data Retention
+
+Statistics data is automatically managed to prevent database growth:
+
+- **Default Retention**: 30 days (configurable via `STATS_RETENTION_DAYS`)
+- **Automatic Cleanup**: Runs daily at 2 AM to remove old records
+- **Manual Cleanup**: Use the API endpoint `POST /api/v1/stats/cleanup` to trigger cleanup manually
+
+Access detailed statistics via:
 ```bash
-# Add tests to tests/ directory
-pytest
+curl "http://localhost:8000/api/v1/stats/detailed"
 ```
 
-### Database Migrations
+## Troubleshooting
 
-The application uses SQLAlchemy with automatic table creation. For production, consider using Alembic for migrations.
+### Common Issues
+
+**Files not being moved:**
+- Verify criteria are configured correctly
+- Check that the path is enabled
+- Ensure scan interval is appropriate for your criteria thresholds
+- Review logs for errors
+
+**Permission errors:**
+- Ensure the application has read/write access to both source and cold storage paths
+- Check file ownership and permissions
+
+**Database locked errors:**
+- SQLite may have limitations with concurrent access
+- Ensure only one instance of the application is running
 
 ## License
 
 Apache License 2.0 - See LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request.
 
 ## Support
 

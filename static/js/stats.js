@@ -4,64 +4,155 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 function loadStats() {
-    // Load overall stats
-    Promise.all([
-        fetch('/api/v1/stats').then(r => r.json()),
-        fetch('/api/v1/stats/aggregated?period=daily&days=30').then(r => r.json())
-    ])
-    .then(([stats, aggregated]) => {
-        updateStats(stats);
-        updateChart(aggregated);
-        updatePathStats(stats);
-    })
-    .catch(error => {
-        console.error('Error loading stats:', error);
-        showError('Failed to load statistics');
-    });
+    // Load detailed stats (includes all comprehensive metrics)
+    fetch('/api/v1/stats/detailed')
+        .then(r => r.json())
+        .then(stats => {
+            updateStats(stats);
+            updateChart(stats.daily_activity);
+            updatePathStats(stats);
+            updateAdditionalMetrics(stats);
+        })
+        .catch(error => {
+            console.error('Error loading stats:', error);
+            showError('Failed to load statistics');
+        });
 }
 
 function updateStats(stats) {
-    // Update total files
+    // Update total files moved
     const totalFilesEl = document.getElementById('totalFiles');
     if (totalFilesEl) {
         totalFilesEl.textContent = stats.total_files_moved || 0;
     }
-    
-    // Update total size
+
+    // Update total size moved
     const totalSizeEl = document.getElementById('totalSize');
     if (totalSizeEl) {
         totalSizeEl.textContent = formatBytes(stats.total_size_moved || 0);
     }
+
+    // Update hot storage metrics
+    const hotFilesEl = document.getElementById('hotFiles');
+    if (hotFilesEl) {
+        hotFilesEl.textContent = stats.total_files_hot || 0;
+    }
+
+    const hotSizeEl = document.getElementById('hotSize');
+    if (hotSizeEl) {
+        hotSizeEl.textContent = formatBytes(stats.total_size_hot || 0);
+    }
+
+    // Update cold storage metrics
+    const coldFilesEl = document.getElementById('coldFiles');
+    if (coldFilesEl) {
+        coldFilesEl.textContent = stats.total_files_cold || 0;
+    }
+
+    const coldSizeEl = document.getElementById('coldSize');
+    if (coldSizeEl) {
+        coldSizeEl.textContent = formatBytes(stats.total_size_cold || 0);
+    }
+
+    // Update performance metrics
+    const files24hEl = document.getElementById('files24h');
+    if (files24hEl) {
+        files24hEl.textContent = stats.files_moved_last_24h || 0;
+    }
+
+    const avgPerDayEl = document.getElementById('avgPerDay');
+    if (avgPerDayEl) {
+        avgPerDayEl.textContent = Math.round(stats.average_files_per_day || 0);
+    }
 }
 
-function updateChart(aggregated) {
+function updateAdditionalMetrics(stats) {
+    // Update operational metrics if elements exist
+    const activePathsEl = document.getElementById('activePaths');
+    if (activePathsEl) {
+        activePathsEl.textContent = `${stats.active_paths || 0} / ${stats.total_paths || 0}`;
+    }
+
+    const spaceSavedEl = document.getElementById('spaceSaved');
+    if (spaceSavedEl) {
+        spaceSavedEl.textContent = formatBytes(stats.space_saved || 0);
+    }
+
+    const avgFileSizeEl = document.getElementById('avgFileSize');
+    if (avgFileSizeEl) {
+        avgFileSizeEl.textContent = formatBytes(stats.average_file_size || 0);
+    }
+}
+
+function updateChart(dailyActivity) {
     const ctx = document.getElementById('dailyChart');
     if (!ctx) return;
-    
+
     const chartCtx = ctx.getContext('2d');
-    
+
+    // Show loading indicator
+    const loadingDiv = document.getElementById('daily-chart-loading');
+    if (loadingDiv) loadingDiv.style.display = 'none';
+    ctx.style.display = 'block';
+
     // Process data for chart
-    const labels = aggregated.data.map(d => d.period);
-    const counts = aggregated.data.map(d => d.count);
-    
+    const labels = dailyActivity.map(d => d.date);
+    const counts = dailyActivity.map(d => d.files_moved);
+    const sizes = dailyActivity.map(d => d.size_moved / (1024 * 1024 * 1024)); // Convert to GB
+
     new Chart(chartCtx, {
         type: 'line',
         data: {
             labels: labels,
-            datasets: [{
-                label: 'Files Moved',
-                data: counts,
-                borderColor: 'rgb(75, 192, 192)',
-                backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                tension: 0.1
-            }]
+            datasets: [
+                {
+                    label: 'Files Moved',
+                    data: counts,
+                    borderColor: 'rgb(75, 192, 192)',
+                    backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                    tension: 0.1,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Size Moved (GB)',
+                    data: sizes,
+                    borderColor: 'rgb(255, 99, 132)',
+                    backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                    tension: 0.1,
+                    yAxisID: 'y1'
+                }
+            ]
         },
         options: {
             responsive: true,
             maintainAspectRatio: true,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
             scales: {
                 y: {
-                    beginAtZero: true
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Files Moved'
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    beginAtZero: true,
+                    title: {
+                        display: true,
+                        text: 'Size (GB)'
+                    },
+                    grid: {
+                        drawOnChartArea: false
+                    }
                 }
             }
         }
@@ -69,24 +160,36 @@ function updateChart(aggregated) {
 }
 
 function updatePathStats(stats) {
-    const pathStatsBody = document.getElementById('pathStatsBody');
-    if (!pathStatsBody) return;
-    
-    const filesByPath = stats.files_by_path || {};
-    const paths = Object.keys(filesByPath);
-    
-    if (paths.length === 0) {
-        pathStatsBody.innerHTML = '<tr><td colspan="3" class="text-muted">No statistics available yet.</td></tr>';
+    const pathStatsTable = document.getElementById('pathStatsTable');
+    const pathStatsContent = document.getElementById('path-stats-content');
+    const pathStatsLoading = document.getElementById('path-stats-loading');
+    const noPathStatsMessage = document.getElementById('no-path-stats-message');
+
+    if (!pathStatsTable) return;
+
+    // Hide loading, show content
+    if (pathStatsLoading) pathStatsLoading.style.display = 'none';
+
+    const topPaths = stats.top_paths_by_files || [];
+
+    if (topPaths.length === 0) {
+        if (pathStatsContent) pathStatsContent.style.display = 'none';
+        if (noPathStatsMessage) noPathStatsMessage.style.display = 'block';
         return;
     }
-    
-    pathStatsBody.innerHTML = paths.map(pathName => {
-        const stat = filesByPath[pathName];
+
+    if (pathStatsContent) pathStatsContent.style.display = 'block';
+    if (noPathStatsMessage) noPathStatsMessage.style.display = 'none';
+
+    const tbody = pathStatsTable.querySelector('tbody');
+    if (!tbody) return;
+
+    tbody.innerHTML = topPaths.map(path => {
         return `
             <tr>
-                <td><strong>${escapeHtml(pathName)}</strong></td>
-                <td>${stat.count || 0}</td>
-                <td>${formatBytes(stat.size || 0)}</td>
+                <td><strong>${escapeHtml(path.path_name)}</strong></td>
+                <td>${path.file_count || 0}</td>
+                <td>${formatBytes(path.total_size || 0)}</td>
             </tr>
         `;
     }).join('');
