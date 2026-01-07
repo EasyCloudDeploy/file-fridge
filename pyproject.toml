@@ -33,6 +33,8 @@ dependencies = [
     "apscheduler>=3.10.4",
     "aiofiles>=23.2.1",
     "alembic>=1.13.1",
+    "aiosmtplib>=3.0.1",
+    "httpx>=0.26.0",
 ]
 
 [project.optional-dependencies]

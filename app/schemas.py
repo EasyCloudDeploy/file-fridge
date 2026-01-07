@@ -2,7 +2,17 @@
 from pydantic import BaseModel, Field, validator
 from typing import Optional, List
 from datetime import datetime
-from app.models import OperationType, CriterionType, Operator, StorageType, FileStatus, TagRuleCriterionType
+from app.models import (
+    OperationType,
+    CriterionType,
+    Operator,
+    StorageType,
+    FileStatus,
+    TagRuleCriterionType,
+    NotifierType,
+    NotificationLevel,
+    DispatchStatus,
+)
 
 
 class CriteriaBase(BaseModel):
@@ -309,4 +319,117 @@ class TagRule(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# Notification System Schemas
+
+
+class NotifierBase(BaseModel):
+    """Base notifier schema."""
+    name: str = Field(..., min_length=1, max_length=255, description="Human-readable name for this notifier")
+    type: NotifierType = Field(..., description="Type of notifier (EMAIL or GENERIC_WEBHOOK)")
+    address: str = Field(..., min_length=1, description="Email address or webhook URL")
+    enabled: bool = Field(True, description="Whether this notifier is active")
+    filter_level: NotificationLevel = Field(NotificationLevel.INFO, description="Minimum notification level to send")
+
+    # SMTP settings (required for email notifiers, ignored for webhooks)
+    smtp_host: Optional[str] = Field(None, description="SMTP server hostname (required for EMAIL type)")
+    smtp_port: Optional[int] = Field(587, description="SMTP server port (default: 587)")
+    smtp_user: Optional[str] = Field(None, description="SMTP username for authentication")
+    smtp_password: Optional[str] = Field(None, description="SMTP password for authentication")
+    smtp_sender: Optional[str] = Field(None, description="From address for emails (required for EMAIL type)")
+    smtp_use_tls: Optional[bool] = Field(True, description="Use TLS encryption (default: True)")
+
+
+class NotifierCreate(NotifierBase):
+    """Schema for creating a notifier."""
+
+    @validator('smtp_host')
+    def validate_smtp_host_for_email(cls, v, values):
+        """Ensure smtp_host is provided for email notifiers."""
+        if values.get('type') == NotifierType.EMAIL and not v:
+            raise ValueError('smtp_host is required for EMAIL notifiers')
+        return v
+
+    @validator('smtp_sender')
+    def validate_smtp_sender_for_email(cls, v, values):
+        """Ensure smtp_sender is provided for email notifiers."""
+        if values.get('type') == NotifierType.EMAIL and not v:
+            raise ValueError('smtp_sender is required for EMAIL notifiers')
+        return v
+
+
+class NotifierUpdate(BaseModel):
+    """Schema for updating a notifier."""
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    type: Optional[NotifierType] = None
+    address: Optional[str] = Field(None, min_length=1)
+    enabled: Optional[bool] = None
+    filter_level: Optional[NotificationLevel] = None
+
+    # SMTP settings (optional for updates)
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_sender: Optional[str] = None
+    smtp_use_tls: Optional[bool] = None
+
+
+class Notifier(NotifierBase):
+    """Schema for notifier response."""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationBase(BaseModel):
+    """Base notification schema."""
+    level: NotificationLevel
+    message: str = Field(..., min_length=1)
+
+
+class NotificationCreate(NotificationBase):
+    """Schema for creating a notification."""
+    pass
+
+
+class Notification(NotificationBase):
+    """Schema for notification response."""
+    id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationDispatch(BaseModel):
+    """Schema for notification dispatch log."""
+    id: int
+    notification_id: int
+    notifier_id: int
+    status: DispatchStatus
+    details: Optional[str]
+    timestamp: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class NotificationWithDispatches(Notification):
+    """Schema for notification with dispatch history."""
+    dispatches: List[NotificationDispatch] = []
+
+    class Config:
+        from_attributes = True
+
+
+class TestNotifierResponse(BaseModel):
+    """Schema for test notifier response."""
+    success: bool
+    message: str
+    notifier_name: str
 
