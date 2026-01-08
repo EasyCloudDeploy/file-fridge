@@ -217,3 +217,77 @@ class TagRule(Base):
     # Relationships
     tag = relationship("Tag")
 
+
+class NotifierType(str, enum.Enum):
+    """Notification destination types."""
+    EMAIL = "email"
+    GENERIC_WEBHOOK = "generic_webhook"
+
+
+class NotificationLevel(str, enum.Enum):
+    """Notification severity levels."""
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+class DispatchStatus(str, enum.Enum):
+    """Notification dispatch status."""
+    SUCCESS = "success"
+    FAILED = "failed"
+
+
+class Notifier(Base):
+    """Configured notification destination."""
+    __tablename__ = "notifiers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    type = Column(SQLEnum(NotifierType), nullable=False)
+    address = Column(String, nullable=False)  # Email address or webhook URL
+    enabled = Column(Boolean, default=True, nullable=False)
+    filter_level = Column(SQLEnum(NotificationLevel), default=NotificationLevel.INFO, nullable=False)
+
+    # SMTP settings (for email notifiers only)
+    smtp_host = Column(String, nullable=True)  # SMTP server hostname
+    smtp_port = Column(Integer, nullable=True)  # SMTP server port (default 587)
+    smtp_user = Column(String, nullable=True)  # SMTP username
+    smtp_password = Column(String, nullable=True)  # SMTP password (stored encrypted in production)
+    smtp_sender = Column(String, nullable=True)  # From address
+    smtp_use_tls = Column(Boolean, default=True, nullable=True)  # Use TLS encryption
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    dispatches = relationship("NotificationDispatch", back_populates="notifier", cascade="all, delete-orphan")
+
+
+class Notification(Base):
+    """Notification event record."""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    level = Column(SQLEnum(NotificationLevel), nullable=False, index=True)
+    message = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Relationships
+    dispatches = relationship("NotificationDispatch", back_populates="notification", cascade="all, delete-orphan")
+
+
+class NotificationDispatch(Base):
+    """Log of notification dispatch attempts."""
+    __tablename__ = "notification_dispatches"
+
+    id = Column(Integer, primary_key=True, index=True)
+    notification_id = Column(Integer, ForeignKey("notifications.id"), nullable=False, index=True)
+    notifier_id = Column(Integer, ForeignKey("notifiers.id"), nullable=False, index=True)
+    status = Column(SQLEnum(DispatchStatus), nullable=False)
+    details = Column(Text, nullable=True)  # Error message if failed
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Relationships
+    notification = relationship("Notification", back_populates="dispatches")
+    notifier = relationship("Notifier", back_populates="dispatches")
+
