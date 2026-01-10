@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Create Path - File Fridge{% endblock %}
+
+{% block content %}
+        <div class="row">
+            <div class="col-12 col-md-8 offset-md-2">
+                <h1 class="mb-4" id="form-title">
+                    <i class="bi bi-plus-circle"></i> Create Monitored Path
+                </h1>
+
+                <div class="card">
+                    <div class="card-body">
+                        <form id="path-form">
+                            <div class="mb-3">
+                                <label for="name" class="form-label">Name *</label>
+                                <input type="text" class="form-control" id="name" name="name" required>
+                                <small class="form-text text-muted">A descriptive name for this monitored path</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="source_path" class="form-label">Source Path *</label>
+                                <input type="text" class="form-control" id="source_path" name="source_path" required>
+                                <small class="form-text text-muted">The directory to monitor for files</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="storage_locations" class="form-label">Cold Storage Locations *</label>
+                                <div class="input-group">
+                                    <div id="storage-locations-container" class="form-control" style="height: auto; max-height: 140px; overflow-y: auto;">
+                                        <!-- Storage locations checkboxes will be loaded by JavaScript -->
+                                    </div>
+                                    <button class="btn btn-outline-secondary" type="button" onclick="window.open('/storage-locations/new', '_blank')">
+                                        <i class="bi bi-plus-circle"></i> Add New
+                                    </button>
+                                </div>
+                                <small class="form-text text-muted">
+                                    Select one or more storage locations. Files will be moved to the first location with sufficient space.
+                                </small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="operation_type" class="form-label">Operation Type *</label>
+                                <select class="form-select" id="operation_type" name="operation_type" required>
+                                    <option value="move">Move</option>
+                                    <option value="copy">Copy</option>
+                                    <option value="symlink">Move & Create Symlink</option>
+                                </select>
+                                <small class="form-text text-muted">
+                                    Move: Move file to cold storage<br>
+                                    Copy: Copy file, keep original<br>
+                                    Symlink: Move file, create symlink at original location
+                                </small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="check_interval_seconds" class="form-label">Check Interval (seconds) *</label>
+                                <input type="number" class="form-control" id="check_interval_seconds" name="check_interval_seconds"
+                                       value="3600" min="60" required>
+                                <small class="form-text text-muted">How often to check for files matching criteria (minimum 60 seconds)</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="enabled" name="enabled" checked>
+                                    <label class="form-check-label" for="enabled">
+                                        Enabled
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted">Enable automatic scanning for this path</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="prevent_indexing" name="prevent_indexing" checked>
+                                    <label class="form-check-label" for="prevent_indexing">
+                                        Prevent Spotlight Indexing (Recommended)
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted">
+                                    <i class="bi bi-info-circle"></i> Creates a <code>.noindex</code> file in both hot and cold storage directories to prevent macOS Spotlight from accessing files.
+                                    This prevents timestamp corruption that can cause files to move back and forth between hot and cold storage.
+                                    <strong>Recommended to keep enabled unless you specifically need Spotlight indexing.</strong>
+                                </small>
+                            </div>
+
+                            <div class="d-flex justify-content-between">
+                                <a href="/paths" class="btn btn-secondary">Cancel</a>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-save"></i> <span id="submit-text">Create</span> Path
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="/static/js/paths.js"></script>
+{% endblock %}
