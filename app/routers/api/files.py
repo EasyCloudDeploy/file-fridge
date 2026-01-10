@@ -7,8 +7,9 @@ from pathlib import Path
 from datetime import datetime
 from starlette.concurrency import run_in_threadpool
 from app.database import get_db
-from app.models import FileRecord, MonitoredPath, FileInventory, StorageType, FileStatus
-from app.schemas import FileInventory as FileInventorySchema, FileMoveRequest, StorageType as StorageTypeSchema, PaginatedFileInventory
+from app.models import FileRecord, MonitoredPath, FileInventory, StorageType, FileStatus, ColdStorageLocation
+import logging
+from app.schemas import FileInventory as FileInventorySchema, FileMoveRequest, FileRelocateRequest, StorageType as StorageTypeSchema, PaginatedFileInventory
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
 from app.models import OperationType
@@ -17,7 +18,7 @@ import math
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 
 
-@router.get("", response_model=PaginatedFileInventory)
+@router.get("")
 async def list_files(
     page: int = Query(1, ge=1, description="Page number (1-indexed)"),
     page_size: int = Query(50, ge=1, le=500, description="Items per page (max 500)"),
@@ -62,6 +63,21 @@ async def list_files(
     return result
 
 
+def _get_storage_location_for_file(file_path: str, monitored_path: MonitoredPath) -> Optional[dict]:
+    """Determine the cold storage location for a file based on its path."""
+    if not monitored_path or not monitored_path.storage_locations:
+        return None
+
+    for loc in monitored_path.storage_locations:
+        if file_path.startswith(loc.path):
+            return {
+                "id": loc.id,
+                "name": loc.name,
+                "path": loc.path
+            }
+    return None
+
+
 def _query_files_inventory_paginated(
     db: Session,
     page: int,
@@ -76,7 +92,7 @@ def _query_files_inventory_paginated(
     tag_ids: Optional[List[int]],
     sort_by: str,
     sort_order: str
-) -> PaginatedFileInventory:
+) -> dict:
     """Query files inventory with pagination (runs in thread pool)."""
     from app.models import FileTag, Tag
 
@@ -93,8 +109,8 @@ def _query_files_inventory_paginated(
     if status:
         query = query.filter(FileInventory.status == status)
     else:
-        # Only show active files by default for better performance
-        query = query.filter(FileInventory.status == FileStatus.ACTIVE)
+        # Show active and migrating files by default
+        query = query.filter(FileInventory.status.in_([FileStatus.ACTIVE, FileStatus.MIGRATING]))
 
     # Search filter (case-insensitive partial match on file_path)
     if search:
@@ -153,15 +169,67 @@ def _query_files_inventory_paginated(
     # Execute query with pagination
     files = query.offset(skip).limit(page_size).all()
 
-    return PaginatedFileInventory(
-        items=files,
-        total=total_count,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages,
-        has_next=page < total_pages,
-        has_prev=page > 1
-    )
+    # Get all monitored paths for the files in this result set
+    path_ids = set(f.path_id for f in files)
+    paths_map = {}
+    if path_ids:
+        paths = db.query(MonitoredPath).filter(MonitoredPath.id.in_(path_ids)).all()
+        paths_map = {p.id: p for p in paths}
+
+    # Convert to dicts and add storage location info for cold storage files
+    items = []
+    for file in files:
+        file_dict = {
+            "id": file.id,
+            "path_id": file.path_id,
+            "file_path": file.file_path,
+            "storage_type": file.storage_type.value if hasattr(file.storage_type, 'value') else file.storage_type,
+            "file_size": file.file_size,
+            "file_mtime": file.file_mtime.isoformat() if file.file_mtime else None,
+            "file_atime": file.file_atime.isoformat() if file.file_atime else None,
+            "file_ctime": file.file_ctime.isoformat() if file.file_ctime else None,
+            "checksum": file.checksum,
+            "file_extension": file.file_extension,
+            "mime_type": file.mime_type,
+            "status": file.status.value if hasattr(file.status, 'value') else file.status,
+            "last_seen": file.last_seen.isoformat() if file.last_seen else None,
+            "created_at": file.created_at.isoformat() if file.created_at else None,
+            "tags": [
+                {
+                    "id": ft.id,
+                    "file_id": ft.file_id,
+                    "tag": {
+                        "id": ft.tag.id,
+                        "name": ft.tag.name,
+                        "description": ft.tag.description,
+                        "color": ft.tag.color,
+                        "created_at": ft.tag.created_at.isoformat() if ft.tag.created_at else None
+                    },
+                    "tagged_at": ft.tagged_at.isoformat() if ft.tagged_at else None,
+                    "tagged_by": ft.tagged_by
+                }
+                for ft in file.tags
+            ],
+            "storage_location": None
+        }
+
+        # Add storage location info for cold storage files
+        if file.storage_type == StorageType.COLD:
+            monitored_path = paths_map.get(file.path_id)
+            storage_loc = _get_storage_location_for_file(file.file_path, monitored_path)
+            file_dict["storage_location"] = storage_loc
+
+        items.append(file_dict)
+
+    return {
+        "items": items,
+        "total": total_count,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "has_next": page < total_pages,
+        "has_prev": page > 1
+    }
 
 
 @router.post("/move", status_code=status.HTTP_202_ACCEPTED)
@@ -364,6 +432,270 @@ def _thaw_file_operation(db: Session, inventory_id: int, pin: bool) -> dict:
         "message": f"File thawed successfully{' and pinned' if pin else ''}",
         "inventory_id": inventory_id,
         "pinned": pin
+    }
+
+
+@router.post("/relocate/{inventory_id}", status_code=status.HTTP_202_ACCEPTED)
+async def relocate_file(
+    inventory_id: int,
+    request: FileRelocateRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Start an async relocation of a file from one cold storage location to another.
+
+    This endpoint creates a background task to move the file between cold storage
+    locations. The operation runs asynchronously and returns a task ID that can be
+    used to check progress.
+
+    Returns 202 Accepted with a task_id that can be polled for status.
+    """
+    result = await run_in_threadpool(_create_relocate_task, db, inventory_id, request.target_storage_location_id)
+    return result
+
+
+def _create_relocate_task(db: Session, inventory_id: int, target_storage_location_id: int) -> dict:
+    """Create a relocation task (runs in thread pool)."""
+    from app.services.relocation_manager import relocation_manager
+
+    # Find the inventory entry
+    inventory_entry = db.query(FileInventory).filter(
+        FileInventory.id == inventory_id,
+        FileInventory.storage_type == StorageType.COLD
+    ).first()
+
+    if not inventory_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File inventory entry with id {inventory_id} not found in cold storage"
+        )
+
+    # Get the monitored path
+    monitored_path = db.query(MonitoredPath).filter(
+        MonitoredPath.id == inventory_entry.path_id
+    ).first()
+
+    if not monitored_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Monitored path not found for inventory entry {inventory_id}"
+        )
+
+    # Get the target storage location
+    target_location = db.query(ColdStorageLocation).filter(
+        ColdStorageLocation.id == target_storage_location_id
+    ).first()
+
+    if not target_location:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Target storage location with id {target_storage_location_id} not found"
+        )
+
+    # Verify target location is associated with this path
+    path_location_ids = [loc.id for loc in monitored_path.storage_locations]
+    if target_storage_location_id not in path_location_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Target storage location is not associated with this path. Valid locations: {path_location_ids}"
+        )
+
+    # Determine the current file location
+    current_file_path = Path(inventory_entry.file_path)
+    if not current_file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Source file does not exist: {inventory_entry.file_path}"
+        )
+
+    # Find current storage location by matching the file path prefix
+    current_location = None
+    for loc in monitored_path.storage_locations:
+        if inventory_entry.file_path.startswith(loc.path):
+            current_location = loc
+            break
+
+    if not current_location:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Could not determine current storage location for file"
+        )
+
+    if current_location.id == target_storage_location_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File is already in the target storage location"
+        )
+
+    # Get file size
+    file_size = current_file_path.stat().st_size
+
+    # Set status to MIGRATING immediately so UI reflects the pending operation
+    inventory_entry.status = FileStatus.MIGRATING
+    db.commit()
+    logger = logging.getLogger(__name__)
+    logger.info(f"Set file {inventory_id} status to MIGRATING (task pending)")
+
+    # Create the relocation task
+    try:
+        task_id = relocation_manager.create_task(
+            inventory_id=inventory_id,
+            file_path=inventory_entry.file_path,
+            file_size=file_size,
+            source_location_id=current_location.id,
+            source_location_name=current_location.name,
+            target_location_id=target_location.id,
+            target_location_name=target_location.name
+        )
+    except ValueError as e:
+        # Reset status if task creation fails
+        inventory_entry.status = FileStatus.ACTIVE
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(e)
+        )
+
+    return {
+        "message": "Relocation task created",
+        "task_id": task_id,
+        "inventory_id": inventory_id,
+        "source_location": {
+            "id": current_location.id,
+            "name": current_location.name
+        },
+        "target_location": {
+            "id": target_location.id,
+            "name": target_location.name
+        }
+    }
+
+
+@router.get("/relocate/{inventory_id}/options")
+async def get_relocate_options(
+    inventory_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get available cold storage locations for relocating a file.
+
+    Returns the list of valid target storage locations for a file,
+    excluding the current location.
+    """
+    result = await run_in_threadpool(_get_relocate_options, db, inventory_id)
+    return result
+
+
+def _get_relocate_options(db: Session, inventory_id: int) -> dict:
+    """Get relocate options (runs in thread pool)."""
+    # Find the inventory entry
+    inventory_entry = db.query(FileInventory).filter(
+        FileInventory.id == inventory_id,
+        FileInventory.storage_type == StorageType.COLD
+    ).first()
+
+    if not inventory_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File inventory entry with id {inventory_id} not found in cold storage"
+        )
+
+    # Get the monitored path
+    monitored_path = db.query(MonitoredPath).filter(
+        MonitoredPath.id == inventory_entry.path_id
+    ).first()
+
+    if not monitored_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Monitored path not found for inventory entry {inventory_id}"
+        )
+
+    # Find current storage location
+    current_location_id = None
+    for loc in monitored_path.storage_locations:
+        if inventory_entry.file_path.startswith(loc.path):
+            current_location_id = loc.id
+            break
+
+    # Get all available storage locations for this path, excluding current
+    available_locations = [
+        {
+            "id": loc.id,
+            "name": loc.name,
+            "path": loc.path,
+            "is_current": loc.id == current_location_id
+        }
+        for loc in monitored_path.storage_locations
+    ]
+
+    return {
+        "inventory_id": inventory_id,
+        "file_path": inventory_entry.file_path,
+        "current_location_id": current_location_id,
+        "available_locations": available_locations,
+        "can_relocate": len([l for l in available_locations if not l["is_current"]]) > 0
+    }
+
+
+@router.get("/relocate/tasks")
+async def get_relocation_tasks(
+    active_only: bool = Query(False, description="Only return active (pending/running) tasks"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum number of tasks to return")
+):
+    """
+    Get list of relocation tasks.
+
+    Returns recent relocation tasks including their status and progress.
+    """
+    from app.services.relocation_manager import relocation_manager
+
+    if active_only:
+        tasks = relocation_manager.get_all_active_tasks()
+    else:
+        tasks = relocation_manager.get_recent_tasks(limit=limit)
+
+    return {
+        "tasks": tasks,
+        "count": len(tasks)
+    }
+
+
+@router.get("/relocate/tasks/{task_id}")
+async def get_relocation_task_status(task_id: str):
+    """
+    Get the status of a specific relocation task.
+
+    Returns detailed progress information for the task.
+    """
+    from app.services.relocation_manager import relocation_manager
+
+    task = relocation_manager.get_task(task_id)
+
+    if not task:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Relocation task {task_id} not found"
+        )
+
+    return task
+
+
+@router.get("/relocate/{inventory_id}/status")
+async def get_file_relocation_status(inventory_id: int):
+    """
+    Get the relocation status for a specific file.
+
+    Returns the active relocation task for a file if one exists.
+    """
+    from app.services.relocation_manager import relocation_manager
+
+    task = relocation_manager.get_task_for_inventory(inventory_id)
+
+    return {
+        "inventory_id": inventory_id,
+        "has_active_task": task is not None,
+        "task": task
     }
 
 

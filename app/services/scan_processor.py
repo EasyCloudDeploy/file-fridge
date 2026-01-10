@@ -48,7 +48,47 @@ class ScanProcessor:
             logger.debug(f"  Matched criteria IDs: {matched_criteria_ids}")
 
             source_base = Path(path.source_path)
-            dest_base = Path(path.cold_storage_path)
+
+            # Get file size to check available space
+            try:
+                if file_path.is_symlink():
+                    try:
+                        actual_file = file_path.resolve(strict=True)
+                        file_size = actual_file.stat().st_size
+                    except (OSError, RuntimeError):
+                        file_size = file_path.stat().st_size
+                else:
+                    file_size = file_path.stat().st_size
+            except (OSError, FileNotFoundError) as e:
+                logger.debug(f"  Could not get file size: {e}")
+                result["error"] = f"Cannot stat source file: {e}"
+                return result
+
+            # Determine destination base path
+            dest_base = None
+            if not path.storage_locations:
+                result["error"] = "No storage locations configured for this path"
+                logger.error(f"  ERROR: {result['error']}")
+                return result
+
+            # Iterate through storage locations to find one with sufficient space
+            for location in path.storage_locations:
+                try:
+                    _, _, free_space = shutil.disk_usage(location.path)
+                    # Add 1MB buffer to be safe
+                    if file_size + (1024 * 1024) <= free_space:
+                        dest_base = Path(location.path)
+                        logger.debug(f"  Selected storage location: {location.name} ({location.path}) with {free_space} bytes free")
+                        break
+                    else:
+                        logger.debug(f"  Skipping storage location {location.name} ({location.path}): insufficient space (need {file_size + (1024 * 1024)}, have {free_space})")
+                except Exception as e:
+                    logger.warning(f"  Could not check disk space for storage location {location.name} ({location.path}): {e}")
+
+            if dest_base is None:
+                result["error"] = "No storage location has sufficient space for this file"
+                logger.error(f"  ERROR: {result['error']}")
+                return result
 
             # Calculate destination path
             dest_path = FileMover.preserve_directory_structure(

@@ -1,18 +1,17 @@
-"""Statistics web routes - serves static HTML, data loaded via API."""
-from fastapi import APIRouter
-from fastapi.responses import FileResponse
-from pathlib import Path
+"""Statistics web routes - serves templated HTML, data loaded via API."""
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 router = APIRouter()
+templates = Jinja2Templates(directory="templates")
 
 
-@router.get("/stats")
-async def statistics():
-    """Statistics overview - serves static HTML, data loaded via API."""
-    html_path = Path("static/html/stats.html")
-    if html_path.exists():
-        return FileResponse(html_path, media_type="text/html")
-    else:
-        from fastapi.responses import HTMLResponse
-        return HTMLResponse(content="<h1>Statistics</h1><p>Static HTML file not found. Please check static/html/stats.html</p>", status_code=404)
+@router.get("/stats", response_class=HTMLResponse)
+async def statistics(request: Request):
+    """Statistics overview - serves templated HTML, data loaded via API."""
+    return templates.TemplateResponse("stats.html", {
+        "request": request,
+        "active_page": "stats"
+    })
 

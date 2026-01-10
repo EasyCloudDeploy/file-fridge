@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from pathlib import Path
 from app.database import get_db
-from app.models import MonitoredPath, CriterionType
+from app.models import MonitoredPath, CriterionType, ColdStorageLocation
 from app.schemas import MonitoredPathCreate, MonitoredPathUpdate, MonitoredPath as MonitoredPathSchema
 from app.services.scheduler import scheduler_service
 from app.services.scan_progress import scan_progress_manager
@@ -21,32 +21,38 @@ router = APIRouter(prefix="/api/v1/paths", tags=["paths"])
 def validate_path_configuration(path: MonitoredPath, db: Session) -> None:
     """
     Validate path configuration and check for incompatible settings.
-    
+
     Sets error_message on the path if validation fails.
-    
+
     Args:
         path: The MonitoredPath to validate
         db: Database session
     """
-    # Check if cold storage is a network mount and if atime criteria exist
-    atime_available, error_msg = check_atime_availability(path.cold_storage_path)
-    
-    if not atime_available:
-        # Check if any enabled criteria use ATIME
-        atime_criteria = [
-            c for c in path.criteria 
-            if c.enabled and c.criterion_type == CriterionType.ATIME
-        ]
-        
-        if atime_criteria:
-            # Path has atime criteria but cold storage is on network mount
-            path.error_message = error_msg
+    # Check if any enabled criteria use ATIME
+    atime_criteria = [
+        c for c in path.criteria
+        if c.enabled and c.criterion_type == CriterionType.ATIME
+    ]
+
+    if atime_criteria:
+        # Check cold storage locations for network mount incompatibility
+        error_locations = []
+
+        for location in path.storage_locations:
+            atime_available, error_msg = check_atime_availability(location.path)
+            if not atime_available:
+                error_locations.append(f"{location.name} ({location.path}): {error_msg}")
+
+        if error_locations:
+            # At least one storage location has atime issues
+            combined_error = "ATIME criteria configured but not available on storage location(s): " + "; ".join(error_locations)
+            path.error_message = combined_error
             db.commit()
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=error_msg
+                detail=combined_error
             )
-    
+
     # Clear error message if validation passes
     if path.error_message:
         path.error_message = None
@@ -63,24 +69,14 @@ def list_paths(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
 @router.post("", response_model=MonitoredPathSchema, status_code=status.HTTP_201_CREATED)
 def create_path(path: MonitoredPathCreate, db: Session = Depends(get_db)):
     """Create a new monitored path."""
-    # Validate paths exist
+    # Validate source path exists
     source = Path(path.source_path)
     if not source.exists() or not source.is_dir():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Source path does not exist or is not a directory: {path.source_path}"
         )
-    
-    dest = Path(path.cold_storage_path)
-    if not dest.exists():
-        try:
-            dest.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot create cold storage path: {str(e)}"
-            )
-    
+
     # Check for duplicate name
     existing = db.query(MonitoredPath).filter(MonitoredPath.name == path.name).first()
     if existing:
@@ -88,8 +84,25 @@ def create_path(path: MonitoredPathCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path with name '{path.name}' already exists"
         )
-    
-    db_path = MonitoredPath(**path.model_dump())
+
+    # Fetch and associate storage locations
+    storage_locations = db.query(ColdStorageLocation).filter(
+        ColdStorageLocation.id.in_(path.storage_location_ids)
+    ).all()
+
+    if len(storage_locations) != len(path.storage_location_ids):
+        found_ids = {loc.id for loc in storage_locations}
+        missing_ids = set(path.storage_location_ids) - found_ids
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Storage location IDs not found: {missing_ids}"
+        )
+
+    # Create path without storage_location_ids (not a DB column)
+    path_data = path.model_dump(exclude={'storage_location_ids'})
+    db_path = MonitoredPath(**path_data)
+    db_path.storage_locations = storage_locations
+
     db.add(db_path)
     db.commit()
     db.refresh(db_path)
@@ -104,11 +117,12 @@ def create_path(path: MonitoredPathCreate, db: Session = Depends(get_db)):
         raise
 
     # Manage .noindex files based on prevent_indexing setting
-    IndexingManager.manage_noindex_files(
-        db_path.source_path,
-        db_path.cold_storage_path,
-        db_path.prevent_indexing
-    )
+    for location in db_path.storage_locations:
+        IndexingManager.manage_noindex_files(
+            db_path.source_path,
+            location.path,
+            db_path.prevent_indexing
+        )
 
     # Add to scheduler
     if db_path.enabled:
@@ -148,60 +162,6 @@ def update_path(
     # Validate paths if being updated
     update_data = path_update.model_dump(exclude_unset=True)
 
-    # CRITICAL: Check if cold_storage_path is being changed
-    if "cold_storage_path" in update_data and update_data["cold_storage_path"] != path.cold_storage_path:
-        old_cold_path = path.cold_storage_path
-        new_cold_path = update_data["cold_storage_path"]
-
-        logger.info(f"Cold storage path change detected: {old_cold_path} -> {new_cold_path}")
-
-        # Check for existing files in old location
-        check_result = PathMigrationService.check_existing_files(old_cold_path, path_id, db)
-
-        if check_result["has_files"]:
-            # Files exist - require confirmation
-            if not confirm_cold_storage_change:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "cold_storage_path_has_files",
-                        "message": f"The old cold storage path '{old_cold_path}' contains {check_result['filesystem_count']} files. Please confirm what to do with these files.",
-                        "file_counts": {
-                            "filesystem": check_result["filesystem_count"],
-                            "database_records": check_result["file_records_count"],
-                            "inventory": check_result["inventory_count"]
-                        },
-                        "old_path": old_cold_path,
-                        "new_path": new_cold_path
-                    }
-                )
-
-            # Confirmation provided - execute the action
-            if migration_action == "move":
-                logger.info(f"Migrating files from {old_cold_path} to {new_cold_path}")
-                success, error, stats = PathMigrationService.migrate_files(
-                    old_cold_path, new_cold_path, path_id, db
-                )
-
-                if not success:
-                    raise HTTPException(
-                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                        detail=f"File migration failed: {error}. Stats: {stats}"
-                    )
-
-                logger.info(f"Migration successful: {stats}")
-
-            elif migration_action == "abandon":
-                logger.warning(f"Abandoning files in {old_cold_path}")
-                success, message = PathMigrationService.abandon_files(old_cold_path, path_id, db)
-                logger.info(message)
-
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="migration_action must be either 'move' or 'abandon' when confirm_cold_storage_change=true"
-                )
-    
     if "source_path" in update_data:
         source = Path(update_data["source_path"])
         if not source.exists() or not source.is_dir():
@@ -209,17 +169,6 @@ def update_path(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Source path does not exist or is not a directory: {update_data['source_path']}"
             )
-    
-    if "cold_storage_path" in update_data:
-        dest = Path(update_data["cold_storage_path"])
-        if not dest.exists():
-            try:
-                dest.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Cannot create cold storage path: {str(e)}"
-                )
     
     # Check for duplicate name if name is being updated
     if "name" in update_data:
@@ -232,7 +181,24 @@ def update_path(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Path with name '{update_data['name']}' already exists"
             )
-    
+
+    # Handle storage_location_ids update if provided
+    storage_location_ids = update_data.pop('storage_location_ids', None)
+    if storage_location_ids is not None:
+        storage_locations = db.query(ColdStorageLocation).filter(
+            ColdStorageLocation.id.in_(storage_location_ids)
+        ).all()
+
+        if len(storage_locations) != len(storage_location_ids):
+            found_ids = {loc.id for loc in storage_locations}
+            missing_ids = set(storage_location_ids) - found_ids
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Storage location IDs not found: {missing_ids}"
+            )
+
+        path.storage_locations = storage_locations
+
     # Update fields
     for field, value in update_data.items():
         setattr(path, field, value)
@@ -244,12 +210,13 @@ def update_path(
     validate_path_configuration(path, db)
 
     # Manage .noindex files if prevent_indexing or paths were updated
-    if "prevent_indexing" in update_data or "source_path" in update_data or "cold_storage_path" in update_data:
-        IndexingManager.manage_noindex_files(
-            path.source_path,
-            path.cold_storage_path,
-            path.prevent_indexing
-        )
+    if "prevent_indexing" in update_data or "source_path" in update_data or storage_location_ids is not None:
+        for location in path.storage_locations:
+            IndexingManager.manage_noindex_files(
+                path.source_path,
+                location.path,
+                path.prevent_indexing
+            )
 
     # Update scheduler job
     scheduler_service.remove_path_job(path_id)

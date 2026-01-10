@@ -1,5 +1,5 @@
 """SQLAlchemy database models."""
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, Enum as SQLEnum, Index
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, Enum as SQLEnum, Index, Table
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import enum
@@ -39,14 +39,36 @@ class Operator(str, enum.Enum):
     MATCHES = "matches"  # For glob patterns
 
 
+# Association table for many-to-many relationship between MonitoredPath and ColdStorageLocation
+path_storage_location_association = Table(
+    'path_storage_location_association',
+    Base.metadata,
+    Column('path_id', Integer, ForeignKey('monitored_paths.id'), primary_key=True),
+    Column('storage_location_id', Integer, ForeignKey('cold_storage_locations.id'), primary_key=True)
+)
+
+
+class ColdStorageLocation(Base):
+    """Cold storage location configuration."""
+    __tablename__ = "cold_storage_locations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, unique=True, index=True)
+    path = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationship to monitored paths
+    paths = relationship("MonitoredPath", secondary=path_storage_location_association, back_populates="storage_locations")
+
+
 class MonitoredPath(Base):
     """Monitored path configuration."""
     __tablename__ = "monitored_paths"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, index=True)
     source_path = Column(String, nullable=False)
-    cold_storage_path = Column(String, nullable=False)
     operation_type = Column(SQLEnum(OperationType), default=OperationType.MOVE)
     check_interval_seconds = Column(Integer, default=3600)
     enabled = Column(Boolean, default=True)
@@ -54,10 +76,27 @@ class MonitoredPath(Base):
     error_message = Column(Text, nullable=True)  # Error state message (e.g., atime unavailable on network mount)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
     criteria = relationship("Criteria", back_populates="path", cascade="all, delete-orphan")
     file_records = relationship("FileRecord", back_populates="path", cascade="all, delete-orphan")
     file_inventory = relationship("FileInventory", back_populates="path", cascade="all, delete-orphan")
+    storage_locations = relationship("ColdStorageLocation", secondary=path_storage_location_association, back_populates="paths")
+
+    @property
+    def cold_storage_path(self) -> str:
+        """
+        Compatibility property that returns the first storage location's path.
+        This is a temporary measure for backward compatibility with existing services.
+
+        TODO: Refactor all services to handle multiple storage locations properly:
+        - file_scanner.py: Scan all storage locations for inventory
+        - file_reconciliation.py: Check all storage locations
+        - criteria.py: Validate atime for all storage locations
+        - utils/indexing.py: Manage .noindex for all locations
+        """
+        if self.storage_locations:
+            return self.storage_locations[0].path
+        raise ValueError(f"Path '{self.name}' has no storage locations configured")
 
 
 class Criteria(Base):
@@ -104,6 +143,7 @@ class FileStatus(str, enum.Enum):
     MOVED = "moved"        # File has been moved to cold storage
     DELETED = "deleted"    # File was deleted
     MISSING = "missing"    # File should exist but is not found
+    MIGRATING = "migrating"  # File is being relocated between cold storage locations
 
 
 class FileInventory(Base):

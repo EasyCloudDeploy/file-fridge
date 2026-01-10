@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Paths - File Fridge{% endblock %}
+
+{% block content %}
+        <div class="row">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h1>
+                        <i class="bi bi-folder"></i> Monitored Paths
+                    </h1>
+                    <a href="/paths/new" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> Add Path
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <div id="paths-loading" class="text-center py-5">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading paths...</span>
+                            </div>
+                            <p class="text-muted mt-3">Loading paths...</p>
+                        </div>
+                        <div id="paths-content" style="display: none;">
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="pathsTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Source Path</th>
+                                            <th>Cold Storage</th>
+                                            <th>Operation</th>
+                                            <th>Interval</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Paths will be loaded here by JavaScript -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div id="no-paths-message" class="text-center py-5" style="display: none;">
+                            <i class="bi bi-folder-x display-1 text-muted"></i>
+                            <p class="text-muted mt-3">No monitored paths configured yet.</p>
+                            <a href="/paths/new" class="btn btn-primary">
+                                <i class="bi bi-plus-circle"></i> Add Your First Path
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="/static/js/paths.js"></script>
+{% endblock %}

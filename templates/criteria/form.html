@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block title %}Add Criteria - File Fridge{% endblock %}
+
+{% block content %}
+        <div class="row">
+            <div class="col-12 col-md-8 offset-md-2">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h1 id="form-title">
+                        <i class="bi bi-plus-circle"></i> Add Criteria
+                    </h1>
+                    <a href="#" id="back-link" class="btn btn-secondary">
+                        <i class="bi bi-arrow-left"></i> Back to Path
+                    </a>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title" id="path-name">Loading...</h5>
+                        <p class="card-text text-muted mb-0">
+                            <code id="path-source">Loading...</code>
+                        </p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-body">
+                        <form id="criteria-form">
+                            <div class="mb-3">
+                                <label for="criterion_type" class="form-label">Criteria Type *</label>
+                                <select class="form-select" id="criterion_type" name="criterion_type" required>
+                                    <option value="">Select a type...</option>
+                                    <option value="mtime">Modification Time (mtime)</option>
+                                    <option value="atime">Access Time (atime)</option>
+                                    <option value="ctime">Change Time (ctime)</option>
+                                    <option value="size">File Size</option>
+                                    <option value="name">Filename (case-sensitive)</option>
+                                    <option value="iname">Filename (case-insensitive)</option>
+                                    <option value="type">File Type</option>
+                                    <option value="perm">Permissions</option>
+                                    <option value="user">User</option>
+                                    <option value="group">Group</option>
+                                </select>
+                                <small class="form-text text-muted">
+                                    The type of file attribute to match against
+                                </small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="operator" class="form-label">Operator *</label>
+                                <select class="form-select" id="operator" name="operator" required>
+                                    <option value="">Select an operator...</option>
+                                    <option value=">">&gt; (Greater Than)</option>
+                                    <option value="<">&lt; (Less Than)</option>
+                                    <option value="=">= (Equal To)</option>
+                                    <option value=">=">&gt;= (Greater Than or Equal)</option>
+                                    <option value="<=">&lt;= (Less Than or Equal)</option>
+                                    <option value="contains">Contains</option>
+                                    <option value="matches">Matches (glob pattern)</option>
+                                    <option value="regex">Regex</option>
+                                </select>
+                                <small class="form-text text-muted">
+                                    The comparison operator to use
+                                </small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="value" class="form-label">Value *</label>
+                                <input type="text" class="form-control" id="value" name="value" required>
+                                <small class="form-text text-muted">
+                                    <div id="value-help">
+                                        <strong>Examples:</strong><br>
+                                        <span id="mtime-help" style="display: none;">
+                                            Minutes since modification (e.g., "30" for files older than 30 minutes, "1440" for 1 day)
+                                        </span>
+                                        <span id="atime-help" style="display: none;">
+                                            Minutes since access (e.g., "30" for files older than 30 minutes, "1440" for 1 day)
+                                        </span>
+                                        <span id="ctime-help" style="display: none;">
+                                            Minutes since change (e.g., "30" for files older than 30 minutes, "1440" for 1 day)
+                                        </span>
+                                        <span id="size-help" style="display: none;">
+                                            Size with optional suffix: c (bytes), k (KB), M (MB), G (GB)<br>
+                                            Example: "100M" for files larger than 100MB, "1G" for files larger than 1GB
+                                        </span>
+                                        <span id="name-help" style="display: none;">
+                                            Filename pattern (e.g., "*.log", "*.txt", "app*")
+                                        </span>
+                                        <span id="type-help" style="display: none;">
+                                            File type: "f" or "file" for files, "d" or "directory" for directories, "l" or "link" for symlinks
+                                        </span>
+                                        <span id="perm-help" style="display: none;">
+                                            Permissions in octal (e.g., "755") or symbolic (e.g., "rwx")
+                                        </span>
+                                        <span id="user-help" style="display: none;">
+                                            Username or UID (e.g., "www-data" or "33")
+                                        </span>
+                                        <span id="group-help" style="display: none;">
+                                            Group name or GID (e.g., "www-data" or "33")
+                                        </span>
+                                    </div>
+                                </small>
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="enabled" name="enabled" checked>
+                                    <label class="form-check-label" for="enabled">
+                                        Enabled
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted">
+                                    Enable or disable this criterion. All enabled criteria must match for a file to be moved.
+                                </small>
+                            </div>
+
+                            <div class="d-flex justify-content-between">
+                                <a href="#" id="cancel-link" class="btn btn-secondary">Cancel</a>
+                                <button type="submit" class="btn btn-primary">
+                                    <i class="bi bi-save"></i> <span id="submit-text">Create</span> Criteria
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h6 class="mb-0">Criteria Examples</h6>
+                    </div>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            <li><strong>Files older than 30 minutes:</strong> Type: mtime, Operator: &gt;, Value: 30</li>
+                            <li><strong>Files older than 1 day (1440 minutes):</strong> Type: mtime, Operator: &gt;, Value: 1440</li>
+                            <li><strong>Files larger than 1GB:</strong> Type: size, Operator: &gt;, Value: 1G</li>
+                            <li><strong>All .log files:</strong> Type: name, Operator: matches, Value: *.log</li>
+                            <li><strong>Files containing "backup":</strong> Type: name, Operator: contains, Value: backup</li>
+                            <li><strong>Only files (not directories):</strong> Type: type, Operator: =, Value: f</li>
+                        </ul>
+            <div class="d-flex align-items-center">
+                <span class="badge bg-light text-dark">
+                    <i class="bi bi-thermometer-snow"></i> <span id="app-version">Loading...</span>
+                </span>
+            </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="/static/js/paths.js"></script>
+    <script>
+        // Show contextual help based on selected criterion type
+        document.getElementById('criterion_type').addEventListener('change', function() {
+            const type = this.value;
+            // Hide all help texts
+            document.querySelectorAll('#value-help > span').forEach(span => {
+                span.style.display = 'none';
+            });
+            // Show relevant help
+            if (type && document.getElementById(type + '-help')) {
+                document.getElementById(type + '-help').style.display = 'block';
+            }
+        });
+    </script>
+{% endblock %}

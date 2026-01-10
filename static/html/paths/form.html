@@ -30,6 +30,11 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="/storage-locations">
+                            <i class="bi bi-hdd-stack"></i> Storage
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="/files">
                             <i class="bi bi-file-earmark"></i> Files
                         </a>
@@ -72,9 +77,19 @@
                             </div>
 
                             <div class="mb-3">
-                                <label for="cold_storage_path" class="form-label">Cold Storage Path *</label>
-                                <input type="text" class="form-control" id="cold_storage_path" name="cold_storage_path" required>
-                                <small class="form-text text-muted">Destination directory for cold storage</small>
+                                <label for="storage_locations" class="form-label">Cold Storage Locations *</label>
+                                <div class="input-group">
+                                    <select class="form-select" id="storage_locations" name="storage_locations" multiple size="5" required>
+                                        <!-- Storage locations will be loaded by JavaScript -->
+                                    </select>
+                                    <button class="btn btn-outline-secondary" type="button" onclick="window.open('/storage-locations/new', '_blank')">
+                                        <i class="bi bi-plus-circle"></i> Add New
+                                    </button>
+                                </div>
+                                <small class="form-text text-muted">
+                                    Select one or more storage locations. Hold Ctrl/Cmd to select multiple.
+                                    Files will be moved to the first location with sufficient space.
+                                </small>
                             </div>
 
                             <div class="mb-3">

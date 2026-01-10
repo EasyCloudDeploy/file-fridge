@@ -74,21 +74,46 @@ function renderFilesTable(files) {
     tableBody.innerHTML = '';
 
     if (!files || files.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No files found</td></tr>';
+        tableBody.innerHTML = '<tr><td colspan="11" class="text-center text-muted">No files found</td></tr>';
         return;
     }
 
     files.forEach(file => {
         const row = tableBody.insertRow();
         const storageBadge = file.storage_type === 'hot'
-            ? '<span class="badge bg-success">Hot Storage</span>'
-            : '<span class="badge bg-info">Cold Storage</span>';
+            ? '<span class="badge bg-success">Hot</span>'
+            : '<span class="badge bg-info">Cold</span>';
 
-        const actionButton = file.storage_type === 'cold'
-            ? `<button type="button" class="btn btn-sm btn-warning" onclick="showThawModal(${file.id}, '${escapeHtml(file.file_path)}')">
-                   <i class="bi bi-fire"></i> Thaw
-               </button>`
-            : '<span class="text-muted">In Hot Storage</span>';
+        // Storage location display for cold storage files
+        let storageLocationHtml = '<span class="text-muted">-</span>';
+        if (file.storage_type === 'cold' && file.storage_location) {
+            storageLocationHtml = `<span class="badge bg-secondary">${escapeHtml(file.storage_location.name)}</span>`;
+        }
+
+        // Check if file is migrating
+        const isMigrating = file.status === 'migrating';
+
+        let actionButton;
+        if (isMigrating) {
+            // Show migrating indicator instead of action buttons
+            actionButton = `
+                <span class="text-warning">
+                    <span class="spinner-border spinner-border-sm" role="status"></span>
+                    Migrating...
+                </span>`;
+        } else if (file.storage_type === 'cold') {
+            actionButton = `
+                <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-warning" onclick="showThawModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Move file back to hot storage">
+                        <i class="bi bi-fire"></i> Thaw
+                    </button>
+                    <button type="button" class="btn btn-outline-primary" onclick="showRelocateModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Move to another cold storage location">
+                        <i class="bi bi-arrow-right-circle"></i> Relocate
+                    </button>
+                </div>`;
+        } else {
+            actionButton = '<span class="text-muted">-</span>';
+        }
 
         // Format criteria times
         const mtime = file.file_mtime ? formatDate(file.file_mtime) : '<span class="text-muted">N/A</span>';
@@ -108,14 +133,25 @@ function renderFilesTable(files) {
             <i class="bi bi-tags"></i>
         </button>`;
 
+        // Status badge with appropriate color
+        let statusBadgeClass = 'bg-secondary';
+        if (file.status === 'active') {
+            statusBadgeClass = 'bg-success';
+        } else if (file.status === 'migrating') {
+            statusBadgeClass = 'bg-warning text-dark';
+        } else if (file.status === 'missing' || file.status === 'deleted') {
+            statusBadgeClass = 'bg-danger';
+        }
+
         row.innerHTML = `
             <td><code>${escapeHtml(file.file_path)}</code></td>
             <td>${storageBadge}</td>
+            <td>${storageLocationHtml}</td>
             <td>${formatBytes(file.file_size)}</td>
             <td><small>${mtime}</small></td>
             <td><small>${atime}</small></td>
             <td><small>${ctime}</small></td>
-            <td><span class="badge bg-secondary">${escapeHtml(file.status)}</span></td>
+            <td><span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span></td>
             <td><small>${formatDate(file.last_seen)}</small></td>
             <td>${tagsHtml}</td>
             <td>${actionButton}</td>
@@ -476,6 +512,10 @@ let currentFileId = null;
 let allAvailableTags = [];
 let manageTagsModal = null;
 
+// Relocate Modal Management
+let relocateModal = null;
+let currentRelocateInventoryId = null;
+
 // Load all available tags
 async function loadAvailableTags() {
     try {
@@ -663,6 +703,170 @@ async function removeTag(fileId, tagId) {
     }
 }
 
+// Relocate Functions
+
+// Show relocate modal
+async function showRelocateModal(inventoryId, filePath) {
+    currentRelocateInventoryId = inventoryId;
+
+    const modal = document.getElementById('relocateModal');
+    if (!modal) return;
+
+    // Reset modal state
+    document.getElementById('relocateFileName').textContent = filePath;
+    document.getElementById('relocateCurrentLocation').innerHTML = '<span class="text-muted">Loading...</span>';
+    document.getElementById('relocateTargetSelect').innerHTML = '<option value="">Loading locations...</option>';
+    document.getElementById('relocateTargetSelect').disabled = true;
+    document.getElementById('confirmRelocateBtn').disabled = true;
+
+    const errorEl = document.getElementById('relocateError');
+    const noOptionsEl = document.getElementById('relocateNoOptions');
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('d-none');
+    }
+    if (noOptionsEl) {
+        noOptionsEl.classList.add('d-none');
+    }
+
+    // Show modal
+    if (!relocateModal) {
+        relocateModal = new bootstrap.Modal(modal);
+    }
+    relocateModal.show();
+
+    // Load relocate options
+    await loadRelocateOptions(inventoryId);
+}
+
+// Load relocate options for a file
+async function loadRelocateOptions(inventoryId) {
+    const selectEl = document.getElementById('relocateTargetSelect');
+    const currentLocationEl = document.getElementById('relocateCurrentLocation');
+    const noOptionsEl = document.getElementById('relocateNoOptions');
+    const errorEl = document.getElementById('relocateError');
+    const confirmBtn = document.getElementById('confirmRelocateBtn');
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/files/relocate/${inventoryId}/options`);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to load options');
+        }
+
+        const data = await response.json();
+
+        // Show current location
+        const currentLocation = data.available_locations.find(loc => loc.is_current);
+        if (currentLocation) {
+            currentLocationEl.innerHTML = `<span class="badge bg-info me-2">${escapeHtml(currentLocation.name)}</span><small class="text-muted">${escapeHtml(currentLocation.path)}</small>`;
+        } else {
+            currentLocationEl.innerHTML = '<span class="text-muted">Unknown</span>';
+        }
+
+        // Filter to get only non-current locations
+        const targetLocations = data.available_locations.filter(loc => !loc.is_current);
+
+        if (!data.can_relocate || targetLocations.length === 0) {
+            // No other locations available
+            selectEl.innerHTML = '<option value="">No other locations available</option>';
+            selectEl.disabled = true;
+            confirmBtn.disabled = true;
+            if (noOptionsEl) noOptionsEl.classList.remove('d-none');
+        } else {
+            // Populate target locations
+            selectEl.innerHTML = '<option value="">Select target location...</option>' +
+                targetLocations.map(loc =>
+                    `<option value="${loc.id}">${escapeHtml(loc.name)} (${escapeHtml(loc.path)})</option>`
+                ).join('');
+            selectEl.disabled = false;
+            if (noOptionsEl) noOptionsEl.classList.add('d-none');
+        }
+    } catch (error) {
+        console.error('Error loading relocate options:', error);
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('d-none');
+        }
+        selectEl.innerHTML = '<option value="">Error loading locations</option>';
+        selectEl.disabled = true;
+        confirmBtn.disabled = true;
+    }
+}
+
+// Handle target location selection
+function onRelocateTargetChange() {
+    const selectEl = document.getElementById('relocateTargetSelect');
+    const confirmBtn = document.getElementById('confirmRelocateBtn');
+
+    if (confirmBtn) {
+        confirmBtn.disabled = !selectEl || !selectEl.value;
+    }
+}
+
+// Relocate file action
+async function relocateFile() {
+    const selectEl = document.getElementById('relocateTargetSelect');
+    const targetLocationId = selectEl ? parseInt(selectEl.value) : null;
+    const confirmBtn = document.getElementById('confirmRelocateBtn');
+    const errorEl = document.getElementById('relocateError');
+
+    if (!targetLocationId || !currentRelocateInventoryId) return;
+
+    // Disable button during operation
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Starting...';
+    }
+
+    // Clear previous error
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('d-none');
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/files/relocate/${currentRelocateInventoryId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                target_storage_location_id: targetLocationId
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to start relocation');
+        }
+
+        const data = await response.json();
+
+        // Task was created successfully - it runs in the background
+        showNotification(`Relocation started: moving file to ${data.target_location.name}. This will complete in the background.`);
+
+        // Close modal
+        if (relocateModal) relocateModal.hide();
+
+        // Reload files to show updated state
+        loadFilesList();
+    } catch (error) {
+        console.error('Error starting relocation:', error);
+        showNotification(`Error starting relocation: ${error.message}`, 'error');
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('d-none');
+        }
+    } finally {
+        // Reset button
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> Relocate File';
+        }
+    }
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     const urlParams = new URLSearchParams(window.location.search);
@@ -720,6 +924,17 @@ document.addEventListener('DOMContentLoaded', function() {
     const clearTagFilterBtn = document.getElementById('clear_tag_filter_btn');
     if (clearTagFilterBtn) {
         clearTagFilterBtn.addEventListener('click', clearTagFilter);
+    }
+
+    // Setup relocate modal
+    const relocateTargetSelect = document.getElementById('relocateTargetSelect');
+    if (relocateTargetSelect) {
+        relocateTargetSelect.addEventListener('change', onRelocateTargetChange);
+    }
+
+    const confirmRelocateBtn = document.getElementById('confirmRelocateBtn');
+    if (confirmRelocateBtn) {
+        confirmRelocateBtn.addEventListener('click', relocateFile);
     }
 });
 
