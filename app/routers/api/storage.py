@@ -2,12 +2,12 @@
 import logging
 import os
 import shutil
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from typing import List
 from pathlib import Path
 from app.database import get_db
-from app.models import MonitoredPath, ColdStorageLocation
+from app.models import MonitoredPath, ColdStorageLocation, FileInventory, FileRecord
 from app.schemas import StorageStats, ColdStorageLocationCreate, ColdStorageLocationUpdate, ColdStorageLocation as ColdStorageLocationSchema, ColdStorageLocationWithStats
 
 logger = logging.getLogger(__name__)
@@ -215,11 +215,17 @@ def update_storage_location(
 
 
 @router.delete("/locations/{location_id}", status_code=status.HTTP_200_OK)
-def delete_storage_location(location_id: int, db: Session = Depends(get_db)):
+def delete_storage_location(
+    location_id: int,
+    force: bool = Query(False, description="Force delete the location even if it's not empty"),
+    db: Session = Depends(get_db)
+):
     """
     Delete a cold storage location.
 
-    Note: This will fail if the location is still associated with any monitored paths.
+    - If `force` is False, this will fail if the location is still associated with any monitored paths.
+    - If `force` is True, it will remove all associated file records and attempt to delete the files from storage.
+      This is useful for corrupted or lost drives.
     """
     location = db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
     if not location:
@@ -228,14 +234,49 @@ def delete_storage_location(location_id: int, db: Session = Depends(get_db)):
             detail=f"Storage location with id {location_id} not found"
         )
 
-    # Check if location is still in use
-    if location.paths:
+    # Standard delete: Check if location is still in use by monitored paths
+    if not force and location.paths:
         path_names = [p.name for p in location.paths]
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot delete storage location '{location.name}' because it is still associated with {len(location.paths)} monitored path(s): {', '.join(path_names)}"
+            detail=f"Cannot delete storage location '{location.name}' because it is still associated with "
+                   f"{len(location.paths)} monitored path(s): {', '.join(path_names)}"
         )
 
+    # Force delete: Clean up all associated data
+    if force:
+        logger.info(f"Force deleting storage location '{location.name}' (ID: {location_id})")
+
+        # 1. Find all files in this storage location
+        # We need to check both FileInventory and FileRecord for paths
+        inventory_files = db.query(FileInventory).filter(FileInventory.file_path.like(f"{location.path}%")).all()
+        file_records = db.query(FileRecord).filter(FileRecord.cold_storage_path.like(f"{location.path}%")).all()
+
+        # 2. Delete file records from the database
+        for record in file_records:
+            db.delete(record)
+        
+        for inv_file in inventory_files:
+            db.delete(inv_file)
+
+        # 3. Attempt to delete the actual files and directory from the filesystem
+        try:
+            if os.path.exists(location.path):
+                logger.info(f"Deleting files and directory: {location.path}")
+                shutil.rmtree(location.path)
+        except FileNotFoundError:
+            logger.warning(f"Path not found, proceeding with DB deletion: {location.path}")
+        except Exception as e:
+            logger.error(f"Error deleting storage directory '{location.path}': {e}. "
+                         f"Manual cleanup may be required.")
+            # We don't re-raise, to allow DB cleanup to proceed
+
+        # 4. Disassociate monitored paths
+        location.paths.clear()
+        
+        db.commit()  # Commit record deletions and path disassociation
+
+    # Delete the location itself
     db.delete(location)
     db.commit()
 

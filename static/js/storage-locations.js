@@ -3,9 +3,13 @@
  */
 
 let allLocations = [];
+let deleteModal = null;
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
+    // Initialize modal
+    deleteModal = new bootstrap.Modal(document.getElementById('deleteLocationModal'));
+
     // Load storage locations
     await loadStorageLocations();
 });
@@ -40,12 +44,7 @@ async function loadStorageLocations() {
         }
     } catch (error) {
         console.error('Error loading storage locations:', error);
-        loadingEl.innerHTML = `
-            <div class="alert alert-danger" role="alert">
-                <i class="bi bi-exclamation-triangle"></i>
-                Failed to load storage locations: ${error.message}
-            </div>
-        `;
+        showAlert('danger', `Failed to load storage locations: ${error.message}`);
     }
 }
 
@@ -68,7 +67,7 @@ function renderStorageLocations() {
                     <a href="/storage-locations/${location.id}/edit" class="btn btn-outline-primary">
                         <i class="bi bi-pencil"></i> Edit
                     </a>
-                    <button type="button" class="btn btn-outline-danger" onclick="deleteLocation(${location.id}, '${escapeHtml(location.name)}')">
+                    <button type="button" class="btn btn-outline-danger" onclick="showDeleteModal(${location.id}, '${escapeHtml(location.name)}')">
                         <i class="bi bi-trash"></i> Delete
                     </button>
                 </div>
@@ -78,15 +77,39 @@ function renderStorageLocations() {
 }
 
 /**
+ * Show delete confirmation modal
+ */
+function showDeleteModal(id, name) {
+    document.getElementById('location-name-to-delete').textContent = name;
+    
+    const confirmBtn = document.getElementById('confirm-delete-button');
+    const forceCheckbox = document.getElementById('forceDeleteCheckbox');
+
+    // Clone and replace the button to remove old event listeners
+    const newConfirmBtn = confirmBtn.cloneNode(true);
+    confirmBtn.parentNode.replaceChild(newConfirmBtn, confirmBtn);
+
+    newConfirmBtn.addEventListener('click', async () => {
+        await deleteLocation(id, name, forceCheckbox.checked);
+    });
+
+    forceCheckbox.checked = false; // Reset checkbox
+    deleteModal.show();
+}
+
+/**
  * Delete a storage location
  */
-async function deleteLocation(id, name) {
-    if (!confirm(`Are you sure you want to delete storage location "${name}"?\n\nThis will fail if the location is still associated with any monitored paths.`)) {
-        return;
+async function deleteLocation(id, name, isForced) {
+    deleteModal.hide();
+
+    let url = `/api/v1/storage/locations/${id}`;
+    if (isForced) {
+        url += '?force=true';
     }
 
     try {
-        const response = await fetch(`/api/v1/storage/locations/${id}`, {
+        const response = await fetch(url, {
             method: 'DELETE'
         });
 
@@ -132,6 +155,7 @@ function escapeHtml(unsafe) {
  * Show alert message
  */
 function showAlert(type, message) {
+    const alertContainer = document.getElementById('alert-container');
     const alertDiv = document.createElement('div');
     alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
     alertDiv.role = 'alert';
@@ -140,8 +164,7 @@ function showAlert(type, message) {
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
     `;
 
-    const container = document.querySelector('main .container-fluid');
-    container.insertBefore(alertDiv, container.firstChild);
+    alertContainer.appendChild(alertDiv);
 
     // Auto-dismiss after 5 seconds
     setTimeout(() => {
