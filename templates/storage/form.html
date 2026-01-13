@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Storage Location - File Fridge{% endblock %}
+
+{% block content %}
+        <div class="row">
+            <div class="col-12 col-md-8 offset-md-2">
+                <h1 class="mb-4" id="form-title">
+                    <i class="bi bi-plus-circle"></i> Create Storage Location
+                </h1>
+
+                <div class="card">
+                    <div class="card-body">
+                        <form id="storage-location-form">
+                            <div class="mb-3">
+                                <label for="name" class="form-label">Name *</label>
+                                <input type="text" class="form-control" id="name" name="name" required>
+                                <small class="form-text text-muted">A descriptive name for this storage location</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="path" class="form-label">Path *</label>
+                                <input type="text" class="form-control" id="path" name="path" required>
+                                <small class="form-text text-muted">The absolute file system path to the storage location</small>
+                            </div>
+
+                            <div class="d-flex justify-content-between">
+                                <a href="/storage-locations" class="btn btn-secondary">
+                                    <i class="bi bi-x-circle"></i> Cancel
+                                </a>
+                                <button type="submit" class="btn btn-primary" id="submit-btn">
+                                    <i class="bi bi-check-circle"></i> <span id="submit-text">Create Location</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="/static/js/storage-location-form.js"></script>
+{% endblock %}

@@ -1,0 +1,268 @@
+{% extends "base.html" %}
+
+{% block title %}Files - File Fridge{% endblock %}
+
+{% block content %}
+        <div class="row">
+            <div class="col-12">
+                <h1 class="mb-4">
+                    <i class="bi bi-file-earmark"></i> File Browser
+                </h1>
+            </div>
+        </div>
+
+        <!-- Search and Filters -->
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                    <input type="text" class="form-control" id="search_input" placeholder="Search file paths...">
+                    <button class="btn btn-primary" type="button" id="search_btn">
+                        Search
+                    </button>
+                    <button class="btn btn-outline-secondary" type="button" id="clear_search_btn">
+                        Clear
+                    </button>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="input-group">
+                    <label class="input-group-text" for="path_id_filter">Path:</label>
+                    <select class="form-select" id="path_id_filter">
+                        <option value="">All Paths</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="input-group">
+                    <label class="input-group-text" for="storage_filter">Storage:</label>
+                    <select class="form-select" id="storage_filter">
+                        <option value="">All</option>
+                        <option value="hot">Hot</option>
+                        <option value="cold">Cold</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Tag Filter -->
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <div class="input-group">
+                    <label class="input-group-text" for="tag_filter"><i class="bi bi-tags"></i> Tags:</label>
+                    <select class="form-select" id="tag_filter" multiple size="1">
+                        <option value="">All Tags</option>
+                    </select>
+                    <button class="btn btn-outline-secondary" type="button" id="clear_tag_filter_btn">
+                        <i class="bi bi-x-circle"></i> Clear
+                    </button>
+                </div>
+                <div class="form-text">Select one or more tags to filter files (hold Ctrl/Cmd to select multiple)</div>
+            </div>
+            <div class="col-md-6 text-end">
+                <div class="btn-group">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="cleanupMissingFiles()" title="Clean up records for files that no longer exist">
+                        <i class="bi bi-trash"></i> Cleanup Missing
+                    </button>
+                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()" title="Remove duplicate file records">
+                        <i class="bi bi-files"></i> Remove Duplicates
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body">
+                        <div id="files-loading" class="text-center py-5">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading files...</span>
+                            </div>
+                            <p class="text-muted mt-3">Loading files...</p>
+                        </div>
+                        <div id="files-content" style="display: none;">
+                            <div class="table-responsive">
+                                <table class="table table-hover" id="filesTable">
+                                    <thead>
+                                        <tr>
+                                            <th class="sortable" data-sort="file_path">
+                                                File Path <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="storage_type">
+                                                Storage <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th>
+                                                Cold Storage Location
+                                            </th>
+                                            <th class="sortable" data-sort="file_size">
+                                                Size <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="file_mtime">
+                                                Modified Time <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="file_atime">
+                                                Access Time <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="file_ctime">
+                                                Change Time <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="status">
+                                                Status <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th class="sortable" data-sort="last_seen">
+                                                Last Seen <i class="bi bi-arrow-down-up"></i>
+                                            </th>
+                                            <th>Tags</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Files will be loaded here by JavaScript -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div id="no-files-message" class="text-center py-5" style="display: none;">
+                            <i class="bi bi-file-earmark-x display-1 text-muted"></i>
+                            <p class="text-muted mt-3">No files found.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="row mt-3">
+            <div class="col-12" id="pagination-controls">
+                <!-- Pagination will be rendered here by JavaScript -->
+            </div>
+        </div>
+
+        <!-- Thaw Modal -->
+        <div class="modal fade" id="thawModal" tabindex="-1" aria-labelledby="thawModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="thawModalLabel">Move File to Hot Storage</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Move this file from cold storage back to hot storage?</p>
+                        <p><strong>File:</strong> <code id="thawFileName"></code></p>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="pin_file" id="pinTemp" value="false" checked>
+                                <label class="form-check-label" for="pinTemp">
+                                    <strong>Temporary</strong> - Move back, but file may be moved again on next scan if it matches criteria
+                                </label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="pin_file" id="pinPermanent" value="true">
+                                <label class="form-check-label" for="pinPermanent">
+                                    <strong>Pinned</strong> - Move back and exclude from future scans
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-warning" id="confirmThawBtn">
+                            <i class="bi bi-arrow-left-circle"></i> Move to Hot Storage
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manage Tags Modal -->
+        <div class="modal fade" id="manageTagsModal" tabindex="-1" aria-labelledby="manageTagsModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="manageTagsModalLabel">Manage Tags</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p><strong>File:</strong> <code id="tagFileName"></code></p>
+
+                        <div class="mb-3">
+                            <label class="form-label">Current Tags</label>
+                            <div id="currentTags" class="mb-2">
+                                <span class="text-muted">Loading...</span>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="addTagSelect" class="form-label">Add Tag</label>
+                            <div class="input-group">
+                                <select class="form-select" id="addTagSelect">
+                                    <option value="">Select a tag...</option>
+                                </select>
+                                <button class="btn btn-primary" type="button" id="addTagBtn" disabled>
+                                    <i class="bi bi-plus-circle"></i> Add
+                                </button>
+                            </div>
+                            <div class="form-text">Select a tag from the list to add it to this file</div>
+                        </div>
+
+                        <div id="tagError" class="alert alert-danger d-none" role="alert"></div>
+                        <div id="tagSuccess" class="alert alert-success d-none" role="alert"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Relocate Modal -->
+        <div class="modal fade" id="relocateModal" tabindex="-1" aria-labelledby="relocateModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="relocateModalLabel">Relocate File to Another Cold Storage</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Move this file to a different cold storage location?</p>
+                        <p><strong>File:</strong> <code id="relocateFileName"></code></p>
+
+                        <div class="mb-3">
+                            <label for="relocateCurrentLocation" class="form-label">Current Location</label>
+                            <div id="relocateCurrentLocation" class="form-control-plaintext">
+                                <span class="text-muted">Loading...</span>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="relocateTargetSelect" class="form-label">Target Storage Location</label>
+                            <select class="form-select" id="relocateTargetSelect">
+                                <option value="">Loading locations...</option>
+                            </select>
+                            <div class="form-text">Select the cold storage location to move the file to</div>
+                        </div>
+
+                        <div id="relocateError" class="alert alert-danger d-none" role="alert"></div>
+                        <div id="relocateNoOptions" class="alert alert-warning d-none" role="alert">
+                            <i class="bi bi-exclamation-triangle"></i>
+                            This path only has one cold storage location configured.
+                            Add more storage locations to the path to enable relocation.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="confirmRelocateBtn" disabled>
+                            <i class="bi bi-arrow-right-circle"></i> Relocate File
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <script src="/static/js/files.js"></script>
+{% endblock %}

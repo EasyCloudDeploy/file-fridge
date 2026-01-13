@@ -1,60 +1,8 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Path - File Fridge</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="/static/css/style.css" rel="stylesheet">
-</head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/">
-                <i class="bi bi-snow"></i> <span id="app-name-navbar">File Fridge</span>
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="/">
-                            <i class="bi bi-speedometer2"></i> Dashboard
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link active" href="/paths">
-                            <i class="bi bi-folder"></i> Paths
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/storage-locations">
-                            <i class="bi bi-hdd-stack"></i> Storage
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/files">
-                            <i class="bi bi-file-earmark"></i> Files
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/stats">
-                            <i class="bi bi-graph-up"></i> Statistics
-                        </a>
-                    </li>
-                </ul>
-                <div class="d-flex align-items-center">
-                    <span class="badge bg-light text-dark">
-                        <i class="bi bi-thermometer-snow"></i> <span id="app-version">Loading...</span>
-                    </span>
-                </div>
-            </div>
-        </div>
-    </nav>
+{% extends "base.html" %}
 
-    <main class="container-fluid mt-4">
+{% block title %}Create Path - File Fridge{% endblock %}
+
+{% block content %}
         <div class="row">
             <div class="col-12 col-md-8 offset-md-2">
                 <h1 class="mb-4" id="form-title">
@@ -79,16 +27,15 @@
                             <div class="mb-3">
                                 <label for="storage_locations" class="form-label">Cold Storage Locations *</label>
                                 <div class="input-group">
-                                    <select class="form-select" id="storage_locations" name="storage_locations" multiple size="5" required>
-                                        <!-- Storage locations will be loaded by JavaScript -->
-                                    </select>
+                                    <div id="storage-locations-container" class="form-control" style="height: auto; max-height: 140px; overflow-y: auto;">
+                                        <!-- Storage locations checkboxes will be loaded by JavaScript -->
+                                    </div>
                                     <button class="btn btn-outline-secondary" type="button" onclick="window.open('/storage-locations/new', '_blank')">
                                         <i class="bi bi-plus-circle"></i> Add New
                                     </button>
                                 </div>
                                 <small class="form-text text-muted">
-                                    Select one or more storage locations. Hold Ctrl/Cmd to select multiple.
-                                    Files will be moved to the first location with sufficient space.
+                                    Select one or more storage locations. Files will be moved to the first location with sufficient space.
                                 </small>
                             </div>
 
@@ -108,7 +55,7 @@
 
                             <div class="mb-3">
                                 <label for="check_interval_seconds" class="form-label">Check Interval (seconds) *</label>
-                                <input type="number" class="form-control" id="check_interval_seconds" name="check_interval_seconds" 
+                                <input type="number" class="form-control" id="check_interval_seconds" name="check_interval_seconds"
                                        value="3600" min="60" required>
                                 <small class="form-text text-muted">How often to check for files matching criteria (minimum 60 seconds)</small>
                             </div>
@@ -148,21 +95,8 @@
                 </div>
             </div>
         </div>
-    </main>
+{% endblock %}
 
-    <footer class="mt-5 py-3 bg-light text-center">
-        <div class="container">
-            <small class="text-muted"><span id="app-name-footer">File Fridge</span> v<span id="footer-app-version">Loading...</span> - File Cold Storage Management</small>
-        </div>
-    </footer>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/js/app.js"></script>
+{% block extra_scripts %}
     <script src="/static/js/paths.js"></script>
-    <script>
-        // Load app information on page load
-        document.addEventListener('DOMContentLoaded', loadAppInfo);
-    </script>
-</body>
-</html>
-
+{% endblock %}

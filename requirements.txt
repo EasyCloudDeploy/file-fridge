@@ -9,4 +9,4 @@ aiofiles==23.2.1
 alembic==1.13.1
 aiosmtplib==3.0.1
 httpx==0.26.0
-
+Jinja2==3.1.3

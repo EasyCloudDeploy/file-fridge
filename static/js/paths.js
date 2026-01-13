@@ -62,7 +62,15 @@ async function loadPathsList() {
                             ` : ''}
                         </td>
                         <td><code>${escapeHtml(path.source_path)}</code></td>
-                        <td><code>${escapeHtml(path.cold_storage_path)}</code></td>
+                        <td>
+                            ${path.storage_locations && path.storage_locations.length > 0
+                                ? (path.storage_locations.length === 1
+                                    ? `<code>${escapeHtml(path.storage_locations[0].path)}</code>`
+                                    : `<code>${escapeHtml(path.storage_locations[0].path)}</code> <span class="badge bg-secondary">+${path.storage_locations.length - 1} more</span>`
+                                  )
+                                : '<span class="text-muted">None</span>'
+                            }
+                        </td>
                         <td><span class="badge bg-info">${escapeHtml(path.operation_type)}</span></td>
                         <td>${Math.floor(path.check_interval_seconds / 60)} min</td>
                         <td>
@@ -184,7 +192,14 @@ async function loadPathDetail(pathId) {
                 </tr>
                 <tr>
                     <th>Cold Storage:</th>
-                    <td><code>${escapeHtml(path.cold_storage_path)}</code></td>
+                    <td>
+                        ${path.storage_locations && path.storage_locations.length > 0
+                            ? path.storage_locations.map(loc =>
+                                `<div><span class="badge bg-secondary me-1">${escapeHtml(loc.name)}</span> <code>${escapeHtml(loc.path)}</code></div>`
+                              ).join('')
+                            : '<span class="text-muted">No storage locations configured</span>'
+                        }
+                    </td>
                 </tr>
                 <tr>
                     <th>Operation Type:</th>
@@ -227,38 +242,60 @@ async function loadPathDetail(pathId) {
         // Render storage status
         const storageCardBody = document.getElementById('storage-status-card');
         if (storageCardBody) {
-            const relevantStat = storageStats.find(s => path.cold_storage_path.startsWith(s.path));
-            if (relevantStat) {
-                if (relevantStat.error) {
-                    storageCardBody.innerHTML = `
-                        <div class="alert alert-danger">
-                            <strong>Error:</strong> ${escapeHtml(relevantStat.error)}
-                        </div>`;
-                } else {
-                    const usedPercent = (relevantStat.used_bytes / relevantStat.total_bytes) * 100;
+            if (!path.storage_locations || path.storage_locations.length === 0) {
+                storageCardBody.innerHTML = '<p class="text-muted">No storage locations configured.</p>';
+            } else {
+                // Find stats for all storage locations
+                const locationStats = path.storage_locations.map(loc => {
+                    const stat = storageStats.find(s => loc.path.startsWith(s.path) || s.path.startsWith(loc.path));
+                    return { location: loc, stat: stat };
+                });
+
+                storageCardBody.innerHTML = locationStats.map(({location, stat}) => {
+                    if (!stat) {
+                        return `
+                            <div class="mb-3">
+                                <strong>${escapeHtml(location.name)}</strong>
+                                <p class="text-muted small"><code>${escapeHtml(location.path)}</code></p>
+                                <p class="text-muted">Storage stats not available.</p>
+                            </div>`;
+                    }
+
+                    if (stat.error) {
+                        return `
+                            <div class="mb-3">
+                                <strong>${escapeHtml(location.name)}</strong>
+                                <p class="text-muted small"><code>${escapeHtml(location.path)}</code></p>
+                                <div class="alert alert-danger mb-0">
+                                    <strong>Error:</strong> ${escapeHtml(stat.error)}
+                                </div>
+                            </div>`;
+                    }
+
+                    const usedPercent = (stat.used_bytes / stat.total_bytes) * 100;
                     let progressBarClass = 'bg-success';
                     if (usedPercent > 70) {
                         progressBarClass = 'bg-danger';
                     } else if (usedPercent > 50) {
                         progressBarClass = 'bg-warning';
                     }
-                    storageCardBody.innerHTML = `
-                        <div>
-                            <strong>${escapeHtml(relevantStat.path)}</strong>
-                            <div class="progress mt-2" style="height: 20px;">
+
+                    return `
+                        <div class="mb-3">
+                            <strong>${escapeHtml(location.name)}</strong>
+                            <p class="text-muted small mb-2"><code>${escapeHtml(location.path)}</code></p>
+                            <div class="progress" style="height: 20px;">
                                 <div class="progress-bar ${progressBarClass}" role="progressbar" style="width: ${usedPercent.toFixed(2)}%;" aria-valuenow="${usedPercent.toFixed(2)}" aria-valuemin="0" aria-valuemax="100">
                                     ${usedPercent.toFixed(2)}%
                                 </div>
                             </div>
                             <div class="d-flex justify-content-between text-muted small mt-1">
-                                <span>Used: ${formatBytes(relevantStat.used_bytes)}</span>
-                                <span>Free: ${formatBytes(relevantStat.free_bytes)}</span>
-                                <span>Total: ${formatBytes(relevantStat.total_bytes)}</span>
+                                <span>Used: ${formatBytes(stat.used_bytes)}</span>
+                                <span>Free: ${formatBytes(stat.free_bytes)}</span>
+                                <span>Total: ${formatBytes(stat.total_bytes)}</span>
                             </div>
                         </div>`;
-                }
-            } else {
-                storageCardBody.innerHTML = '<p class="text-muted">Storage stats not available for this path.</p>';
+                }).join('');
             }
         }
         
@@ -738,10 +775,15 @@ function setupPathForm() {
         e.preventDefault();
         
         const formData = new FormData(form);
+
+        // Get selected storage location IDs from the checkboxes
+        const checkedCheckboxes = document.querySelectorAll('#storage-locations-container .form-check-input:checked');
+        const storageLocationIds = Array.from(checkedCheckboxes).map(cb => parseInt(cb.value));
+
         const pathData = {
             name: formData.get('name'),
             source_path: formData.get('source_path'),
-            cold_storage_path: formData.get('cold_storage_path'),
+            storage_location_ids: storageLocationIds,
             operation_type: formData.get('operation_type'),
             check_interval_seconds: parseInt(formData.get('check_interval_seconds')),
             enabled: formData.get('enabled') === 'on',
@@ -850,6 +892,9 @@ document.addEventListener('DOMContentLoaded', function() {
             // Update form title
             document.getElementById('form-title').innerHTML = '<i class="bi bi-pencil"></i> Edit Monitored Path';
             document.getElementById('submit-text').textContent = 'Update';
+        } else {
+            // Load storage locations for new path form
+            loadStorageLocationsCheckboxes();
         }
     } else if (window.location.pathname.match(/^\/paths\/\d+\/criteria\/new$/)) {
         setupCriteriaForm();
@@ -867,22 +912,70 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
+// Load storage locations into checkboxes
+async function loadStorageLocationsCheckboxes() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/storage/locations`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const locations = await response.json();
+
+        const container = document.getElementById('storage-locations-container');
+        if (container) {
+            if (locations.length === 0) {
+                container.innerHTML = '<p class="text-muted small m-2">No storage locations have been created yet.</p>';
+                return locations;
+            }
+            container.innerHTML = locations.map(loc => `
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" value="${loc.id}" id="storage_location_${loc.id}">
+                    <label class="form-check-label" for="storage_location_${loc.id}">
+                        ${escapeHtml(loc.name)} <code class="small">${escapeHtml(loc.path)}</code>
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        return locations;
+    } catch (error) {
+        console.error('Error loading storage locations:', error);
+        showNotification(`Failed to load storage locations: ${error.message}`, 'error');
+        const container = document.getElementById('storage-locations-container');
+        if (container) {
+            container.innerHTML = '<p class="text-danger small m-2">Failed to load storage locations.</p>';
+        }
+        return [];
+    }
+}
+
 // Load path data for edit form
 async function loadPathForEdit(pathId) {
     try {
+        // Load storage locations first
+        await loadStorageLocationsCheckboxes();
+
         const response = await fetch(`${API_BASE_URL}/paths/${pathId}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const path = await response.json();
-        
+
         // Populate form
         document.getElementById('name').value = path.name;
         document.getElementById('source_path').value = path.source_path;
-        document.getElementById('cold_storage_path').value = path.cold_storage_path;
         document.getElementById('operation_type').value = path.operation_type;
         document.getElementById('check_interval_seconds').value = path.check_interval_seconds;
         document.getElementById('enabled').checked = path.enabled;
         document.getElementById('prevent_indexing').checked = path.prevent_indexing;
-        
+
+        // Check selected storage locations
+        if (path.storage_locations) {
+            const locationIds = path.storage_locations.map(loc => loc.id.toString());
+            locationIds.forEach(id => {
+                const checkbox = document.getElementById(`storage_location_${id}`);
+                if (checkbox) {
+                    checkbox.checked = true;
+                }
+            });
+        }
+
         // Set form data attribute
         const form = document.getElementById('path-form');
         if (form) form.dataset.pathId = pathId;

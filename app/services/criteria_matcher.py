@@ -31,13 +31,13 @@ class CriteriaMatcher:
             (False, []) if ANY criterion doesn't match - file is INACTIVE and should be in COLD storage
         """
         if not criteria:
-            # No criteria means no files are considered active, move all to cold
-            return False, []
+            # No criteria means keep everything in hot storage (no rules to trigger cold storage)
+            return True, []
 
         enabled_criteria = [c for c in criteria if c.enabled]
         if not enabled_criteria:
-            # No enabled criteria means no files are considered active, move all to cold
-            return False, []
+            # No enabled criteria means keep everything in hot storage (no rules to trigger cold storage)
+            return True, []
 
         # Target the actual file metadata (ignore symlink itself)
         stat_path = actual_file_path if actual_file_path else file_path

@@ -41,37 +41,68 @@ class Criteria(CriteriaBase):
     id: int
     path_id: int
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
+
+
+class ColdStorageLocationBase(BaseModel):
+    """Base cold storage location schema."""
+    name: str = Field(..., min_length=1, max_length=255)
+    path: str = Field(..., min_length=1)
+
+
+class ColdStorageLocationCreate(ColdStorageLocationBase):
+    """Schema for creating cold storage location."""
+    pass
+
+
+class ColdStorageLocationUpdate(BaseModel):
+    """Schema for updating cold storage location."""
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    path: Optional[str] = Field(None, min_length=1)
+
+
+class ColdStorageLocation(ColdStorageLocationBase):
+    """Schema for cold storage location response."""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class ColdStorageLocationWithStats(ColdStorageLocation):
+    """Schema for cold storage location with path count."""
+    path_count: int
 
 
 class MonitoredPathBase(BaseModel):
     """Base monitored path schema."""
     name: str = Field(..., min_length=1, max_length=255)
     source_path: str = Field(..., min_length=1)
-    cold_storage_path: str = Field(..., min_length=1)
     operation_type: OperationType = OperationType.MOVE
     check_interval_seconds: int = Field(..., ge=60)  # Minimum 1 minute
     enabled: bool = True
     prevent_indexing: bool = True  # Create .noindex file to prevent macOS Spotlight from corrupting timestamps
-    error_message: str | None = None  # Error state message
+    error_message: Optional[str] = None  # Error state message
 
 
 class MonitoredPathCreate(MonitoredPathBase):
     """Schema for creating monitored path."""
-    pass
+    storage_location_ids: List[int] = Field(..., min_items=1, description="List of cold storage location IDs (at least one required)")
 
 
 class MonitoredPathUpdate(BaseModel):
     """Schema for updating monitored path."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     source_path: Optional[str] = Field(None, min_length=1)
-    cold_storage_path: Optional[str] = Field(None, min_length=1)
     operation_type: Optional[OperationType] = None
     check_interval_seconds: Optional[int] = Field(None, ge=60)
     enabled: Optional[bool] = None
     prevent_indexing: Optional[bool] = None
+    storage_location_ids: Optional[List[int]] = Field(None, min_items=1, description="List of cold storage location IDs")
 
 
 class MonitoredPath(MonitoredPathBase):
@@ -81,6 +112,7 @@ class MonitoredPath(MonitoredPathBase):
     updated_at: Optional[datetime]
     criteria: List[Criteria] = []
     file_inventory: List["FileInventory"] = []
+    storage_locations: List[ColdStorageLocation] = []
 
     class Config:
         from_attributes = True
@@ -153,6 +185,11 @@ class FileMoveRequest(BaseModel):
     source_path: str
     destination_path: str
     operation_type: OperationType = OperationType.MOVE
+
+
+class FileRelocateRequest(BaseModel):
+    """Schema for relocating a file between cold storage locations."""
+    target_storage_location_id: int = Field(..., description="ID of the target cold storage location")
 
 
 class Statistics(BaseModel):
@@ -432,4 +469,10 @@ class TestNotifierResponse(BaseModel):
     success: bool
     message: str
     notifier_name: str
+
+
+# Rebuild models to resolve forward references
+MonitoredPath.model_rebuild()
+FileInventory.model_rebuild()
+PaginatedFileInventory.model_rebuild()
 

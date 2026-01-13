@@ -1,11 +1,16 @@
 """Notification service for creating and dispatching notifications."""
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+from datetime import datetime
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+import aiosmtplib
+import httpx
 from sqlalchemy.orm import Session
 from fastapi import BackgroundTasks
 
 from app.models import Notifier, Notification, NotificationDispatch, NotifierType, NotificationLevel, DispatchStatus
-from app.services.dispatchers import EmailDispatcher, WebhookDispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -13,10 +18,7 @@ logger = logging.getLogger(__name__)
 class NotificationService:
     """Service for managing and dispatching notifications."""
 
-    def __init__(self):
-        """Initialize notification service with dispatchers."""
-        self.email_dispatcher = EmailDispatcher()
-        self.webhook_dispatcher = WebhookDispatcher()
+    WEBHOOK_TIMEOUT = 30
 
     async def create_and_dispatch_notification(
         self,
@@ -26,31 +28,15 @@ class NotificationService:
         metadata: Optional[Dict[str, Any]] = None,
         background_tasks: Optional[BackgroundTasks] = None,
     ) -> Notification:
-        """
-        Create a notification and dispatch it to all enabled notifiers.
-
-        Args:
-            db: Database session
-            level: Notification level (INFO, WARNING, ERROR)
-            message: Notification message
-            metadata: Optional metadata to include
-            background_tasks: Optional FastAPI background tasks for async dispatch
-
-        Returns:
-            Created Notification object
-        """
+        """Create a notification and dispatch it to all enabled notifiers."""
         # Validate level
         try:
             notification_level = NotificationLevel(level.lower())
         except ValueError:
-            logger.error(f"Invalid notification level: {level}")
             raise ValueError(f"Invalid notification level: {level}. Must be INFO, WARNING, or ERROR.")
 
         # Create notification record
-        notification = Notification(
-            level=notification_level,
-            message=message
-        )
+        notification = Notification(level=notification_level, message=message)
         db.add(notification)
         db.commit()
         db.refresh(notification)
@@ -66,71 +52,39 @@ class NotificationService:
 
         # Dispatch to notifiers
         if background_tasks:
-            # Dispatch in background
             background_tasks.add_task(
-                self._dispatch_to_notifiers,
-                db,
-                notification,
-                notifiers,
-                metadata
+                self._dispatch_to_notifiers, db, notification, notifiers, metadata
             )
             logger.info(f"Scheduled background dispatch to {len(notifiers)} notifier(s)")
         else:
-            # Dispatch synchronously
             await self._dispatch_to_notifiers(db, notification, notifiers, metadata)
 
         return notification
 
-    def _get_notifiers_for_level(self, db: Session, level: NotificationLevel) -> list[Notifier]:
-        """
-        Get all enabled notifiers that should receive notifications of this level.
-
-        Args:
-            db: Database session
-            level: Notification level
-
-        Returns:
-            List of enabled notifiers
-        """
-        # Define level hierarchy: INFO < WARNING < ERROR
+    def _get_notifiers_for_level(self, db: Session, level: NotificationLevel) -> List[Notifier]:
+        """Get all enabled notifiers that should receive notifications of this level."""
         level_hierarchy = {
             NotificationLevel.INFO: 0,
             NotificationLevel.WARNING: 1,
             NotificationLevel.ERROR: 2,
         }
-
-        # Get level value
         level_value = level_hierarchy[level]
 
-        # Fetch notifiers
         notifiers = db.query(Notifier).filter(Notifier.enabled == True).all()
 
-        # Filter based on filter_level
-        filtered_notifiers = []
-        for notifier in notifiers:
-            notifier_filter_value = level_hierarchy[notifier.filter_level]
-            # Send if notification level >= notifier's filter level
-            if level_value >= notifier_filter_value:
-                filtered_notifiers.append(notifier)
-
-        return filtered_notifiers
+        return [
+            n for n in notifiers
+            if level_value >= level_hierarchy[n.filter_level]
+        ]
 
     async def _dispatch_to_notifiers(
         self,
         db: Session,
         notification: Notification,
-        notifiers: list[Notifier],
+        notifiers: List[Notifier],
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
-        """
-        Dispatch a notification to multiple notifiers.
-
-        Args:
-            db: Database session
-            notification: Notification to dispatch
-            notifiers: List of notifiers to send to
-            metadata: Optional metadata
-        """
+        """Dispatch a notification to multiple notifiers."""
         logger.info(f"Dispatching notification #{notification.id} to {len(notifiers)} notifier(s)")
 
         for notifier in notifiers:
@@ -143,68 +97,132 @@ class NotificationService:
         notifier: Notifier,
         metadata: Optional[Dict[str, Any]] = None
     ) -> None:
-        """
-        Dispatch a notification to a single notifier.
-
-        Args:
-            db: Database session
-            notification: Notification to dispatch
-            notifier: Notifier to send to
-            metadata: Optional metadata
-        """
+        """Dispatch a notification to a single notifier."""
         logger.info(f"Dispatching to notifier '{notifier.name}' ({notifier.type}) at {notifier.address}")
 
-        # Select appropriate dispatcher
-        if notifier.type == NotifierType.EMAIL:
-            dispatcher = self.email_dispatcher
-        elif notifier.type == NotifierType.GENERIC_WEBHOOK:
-            dispatcher = self.webhook_dispatcher
-        else:
-            logger.error(f"Unknown notifier type: {notifier.type}")
-            self._log_dispatch(
-                db,
-                notification,
-                notifier,
-                DispatchStatus.FAILED,
-                f"Unknown notifier type: {notifier.type}"
-            )
-            return
-
-        # Prepare SMTP config if this is an email notifier
-        smtp_config = None
-        if notifier.type == NotifierType.EMAIL:
-            smtp_config = {
-                'smtp_host': notifier.smtp_host,
-                'smtp_port': notifier.smtp_port,
-                'smtp_user': notifier.smtp_user,
-                'smtp_password': notifier.smtp_password,
-                'smtp_sender': notifier.smtp_sender,
-                'smtp_use_tls': notifier.smtp_use_tls,
-            }
-
-        # Send notification
         try:
-            success, details = await dispatcher.send(
-                address=notifier.address,
-                level=notification.level.value,
-                message=notification.message,
-                metadata=metadata,
-                smtp_config=smtp_config
-            )
+            if notifier.type == NotifierType.EMAIL:
+                success, details = await self._send_email(
+                    address=notifier.address,
+                    level=notification.level.value,
+                    message=notification.message,
+                    metadata=metadata,
+                    smtp_config={
+                        'smtp_host': notifier.smtp_host,
+                        'smtp_port': notifier.smtp_port,
+                        'smtp_user': notifier.smtp_user,
+                        'smtp_password': notifier.smtp_password,
+                        'smtp_sender': notifier.smtp_sender,
+                        'smtp_use_tls': notifier.smtp_use_tls,
+                    }
+                )
+            elif notifier.type == NotifierType.GENERIC_WEBHOOK:
+                success, details = await self._send_webhook(
+                    url=notifier.address,
+                    level=notification.level.value,
+                    message=notification.message,
+                    metadata=metadata
+                )
+            else:
+                success, details = False, f"Unknown notifier type: {notifier.type}"
 
-            # Log result
             status = DispatchStatus.SUCCESS if success else DispatchStatus.FAILED
             self._log_dispatch(db, notification, notifier, status, details)
 
         except Exception as e:
             logger.exception(f"Unexpected error dispatching to notifier '{notifier.name}': {e}")
-            self._log_dispatch(
-                db,
-                notification,
-                notifier,
-                DispatchStatus.FAILED,
-                f"Unexpected error: {str(e)}"
+            self._log_dispatch(db, notification, notifier, DispatchStatus.FAILED, f"Unexpected error: {str(e)}")
+
+    async def _send_email(
+        self,
+        address: str,
+        level: str,
+        message: str,
+        metadata: Optional[Dict[str, Any]] = None,
+        smtp_config: Optional[Dict[str, Any]] = None
+    ) -> tuple:
+        """Send an email notification."""
+        if not smtp_config:
+            return False, "SMTP configuration is required for email notifications"
+
+        smtp_host = smtp_config.get('smtp_host')
+        smtp_port = smtp_config.get('smtp_port', 587)
+        smtp_user = smtp_config.get('smtp_user')
+        smtp_password = smtp_config.get('smtp_password')
+        smtp_sender = smtp_config.get('smtp_sender')
+        smtp_use_tls = smtp_config.get('smtp_use_tls', True)
+
+        if not smtp_host:
+            return False, "SMTP host is not configured"
+        if not smtp_sender:
+            return False, "SMTP sender is not configured"
+
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = f"File Fridge Notification - {level.upper()}"
+            msg["From"] = smtp_sender
+            msg["To"] = address
+
+            # Plain text
+            body = self._format_text_message(level, message, metadata)
+            msg.attach(MIMEText(body, "plain"))
+
+            # HTML
+            html_body = self._format_html_message(level, message, metadata)
+            msg.attach(MIMEText(html_body, "html"))
+
+            logger.info(f"Sending email to {address} via {smtp_host}")
+
+            await aiosmtplib.send(
+                msg,
+                hostname=smtp_host,
+                port=smtp_port,
+                username=smtp_user,
+                password=smtp_password,
+                use_tls=smtp_use_tls,
             )
+
+            return True, f"Email sent successfully to {address}"
+
+        except aiosmtplib.SMTPException as e:
+            return False, f"SMTP error: {str(e)}"
+        except Exception as e:
+            return False, f"Error sending email: {str(e)}"
+
+    async def _send_webhook(
+        self,
+        url: str,
+        level: str,
+        message: str,
+        metadata: Optional[Dict[str, Any]] = None
+    ) -> tuple:
+        """Send a webhook notification."""
+        try:
+            payload = {
+                "level": level.upper(),
+                "message": message,
+                "timestamp": datetime.utcnow().isoformat(),
+                "source": "File Fridge",
+            }
+            if metadata:
+                payload["metadata"] = metadata
+
+            logger.info(f"Sending webhook to {url}")
+
+            async with httpx.AsyncClient(timeout=self.WEBHOOK_TIMEOUT) as client:
+                response = await client.post(url, json=payload)
+
+                if 200 <= response.status_code < 300:
+                    return True, f"Webhook sent (Status: {response.status_code})"
+                else:
+                    return False, f"Webhook returned status {response.status_code}"
+
+        except httpx.TimeoutException:
+            return False, f"Webhook timed out after {self.WEBHOOK_TIMEOUT}s"
+        except httpx.RequestError as e:
+            return False, f"Webhook request failed: {str(e)}"
+        except Exception as e:
+            return False, f"Error sending webhook: {str(e)}"
 
     def _log_dispatch(
         self,
@@ -214,16 +232,7 @@ class NotificationService:
         status: DispatchStatus,
         details: str
     ) -> None:
-        """
-        Log a dispatch attempt to the database.
-
-        Args:
-            db: Database session
-            notification: Notification that was dispatched
-            notifier: Notifier it was sent to
-            status: Dispatch status (SUCCESS or FAILED)
-            details: Details or error message
-        """
+        """Log a dispatch attempt to the database."""
         dispatch_log = NotificationDispatch(
             notification_id=notification.id,
             notifier_id=notifier.id,
@@ -232,69 +241,96 @@ class NotificationService:
         )
         db.add(dispatch_log)
         db.commit()
+        logger.info(f"Dispatch: notification #{notification.id} to '{notifier.name}' - {status.value}")
 
-        logger.info(f"Logged dispatch: notification #{notification.id} to notifier '{notifier.name}' - {status.value}")
-
-    async def test_notifier(self, db: Session, notifier_id: int) -> tuple[bool, str]:
-        """
-        Send a test notification to a specific notifier.
-
-        Args:
-            db: Database session
-            notifier_id: ID of notifier to test
-
-        Returns:
-            Tuple of (success: bool, details: str)
-        """
-        # Fetch notifier
+    async def test_notifier(self, db: Session, notifier_id: int) -> tuple:
+        """Send a test notification to a specific notifier."""
         notifier = db.query(Notifier).filter(Notifier.id == notifier_id).first()
         if not notifier:
             return False, f"Notifier with ID {notifier_id} not found"
 
         logger.info(f"Testing notifier '{notifier.name}' ({notifier.type})")
 
-        # Select dispatcher
-        if notifier.type == NotifierType.EMAIL:
-            dispatcher = self.email_dispatcher
-        elif notifier.type == NotifierType.GENERIC_WEBHOOK:
-            dispatcher = self.webhook_dispatcher
-        else:
-            return False, f"Unknown notifier type: {notifier.type}"
-
-        # Prepare SMTP config if this is an email notifier
-        smtp_config = None
-        if notifier.type == NotifierType.EMAIL:
-            smtp_config = {
-                'smtp_host': notifier.smtp_host,
-                'smtp_port': notifier.smtp_port,
-                'smtp_user': notifier.smtp_user,
-                'smtp_password': notifier.smtp_password,
-                'smtp_sender': notifier.smtp_sender,
-                'smtp_use_tls': notifier.smtp_use_tls,
-            }
-
-        # Send test message
-        test_message = "This is a test notification from File Fridge. If you received this, your notifier is configured correctly!"
+        test_message = "This is a test notification from File Fridge."
         test_metadata = {
             "notifier_name": notifier.name,
             "notifier_type": notifier.type.value,
-            "test_timestamp": str(logger),
+            "test_timestamp": datetime.utcnow().isoformat(),
         }
 
         try:
-            success, details = await dispatcher.send(
-                address=notifier.address,
-                level="INFO",
-                message=test_message,
-                metadata=test_metadata,
-                smtp_config=smtp_config
-            )
-            return success, details
+            if notifier.type == NotifierType.EMAIL:
+                return await self._send_email(
+                    address=notifier.address,
+                    level="INFO",
+                    message=test_message,
+                    metadata=test_metadata,
+                    smtp_config={
+                        'smtp_host': notifier.smtp_host,
+                        'smtp_port': notifier.smtp_port,
+                        'smtp_user': notifier.smtp_user,
+                        'smtp_password': notifier.smtp_password,
+                        'smtp_sender': notifier.smtp_sender,
+                        'smtp_use_tls': notifier.smtp_use_tls,
+                    }
+                )
+            elif notifier.type == NotifierType.GENERIC_WEBHOOK:
+                return await self._send_webhook(
+                    url=notifier.address,
+                    level="INFO",
+                    message=test_message,
+                    metadata=test_metadata
+                )
+            else:
+                return False, f"Unknown notifier type: {notifier.type}"
 
         except Exception as e:
-            error_msg = f"Error testing notifier: {str(e)}"
-            logger.exception(error_msg)
-            return False, error_msg
+            return False, f"Error testing notifier: {str(e)}"
+
+    @staticmethod
+    def _format_text_message(level: str, message: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+        """Format a notification message as plain text."""
+        formatted = f"[{level.upper()}] {message}"
+        if metadata:
+            formatted += "\n\nAdditional Information:\n"
+            for key, value in metadata.items():
+                formatted += f"- {key}: {value}\n"
+        return formatted
+
+    @staticmethod
+    def _format_html_message(level: str, message: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+        """Format a notification message as HTML."""
+        color_map = {"INFO": "#2196F3", "WARNING": "#FF9800", "ERROR": "#F44336"}
+        color = color_map.get(level.upper(), "#666666")
+
+        html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <div style="background-color: {color}; color: white; padding: 10px 20px; border-radius: 5px 5px 0 0;">
+                    <h2 style="margin: 0;">File Fridge Notification</h2>
+                </div>
+                <div style="background-color: #f5f5f5; padding: 20px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 5px 5px;">
+                    <p><strong>Level:</strong> <span style="color: {color};">{level.upper()}</span></p>
+                    <p><strong>Message:</strong> {message}</p>
+        """
+
+        if metadata:
+            html += "<p><strong>Additional Information:</strong></p><ul>"
+            for key, value in metadata.items():
+                html += f"<li>{key}: {value}</li>"
+            html += "</ul>"
+
+        html += """
+                    <p style="font-size: 12px; color: #999; margin-top: 20px;">
+                        Automated notification from File Fridge
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        return html
 
 
 # Global service instance

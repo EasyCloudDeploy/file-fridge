@@ -1,13 +1,12 @@
 """API routes for statistics."""
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
-from typing import List, Dict
+from sqlalchemy import func
 from datetime import datetime, timedelta
-from starlette.concurrency import run_in_threadpool
+
 from app.database import get_db
 from app.models import FileRecord, MonitoredPath, FileInventory, StorageType, Criteria, PinnedFile
-from app.schemas import Statistics, FileRecord as FileRecordSchema, DetailedStatistics
+from app.schemas import Statistics, DetailedStatistics
 from app.config import settings
 from app.services.stats_cleanup import stats_cleanup_service
 
@@ -15,22 +14,11 @@ router = APIRouter(prefix="/api/v1/stats", tags=["stats"])
 
 
 @router.get("", response_model=Statistics)
-async def get_statistics(db: Session = Depends(get_db)):
+def get_statistics(db: Session = Depends(get_db)):
     """Get overall statistics."""
-    # Run database queries in thread pool to avoid blocking the event loop
-    stats = await run_in_threadpool(_calculate_statistics, db)
-    return stats
-
-
-def _calculate_statistics(db: Session) -> Statistics:
-    """Calculate statistics (runs in thread pool)."""
-    # Total files moved
     total_files = db.query(func.count(FileRecord.id)).scalar() or 0
-
-    # Total size moved
     total_size = db.query(func.sum(FileRecord.file_size)).scalar() or 0
 
-    # Files by path
     files_by_path = {}
     paths = db.query(MonitoredPath).all()
     for path in paths:
@@ -45,7 +33,6 @@ def _calculate_statistics(db: Session) -> Statistics:
             "size": size or 0
         }
 
-    # Recent activity (last 50 files)
     recent_activity = db.query(FileRecord).order_by(
         FileRecord.moved_at.desc()
     ).limit(50).all()
@@ -59,38 +46,14 @@ def _calculate_statistics(db: Session) -> Statistics:
 
 
 @router.get("/detailed", response_model=DetailedStatistics)
-async def get_detailed_statistics(
+def get_detailed_statistics(
     days: int = None,
     db: Session = Depends(get_db)
 ):
     """Get comprehensive statistics with detailed metrics and trends."""
     if days is None:
         days = settings.stats_retention_days
-    stats = await run_in_threadpool(_calculate_detailed_statistics, db, days)
-    return stats
 
-
-@router.post("/cleanup")
-async def cleanup_old_stats(db: Session = Depends(get_db)):
-    """Manually trigger cleanup of old statistics data."""
-    result = await run_in_threadpool(stats_cleanup_service.cleanup_old_records, db)
-    return result
-
-
-@router.get("/aggregated")
-async def get_aggregated_stats(
-    period: str = "daily",  # daily, weekly, monthly
-    days: int = 30,
-    db: Session = Depends(get_db)
-):
-    """Get time-based aggregated statistics."""
-    # Run database query in thread pool to avoid blocking the event loop
-    result = await run_in_threadpool(_calculate_aggregated_stats, db, period, days)
-    return result
-
-
-def _calculate_detailed_statistics(db: Session, days: int) -> DetailedStatistics:
-    """Calculate comprehensive detailed statistics (runs in thread pool)."""
     now = datetime.now()
     cutoff_24h = now - timedelta(hours=24)
     cutoff_7d = now - timedelta(days=7)
@@ -187,8 +150,7 @@ def _calculate_detailed_statistics(db: Session, days: int) -> DetailedStatistics
             "size_moved": stat.size_moved or 0
         })
 
-    # Storage trend - track hot/cold storage over time
-    # For now, we'll provide current snapshot as we don't have historical inventory tracking
+    # Storage trend - current snapshot
     storage_trend = [{
         "date": str(now.date()),
         "hot_storage": total_size_hot,
@@ -274,23 +236,30 @@ def _calculate_detailed_statistics(db: Session, days: int) -> DetailedStatistics
     )
 
 
-def _calculate_aggregated_stats(db: Session, period: str, days: int) -> dict:
-    """Calculate aggregated statistics (runs in thread pool)."""
+@router.post("/cleanup")
+def cleanup_old_stats(db: Session = Depends(get_db)):
+    """Manually trigger cleanup of old statistics data."""
+    return stats_cleanup_service.cleanup_old_records(db)
+
+
+@router.get("/aggregated")
+def get_aggregated_stats(
+    period: str = "daily",  # daily, weekly, monthly
+    days: int = 30,
+    db: Session = Depends(get_db)
+):
+    """Get time-based aggregated statistics."""
     end_date = datetime.now()
     start_date = end_date - timedelta(days=days)
 
     # Group by time period
     if period == "daily":
-        date_format = "%Y-%m-%d"
         group_by = func.date(FileRecord.moved_at)
     elif period == "weekly":
-        date_format = "%Y-W%V"
         group_by = func.strftime("%Y-W%V", FileRecord.moved_at)
     elif period == "monthly":
-        date_format = "%Y-%m"
         group_by = func.strftime("%Y-%m", FileRecord.moved_at)
     else:
-        date_format = "%Y-%m-%d"
         group_by = func.date(FileRecord.moved_at)
 
     results = db.query(
@@ -316,4 +285,3 @@ def _calculate_aggregated_stats(db: Session, period: str, days: int) -> dict:
             for r in results
         ]
     }
-

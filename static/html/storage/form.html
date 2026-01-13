@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storage Location - File Fridge</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">
+                <i class="bi bi-snow"></i> <span id="app-name-navbar">File Fridge</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/paths">
+                            <i class="bi bi-folder"></i> Paths
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="/storage-locations">
+                            <i class="bi bi-hdd-stack"></i> Storage Locations
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/files">
+                            <i class="bi bi-file-earmark"></i> Files
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/stats">
+                            <i class="bi bi-graph-up"></i> Statistics
+                        </a>
+                    </li>
+                </ul>
+                <div class="d-flex align-items-center">
+                    <span class="badge bg-light text-dark">
+                        <i class="bi bi-thermometer-snow"></i> <span id="app-version">Loading...</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="container-fluid mt-4">
+        <div class="row">
+            <div class="col-12 col-md-8 offset-md-2">
+                <h1 class="mb-4" id="form-title">
+                    <i class="bi bi-plus-circle"></i> Create Storage Location
+                </h1>
+
+                <div class="card">
+                    <div class="card-body">
+                        <form id="storage-location-form">
+                            <div class="mb-3">
+                                <label for="name" class="form-label">Name *</label>
+                                <input type="text" class="form-control" id="name" name="name" required>
+                                <small class="form-text text-muted">A descriptive name for this storage location</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="path" class="form-label">Path *</label>
+                                <input type="text" class="form-control" id="path" name="path" required>
+                                <small class="form-text text-muted">The absolute file system path to the storage location</small>
+                            </div>
+
+                            <div class="d-flex justify-content-between">
+                                <a href="/storage-locations" class="btn btn-secondary">
+                                    <i class="bi bi-x-circle"></i> Cancel
+                                </a>
+                                <button type="submit" class="btn btn-primary" id="submit-btn">
+                                    <i class="bi bi-check-circle"></i> <span id="submit-text">Create Location</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="mt-5 py-3 bg-light text-center">
+        <div class="container">
+            <small class="text-muted"><span id="app-name-footer">File Fridge</span> v<span id="footer-app-version">Loading...</span> - File Cold Storage Management</small>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/storage-location-form.js"></script>
+    <script>
+        // Load app information on page load
+        document.addEventListener('DOMContentLoaded', loadAppInfo);
+    </script>
+</body>
+</html>

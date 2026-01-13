@@ -6,9 +6,7 @@ from apscheduler.executors.pool import ThreadPoolExecutor
 from sqlalchemy.orm import Session, sessionmaker
 from app.database import engine
 from app.models import MonitoredPath
-from app.services.file_scanner import FileScanner
-from app.services.file_mover import FileMover
-from app.services.scan_processor import ScanProcessor
+from app.services.file_workflow_service import file_workflow_service
 from app.services.stats_cleanup import cleanup_old_stats_job_func
 
 logger = logging.getLogger(__name__)
@@ -42,7 +40,6 @@ class SchedulerService:
                 'misfire_grace_time': 30  # Allow 30 seconds grace time for missed jobs
             }
         )
-        self.scan_processor = ScanProcessor()
     
     def start(self):
         """Start the scheduler."""
@@ -183,8 +180,7 @@ def scan_path_job_func(path_id: int):
             return
 
         logger.info(f"Starting scan for path {path_id} ({path.name})")
-        scan_processor = ScanProcessor()
-        result = scan_processor.process_path(path, db)
+        result = file_workflow_service.process_path(path, db)
         logger.info(f"Completed scan for path {path_id}: {result['files_moved']} files moved, {len(result['errors'])} errors")
 
     except Exception as e:

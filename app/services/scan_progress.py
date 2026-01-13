@@ -77,33 +77,19 @@ class ScanProgress:
 
 class ScanProgressManager:
     """
-    Thread-safe singleton manager for tracking scan progress in memory.
+    Thread-safe manager for tracking scan progress in memory.
 
     Provides real-time progress updates for file operations during scans.
+    Use the module-level `scan_progress_manager` instance.
     """
-
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls):
-        """Singleton pattern implementation."""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
 
     def __init__(self):
         """Initialize the progress manager."""
-        if self._initialized:
-            return
-
-        self._initialized = True
-        self._scans: Dict[int, ScanProgress] = {}  # path_id -> ScanProgress
-        self._scans_by_id: Dict[str, ScanProgress] = {}  # scan_id -> ScanProgress
+        self._lock = threading.Lock()
+        self._scans: Dict[int, ScanProgress] = {}
+        self._scans_by_id: Dict[str, ScanProgress] = {}
         self._cleanup_thread = None
-        self._cleanup_interval = 300  # 5 minutes
+        self._cleanup_interval = 300
         self._start_cleanup_thread()
 
     def _start_cleanup_thread(self):
