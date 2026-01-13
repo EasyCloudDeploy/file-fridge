@@ -87,11 +87,22 @@ function renderFilesTable(files) {
         // Storage location display for cold storage files
         let storageLocationHtml = '<span class="text-muted">-</span>';
         if (file.storage_type === 'cold' && file.storage_location) {
-            storageLocationHtml = `<span class="badge bg-secondary">${escapeHtml(file.storage_location.name)}</span>`;
+            if (file.storage_location.available === false) {
+                // Storage is unavailable (ejected/disconnected)
+                storageLocationHtml = `
+                    <span class="badge bg-danger" title="Storage unavailable - drive may be ejected">
+                        <i class="bi bi-exclamation-triangle"></i> ${escapeHtml(file.storage_location.name)}
+                    </span>`;
+            } else {
+                storageLocationHtml = `<span class="badge bg-secondary">${escapeHtml(file.storage_location.name)}</span>`;
+            }
         }
 
         // Check if file is migrating
         const isMigrating = file.status === 'migrating';
+        // Check if storage is unavailable
+        const storageUnavailable = file.storage_type === 'cold' &&
+            file.storage_location && file.storage_location.available === false;
 
         let actionButton;
         if (isMigrating) {
@@ -100,6 +111,12 @@ function renderFilesTable(files) {
                 <span class="text-warning">
                     <span class="spinner-border spinner-border-sm" role="status"></span>
                     Migrating...
+                </span>`;
+        } else if (storageUnavailable) {
+            // Storage is ejected/unavailable - disable actions
+            actionButton = `
+                <span class="text-danger" title="Storage unavailable - reconnect drive to perform actions">
+                    <i class="bi bi-hdd-network"></i> Offline
                 </span>`;
         } else if (file.storage_type === 'cold') {
             actionButton = `

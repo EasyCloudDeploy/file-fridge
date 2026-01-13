@@ -73,6 +73,11 @@ class ColdStorageLocation(ColdStorageLocationBase):
         from_attributes = True
 
 
+class ColdStorageLocationWithStats(ColdStorageLocation):
+    """Schema for cold storage location with path count."""
+    path_count: int
+
+
 class MonitoredPathBase(BaseModel):
     """Base monitored path schema."""
     name: str = Field(..., min_length=1, max_length=255)

@@ -50,35 +50,21 @@ class RelocationTask:
 
 class RelocationTaskManager:
     """
-    Thread-safe singleton manager for tracking file relocation tasks.
+    Thread-safe manager for tracking file relocation tasks.
 
     Handles background file relocations between cold storage locations.
+    Use the module-level `relocation_manager` instance.
     """
-
-    _instance = None
-    _lock = threading.Lock()
-
-    def __new__(cls):
-        """Singleton pattern implementation."""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._initialized = False
-        return cls._instance
 
     def __init__(self):
         """Initialize the relocation task manager."""
-        if self._initialized:
-            return
-
-        self._initialized = True
-        self._tasks: Dict[str, RelocationTask] = {}  # task_id -> RelocationTask
-        self._tasks_by_inventory: Dict[int, str] = {}  # inventory_id -> task_id (for active tasks)
+        self._lock = threading.Lock()
+        self._tasks: Dict[str, RelocationTask] = {}
+        self._tasks_by_inventory: Dict[int, str] = {}
         self._worker_thread = None
-        self._task_queue: List[str] = []  # Queue of task_ids to process
+        self._task_queue: List[str] = []
         self._shutdown = False
-        self._cleanup_interval = 3600  # 1 hour - keep completed tasks for reference
+        self._cleanup_interval = 3600
         self._start_worker_thread()
         self._start_cleanup_thread()
 

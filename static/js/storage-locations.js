@@ -60,7 +60,7 @@ function renderStorageLocations() {
             <td><strong>${escapeHtml(location.name)}</strong></td>
             <td><code>${escapeHtml(location.path)}</code></td>
             <td>
-                <span class="badge bg-secondary">0 paths</span>
+                <span class="badge bg-secondary">${location.path_count} paths</span>
             </td>
             <td><small class="text-muted">${formatDateTime(location.created_at)}</small></td>
             <td>

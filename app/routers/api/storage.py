@@ -8,7 +8,7 @@ from typing import List
 from pathlib import Path
 from app.database import get_db
 from app.models import MonitoredPath, ColdStorageLocation
-from app.schemas import StorageStats, ColdStorageLocationCreate, ColdStorageLocationUpdate, ColdStorageLocation as ColdStorageLocationSchema
+from app.schemas import StorageStats, ColdStorageLocationCreate, ColdStorageLocationUpdate, ColdStorageLocation as ColdStorageLocationSchema, ColdStorageLocationWithStats
 
 logger = logging.getLogger(__name__)
 
@@ -76,12 +76,20 @@ def get_storage_stats(db: Session = Depends(get_db)):
 
 # ColdStorageLocation CRUD endpoints
 
-@router.get("/locations", response_model=List[ColdStorageLocationSchema])
+@router.get("/locations", response_model=List[ColdStorageLocationWithStats])
 def list_storage_locations(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """List all cold storage locations."""
     locations = db.query(ColdStorageLocation).offset(skip).limit(limit).all()
-    return locations
-
+    
+    locations_with_stats = []
+    for loc in locations:
+        locations_with_stats.append(
+            ColdStorageLocationWithStats(
+                **loc.__dict__,
+                path_count=len(loc.paths)
+            )
+        )
+    return locations_with_stats
 
 @router.post("/locations", response_model=ColdStorageLocationSchema, status_code=status.HTTP_201_CREATED)
 def create_storage_location(location: ColdStorageLocationCreate, db: Session = Depends(get_db)):
