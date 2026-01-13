@@ -59,14 +59,16 @@ def init_db():
     """
     Initialize database environment.
 
-    NOTE: This function no longer creates database tables directly.
-    All database schema changes are now handled exclusively by Alembic migrations.
+    Creates all database tables if they don't exist. This is safe to call
+    on existing databases as SQLAlchemy's create_all is idempotent.
+    Incremental schema changes are handled by Alembic migrations.
     See app/database_migrations.py for the migration system.
-
-    This function is kept for backwards compatibility and may perform future
-    database initialization tasks that don't involve schema changes.
     """
-    # Database directory is already ensured at module import time
-    # All schema changes are handled by Alembic migrations
-    pass
+    # Import models to ensure they're registered with Base.metadata
+    from app import models  # noqa: F401
+
+    # Create all tables that don't exist
+    # This is idempotent - existing tables are not affected
+    Base.metadata.create_all(bind=engine)
+    logger.info("Database tables initialized")
 
