@@ -181,6 +181,10 @@ def scan_path_job_func(path_id: int):
 
         logger.info(f"Starting scan for path {path_id} ({path.name})")
         result = file_workflow_service.process_path(path, db)
+        if result['errors']:
+            logger.error(f"Scan for path {path_id} completed with {len(result['errors'])} errors:")
+            for error in result['errors']:
+                logger.error(f"  - {error}")
         logger.info(f"Completed scan for path {path_id}: {result['files_moved']} files moved, {len(result['errors'])} errors")
 
     except Exception as e:

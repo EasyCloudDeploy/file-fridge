@@ -44,9 +44,23 @@ class FileWorkflowService:
         Process a monitored path: scan, match, and move files.
 
         Returns:
-            dict with scan results
+            dict with scan results including:
+            - scan_skipped: True if scan was skipped because one is already running
         """
-        scan_id = scan_progress_manager.start_scan(path.id, total_files=0)
+        scan_id, scan_started = scan_progress_manager.start_scan(path.id, total_files=0)
+
+        if not scan_started:
+            logger.warning(f"Scan already running for path {path.id}, skipping")
+            return {
+                "path_id": path.id,
+                "files_found": 0,
+                "files_moved": 0,
+                "files_cleaned": 0,
+                "errors": [],
+                "scan_skipped": True,
+                "scan_skipped_reason": "A scan is already running for this path"
+            }
+
         logger.info(f"Started scan {scan_id} for path {path.id}")
 
         try:
@@ -285,18 +299,43 @@ class FileWorkflowService:
         try:
             source_base = Path(path.source_path)
 
-            # Get file size
-            try:
-                if file_path.is_symlink():
-                    try:
-                        actual_file = file_path.resolve(strict=True)
-                        file_size = actual_file.stat().st_size
-                    except (OSError, RuntimeError):
+            # Pre-check: verify file still exists
+            if not file_path.exists():
+                # File disappeared between scan and processing
+                logger.debug(f"File no longer exists, skipping: {file_path}")
+                result["success"] = True
+                result["skipped"] = True
+                return result
+
+            # Get file size with retry for transient network errors
+            file_size = None
+            for attempt in range(3):
+                try:
+                    if file_path.is_symlink():
+                        try:
+                            actual_file = file_path.resolve(strict=True)
+                            file_size = actual_file.stat().st_size
+                        except (OSError, RuntimeError):
+                            file_size = file_path.stat().st_size
+                    else:
                         file_size = file_path.stat().st_size
-                else:
-                    file_size = file_path.stat().st_size
-            except (OSError, FileNotFoundError) as e:
-                result["error"] = f"Cannot stat source file: {e}"
+                    break  # Success, exit retry loop
+                except (OSError, FileNotFoundError) as e:
+                    if attempt < 2:
+                        # Wait briefly and retry (helps with network mount transient errors)
+                        time.sleep(0.1 * (attempt + 1))
+                        continue
+                    # File genuinely doesn't exist or is inaccessible
+                    if not file_path.exists():
+                        logger.debug(f"File disappeared during processing: {file_path}")
+                        result["success"] = True
+                        result["skipped"] = True
+                        return result
+                    result["error"] = f"Cannot stat source file: {e}"
+                    return result
+
+            if file_size is None:
+                result["error"] = "Could not determine file size"
                 return result
 
             # Find storage location with sufficient space

@@ -124,7 +124,22 @@ class ScanProgressManager:
                     self._scans.pop(progress.path_id, None)
                     logger.debug(f"Cleaned up old scan: {scan_id}")
 
-    def start_scan(self, path_id: int, total_files: int = 0) -> str:
+    def is_scan_running(self, path_id: int) -> bool:
+        """
+        Check if a scan is currently running for a path.
+
+        Args:
+            path_id: The monitored path ID to check
+
+        Returns:
+            True if a scan is running, False otherwise
+        """
+        with self._lock:
+            if path_id not in self._scans:
+                return False
+            return self._scans[path_id].status == "running"
+
+    def start_scan(self, path_id: int, total_files: int = 0) -> tuple[str, bool]:
         """
         Start tracking a new scan operation.
 
@@ -133,9 +148,17 @@ class ScanProgressManager:
             total_files: Total number of files to process
 
         Returns:
-            scan_id: Unique identifier for this scan
+            Tuple of (scan_id, started):
+            - scan_id: Unique identifier for this scan (or existing scan if already running)
+            - started: True if new scan started, False if scan was already running
         """
         with self._lock:
+            # Check if a scan is already running for this path
+            if path_id in self._scans and self._scans[path_id].status == "running":
+                existing_scan = self._scans[path_id]
+                logger.warning(f"Scan already running for path {path_id}: {existing_scan.scan_id}")
+                return existing_scan.scan_id, False
+
             scan_id = str(uuid.uuid4())
             progress = ScanProgress(
                 scan_id=scan_id,
@@ -149,7 +172,7 @@ class ScanProgressManager:
             self._scans_by_id[scan_id] = progress
 
             logger.info(f"Started scan tracking: {scan_id} for path {path_id}, {total_files} files")
-            return scan_id
+            return scan_id, True
 
     def update_total_files(self, path_id: int, total_files: int):
         """Update the total file count (useful when count is determined during scan)."""
