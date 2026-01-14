@@ -1,17 +1,17 @@
-// Files browser JavaScript - client-side rendering
+// Files browser JavaScript - client-side rendering with NDJSON streaming
 const API_BASE_URL = '/api/v1';
 
-// Pagination and filter state
-let currentPage = 1;
-let currentPageSize = 50;
+// Filter state (no pagination - streaming returns all files)
 let currentSearch = '';
 let currentPathId = null;
 let currentStorageType = null;
 let currentTagIds = [];
 let currentSortBy = 'last_seen';
 let currentSortOrder = 'desc';
-let totalPages = 1;
 let totalItems = 0;
+
+// Streaming state
+let currentAbortController = null;
 
 // Utility functions
 function escapeHtml(text) {
@@ -38,7 +38,7 @@ function showNotification(message, type = 'success') {
     showToast(message, type);
 }
 
-// Sorting functions (server-side sorting now)
+// Sorting functions (server-side sorting)
 function handleSortClick(column) {
     if (currentSortBy === column) {
         // Toggle direction
@@ -49,8 +49,6 @@ function handleSortClick(column) {
         currentSortOrder = 'desc';
     }
 
-    // Reset to page 1 when sorting changes
-    currentPage = 1;
     loadFilesList();
 }
 
@@ -176,89 +174,262 @@ function renderFilesTable(files) {
     });
 }
 
-function renderPagination() {
+// Append a single file row to the table (used for streaming)
+function appendFileRow(tableBody, file) {
+    const row = tableBody.insertRow();
+    const storageBadge = file.storage_type === 'hot'
+        ? '<span class="badge bg-success">Hot</span>'
+        : '<span class="badge bg-info">Cold</span>';
+
+    // Storage location display for cold storage files
+    let storageLocationHtml = '<span class="text-muted">-</span>';
+    if (file.storage_type === 'cold' && file.storage_location) {
+        if (file.storage_location.available === false) {
+            storageLocationHtml = `
+                <span class="badge bg-danger" title="Storage unavailable - drive may be ejected">
+                    <i class="bi bi-exclamation-triangle"></i> ${escapeHtml(file.storage_location.name)}
+                </span>`;
+        } else {
+            storageLocationHtml = `<span class="badge bg-secondary">${escapeHtml(file.storage_location.name)}</span>`;
+        }
+    }
+
+    const isMigrating = file.status === 'migrating';
+    const storageUnavailable = file.storage_type === 'cold' &&
+        file.storage_location && file.storage_location.available === false;
+
+    let actionButton;
+    if (isMigrating) {
+        actionButton = `
+            <span class="text-warning">
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+                Migrating...
+            </span>`;
+    } else if (storageUnavailable) {
+        actionButton = `
+            <span class="text-danger" title="Storage unavailable - reconnect drive to perform actions">
+                <i class="bi bi-hdd-network"></i> Offline
+            </span>`;
+    } else if (file.storage_type === 'cold') {
+        actionButton = `
+            <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-warning" onclick="showThawModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Move file back to hot storage">
+                    <i class="bi bi-fire"></i> Thaw
+                </button>
+                <button type="button" class="btn btn-outline-primary" onclick="showRelocateModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Move to another cold storage location">
+                    <i class="bi bi-arrow-right-circle"></i> Relocate
+                </button>
+            </div>`;
+    } else {
+        // Hot storage files - show freeze button
+        actionButton = `
+            <button type="button" class="btn btn-sm btn-info" onclick="showFreezeModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Send to cold storage">
+                <i class="bi bi-snow"></i> Freeze
+            </button>`;
+    }
+
+    const mtime = file.file_mtime ? formatDate(file.file_mtime) : '<span class="text-muted">N/A</span>';
+    const atime = file.file_atime ? formatDate(file.file_atime) : '<span class="text-muted">N/A</span>';
+    const ctime = file.file_ctime ? formatDate(file.file_ctime) : '<span class="text-muted">N/A</span>';
+
+    let tagsHtml = '';
+    if (file.tags && file.tags.length > 0) {
+        tagsHtml = file.tags.map(ft => {
+            const color = ft.tag && ft.tag.color ? ft.tag.color : '#6c757d';
+            const name = ft.tag && ft.tag.name ? ft.tag.name : 'Unknown';
+            return `<span class="badge me-1" style="background-color: ${color};">${escapeHtml(name)}</span>`;
+        }).join('');
+    }
+    tagsHtml += `<button type="button" class="btn btn-sm btn-outline-primary" onclick="showManageTagsModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Manage tags">
+        <i class="bi bi-tags"></i>
+    </button>`;
+
+    let statusBadgeClass = 'bg-secondary';
+    if (file.status === 'active') {
+        statusBadgeClass = 'bg-success';
+    } else if (file.status === 'migrating') {
+        statusBadgeClass = 'bg-warning text-dark';
+    } else if (file.status === 'missing' || file.status === 'deleted') {
+        statusBadgeClass = 'bg-danger';
+    }
+
+    // Pin indicator shown next to status
+    const pinIndicator = file.is_pinned
+        ? '<i class="bi bi-pin-fill text-secondary me-1" title="File is pinned"></i>'
+        : '';
+
+    row.innerHTML = `
+        <td><code>${escapeHtml(file.file_path)}</code></td>
+        <td>${storageBadge}</td>
+        <td>${storageLocationHtml}</td>
+        <td>${formatBytes(file.file_size)}</td>
+        <td><small>${mtime}</small></td>
+        <td><small>${atime}</small></td>
+        <td><small>${ctime}</small></td>
+        <td>${pinIndicator}<span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span></td>
+        <td><small>${formatDate(file.last_seen)}</small></td>
+        <td>${tagsHtml}</td>
+        <td>${actionButton}</td>
+    `;
+}
+
+// Handle metadata message from stream
+function handleStreamMetadata(metadata) {
+    totalItems = metadata.total;
+
+    const loadingTextEl = document.getElementById('loading-text');
+    const progressContainer = document.getElementById('stream-progress-container');
+
+    if (loadingTextEl) {
+        loadingTextEl.textContent = `Loading ${totalItems.toLocaleString()} files...`;
+    }
+    if (progressContainer) {
+        progressContainer.style.display = 'block';
+    }
+
+    // Show content container early so rows can be appended
+    const contentEl = document.getElementById('files-content');
+    if (contentEl && totalItems > 0) {
+        contentEl.style.display = 'block';
+    }
+}
+
+// Update progress bar during streaming
+function updateStreamProgress(received, total) {
+    const progressBar = document.getElementById('stream-progress');
+    if (progressBar && total > 0) {
+        const percent = Math.round((received / total) * 100);
+        progressBar.style.width = `${percent}%`;
+        progressBar.setAttribute('aria-valuenow', percent);
+    }
+}
+
+// Handle stream completion
+function handleStreamComplete(message) {
+    console.log(`Stream complete: ${message.count} files in ${message.duration_ms}ms`);
+    renderStreamSummary(message.count, message.duration_ms);
+}
+
+// Handle stream error
+function handleStreamError(message) {
+    console.error('Stream error:', message.message);
+    showNotification(`Error loading files: ${message.message}. Received ${message.partial_count} files before error.`, 'error');
+}
+
+// Render summary after streaming completes
+function renderStreamSummary(count, durationMs) {
     const paginationEl = document.getElementById('pagination-controls');
     if (!paginationEl) return;
 
-    if (totalPages <= 1) {
-        paginationEl.innerHTML = '';
-        return;
-    }
-
-    let html = '<nav><ul class="pagination justify-content-center">';
-
-    // Previous button
-    html += `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
-        <a class="page-link" href="#" onclick="changePage(${currentPage - 1}); return false;">Previous</a>
-    </li>`;
-
-    // Page numbers
-    const maxPagesToShow = 5;
-    let startPage = Math.max(1, currentPage - Math.floor(maxPagesToShow / 2));
-    let endPage = Math.min(totalPages, startPage + maxPagesToShow - 1);
-
-    if (endPage - startPage < maxPagesToShow - 1) {
-        startPage = Math.max(1, endPage - maxPagesToShow + 1);
-    }
-
-    if (startPage > 1) {
-        html += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(1); return false;">1</a></li>`;
-        if (startPage > 2) {
-            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-        }
-    }
-
-    for (let i = startPage; i <= endPage; i++) {
-        html += `<li class="page-item ${i === currentPage ? 'active' : ''}">
-            <a class="page-link" href="#" onclick="changePage(${i}); return false;">${i}</a>
-        </li>`;
-    }
-
-    if (endPage < totalPages) {
-        if (endPage < totalPages - 1) {
-            html += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
-        }
-        html += `<li class="page-item"><a class="page-link" href="#" onclick="changePage(${totalPages}); return false;">${totalPages}</a></li>`;
-    }
-
-    // Next button
-    html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
-        <a class="page-link" href="#" onclick="changePage(${currentPage + 1}); return false;">Next</a>
-    </li>`;
-
-    html += '</ul></nav>';
-
-    // Add page info
-    const start = (currentPage - 1) * currentPageSize + 1;
-    const end = Math.min(currentPage * currentPageSize, totalItems);
-    html += `<p class="text-center text-muted">Showing ${start}-${end} of ${totalItems} files</p>`;
-
-    paginationEl.innerHTML = html;
+    const seconds = (durationMs / 1000).toFixed(2);
+    paginationEl.innerHTML = `
+        <p class="text-center text-muted">
+            Showing ${count.toLocaleString()} files (loaded in ${seconds}s)
+        </p>
+    `;
 }
 
-function changePage(newPage) {
-    if (newPage < 1 || newPage > totalPages || newPage === currentPage) return;
-    currentPage = newPage;
-    loadFilesList();
+// Process NDJSON stream
+async function processNDJSONStream(body, tableBody) {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let receivedCount = 0;
+
+    try {
+        while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) break;
+
+            // Decode chunk and add to buffer
+            buffer += decoder.decode(value, { stream: true });
+
+            // Process complete lines
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // Keep incomplete line in buffer
+
+            for (const line of lines) {
+                if (!line.trim()) continue;
+
+                try {
+                    const message = JSON.parse(line);
+
+                    switch (message.type) {
+                        case 'metadata':
+                            handleStreamMetadata(message);
+                            break;
+                        case 'file':
+                            appendFileRow(tableBody, message.data);
+                            receivedCount++;
+                            updateStreamProgress(receivedCount, totalItems);
+                            break;
+                        case 'complete':
+                            handleStreamComplete(message);
+                            break;
+                        case 'error':
+                            handleStreamError(message);
+                            break;
+                    }
+                } catch (parseError) {
+                    console.error('Failed to parse NDJSON line:', line, parseError);
+                }
+            }
+        }
+
+        // Process any remaining buffer content
+        if (buffer.trim()) {
+            try {
+                const message = JSON.parse(buffer);
+                if (message.type === 'complete') {
+                    handleStreamComplete(message);
+                } else if (message.type === 'error') {
+                    handleStreamError(message);
+                }
+            } catch (e) {
+                console.error('Failed to parse final buffer:', buffer);
+            }
+        }
+    } finally {
+        reader.releaseLock();
+    }
 }
 
-// Load and render files list
+// Load and render files list via streaming
 async function loadFilesList() {
     const loadingEl = document.getElementById('files-loading');
     const contentEl = document.getElementById('files-content');
     const emptyEl = document.getElementById('no-files-message');
     const tableBody = document.querySelector('#filesTable tbody');
+    const paginationEl = document.getElementById('pagination-controls');
 
+    // Abort any in-progress stream
+    if (currentAbortController) {
+        currentAbortController.abort();
+    }
+    currentAbortController = new AbortController();
+
+    // Show loading state
     if (loadingEl) loadingEl.style.display = 'block';
     if (contentEl) contentEl.style.display = 'none';
     if (emptyEl) emptyEl.style.display = 'none';
     if (tableBody) tableBody.innerHTML = '';
+    if (paginationEl) paginationEl.innerHTML = '';
+
+    // Reset progress
+    const loadingTextEl = document.getElementById('loading-text');
+    const progressContainer = document.getElementById('stream-progress-container');
+    const progressBar = document.getElementById('stream-progress');
+    if (loadingTextEl) loadingTextEl.textContent = 'Loading files...';
+    if (progressContainer) progressContainer.style.display = 'none';
+    if (progressBar) progressBar.style.width = '0%';
+
+    // Reset state
+    totalItems = 0;
 
     try {
-        // Build URL with all parameters
+        // Build URL with all parameters (no pagination)
         const params = new URLSearchParams({
-            page: currentPage,
-            page_size: currentPageSize,
             sort_by: currentSortBy,
             sort_order: currentSortOrder
         });
@@ -277,32 +448,38 @@ async function loadFilesList() {
         }
 
         const url = `${API_BASE_URL}/files?${params.toString()}`;
-        const response = await fetch(url);
 
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const response = await fetch(url, {
+            signal: currentAbortController.signal
+        });
 
-        const data = await response.json();
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
 
-        // Update pagination state
-        totalPages = data.total_pages;
-        totalItems = data.total;
+        // Process NDJSON stream
+        await processNDJSONStream(response.body, tableBody);
 
-        // Render table and pagination
-        renderFilesTable(data.items);
-        renderPagination();
-        updateSortIndicators();
-
-        if (data.items.length === 0) {
+        // Show content or empty message
+        if (totalItems === 0) {
             if (emptyEl) emptyEl.style.display = 'block';
         } else {
             if (contentEl) contentEl.style.display = 'block';
         }
+
+        updateSortIndicators();
+
     } catch (error) {
+        if (error.name === 'AbortError') {
+            console.log('Stream aborted');
+            return;
+        }
         console.error('Error loading files:', error);
         showNotification(`Failed to load files: ${error.message}`, 'error');
         if (emptyEl) emptyEl.style.display = 'block';
     } finally {
         if (loadingEl) loadingEl.style.display = 'none';
+        currentAbortController = null;
     }
 }
 
@@ -310,7 +487,6 @@ async function loadFilesList() {
 function performSearch() {
     const searchInput = document.getElementById('search_input');
     currentSearch = searchInput ? searchInput.value.trim() : '';
-    currentPage = 1; // Reset to first page on search
     loadFilesList();
 }
 
@@ -319,7 +495,6 @@ function clearSearch() {
     const searchInput = document.getElementById('search_input');
     if (searchInput) searchInput.value = '';
     currentSearch = '';
-    currentPage = 1;
     loadFilesList();
 }
 
@@ -381,7 +556,6 @@ function updateFilters() {
             .map(val => parseInt(val));
     }
 
-    currentPage = 1; // Reset to first page on filter change
     loadFilesList();
 }
 
@@ -420,7 +594,6 @@ function clearTagFilter() {
         Array.from(tagSelect.options).forEach(opt => opt.selected = false);
     }
     currentTagIds = [];
-    currentPage = 1;
     loadFilesList();
 }
 
@@ -444,7 +617,8 @@ function showThawModal(inventoryId, filePath) {
 async function thawFile() {
     const button = document.getElementById('confirmThawBtn');
     const inventoryId = button.dataset.inventoryId;
-    const pin = document.querySelector('input[name="pin_file"]:checked').value === 'true';
+    const pinCheckbox = document.getElementById('thawPinCheckbox');
+    const pin = pinCheckbox ? pinCheckbox.checked : false;
 
     try {
         const response = await fetch(`${API_BASE_URL}/files/thaw/${inventoryId}?pin=${pin}`, {
@@ -468,6 +642,197 @@ async function thawFile() {
     } catch (error) {
         console.error('Error thawing file:', error);
         showNotification(`Error thawing file: ${error.message}`, 'error');
+    }
+}
+
+// Toggle pin status for a file
+async function togglePin(inventoryId, currentlyPinned) {
+    const method = currentlyPinned ? 'DELETE' : 'POST';
+    const action = currentlyPinned ? 'unpin' : 'pin';
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/files/${inventoryId}/pin`, {
+            method: method
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || `Failed to ${action} file`);
+        }
+
+        const data = await response.json();
+        showNotification(data.message);
+
+        // Reload files to show updated pin status
+        loadFilesList();
+    } catch (error) {
+        console.error(`Error ${action}ning file:`, error);
+        showNotification(`Error ${action}ning file: ${error.message}`, 'error');
+    }
+}
+
+// Freeze Modal Management
+let freezeModal = null;
+let currentFreezeInventoryId = null;
+
+// Show freeze modal
+async function showFreezeModal(inventoryId, filePath) {
+    currentFreezeInventoryId = inventoryId;
+
+    const modal = document.getElementById('freezeModal');
+    if (!modal) return;
+
+    // Reset modal state
+    document.getElementById('freezeFileName').textContent = filePath;
+    document.getElementById('freezeLocationSelect').innerHTML = '<option value="">Loading locations...</option>';
+    document.getElementById('freezeLocationSelect').disabled = true;
+    document.getElementById('confirmFreezeBtn').disabled = true;
+    document.getElementById('freezePinCheckbox').checked = false;
+
+    const errorEl = document.getElementById('freezeError');
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('d-none');
+    }
+
+    // Show modal
+    if (!freezeModal) {
+        freezeModal = new bootstrap.Modal(modal);
+    }
+    freezeModal.show();
+
+    // Load freeze options
+    await loadFreezeOptions(inventoryId);
+}
+
+// Load freeze options for a file
+async function loadFreezeOptions(inventoryId) {
+    const selectEl = document.getElementById('freezeLocationSelect');
+    const errorEl = document.getElementById('freezeError');
+    const confirmBtn = document.getElementById('confirmFreezeBtn');
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/files/freeze/${inventoryId}/options`);
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to load options');
+        }
+
+        const data = await response.json();
+
+        if (!data.can_freeze || data.available_locations.length === 0) {
+            // No locations available
+            selectEl.innerHTML = '<option value="">No storage locations available</option>';
+            selectEl.disabled = true;
+            confirmBtn.disabled = true;
+            if (errorEl) {
+                errorEl.textContent = 'No cold storage locations are configured for this path.';
+                errorEl.classList.remove('d-none');
+            }
+        } else {
+            // Filter to available locations only
+            const availableLocations = data.available_locations.filter(loc => loc.available);
+
+            if (availableLocations.length === 0) {
+                selectEl.innerHTML = '<option value="">No storage locations currently accessible</option>';
+                selectEl.disabled = true;
+                confirmBtn.disabled = true;
+                if (errorEl) {
+                    errorEl.textContent = 'All configured storage locations are offline or inaccessible.';
+                    errorEl.classList.remove('d-none');
+                }
+            } else if (availableLocations.length === 1) {
+                // Only one location - preselect it
+                selectEl.innerHTML = availableLocations.map(loc =>
+                    `<option value="${loc.id}" selected>${escapeHtml(loc.name)} (${escapeHtml(loc.path)})</option>`
+                ).join('');
+                selectEl.disabled = false;
+                confirmBtn.disabled = false;
+            } else {
+                // Multiple locations - let user choose
+                selectEl.innerHTML = '<option value="">Select storage location...</option>' +
+                    availableLocations.map(loc =>
+                        `<option value="${loc.id}">${escapeHtml(loc.name)} (${escapeHtml(loc.path)})</option>`
+                    ).join('');
+                selectEl.disabled = false;
+            }
+        }
+    } catch (error) {
+        console.error('Error loading freeze options:', error);
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('d-none');
+        }
+        selectEl.innerHTML = '<option value="">Error loading locations</option>';
+        selectEl.disabled = true;
+        confirmBtn.disabled = true;
+    }
+}
+
+// Handle freeze location selection
+function onFreezeLocationChange() {
+    const selectEl = document.getElementById('freezeLocationSelect');
+    const confirmBtn = document.getElementById('confirmFreezeBtn');
+
+    if (confirmBtn) {
+        confirmBtn.disabled = !selectEl || !selectEl.value;
+    }
+}
+
+// Freeze file action
+async function freezeFile() {
+    const selectEl = document.getElementById('freezeLocationSelect');
+    const storageLocationId = selectEl ? parseInt(selectEl.value) : null;
+    const pinCheckbox = document.getElementById('freezePinCheckbox');
+    const pin = pinCheckbox ? pinCheckbox.checked : false;
+    const confirmBtn = document.getElementById('confirmFreezeBtn');
+    const errorEl = document.getElementById('freezeError');
+
+    if (!storageLocationId || !currentFreezeInventoryId) return;
+
+    // Disable button during operation
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Freezing...';
+    }
+
+    // Clear previous error
+    if (errorEl) {
+        errorEl.textContent = '';
+        errorEl.classList.add('d-none');
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/files/freeze/${currentFreezeInventoryId}?storage_location_id=${storageLocationId}&pin=${pin}`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to freeze file');
+        }
+
+        const data = await response.json();
+        showNotification(`File sent to ${data.storage_location.name}` + (pin ? ' and pinned' : ''));
+
+        // Close modal
+        if (freezeModal) freezeModal.hide();
+
+        // Reload files to show updated state
+        loadFilesList();
+    } catch (error) {
+        console.error('Error freezing file:', error);
+        showNotification(`Error freezing file: ${error.message}`, 'error');
+        if (errorEl) {
+            errorEl.textContent = error.message;
+            errorEl.classList.remove('d-none');
+        }
+    } finally {
+        // Reset button
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="bi bi-snow"></i> Send to Fridge';
+        }
     }
 }
 
@@ -952,6 +1317,33 @@ document.addEventListener('DOMContentLoaded', function() {
     const confirmRelocateBtn = document.getElementById('confirmRelocateBtn');
     if (confirmRelocateBtn) {
         confirmRelocateBtn.addEventListener('click', relocateFile);
+    }
+
+    // Setup freeze modal
+    const freezeLocationSelect = document.getElementById('freezeLocationSelect');
+    if (freezeLocationSelect) {
+        freezeLocationSelect.addEventListener('change', onFreezeLocationChange);
+    }
+
+    const confirmFreezeBtn = document.getElementById('confirmFreezeBtn');
+    if (confirmFreezeBtn) {
+        confirmFreezeBtn.addEventListener('click', freezeFile);
+    }
+
+    // Reset thaw modal checkbox when modal is shown
+    const thawModal = document.getElementById('thawModal');
+    if (thawModal) {
+        thawModal.addEventListener('show.bs.modal', function() {
+            const checkbox = document.getElementById('thawPinCheckbox');
+            if (checkbox) checkbox.checked = false;
+        });
+    }
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    if (currentAbortController) {
+        currentAbortController.abort();
     }
 });
 

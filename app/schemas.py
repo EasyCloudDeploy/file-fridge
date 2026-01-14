@@ -118,6 +118,19 @@ class MonitoredPath(MonitoredPathBase):
         from_attributes = True
 
 
+class MonitoredPathSummary(MonitoredPathBase):
+    """Schema for monitored path summary response."""
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime]
+    file_count: int
+    is_path_present: Optional[bool] = None
+    storage_locations: List[ColdStorageLocation] = []
+
+    class Config:
+        from_attributes = True
+
+
 class FileRecordBase(BaseModel):
     """Base file record schema."""
     original_path: str
