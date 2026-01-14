@@ -1,18 +1,20 @@
 """API routes for file management."""
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from pathlib import Path
-from datetime import datetime
+import json
+import time
 import logging
-import math
+from typing import Optional, Generator
+
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+from pathlib import Path
 
 from app.database import get_db
-from app.models import FileRecord, MonitoredPath, FileInventory, StorageType, FileStatus, ColdStorageLocation
-from app.schemas import FileInventory as FileInventorySchema, FileMoveRequest, FileRelocateRequest, StorageType as StorageTypeSchema, PaginatedFileInventory
+from app.models import FileRecord, MonitoredPath, FileInventory, StorageType, FileStatus, ColdStorageLocation, PinnedFile, OperationType
+from app.schemas import FileMoveRequest, FileRelocateRequest, StorageType as StorageTypeSchema
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
-from app.models import OperationType
+from app.services.file_freezer import FileFreezer
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 logger = logging.getLogger(__name__)
@@ -35,10 +37,53 @@ def _get_storage_location_for_file(file_path: str, monitored_path: MonitoredPath
     return None
 
 
+def _serialize_file(file: FileInventory, paths_map: dict, pinned_paths_set: set = None) -> dict:
+    """Serialize a FileInventory object to a dictionary for JSON output."""
+    file_dict = {
+        "id": file.id,
+        "path_id": file.path_id,
+        "file_path": file.file_path,
+        "storage_type": file.storage_type.value if hasattr(file.storage_type, 'value') else file.storage_type,
+        "file_size": file.file_size,
+        "file_mtime": file.file_mtime.isoformat() if file.file_mtime else None,
+        "file_atime": file.file_atime.isoformat() if file.file_atime else None,
+        "file_ctime": file.file_ctime.isoformat() if file.file_ctime else None,
+        "checksum": file.checksum,
+        "file_extension": file.file_extension,
+        "mime_type": file.mime_type,
+        "status": file.status.value if hasattr(file.status, 'value') else file.status,
+        "last_seen": file.last_seen.isoformat() if file.last_seen else None,
+        "created_at": file.created_at.isoformat() if file.created_at else None,
+        "tags": [
+            {
+                "id": ft.id,
+                "file_id": ft.file_id,
+                "tag": {
+                    "id": ft.tag.id,
+                    "name": ft.tag.name,
+                    "description": ft.tag.description,
+                    "color": ft.tag.color,
+                    "created_at": ft.tag.created_at.isoformat() if ft.tag.created_at else None
+                },
+                "tagged_at": ft.tagged_at.isoformat() if ft.tagged_at else None,
+                "tagged_by": ft.tagged_by
+            }
+            for ft in file.tags
+        ],
+        "storage_location": None,
+        "is_pinned": file.file_path in pinned_paths_set if pinned_paths_set else False
+    }
+
+    if file.storage_type == StorageType.COLD:
+        monitored_path = paths_map.get(file.path_id)
+        storage_loc = _get_storage_location_for_file(file.file_path, monitored_path)
+        file_dict["storage_location"] = storage_loc
+
+    return file_dict
+
+
 @router.get("")
 def list_files(
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
-    page_size: int = Query(50, ge=1, le=500, description="Items per page (max 500)"),
     path_id: Optional[int] = Query(None, description="Filter by monitored path ID"),
     storage_type: Optional[StorageTypeSchema] = Query(None, description="Filter by storage type (hot/cold)"),
     file_status: Optional[str] = Query(None, alias="status", description="Filter by file status"),
@@ -51,143 +96,157 @@ def list_files(
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
     db: Session = Depends(get_db)
 ):
-    """List files in inventory with pagination, search, and filtering."""
-    from app.models import FileTag, Tag
+    """
+    Stream files in inventory as NDJSON.
 
-    # Parse tag IDs if provided
-    tag_id_list = None
-    if tag_ids:
+    Each line is a JSON object:
+    - First line: {"type": "metadata", "total": N, "filters": {...}, "sort": {...}}
+    - File lines: {"type": "file", "data": {...}}
+    - Last line: {"type": "complete", "count": N, "duration_ms": N}
+    - On error: {"type": "error", "message": "...", "partial_count": N}
+    """
+    from app.models import FileTag
+
+    def generate_ndjson() -> Generator[str, None, None]:
+        start_time = time.time()
+        count = 0
+
         try:
-            tag_id_list = [int(tid.strip()) for tid in tag_ids.split(',') if tid.strip()]
-        except ValueError:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid tag_ids format. Must be comma-separated integers."
-            )
+            # Parse tag IDs if provided
+            tag_id_list = None
+            if tag_ids:
+                try:
+                    tag_id_list = [int(tid.strip()) for tid in tag_ids.split(',') if tid.strip()]
+                except ValueError:
+                    yield json.dumps({
+                        "type": "error",
+                        "message": "Invalid tag_ids format. Must be comma-separated integers.",
+                        "partial_count": 0
+                    }) + "\n"
+                    return
 
-    # Build base query
-    query = db.query(FileInventory)
+            # Build base query
+            query = db.query(FileInventory)
 
-    # Apply filters
-    if path_id:
-        query = query.filter(FileInventory.path_id == path_id)
+            # Apply filters
+            if path_id:
+                query = query.filter(FileInventory.path_id == path_id)
 
-    if storage_type:
-        query = query.filter(FileInventory.storage_type == storage_type)
+            if storage_type:
+                query = query.filter(FileInventory.storage_type == storage_type)
 
-    if file_status:
-        query = query.filter(FileInventory.status == file_status)
-    else:
-        query = query.filter(FileInventory.status.in_([FileStatus.ACTIVE, FileStatus.MIGRATING]))
+            if file_status:
+                query = query.filter(FileInventory.status == file_status)
+            else:
+                query = query.filter(FileInventory.status.in_([FileStatus.ACTIVE, FileStatus.MIGRATING]))
 
-    if search:
-        search_pattern = f"%{search}%"
-        query = query.filter(FileInventory.file_path.ilike(search_pattern))
+            if search:
+                search_pattern = f"%{search}%"
+                query = query.filter(FileInventory.file_path.ilike(search_pattern))
 
-    if extension:
-        ext = extension if extension.startswith('.') else f'.{extension}'
-        query = query.filter(FileInventory.file_extension == ext.lower())
+            if extension:
+                ext = extension if extension.startswith('.') else f'.{extension}'
+                query = query.filter(FileInventory.file_extension == ext.lower())
 
-    if mime_type:
-        query = query.filter(FileInventory.mime_type.ilike(f"%{mime_type}%"))
+            if mime_type:
+                query = query.filter(FileInventory.mime_type.ilike(f"%{mime_type}%"))
 
-    if has_checksum is not None:
-        if has_checksum:
-            query = query.filter(FileInventory.checksum.isnot(None))
-        else:
-            query = query.filter(FileInventory.checksum.is_(None))
+            if has_checksum is not None:
+                if has_checksum:
+                    query = query.filter(FileInventory.checksum.isnot(None))
+                else:
+                    query = query.filter(FileInventory.checksum.is_(None))
 
-    if tag_id_list:
-        query = query.join(FileInventory.tags).filter(
-            FileTag.tag_id.in_(tag_id_list)
-        ).distinct()
+            if tag_id_list:
+                query = query.join(FileInventory.tags).filter(
+                    FileTag.tag_id.in_(tag_id_list)
+                ).distinct()
 
-    total_count = query.count()
+            # Get total count first
+            total_count = query.count()
 
-    # Apply sorting
-    valid_sort_fields = {
-        "file_path": FileInventory.file_path,
-        "file_size": FileInventory.file_size,
-        "last_seen": FileInventory.last_seen,
-        "storage_type": FileInventory.storage_type,
-        "file_mtime": FileInventory.file_mtime,
-        "file_atime": FileInventory.file_atime,
-        "file_extension": FileInventory.file_extension
-    }
+            # Apply sorting
+            valid_sort_fields = {
+                "file_path": FileInventory.file_path,
+                "file_size": FileInventory.file_size,
+                "last_seen": FileInventory.last_seen,
+                "storage_type": FileInventory.storage_type,
+                "file_mtime": FileInventory.file_mtime,
+                "file_atime": FileInventory.file_atime,
+                "file_extension": FileInventory.file_extension
+            }
 
-    sort_field = valid_sort_fields.get(sort_by, FileInventory.last_seen)
+            sort_field = valid_sort_fields.get(sort_by, FileInventory.last_seen)
 
-    if sort_order.lower() == "asc":
-        query = query.order_by(sort_field.asc())
-    else:
-        query = query.order_by(sort_field.desc())
+            if sort_order.lower() == "asc":
+                query = query.order_by(sort_field.asc())
+            else:
+                query = query.order_by(sort_field.desc())
 
-    # Calculate pagination
-    skip = (page - 1) * page_size
-    total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
-
-    files = query.offset(skip).limit(page_size).all()
-
-    # Get all monitored paths for the files in this result set
-    path_ids_set = set(f.path_id for f in files)
-    paths_map = {}
-    if path_ids_set:
-        paths = db.query(MonitoredPath).filter(MonitoredPath.id.in_(path_ids_set)).all()
-        paths_map = {p.id: p for p in paths}
-
-    # Convert to dicts and add storage location info for cold storage files
-    items = []
-    for file in files:
-        file_dict = {
-            "id": file.id,
-            "path_id": file.path_id,
-            "file_path": file.file_path,
-            "storage_type": file.storage_type.value if hasattr(file.storage_type, 'value') else file.storage_type,
-            "file_size": file.file_size,
-            "file_mtime": file.file_mtime.isoformat() if file.file_mtime else None,
-            "file_atime": file.file_atime.isoformat() if file.file_atime else None,
-            "file_ctime": file.file_ctime.isoformat() if file.file_ctime else None,
-            "checksum": file.checksum,
-            "file_extension": file.file_extension,
-            "mime_type": file.mime_type,
-            "status": file.status.value if hasattr(file.status, 'value') else file.status,
-            "last_seen": file.last_seen.isoformat() if file.last_seen else None,
-            "created_at": file.created_at.isoformat() if file.created_at else None,
-            "tags": [
-                {
-                    "id": ft.id,
-                    "file_id": ft.file_id,
-                    "tag": {
-                        "id": ft.tag.id,
-                        "name": ft.tag.name,
-                        "description": ft.tag.description,
-                        "color": ft.tag.color,
-                        "created_at": ft.tag.created_at.isoformat() if ft.tag.created_at else None
-                    },
-                    "tagged_at": ft.tagged_at.isoformat() if ft.tagged_at else None,
-                    "tagged_by": ft.tagged_by
+            # Send metadata first
+            metadata = {
+                "type": "metadata",
+                "total": total_count,
+                "filters": {
+                    "path_id": path_id,
+                    "storage_type": storage_type.value if storage_type else None,
+                    "status": file_status,
+                    "search": search,
+                    "extension": extension,
+                    "mime_type": mime_type,
+                    "has_checksum": has_checksum,
+                    "tag_ids": tag_id_list
+                },
+                "sort": {
+                    "by": sort_by,
+                    "order": sort_order
                 }
-                for ft in file.tags
-            ],
-            "storage_location": None
+            }
+            yield json.dumps(metadata) + "\n"
+
+            # Pre-fetch all monitored paths to avoid N+1 queries
+            all_paths = db.query(MonitoredPath).all()
+            paths_map = {p.id: p for p in all_paths}
+
+            # Pre-fetch all pinned file paths for efficient lookup
+            pinned_files = db.query(PinnedFile.file_path).all()
+            pinned_paths_set = {p.file_path for p in pinned_files}
+
+            # Stream files using yield_per for memory efficiency
+            for file in query.yield_per(100):
+                try:
+                    file_dict = _serialize_file(file, paths_map, pinned_paths_set)
+                    yield json.dumps({"type": "file", "data": file_dict}) + "\n"
+                    count += 1
+                except Exception as e:
+                    # Log serialization error but continue streaming
+                    logger.warning(f"Error serializing file {file.id}: {e}")
+                    continue
+
+            # Send completion message
+            duration_ms = int((time.time() - start_time) * 1000)
+            yield json.dumps({
+                "type": "complete",
+                "count": count,
+                "duration_ms": duration_ms
+            }) + "\n"
+
+        except Exception as e:
+            logger.exception("Error streaming files")
+            yield json.dumps({
+                "type": "error",
+                "message": str(e),
+                "partial_count": count
+            }) + "\n"
+
+    return StreamingResponse(
+        generate_ndjson(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"  # Disable nginx buffering
         }
-
-        if file.storage_type == StorageType.COLD:
-            monitored_path = paths_map.get(file.path_id)
-            storage_loc = _get_storage_location_for_file(file.file_path, monitored_path)
-            file_dict["storage_location"] = storage_loc
-
-        items.append(file_dict)
-
-    return {
-        "items": items,
-        "total": total_count,
-        "page": page,
-        "page_size": page_size,
-        "total_pages": total_pages,
-        "has_next": page < total_pages,
-        "has_prev": page > 1
-    }
+    )
 
 
 @router.post("/move", status_code=status.HTTP_202_ACCEPTED)
@@ -355,6 +414,135 @@ def thaw_file(
     return {
         "message": f"File thawed successfully{' and pinned' if pin else ''}",
         "inventory_id": inventory_id,
+        "pinned": pin
+    }
+
+
+@router.get("/freeze/{inventory_id}/options")
+def get_freeze_options(
+    inventory_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get available cold storage locations for freezing a file."""
+    inventory_entry = db.query(FileInventory).filter(
+        FileInventory.id == inventory_id,
+        FileInventory.storage_type == StorageType.HOT
+    ).first()
+
+    if not inventory_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File inventory entry with id {inventory_id} not found in hot storage"
+        )
+
+    monitored_path = db.query(MonitoredPath).filter(
+        MonitoredPath.id == inventory_entry.path_id
+    ).first()
+
+    if not monitored_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Monitored path not found for inventory entry {inventory_id}"
+        )
+
+    available_locations = [
+        {
+            "id": loc.id,
+            "name": loc.name,
+            "path": loc.path,
+            "available": Path(loc.path).exists()
+        }
+        for loc in monitored_path.storage_locations
+    ]
+
+    return {
+        "inventory_id": inventory_id,
+        "file_path": inventory_entry.file_path,
+        "available_locations": available_locations,
+        "can_freeze": len(available_locations) > 0
+    }
+
+
+@router.post("/freeze/{inventory_id}")
+def freeze_file(
+    inventory_id: int,
+    storage_location_id: int = Query(..., description="Target cold storage location ID"),
+    pin: bool = Query(False, description="Pin file after freezing"),
+    db: Session = Depends(get_db)
+):
+    """
+    Freeze a file (move from hot storage to cold storage).
+
+    Moves the file to the specified cold storage location and optionally
+    pins it to prevent automatic thawing.
+    """
+    # Get the file from inventory
+    inventory_entry = db.query(FileInventory).filter(
+        FileInventory.id == inventory_id,
+        FileInventory.storage_type == StorageType.HOT
+    ).first()
+
+    if not inventory_entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File inventory entry with id {inventory_id} not found in hot storage"
+        )
+
+    # Get the monitored path
+    monitored_path = db.query(MonitoredPath).filter(
+        MonitoredPath.id == inventory_entry.path_id
+    ).first()
+
+    if not monitored_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Monitored path not found for inventory entry {inventory_id}"
+        )
+
+    # Validate storage location belongs to this path
+    target_location = None
+    for loc in monitored_path.storage_locations:
+        if loc.id == storage_location_id:
+            target_location = loc
+            break
+
+    if not target_location:
+        valid_ids = [loc.id for loc in monitored_path.storage_locations]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Storage location {storage_location_id} is not associated with this path. Valid locations: {valid_ids}"
+        )
+
+    # Check storage location is accessible
+    if not Path(target_location.path).exists():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Storage location {target_location.name} is not accessible: {target_location.path}"
+        )
+
+    # Freeze the file
+    success, error, cold_path = FileFreezer.freeze_file(
+        file=inventory_entry,
+        monitored_path=monitored_path,
+        storage_location=target_location,
+        pin=pin,
+        db=db
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error or "Failed to freeze file"
+        )
+
+    return {
+        "message": f"File frozen successfully{' and pinned' if pin else ''}",
+        "inventory_id": inventory_id,
+        "cold_storage_path": cold_path,
+        "storage_location": {
+            "id": target_location.id,
+            "name": target_location.name
+        },
         "pinned": pin
     }
 
@@ -604,4 +792,93 @@ def backfill_metadata(
         "success": True,
         "message": "Metadata backfill completed",
         **result
+    }
+
+
+@router.post("/{inventory_id}/pin", status_code=status.HTTP_200_OK)
+def pin_file(inventory_id: int, db: Session = Depends(get_db)):
+    """
+    Pin a file to exclude it from automatic scan operations.
+
+    Pinned files will not be moved to cold storage or thawed automatically
+    during scheduled scans.
+    """
+    # Get the file from inventory
+    file = db.query(FileInventory).filter(FileInventory.id == inventory_id).first()
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File with inventory id {inventory_id} not found"
+        )
+
+    # Check if already pinned
+    existing_pin = db.query(PinnedFile).filter(
+        PinnedFile.file_path == file.file_path
+    ).first()
+
+    if existing_pin:
+        return {
+            "message": "File is already pinned",
+            "inventory_id": inventory_id,
+            "file_path": file.file_path,
+            "is_pinned": True
+        }
+
+    # Create new pin
+    pinned = PinnedFile(
+        path_id=file.path_id,
+        file_path=file.file_path
+    )
+    db.add(pinned)
+    db.commit()
+
+    logger.info(f"Pinned file: {file.file_path}")
+
+    return {
+        "message": "File pinned successfully",
+        "inventory_id": inventory_id,
+        "file_path": file.file_path,
+        "is_pinned": True
+    }
+
+
+@router.delete("/{inventory_id}/pin", status_code=status.HTTP_200_OK)
+def unpin_file(inventory_id: int, db: Session = Depends(get_db)):
+    """
+    Remove pin from a file, allowing automatic scan operations.
+
+    The file will be subject to normal scan criteria again and may be
+    moved to cold storage or thawed automatically.
+    """
+    # Get the file from inventory
+    file = db.query(FileInventory).filter(FileInventory.id == inventory_id).first()
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File with inventory id {inventory_id} not found"
+        )
+
+    # Find and delete the pin
+    pin = db.query(PinnedFile).filter(
+        PinnedFile.file_path == file.file_path
+    ).first()
+
+    if not pin:
+        return {
+            "message": "File is not pinned",
+            "inventory_id": inventory_id,
+            "file_path": file.file_path,
+            "is_pinned": False
+        }
+
+    db.delete(pin)
+    db.commit()
+
+    logger.info(f"Unpinned file: {file.file_path}")
+
+    return {
+        "message": "File unpinned successfully",
+        "inventory_id": inventory_id,
+        "file_path": file.file_path,
+        "is_pinned": False
     }

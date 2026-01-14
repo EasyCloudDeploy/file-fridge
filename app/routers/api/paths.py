@@ -1,12 +1,14 @@
 """API routes for path management."""
 import logging
+import os
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session, selectinload
 from typing import List
 from pathlib import Path
 from app.database import get_db
-from app.models import MonitoredPath, CriterionType, ColdStorageLocation
-from app.schemas import MonitoredPathCreate, MonitoredPathUpdate, MonitoredPath as MonitoredPathSchema
+from app.models import MonitoredPath, CriterionType, ColdStorageLocation, FileInventory
+from app import schemas
 from app.services.scheduler import scheduler_service
 from app.services.scan_progress import scan_progress_manager
 from app.services.path_migration import PathMigrationService
@@ -59,15 +61,38 @@ def validate_path_configuration(path: MonitoredPath, db: Session) -> None:
         db.commit()
 
 
-@router.get("", response_model=List[MonitoredPathSchema])
+@router.get("", response_model=List[schemas.MonitoredPathSummary])
 def list_paths(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """List all monitored paths."""
-    paths = db.query(MonitoredPath).offset(skip).limit(limit).all()
-    return paths
+    """List all monitored paths with a summary of their contents."""
+    file_count_subquery = (
+        select(func.count(FileInventory.id))
+        .where(FileInventory.path_id == MonitoredPath.id)
+        .correlate(MonitoredPath)
+        .scalar_subquery()
+    )
+
+    paths_with_counts = (
+        db.query(MonitoredPath, file_count_subquery.label("file_count"))
+        .options(selectinload(MonitoredPath.storage_locations))
+        .order_by(MonitoredPath.name)
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+
+    result = []
+    for path, file_count in paths_with_counts:
+        summary = schemas.MonitoredPathSummary(
+            **{k: v for k, v in path.__dict__.items() if not k.startswith('_')},
+            file_count=file_count,
+            is_path_present=os.path.exists(path.source_path),
+        )
+        result.append(summary)
+    return result
 
 
-@router.post("", response_model=MonitoredPathSchema, status_code=status.HTTP_201_CREATED)
-def create_path(path: MonitoredPathCreate, db: Session = Depends(get_db)):
+@router.post("", response_model=schemas.MonitoredPath, status_code=status.HTTP_201_CREATED)
+def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)):
     """Create a new monitored path."""
     # Validate source path exists
     source = Path(path.source_path)
@@ -131,22 +156,31 @@ def create_path(path: MonitoredPathCreate, db: Session = Depends(get_db)):
     return db_path
 
 
-@router.get("/{path_id}", response_model=MonitoredPathSchema)
+@router.get("/{path_id}", response_model=schemas.MonitoredPathSummary)
 def get_path(path_id: int, db: Session = Depends(get_db)):
-    """Get a specific monitored path."""
-    path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
-    if not path:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Path with id {path_id} not found"
-        )
-    return path
+    """Get a single monitored path with a summary of its contents."""
+    db_path = (
+        db.query(MonitoredPath)
+        .options(selectinload(MonitoredPath.storage_locations))
+        .filter(MonitoredPath.id == path_id)
+        .first()
+    )
+    if db_path is None:
+        raise HTTPException(status_code=404, detail="Path not found")
+
+    file_count = db.query(func.count(FileInventory.id)).filter(FileInventory.path_id == path_id).scalar()
+
+    return schemas.MonitoredPathSummary(
+        **{k: v for k, v in db_path.__dict__.items() if not k.startswith('_')},
+        file_count=file_count,
+        is_path_present=os.path.exists(db_path.source_path),
+    )
 
 
-@router.put("/{path_id}", response_model=MonitoredPathSchema)
+@router.put("/{path_id}", response_model=schemas.MonitoredPath)
 def update_path(
     path_id: int,
-    path_update: MonitoredPathUpdate,
+    path_update: schemas.MonitoredPathUpdate,
     confirm_cold_storage_change: bool = Query(False, description="Confirm cold storage path change"),
     migration_action: str = Query(None, description="Migration action: 'move' or 'abandon'"),
     db: Session = Depends(get_db)
