@@ -224,7 +224,7 @@ function appendFileRow(tableBody, file) {
         // Hot storage files - show freeze button
         actionButton = `
             <button type="button" class="btn btn-sm btn-info" onclick="showFreezeModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Send to cold storage">
-                <i class="bi bi-snow"></i> Freeze
+                <i class="bi bi-snow"></i> Fridge
             </button>`;
     }
 
