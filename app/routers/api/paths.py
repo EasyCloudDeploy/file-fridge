@@ -282,6 +282,13 @@ def trigger_scan(path_id: int, db: Session = Depends(get_db)):
             detail=f"Path with id {path_id} not found"
         )
 
+    # Check if a scan is already running
+    if scan_progress_manager.is_scan_running(path_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"A scan is already running for path {path_id}"
+        )
+
     # Trigger scan asynchronously
     scheduler_service.trigger_scan(path_id)
 

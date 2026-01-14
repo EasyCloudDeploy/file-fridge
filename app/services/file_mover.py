@@ -36,6 +36,16 @@ def move_file(
         (success: bool, error_message: Optional[str])
     """
     try:
+        # Pre-check: verify source exists (important for network mounts with stale entries)
+        if not source.exists() and not source.is_symlink():
+            # File disappeared - common on network mounts when other apps modify files
+            logger.debug(f"Source file no longer exists: {source}")
+            return False, f"Source file no longer exists: {source}"
+
+        # Ensure destination directory exists BEFORE checking disk space
+        # (disk_usage fails on non-existent paths)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+
         # Check available space for operations that copy data
         if operation_type in [OperationType.MOVE, OperationType.COPY] or (operation_type == OperationType.SYMLINK and not source.is_symlink()):
             try:
@@ -44,11 +54,12 @@ def move_file(
                 if file_size + (1024 * 1024) > free_space:
                     return False, f"Not enough space for {source.name}. Required: {file_size}, Available: {free_space}"
             except FileNotFoundError:
-                return False, f"Source file not found: {source}"
+                # Source file doesn't exist
+                if not source.exists():
+                    return False, f"Source file disappeared: {source}"
+                return False, f"Cannot access source file: {source}"
             except Exception as e:
                 logger.warning(f"Could not check disk space: {e}")
-
-        destination.parent.mkdir(parents=True, exist_ok=True)
 
         if operation_type == OperationType.MOVE:
             return _move(source, destination, progress_callback)
