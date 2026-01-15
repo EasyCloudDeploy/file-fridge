@@ -11,6 +11,12 @@ from sqlalchemy.orm import Session
 from fastapi import BackgroundTasks
 
 from app.models import Notifier, Notification, NotificationDispatch, NotifierType, NotificationLevel, DispatchStatus
+from app.services.notification_events import (
+    NotificationEvent,
+    SyncSuccessData,
+    SyncErrorData,
+    LowDiskSpaceData
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +25,53 @@ class NotificationService:
     """Service for managing and dispatching notifications."""
 
     WEBHOOK_TIMEOUT = 30
+
+    async def dispatch_event(
+        self,
+        db: Session,
+        event_type: NotificationEvent,
+        data: Any,
+        background_tasks: Optional[BackgroundTasks] = None,
+    ):
+        """
+        Dispatch a structured notification event.
+
+        This is the preferred method for sending notifications.
+        """
+        level, message, metadata = self._format_event(event_type, data)
+
+        await self.create_and_dispatch_notification(
+            db=db,
+            level=level,
+            message=message,
+            metadata=metadata,
+            background_tasks=background_tasks,
+        )
+
+    def _format_event(self, event_type: NotificationEvent, data: Any) -> tuple[str, str, Dict[str, Any]]:
+        """Format a notification event into a message and metadata."""
+        if event_type == NotificationEvent.SYNC_SUCCESS:
+            data: SyncSuccessData
+            level = "INFO"
+            message = f"Successfully completed sync for path: {data.path_name}"
+            metadata = data.dict()
+        elif event_type == NotificationEvent.SYNC_ERROR:
+            data: SyncErrorData
+            level = "ERROR"
+            message = f"Error during sync for path: {data.path_name}"
+            metadata = data.dict()
+        elif event_type == NotificationEvent.LOW_DISK_SPACE:
+            data: LowDiskSpaceData
+            level = "WARNING"
+            message = f"Low disk space detected for storage location: {data.storage_name}"
+            metadata = data.dict()
+        else:
+            level = "ERROR"
+            message = f"Unknown notification event type: {event_type}"
+            metadata = {"event_type": event_type, "data": str(data)}
+
+        return level, message, metadata
+
 
     async def create_and_dispatch_notification(
         self,
