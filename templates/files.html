@@ -87,7 +87,7 @@
                             </div>
                         </div>
                         <div id="files-content" style="display: none;">
-                            <div class="table-responsive">
+                            <div class="virtual-table-container" id="virtualTableContainer">
                                 <table class="table table-hover" id="filesTable">
                                     <thead>
                                         <tr>
@@ -127,7 +127,7 @@
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        <!-- Files will be loaded here by JavaScript -->
+                                        <!-- Virtual rows will be rendered here by JavaScript -->
                                     </tbody>
                                 </table>
                             </div>
@@ -301,5 +301,6 @@
 {% endblock %}
 
 {% block extra_scripts %}
+    <script src="/static/js/virtual-table.js"></script>
     <script src="/static/js/files.js"></script>
 {% endblock %}

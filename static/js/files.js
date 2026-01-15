@@ -1,7 +1,7 @@
-// Files browser JavaScript - client-side rendering with NDJSON streaming
+// Files browser JavaScript - client-side rendering with virtual scrolling and pagination
 const API_BASE_URL = '/api/v1';
 
-// Filter state (no pagination - streaming returns all files)
+// Filter state
 let currentSearch = '';
 let currentPathId = null;
 let currentStorageType = null;
@@ -11,8 +11,17 @@ let currentSortBy = 'last_seen';
 let currentSortOrder = 'desc';
 let totalItems = 0;
 
+// Pagination state
+let nextCursor = null;
+let hasMoreData = false;
+let isLoadingMore = false;
+let pageSize = 200; // Load 200 files per page
+
 // Streaming state
 let currentAbortController = null;
+
+// Virtual table instance
+let virtualTable = null;
 
 // Utility functions
 function escapeHtml(text) {
@@ -66,118 +75,15 @@ function updateSortIndicators() {
     }
 }
 
-function renderFilesTable(files) {
-    const tableBody = document.querySelector('#filesTable tbody');
-    if (!tableBody) return;
+/**
+ * Create a table row element for a file (used by VirtualTable)
+ */
+function createFileRow(file, index) {
+    const row = document.createElement('tr');
+    row.className = 'virtual-table-row';
+    row.dataset.fileId = file.id;
+    row.dataset.filePath = file.file_path;
 
-    tableBody.innerHTML = '';
-
-    if (!files || files.length === 0) {
-        tableBody.innerHTML = '<tr><td colspan="11" class="text-center text-muted">No files found</td></tr>';
-        return;
-    }
-
-    files.forEach(file => {
-        const row = tableBody.insertRow();
-        const storageBadge = file.storage_type === 'hot'
-            ? '<span class="badge bg-success">Hot</span>'
-            : '<span class="badge bg-info">Cold</span>';
-
-        // Storage location display for cold storage files
-        let storageLocationHtml = '<span class="text-muted">-</span>';
-        if (file.storage_type === 'cold' && file.storage_location) {
-            if (file.storage_location.available === false) {
-                // Storage is unavailable (ejected/disconnected)
-                storageLocationHtml = `
-                    <span class="badge bg-danger" title="Storage unavailable - drive may be ejected">
-                        <i class="bi bi-exclamation-triangle"></i> ${escapeHtml(file.storage_location.name)}
-                    </span>`;
-            } else {
-                storageLocationHtml = `<span class="badge bg-secondary">${escapeHtml(file.storage_location.name)}</span>`;
-            }
-        }
-
-        // Check if file is migrating
-        const isMigrating = file.status === 'migrating';
-        // Check if storage is unavailable
-        const storageUnavailable = file.storage_type === 'cold' &&
-            file.storage_location && file.storage_location.available === false;
-
-        let actionButton;
-        if (isMigrating) {
-            // Show migrating indicator instead of action buttons
-            actionButton = `
-                <span class="text-warning">
-                    <span class="spinner-border spinner-border-sm" role="status"></span>
-                    Migrating...
-                </span>`;
-        } else if (storageUnavailable) {
-            // Storage is ejected/unavailable - disable actions
-            actionButton = `
-                <span class="text-danger" title="Storage unavailable - reconnect drive to perform actions">
-                    <i class="bi bi-hdd-network"></i> Offline
-                </span>`;
-        } else if (file.storage_type === 'cold') {
-            actionButton = `
-                <div class="btn-group btn-group-sm" role="group">
-                    <button type="button" class="btn btn-warning" onclick="showThawModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Move file back to hot storage">
-                        <i class="bi bi-fire"></i> Thaw
-                    </button>
-                    <button type="button" class="btn btn-outline-primary" onclick="showRelocateModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Move to another cold storage location">
-                        <i class="bi bi-arrow-right-circle"></i> Relocate
-                    </button>
-                </div>`;
-        } else {
-            actionButton = '<span class="text-muted">-</span>';
-        }
-
-        // Format criteria times
-        const mtime = file.file_mtime ? formatDate(file.file_mtime) : '<span class="text-muted">N/A</span>';
-        const atime = file.file_atime ? formatDate(file.file_atime) : '<span class="text-muted">N/A</span>';
-        const ctime = file.file_ctime ? formatDate(file.file_ctime) : '<span class="text-muted">N/A</span>';
-
-        // Render tags
-        let tagsHtml = '';
-        if (file.tags && file.tags.length > 0) {
-            tagsHtml = file.tags.map(ft => {
-                const color = ft.tag && ft.tag.color ? ft.tag.color : '#6c757d';
-                const name = ft.tag && ft.tag.name ? ft.tag.name : 'Unknown';
-                return `<span class="badge me-1" style="background-color: ${color};">${escapeHtml(name)}</span>`;
-            }).join('');
-        }
-        tagsHtml += `<button type="button" class="btn btn-sm btn-outline-primary" onclick="showManageTagsModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Manage tags">
-            <i class="bi bi-tags"></i>
-        </button>`;
-
-        // Status badge with appropriate color
-        let statusBadgeClass = 'bg-secondary';
-        if (file.status === 'active') {
-            statusBadgeClass = 'bg-success';
-        } else if (file.status === 'migrating') {
-            statusBadgeClass = 'bg-warning text-dark';
-        } else if (file.status === 'missing' || file.status === 'deleted') {
-            statusBadgeClass = 'bg-danger';
-        }
-
-        row.innerHTML = `
-            <td class="file-path-cell"><code>${escapeHtml(file.file_path)}</code></td>
-            <td>${storageBadge}</td>
-            <td class="d-none d-lg-table-cell">${storageLocationHtml}</td>
-            <td class="d-none d-md-table-cell">${formatBytes(file.file_size)}</td>
-            <td class="d-none d-xl-table-cell"><small>${mtime}</small></td>
-            <td class="d-none d-xl-table-cell"><small>${atime}</small></td>
-            <td class="d-none d-xl-table-cell"><small>${ctime}</small></td>
-            <td><span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span></td>
-            <td class="d-none d-lg-table-cell"><small>${formatDate(file.last_seen)}</small></td>
-            <td class="d-none d-md-table-cell">${tagsHtml}</td>
-            <td>${actionButton}</td>
-        `;
-    });
-}
-
-// Append a single file row to the table (used for streaming)
-function appendFileRow(tableBody, file) {
-    const row = tableBody.insertRow();
     const storageBadge = file.storage_type === 'hot'
         ? '<span class="badge bg-success">Hot</span>'
         : '<span class="badge bg-info">Cold</span>';
@@ -214,17 +120,17 @@ function appendFileRow(tableBody, file) {
     } else if (file.storage_type === 'cold') {
         actionButton = `
             <div class="btn-group btn-group-sm" role="group">
-                <button type="button" class="btn btn-warning" onclick="showThawModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Move file back to hot storage">
+                <button type="button" class="btn btn-warning" data-action="thaw" title="Move file back to hot storage">
                     <i class="bi bi-fire"></i><span class="d-none d-lg-inline"> Thaw</span>
                 </button>
-                <button type="button" class="btn btn-outline-primary" onclick="showRelocateModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Move to another cold storage location">
+                <button type="button" class="btn btn-outline-primary" data-action="relocate" title="Move to another cold storage location">
                     <i class="bi bi-arrow-right-circle"></i><span class="d-none d-xl-inline"> Relocate</span>
                 </button>
             </div>`;
     } else {
         // Hot storage files - show freeze button
         actionButton = `
-            <button type="button" class="btn btn-sm btn-info" onclick="showFreezeModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Send to cold storage">
+            <button type="button" class="btn btn-sm btn-info" data-action="freeze" title="Send to cold storage">
                 <i class="bi bi-snow"></i><span class="d-none d-lg-inline"> Fridge</span>
             </button>`;
     }
@@ -241,7 +147,7 @@ function appendFileRow(tableBody, file) {
             return `<span class="badge me-1" style="background-color: ${color};">${escapeHtml(name)}</span>`;
         }).join('');
     }
-    tagsHtml += `<button type="button" class="btn btn-sm btn-outline-primary" onclick="showManageTagsModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Manage tags">
+    tagsHtml += `<button type="button" class="btn btn-sm btn-outline-primary" data-action="manageTags" title="Manage tags">
         <i class="bi bi-tags"></i>
     </button>`;
 
@@ -272,11 +178,72 @@ function appendFileRow(tableBody, file) {
         <td class="d-none d-md-table-cell">${tagsHtml}</td>
         <td>${actionButton}</td>
     `;
+
+    return row;
+}
+
+/**
+ * Initialize virtual table
+ */
+function initVirtualTable() {
+    const container = document.getElementById('virtualTableContainer');
+    const tbody = document.querySelector('#filesTable tbody');
+
+    if (!container || !tbody) {
+        console.error('Virtual table elements not found');
+        return;
+    }
+
+    virtualTable = new VirtualTable({
+        container: container,
+        tbody: tbody,
+        rowHeight: 48,
+        bufferSize: 10,
+        renderRow: createFileRow,
+        onNearEnd: loadMoreFiles,
+        nearEndThreshold: 500
+    });
+
+    // Setup event delegation for action buttons
+    tbody.addEventListener('click', handleRowAction);
+}
+
+/**
+ * Handle action button clicks via event delegation
+ */
+function handleRowAction(event) {
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+
+    const row = button.closest('tr');
+    if (!row) return;
+
+    const fileId = parseInt(row.dataset.fileId);
+    const filePath = row.dataset.filePath;
+    const action = button.dataset.action;
+
+    switch (action) {
+        case 'thaw':
+            showThawModal(fileId, filePath);
+            break;
+        case 'freeze':
+            showFreezeModal(fileId, filePath);
+            break;
+        case 'relocate':
+            showRelocateModal(fileId, filePath);
+            break;
+        case 'manageTags':
+            showManageTagsModal(fileId, filePath);
+            break;
+    }
 }
 
 // Handle metadata message from stream
 function handleStreamMetadata(metadata) {
     totalItems = metadata.total;
+    hasMoreData = metadata.has_more;
+    nextCursor = metadata.next_cursor;
+    pageSize = metadata.page_size || 200;
 
     const loadingTextEl = document.getElementById('loading-text');
     const progressContainer = document.getElementById('stream-progress-container');
@@ -308,7 +275,9 @@ function updateStreamProgress(received, total) {
 // Handle stream completion
 function handleStreamComplete(message) {
     console.log(`Stream complete: ${message.count} files in ${message.duration_ms}ms`);
-    renderStreamSummary(message.count, message.duration_ms);
+    hasMoreData = message.has_more;
+    nextCursor = message.next_cursor;
+    renderStreamSummary();
 }
 
 // Handle stream error
@@ -318,20 +287,22 @@ function handleStreamError(message) {
 }
 
 // Render summary after streaming completes
-function renderStreamSummary(count, durationMs) {
+function renderStreamSummary() {
     const paginationEl = document.getElementById('pagination-controls');
     if (!paginationEl) return;
 
-    const seconds = (durationMs / 1000).toFixed(2);
+    const loadedCount = virtualTable ? virtualTable.getCount() : 0;
+    const moreText = hasMoreData ? ' (scroll for more)' : '';
+
     paginationEl.innerHTML = `
         <p class="text-center text-muted">
-            Showing ${count.toLocaleString()} files (loaded in ${seconds}s)
+            Showing ${loadedCount.toLocaleString()} of ${totalItems.toLocaleString()} files${moreText}
         </p>
     `;
 }
 
 // Process NDJSON stream
-async function processNDJSONStream(body, tableBody) {
+async function processNDJSONStream(body) {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -361,7 +332,9 @@ async function processNDJSONStream(body, tableBody) {
                             handleStreamMetadata(message);
                             break;
                         case 'file':
-                            appendFileRow(tableBody, message.data);
+                            if (virtualTable) {
+                                virtualTable.appendData(message.data);
+                            }
                             receivedCount++;
                             updateStreamProgress(receivedCount, totalItems);
                             break;
@@ -396,12 +369,83 @@ async function processNDJSONStream(body, tableBody) {
     }
 }
 
+/**
+ * Load more files (infinite scroll)
+ */
+async function loadMoreFiles() {
+    if (isLoadingMore || !hasMoreData || !nextCursor) {
+        return;
+    }
+
+    isLoadingMore = true;
+
+    // Show loading indicator
+    const paginationEl = document.getElementById('pagination-controls');
+    if (paginationEl) {
+        paginationEl.innerHTML = `
+            <p class="text-center text-muted">
+                <span class="spinner-border spinner-border-sm" role="status"></span>
+                Loading more files...
+            </p>
+        `;
+    }
+
+    try {
+        const params = buildQueryParams();
+        params.append('cursor', nextCursor);
+
+        const url = `${API_BASE_URL}/files?${params.toString()}`;
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        await processNDJSONStream(response.body);
+        renderStreamSummary();
+
+    } catch (error) {
+        console.error('Error loading more files:', error);
+        showNotification(`Failed to load more files: ${error.message}`, 'error');
+    } finally {
+        isLoadingMore = false;
+    }
+}
+
+/**
+ * Build query parameters for API request
+ */
+function buildQueryParams() {
+    const params = new URLSearchParams({
+        sort_by: currentSortBy,
+        sort_order: currentSortOrder,
+        page_size: pageSize.toString()
+    });
+
+    if (currentPathId) {
+        params.append('path_id', currentPathId);
+    }
+    if (currentStorageType) {
+        params.append('storage_type', currentStorageType);
+    }
+    if (currentFileStatus) {
+        params.append('status', currentFileStatus);
+    }
+    if (currentSearch) {
+        params.append('search', currentSearch);
+    }
+    if (currentTagIds.length > 0) {
+        params.append('tag_ids', currentTagIds.join(','));
+    }
+
+    return params;
+}
+
 // Load and render files list via streaming
 async function loadFilesList() {
     const loadingEl = document.getElementById('files-loading');
     const contentEl = document.getElementById('files-content');
     const emptyEl = document.getElementById('no-files-message');
-    const tableBody = document.querySelector('#filesTable tbody');
     const paginationEl = document.getElementById('pagination-controls');
 
     // Abort any in-progress stream
@@ -410,12 +454,21 @@ async function loadFilesList() {
     }
     currentAbortController = new AbortController();
 
+    // Reset pagination state
+    nextCursor = null;
+    hasMoreData = false;
+    isLoadingMore = false;
+
     // Show loading state
     if (loadingEl) loadingEl.style.display = 'block';
     if (contentEl) contentEl.style.display = 'none';
     if (emptyEl) emptyEl.style.display = 'none';
-    if (tableBody) tableBody.innerHTML = '';
     if (paginationEl) paginationEl.innerHTML = '';
+
+    // Reset virtual table
+    if (virtualTable) {
+        virtualTable.reset();
+    }
 
     // Reset progress
     const loadingTextEl = document.getElementById('loading-text');
@@ -429,28 +482,7 @@ async function loadFilesList() {
     totalItems = 0;
 
     try {
-        // Build URL with all parameters (no pagination)
-        const params = new URLSearchParams({
-            sort_by: currentSortBy,
-            sort_order: currentSortOrder
-        });
-
-        if (currentPathId) {
-            params.append('path_id', currentPathId);
-        }
-        if (currentStorageType) {
-            params.append('storage_type', currentStorageType);
-        }
-        if (currentFileStatus) { // New line
-            params.append('status', currentFileStatus); // New line
-        }
-        if (currentSearch) {
-            params.append('search', currentSearch);
-        }
-        if (currentTagIds.length > 0) {
-            params.append('tag_ids', currentTagIds.join(','));
-        }
-
+        const params = buildQueryParams();
         const url = `${API_BASE_URL}/files?${params.toString()}`;
 
         const response = await fetch(url, {
@@ -462,7 +494,7 @@ async function loadFilesList() {
         }
 
         // Process NDJSON stream
-        await processNDJSONStream(response.body, tableBody);
+        await processNDJSONStream(response.body);
 
         // Show content or empty message
         if (totalItems === 0) {
@@ -554,12 +586,12 @@ async function loadPathsForFilter() {
 function updateFilters() {
     const pathSelect = document.getElementById('path_id_filter');
     const storageSelect = document.getElementById('storage_filter');
-    const statusSelect = document.getElementById('status_filter'); // New line
+    const statusSelect = document.getElementById('status_filter');
     const tagSelect = document.getElementById('tag_filter');
 
     currentPathId = pathSelect && pathSelect.value ? parseInt(pathSelect.value) : null;
     currentStorageType = storageSelect && storageSelect.value ? storageSelect.value : null;
-    currentFileStatus = statusSelect && statusSelect.value ? statusSelect.value : null; // New line
+    currentFileStatus = statusSelect && statusSelect.value ? statusSelect.value : null;
 
     // Get selected tag IDs from multi-select
     if (tagSelect) {
@@ -1268,13 +1300,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const urlParams = new URLSearchParams(window.location.search);
     currentPathId = urlParams.get('path_id') ? parseInt(urlParams.get('path_id')) : null;
     currentStorageType = urlParams.get('storage_type') || null;
-    currentFileStatus = urlParams.get('status') || null; // Read status from URL
+    currentFileStatus = urlParams.get('status') || null;
 
     // Set initial value for status filter
     const statusSelect = document.getElementById('status_filter');
     if (statusSelect && currentFileStatus) {
         statusSelect.value = currentFileStatus;
     }
+
+    // Initialize virtual table
+    initVirtualTable();
 
     loadFilesList();
     loadPathsForFilter();
@@ -1366,5 +1401,7 @@ window.addEventListener('beforeunload', () => {
     if (currentAbortController) {
         currentAbortController.abort();
     }
+    if (virtualTable) {
+        virtualTable.destroy();
+    }
 });
-

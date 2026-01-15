@@ -2,11 +2,13 @@
 import json
 import time
 import logging
+import base64
 from typing import Optional, Generator
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import and_, or_
 from pathlib import Path
 
 from app.database import get_db
@@ -94,6 +96,8 @@ def list_files(
     tag_ids: Optional[str] = Query(None, description="Filter by tag IDs (comma-separated)"),
     sort_by: str = Query("last_seen", description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)"),
     sort_order: str = Query("desc", description="Sort order (asc/desc)"),
+    page_size: int = Query(100, ge=10, le=500, description="Number of items per page (for pagination)"),
+    cursor: Optional[str] = Query(None, description="Pagination cursor (base64 encoded)"),
     db: Session = Depends(get_db)
 ):
     """
@@ -171,20 +175,117 @@ def list_files(
                 "storage_type": FileInventory.storage_type,
                 "file_mtime": FileInventory.file_mtime,
                 "file_atime": FileInventory.file_atime,
-                "file_extension": FileInventory.file_extension
+                "file_extension": FileInventory.file_extension,
+                "status": FileInventory.status
             }
 
             sort_field = valid_sort_fields.get(sort_by, FileInventory.last_seen)
+            is_descending = sort_order.lower() != "asc"
 
-            if sort_order.lower() == "asc":
-                query = query.order_by(sort_field.asc())
+            # Decode cursor if provided for keyset pagination
+            cursor_data = None
+            if cursor:
+                try:
+                    cursor_json = base64.b64decode(cursor).decode('utf-8')
+                    cursor_data = json.loads(cursor_json)
+                except (ValueError, json.JSONDecodeError) as e:
+                    yield json.dumps({
+                        "type": "error",
+                        "message": f"Invalid cursor format: {e}",
+                        "partial_count": 0
+                    }) + "\n"
+                    return
+
+            # Apply cursor-based pagination (keyset pagination)
+            if cursor_data:
+                last_id = cursor_data.get('id')
+                last_sort_value = cursor_data.get('sort_value')
+
+                if last_id is not None and last_sort_value is not None:
+                    # For nullable fields, handle None values
+                    if is_descending:
+                        # DESC: get rows where (sort_value < last) OR (sort_value == last AND id < last_id)
+                        if last_sort_value is None:
+                            # If last value was None, only filter by id
+                            query = query.filter(
+                                and_(sort_field.is_(None), FileInventory.id < last_id)
+                            )
+                        else:
+                            query = query.filter(
+                                or_(
+                                    sort_field < last_sort_value,
+                                    sort_field.is_(None),
+                                    and_(sort_field == last_sort_value, FileInventory.id < last_id)
+                                )
+                            )
+                    else:
+                        # ASC: get rows where (sort_value > last) OR (sort_value == last AND id > last_id)
+                        if last_sort_value is None:
+                            # If last value was None, get non-null values or higher ids with null
+                            query = query.filter(
+                                or_(
+                                    sort_field.isnot(None),
+                                    and_(sort_field.is_(None), FileInventory.id > last_id)
+                                )
+                            )
+                        else:
+                            query = query.filter(
+                                or_(
+                                    sort_field > last_sort_value,
+                                    and_(sort_field == last_sort_value, FileInventory.id > last_id)
+                                )
+                            )
+
+            # Apply sorting with secondary sort by id for stable pagination
+            if is_descending:
+                query = query.order_by(sort_field.desc(), FileInventory.id.desc())
             else:
-                query = query.order_by(sort_field.desc())
+                query = query.order_by(sort_field.asc(), FileInventory.id.asc())
 
-            # Send metadata first
+            # Limit to page_size + 1 to detect if there are more results
+            query = query.limit(page_size + 1)
+
+            # Pre-fetch all monitored paths to avoid N+1 queries
+            all_paths = db.query(MonitoredPath).all()
+            paths_map = {p.id: p for p in all_paths}
+
+            # Pre-fetch all pinned file paths for efficient lookup
+            pinned_files = db.query(PinnedFile.file_path).all()
+            pinned_paths_set = {p.file_path for p in pinned_files}
+
+            # Collect results to check for has_more and generate cursor
+            files_list = list(query.all())
+            has_more = len(files_list) > page_size
+            if has_more:
+                files_list = files_list[:page_size]  # Remove the extra item
+
+            # Generate next cursor if there are more results
+            next_cursor = None
+            if has_more and files_list:
+                last_file = files_list[-1]
+                # Get the sort value for cursor
+                sort_value_raw = getattr(last_file, sort_by, None) if sort_by in valid_sort_fields else last_file.last_seen
+                # Convert datetime/enum to string for JSON serialization
+                if hasattr(sort_value_raw, 'isoformat'):
+                    sort_value = sort_value_raw.isoformat()
+                elif hasattr(sort_value_raw, 'value'):
+                    sort_value = sort_value_raw.value
+                else:
+                    sort_value = sort_value_raw
+
+                cursor_obj = {
+                    'id': last_file.id,
+                    'sort_value': sort_value
+                }
+                next_cursor = base64.b64encode(json.dumps(cursor_obj).encode('utf-8')).decode('utf-8')
+
+            # Send metadata first (with pagination info)
             metadata = {
                 "type": "metadata",
                 "total": total_count,
+                "page_size": page_size,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
                 "filters": {
                     "path_id": path_id,
                     "storage_type": storage_type.value if storage_type else None,
@@ -202,16 +303,8 @@ def list_files(
             }
             yield json.dumps(metadata) + "\n"
 
-            # Pre-fetch all monitored paths to avoid N+1 queries
-            all_paths = db.query(MonitoredPath).all()
-            paths_map = {p.id: p for p in all_paths}
-
-            # Pre-fetch all pinned file paths for efficient lookup
-            pinned_files = db.query(PinnedFile.file_path).all()
-            pinned_paths_set = {p.file_path for p in pinned_files}
-
-            # Stream files using yield_per for memory efficiency
-            for file in query.yield_per(100):
+            # Stream files from the collected list
+            for file in files_list:
                 try:
                     file_dict = _serialize_file(file, paths_map, pinned_paths_set)
                     yield json.dumps({"type": "file", "data": file_dict}) + "\n"
@@ -226,7 +319,9 @@ def list_files(
             yield json.dumps({
                 "type": "complete",
                 "count": count,
-                "duration_ms": duration_ms
+                "duration_ms": duration_ms,
+                "has_more": has_more,
+                "next_cursor": next_cursor
             }) + "\n"
 
         except Exception as e:
