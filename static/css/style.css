@@ -920,6 +920,183 @@ code {
 }
 
 /* ========================================
+   Virtual Table (High-Performance Scrolling)
+   ======================================== */
+.virtual-table-container {
+    height: calc(100vh - 380px);
+    min-height: 400px;
+    max-height: 800px;
+    overflow-y: auto;
+    overflow-x: auto;
+    position: relative;
+    border: 1px solid var(--gray-200);
+    border-radius: var(--radius-md);
+    background: white;
+}
+
+/* Ensure the table fills the container */
+.virtual-table-container .table {
+    margin-bottom: 0;
+    table-layout: fixed;
+    width: 100%;
+}
+
+/* Keep header fixed at top */
+.virtual-table-container thead {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--gray-100);
+}
+
+.virtual-table-container thead th {
+    background: var(--gray-100);
+}
+
+/* Virtual table tbody positioning */
+.virtual-table-container tbody {
+    display: block;
+    position: relative;
+}
+
+/* Virtual spacer for scroll height */
+.virtual-table-spacer {
+    pointer-events: none;
+}
+
+/* Virtual row container */
+.virtual-table-rows {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+}
+
+/* Individual virtual rows */
+.virtual-table-row {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 48px;
+    border-bottom: 1px solid var(--gray-200);
+    background: white;
+    transition: background-color var(--transition-fast);
+}
+
+.virtual-table-row:hover {
+    background-color: var(--gray-50);
+}
+
+/* Virtual table cells - flex layout */
+.virtual-table-row td {
+    flex-shrink: 0;
+    padding: var(--spacing-sm) var(--spacing-md);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    height: 100%;
+    border: none;
+}
+
+/* File path column - takes more space */
+.virtual-table-row td:first-child {
+    flex: 2;
+    min-width: 200px;
+}
+
+/* Standard columns */
+.virtual-table-row td:not(:first-child) {
+    flex: 1;
+    min-width: 80px;
+}
+
+/* Actions column - fixed width */
+.virtual-table-row td:last-child {
+    flex: 0 0 180px;
+    justify-content: flex-end;
+}
+
+/* Tags column needs more space */
+.virtual-table-row td:nth-child(10) {
+    flex: 1.5;
+    min-width: 120px;
+}
+
+/* Responsive adjustments for virtual table */
+@media (max-width: 1200px) {
+    .virtual-table-container {
+        height: calc(100vh - 350px);
+    }
+
+    .virtual-table-row td:last-child {
+        flex: 0 0 140px;
+    }
+}
+
+@media (max-width: 992px) {
+    .virtual-table-container {
+        height: calc(100vh - 320px);
+        min-height: 350px;
+    }
+
+    .virtual-table-row {
+        height: 52px;
+    }
+
+    .virtual-table-row td:first-child {
+        flex: 1.5;
+        min-width: 150px;
+    }
+}
+
+@media (max-width: 768px) {
+    .virtual-table-container {
+        height: calc(100vh - 300px);
+        min-height: 300px;
+        max-height: 600px;
+    }
+
+    .virtual-table-row {
+        height: 56px;
+    }
+
+    .virtual-table-row td {
+        padding: var(--spacing-xs) var(--spacing-sm);
+        font-size: 0.875rem;
+    }
+
+    .virtual-table-row td:first-child {
+        flex: 1;
+        min-width: 120px;
+    }
+
+    .virtual-table-row td:last-child {
+        flex: 0 0 100px;
+    }
+}
+
+@media (max-width: 576px) {
+    .virtual-table-container {
+        height: calc(100vh - 280px);
+        min-height: 250px;
+    }
+
+    .virtual-table-row {
+        height: 60px;
+    }
+
+    .virtual-table-row td {
+        font-size: 0.8rem;
+    }
+
+    .virtual-table-row td:last-child {
+        flex: 0 0 80px;
+    }
+}
+
+/* ========================================
    Print Styles
    ======================================== */
 @media print {
