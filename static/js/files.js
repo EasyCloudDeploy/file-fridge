@@ -5,6 +5,7 @@ const API_BASE_URL = '/api/v1';
 let currentSearch = '';
 let currentPathId = null;
 let currentStorageType = null;
+let currentFileStatus = null;
 let currentTagIds = [];
 let currentSortBy = 'last_seen';
 let currentSortOrder = 'desc';
@@ -440,6 +441,9 @@ async function loadFilesList() {
         if (currentStorageType) {
             params.append('storage_type', currentStorageType);
         }
+        if (currentFileStatus) { // New line
+            params.append('status', currentFileStatus); // New line
+        }
         if (currentSearch) {
             params.append('search', currentSearch);
         }
@@ -532,6 +536,14 @@ async function loadPathsForFilter() {
                 updateFilters();
             });
         }
+
+        // Setup status filter
+        const statusSelect = document.getElementById('status_filter');
+        if (statusSelect) {
+            statusSelect.addEventListener('change', function() {
+                updateFilters();
+            });
+        }
     } catch (error) {
         console.error('Error loading paths for filter:', error);
         showNotification(`Failed to load paths: ${error.message}`, 'error');
@@ -542,10 +554,12 @@ async function loadPathsForFilter() {
 function updateFilters() {
     const pathSelect = document.getElementById('path_id_filter');
     const storageSelect = document.getElementById('storage_filter');
+    const statusSelect = document.getElementById('status_filter'); // New line
     const tagSelect = document.getElementById('tag_filter');
 
     currentPathId = pathSelect && pathSelect.value ? parseInt(pathSelect.value) : null;
     currentStorageType = storageSelect && storageSelect.value ? storageSelect.value : null;
+    currentFileStatus = statusSelect && statusSelect.value ? statusSelect.value : null; // New line
 
     // Get selected tag IDs from multi-select
     if (tagSelect) {
@@ -1254,6 +1268,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const urlParams = new URLSearchParams(window.location.search);
     currentPathId = urlParams.get('path_id') ? parseInt(urlParams.get('path_id')) : null;
     currentStorageType = urlParams.get('storage_type') || null;
+    currentFileStatus = urlParams.get('status') || null; // Read status from URL
+
+    // Set initial value for status filter
+    const statusSelect = document.getElementById('status_filter');
+    if (statusSelect && currentFileStatus) {
+        statusSelect.value = currentFileStatus;
+    }
 
     loadFilesList();
     loadPathsForFilter();
