@@ -72,7 +72,7 @@
             </div>
 
             <div class="row">
-                <div class="col-md-4">
+                <div class="col-md-6 col-lg-4">
                     <div class="card mb-4">
                         <div class="card-header">
                             <h5 class="mb-0">Path Configuration</h5>
@@ -86,10 +86,22 @@
                         </div>
                     </div>
                 </div>
-                <div class="col-md-4">
-                    <div class="card mb-4">
+                <div class="col-md-6 col-lg-4">
+                    <div class="card mb-4 h-100">
                         <div class="card-header">
-                            <h5 class="mb-0"><i class="bi bi-hdd-rack"></i> Cold Storage Status</h5>
+                            <h5 class="mb-0"><i class="bi bi-thermometer-sun"></i> Hot Storage Status</h5>
+                        </div>
+                        <div class="card-body" id="hot-storage-status-card">
+                            <div class="text-center">
+                                <div class="spinner-border" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card mb-4 h-100">
+                        <div class="card-header">
+                            <h5 class="mb-0"><i class="bi bi-snow"></i> Cold Storage Status</h5>
                         </div>
                         <div class="card-body" id="storage-status-card">
                             <div class="text-center">
@@ -100,7 +112,7 @@
                         </div>
                     </div>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-12 col-lg-4">
                     <div class="card mb-4">
                         <div class="card-header d-flex justify-content-between align-items-center">
                             <h5 class="mb-0">Criteria</h5>
