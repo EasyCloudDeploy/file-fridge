@@ -12,31 +12,33 @@
         </div>
 
         <!-- Search and Filters -->
-        <div class="row mb-3">
-            <div class="col-md-6">
+        <div class="row mb-3 filters-row">
+            <div class="col-12 col-md-6 mb-2 mb-md-0">
                 <div class="input-group">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
-                    <input type="text" class="form-control" id="search_input" placeholder="Search file paths...">
+                    <input type="text" class="form-control" id="search_input" placeholder="Search file paths..." inputmode="search">
                     <button class="btn btn-primary" type="button" id="search_btn">
-                        Search
+                        <i class="bi bi-search d-md-none"></i>
+                        <span class="d-none d-md-inline">Search</span>
                     </button>
                     <button class="btn btn-outline-secondary" type="button" id="clear_search_btn">
-                        Clear
+                        <i class="bi bi-x-lg d-md-none"></i>
+                        <span class="d-none d-md-inline">Clear</span>
                     </button>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-6 col-md-3">
                 <div class="input-group">
-                    <label class="input-group-text" for="path_id_filter">Path:</label>
-                    <select class="form-select" id="path_id_filter">
+                    <label class="input-group-text d-none d-sm-flex" for="path_id_filter">Path:</label>
+                    <select class="form-select" id="path_id_filter" aria-label="Filter by path">
                         <option value="">All Paths</option>
                     </select>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-6 col-md-3">
                 <div class="input-group">
-                    <label class="input-group-text" for="storage_filter">Storage:</label>
-                    <select class="form-select" id="storage_filter">
+                    <label class="input-group-text d-none d-sm-flex" for="storage_filter">Storage:</label>
+                    <select class="form-select" id="storage_filter" aria-label="Filter by storage">
                         <option value="">All</option>
                         <option value="hot">Hot</option>
                         <option value="cold">Cold</option>
@@ -46,26 +48,26 @@
         </div>
 
         <!-- Tag Filter -->
-        <div class="row mb-3">
-            <div class="col-md-6">
+        <div class="row mb-3 filters-row">
+            <div class="col-12 col-md-6 mb-2 mb-md-0">
                 <div class="input-group">
-                    <label class="input-group-text" for="tag_filter"><i class="bi bi-tags"></i> Tags:</label>
-                    <select class="form-select" id="tag_filter" multiple size="1">
+                    <label class="input-group-text" for="tag_filter"><i class="bi bi-tags"></i><span class="d-none d-sm-inline ms-1">Tags:</span></label>
+                    <select class="form-select" id="tag_filter" multiple size="1" aria-label="Filter by tags">
                         <option value="">All Tags</option>
                     </select>
-                    <button class="btn btn-outline-secondary" type="button" id="clear_tag_filter_btn">
-                        <i class="bi bi-x-circle"></i> Clear
+                    <button class="btn btn-outline-secondary" type="button" id="clear_tag_filter_btn" title="Clear tag filter">
+                        <i class="bi bi-x-circle"></i><span class="d-none d-sm-inline ms-1">Clear</span>
                     </button>
                 </div>
-                <div class="form-text">Select one or more tags to filter files (hold Ctrl/Cmd to select multiple)</div>
+                <div class="form-text d-none d-md-block">Select one or more tags to filter files (hold Ctrl/Cmd to select multiple)</div>
             </div>
-            <div class="col-md-6 text-end">
+            <div class="col-12 col-md-6 text-md-end">
                 <div class="btn-group">
                     <button type="button" class="btn btn-outline-secondary btn-sm" onclick="cleanupMissingFiles()" title="Clean up records for files that no longer exist">
-                        <i class="bi bi-trash"></i> Cleanup Missing
+                        <i class="bi bi-trash"></i><span class="d-none d-sm-inline ms-1">Cleanup Missing</span>
                     </button>
                     <button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()" title="Remove duplicate file records">
-                        <i class="bi bi-files"></i> Remove Duplicates
+                        <i class="bi bi-files"></i><span class="d-none d-sm-inline ms-1">Remove Duplicates</span>
                     </button>
                 </div>
             </div>
@@ -90,33 +92,37 @@
                                     <thead>
                                         <tr>
                                             <th class="sortable" data-sort="file_path">
-                                                File Path <i class="bi bi-arrow-down-up"></i>
+                                                <span class="d-none d-md-inline">File Path</span>
+                                                <span class="d-md-none">File</span>
+                                                <i class="bi bi-arrow-down-up"></i>
                                             </th>
                                             <th class="sortable" data-sort="storage_type">
-                                                Storage <i class="bi bi-arrow-down-up"></i>
+                                                <span class="d-none d-sm-inline">Storage</span>
+                                                <span class="d-sm-none"><i class="bi bi-thermometer-half" title="Storage"></i></span>
+                                                <i class="bi bi-arrow-down-up d-none d-sm-inline"></i>
                                             </th>
-                                            <th>
+                                            <th class="d-none d-lg-table-cell">
                                                 Cold Storage Location
                                             </th>
-                                            <th class="sortable" data-sort="file_size">
+                                            <th class="sortable d-none d-md-table-cell" data-sort="file_size">
                                                 Size <i class="bi bi-arrow-down-up"></i>
                                             </th>
-                                            <th class="sortable" data-sort="file_mtime">
-                                                Modified Time <i class="bi bi-arrow-down-up"></i>
+                                            <th class="sortable d-none d-xl-table-cell" data-sort="file_mtime">
+                                                Modified <i class="bi bi-arrow-down-up"></i>
                                             </th>
-                                            <th class="sortable" data-sort="file_atime">
-                                                Access Time <i class="bi bi-arrow-down-up"></i>
+                                            <th class="sortable d-none d-xl-table-cell" data-sort="file_atime">
+                                                Accessed <i class="bi bi-arrow-down-up"></i>
                                             </th>
-                                            <th class="sortable" data-sort="file_ctime">
-                                                Change Time <i class="bi bi-arrow-down-up"></i>
+                                            <th class="sortable d-none d-xl-table-cell" data-sort="file_ctime">
+                                                Changed <i class="bi bi-arrow-down-up"></i>
                                             </th>
                                             <th class="sortable" data-sort="status">
-                                                Status <i class="bi bi-arrow-down-up"></i>
+                                                Status <i class="bi bi-arrow-down-up d-none d-sm-inline"></i>
                                             </th>
-                                            <th class="sortable" data-sort="last_seen">
+                                            <th class="sortable d-none d-lg-table-cell" data-sort="last_seen">
                                                 Last Seen <i class="bi bi-arrow-down-up"></i>
                                             </th>
-                                            <th>Tags</th>
+                                            <th class="d-none d-md-table-cell">Tags</th>
                                             <th>Actions</th>
                                         </tr>
                                     </thead>
@@ -144,7 +150,7 @@
 
         <!-- Thaw Modal -->
         <div class="modal fade" id="thawModal" tabindex="-1" aria-labelledby="thawModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
+            <div class="modal-dialog modal-fullscreen-sm-down">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title" id="thawModalLabel">Thaw File</h5>
@@ -173,7 +179,7 @@
 
         <!-- Freeze Modal -->
         <div class="modal fade" id="freezeModal" tabindex="-1" aria-labelledby="freezeModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
+            <div class="modal-dialog modal-fullscreen-sm-down">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title" id="freezeModalLabel">Send to Cold Storage</h5>
@@ -210,7 +216,7 @@
 
         <!-- Manage Tags Modal -->
         <div class="modal fade" id="manageTagsModal" tabindex="-1" aria-labelledby="manageTagsModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg">
+            <div class="modal-dialog modal-lg modal-fullscreen-md-down">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title" id="manageTagsModalLabel">Manage Tags</h5>
@@ -251,7 +257,7 @@
 
         <!-- Relocate Modal -->
         <div class="modal fade" id="relocateModal" tabindex="-1" aria-labelledby="relocateModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
+            <div class="modal-dialog modal-fullscreen-sm-down">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title" id="relocateModalLabel">Relocate File to Another Cold Storage</h5>

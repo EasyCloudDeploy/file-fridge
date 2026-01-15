@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0d6efd"/>
+      <stop offset="100%" style="stop-color:#0a58ca"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="512" height="512" rx="64" fill="url(#bgGrad)"/>
+  <!-- Snowflake icon -->
+  <g fill="white" transform="translate(256, 256)">
+    <!-- Center circle -->
+    <circle r="20"/>
+    <!-- Main arms (6 directions) -->
+    <g>
+      <!-- Vertical arm up -->
+      <rect x="-10" y="-160" width="20" height="140" rx="10"/>
+      <!-- Vertical arm down -->
+      <rect x="-10" y="20" width="20" height="140" rx="10"/>
+      <!-- Upper left arm -->
+      <rect x="-10" y="-160" width="20" height="140" rx="10" transform="rotate(60)"/>
+      <!-- Lower right arm -->
+      <rect x="-10" y="20" width="20" height="140" rx="10" transform="rotate(60)"/>
+      <!-- Upper right arm -->
+      <rect x="-10" y="-160" width="20" height="140" rx="10" transform="rotate(-60)"/>
+      <!-- Lower left arm -->
+      <rect x="-10" y="20" width="20" height="140" rx="10" transform="rotate(-60)"/>
+    </g>
+    <!-- Small decorative branches -->
+    <g stroke="white" stroke-width="10" stroke-linecap="round" fill="none">
+      <!-- Top branches -->
+      <line x1="0" y1="-95" x2="-32" y2="-127"/>
+      <line x1="0" y1="-95" x2="32" y2="-127"/>
+      <!-- Bottom branches -->
+      <line x1="0" y1="95" x2="-32" y2="127"/>
+      <line x1="0" y1="95" x2="32" y2="127"/>
+      <!-- Upper left branches -->
+      <line x1="-82" y1="-48" x2="-110" y2="-16"/>
+      <line x1="-82" y1="-48" x2="-65" y2="-88"/>
+      <!-- Upper right branches -->
+      <line x1="82" y1="-48" x2="110" y2="-16"/>
+      <line x1="82" y1="-48" x2="65" y2="-88"/>
+      <!-- Lower left branches -->
+      <line x1="-82" y1="48" x2="-110" y2="16"/>
+      <line x1="-82" y1="48" x2="-65" y2="88"/>
+      <!-- Lower right branches -->
+      <line x1="82" y1="48" x2="110" y2="16"/>
+      <line x1="82" y1="48" x2="65" y2="88"/>
+    </g>
+  </g>
+</svg>

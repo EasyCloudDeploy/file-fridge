@@ -82,7 +82,7 @@ function updatePaths(paths) {
     
     pathsList.innerHTML = `
         <div class="table-responsive">
-            <table class="table table-hover">
+            <table class="table table-sm table-hover">
                 <thead>
                     <tr>
                         <th>Name</th>
@@ -93,26 +93,26 @@ function updatePaths(paths) {
                 <tbody>
                     ${paths.map(path => `
                         <tr ${path.error_message ? 'class="table-danger"' : ''}>
-                            <td>
-                                <strong>${escapeHtml(path.name)}</strong><br>
-                                <small class="text-muted">${escapeHtml(path.source_path)}</small>
+                            <td style="max-width: 180px;">
+                                <strong class="small">${escapeHtml(path.name)}</strong><br>
+                                <small class="text-muted text-truncate d-block" style="max-width: 160px;" title="${escapeHtml(path.source_path)}">${escapeHtml(path.source_path)}</small>
                                 ${path.error_message ? `
-                                    <div class="alert alert-danger alert-sm mt-2 mb-0 py-1 px-2" role="alert">
-                                        <i class="bi bi-exclamation-triangle-fill"></i> <strong>Error:</strong> ${escapeHtml(path.error_message)}
+                                    <div class="alert alert-danger alert-sm mt-1 mb-0 py-1 px-2 d-none d-md-block" role="alert" style="font-size: 0.7rem;">
+                                        <i class="bi bi-exclamation-triangle-fill"></i> ${escapeHtml(path.error_message)}
                                     </div>
                                 ` : ''}
                             </td>
                             <td>
-                                <span class="badge bg-${path.enabled ? 'success' : 'secondary'}">${path.enabled ? 'Enabled' : 'Disabled'}</span>
+                                <span class="badge bg-${path.enabled ? 'success' : 'secondary'}">${path.enabled ? 'On' : 'Off'}</span>
                                 ${path.error_message ? `
                                     <br><span class="badge bg-danger mt-1">
-                                        <i class="bi bi-exclamation-triangle-fill"></i> Error State
+                                        <i class="bi bi-exclamation-triangle-fill"></i>
                                     </span>
                                 ` : ''}
                             </td>
                             <td>
-                                <a href="/paths/${path.id}" class="btn btn-sm btn-outline-primary">
-                                    <i class="bi bi-eye"></i> View
+                                <a href="/paths/${path.id}" class="btn btn-sm btn-outline-primary" title="View">
+                                    <i class="bi bi-eye"></i>
                                 </a>
                             </td>
                         </tr>
@@ -136,9 +136,11 @@ function updateRecentFiles(files) {
     
     recentFilesList.innerHTML = recentFiles.map(file => `
         <tr>
-            <td><code>${escapeHtml(file.original_path)}</code></td>
-            <td>${formatBytes(file.file_size)}</td>
-            <td>${formatDate(file.moved_at)}</td>
+            <td style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(file.original_path)}">
+                <code class="small">${escapeHtml(file.original_path)}</code>
+            </td>
+            <td class="d-none d-sm-table-cell">${formatBytes(file.file_size)}</td>
+            <td><small>${formatDate(file.moved_at)}</small></td>
         </tr>
     `).join('');
 }

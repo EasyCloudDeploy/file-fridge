@@ -56,30 +56,30 @@ async function loadPathsList() {
                         <td>
                             <strong>${escapeHtml(path.name)}</strong>
                             ${path.error_message ? `
-                                <div class="alert alert-danger alert-sm mt-1 mb-0 py-1 px-2" role="alert">
+                                <div class="alert alert-danger alert-sm mt-1 mb-0 py-1 px-2 d-none d-md-block" role="alert">
                                     <i class="bi bi-exclamation-triangle-fill"></i> <strong>Error:</strong> ${escapeHtml(path.error_message)}
                                 </div>
                             ` : ''}
                         </td>
-                        <td><code>${escapeHtml(path.source_path)}</code></td>
-                        <td>
+                        <td class="d-none d-md-table-cell"><code class="small">${escapeHtml(path.source_path)}</code></td>
+                        <td class="d-none d-lg-table-cell">
                             ${path.storage_locations && path.storage_locations.length > 0
                                 ? (path.storage_locations.length === 1
-                                    ? `<code>${escapeHtml(path.storage_locations[0].path)}</code>`
-                                    : `<code>${escapeHtml(path.storage_locations[0].path)}</code> <span class="badge bg-secondary">+${path.storage_locations.length - 1} more</span>`
+                                    ? `<code class="small">${escapeHtml(path.storage_locations[0].path)}</code>`
+                                    : `<code class="small">${escapeHtml(path.storage_locations[0].path)}</code> <span class="badge bg-secondary">+${path.storage_locations.length - 1}</span>`
                                   )
                                 : '<span class="text-muted">None</span>'
                             }
                         </td>
-                        <td><span class="badge bg-info">${escapeHtml(path.operation_type)}</span></td>
-                        <td>${Math.floor(path.check_interval_seconds / 60)} min</td>
+                        <td class="d-none d-sm-table-cell"><span class="badge bg-info">${escapeHtml(path.operation_type)}</span></td>
+                        <td class="d-none d-lg-table-cell">${Math.floor(path.check_interval_seconds / 60)} min</td>
                         <td>
                             <span class="badge bg-${path.enabled ? 'success' : 'secondary'}">
                                 ${path.enabled ? 'Enabled' : 'Disabled'}
                             </span>
                             ${path.error_message ? `
                                 <br><span class="badge bg-danger mt-1">
-                                    <i class="bi bi-exclamation-triangle-fill"></i> Error State
+                                    <i class="bi bi-exclamation-triangle-fill"></i><span class="d-none d-sm-inline"> Error</span>
                                 </span>
                             ` : ''}
                         </td>

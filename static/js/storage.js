@@ -45,16 +45,15 @@ function renderStorageStatsList(stats, elementId, emptyMessage) {
 
             html += `
                 <div>
-                    <div class="text-truncate mb-1" title="${escapeStorageHtml(s.path)}"><strong>${escapeStorageHtml(s.path)}</strong></div>
-                    <div class="progress" style="height: 18px;">
+                    <div class="text-truncate mb-1" title="${escapeStorageHtml(s.path)}"><strong class="small">${escapeStorageHtml(s.path)}</strong></div>
+                    <div class="progress" style="height: 16px;">
                         <div class="progress-bar ${progressBarClass}" role="progressbar" style="width: ${usedPercent.toFixed(1)}%;" aria-valuenow="${usedPercent.toFixed(1)}" aria-valuemin="0" aria-valuemax="100">
-                            ${usedPercent.toFixed(1)}%
+                            <small>${usedPercent.toFixed(0)}%</small>
                         </div>
                     </div>
-                    <div class="d-flex justify-content-between text-muted small mt-1">
-                        <span>Used: ${formatStorageBytes(s.used_bytes)}</span>
-                        <span>Free: ${formatStorageBytes(s.free_bytes)}</span>
-                        <span>Total: ${formatStorageBytes(s.total_bytes)}</span>
+                    <div class="d-flex flex-wrap justify-content-between text-muted mt-1" style="font-size: 0.7rem;">
+                        <span>${formatStorageBytes(s.used_bytes)} used</span>
+                        <span>${formatStorageBytes(s.free_bytes)} free</span>
                     </div>
                 </div>`;
         }

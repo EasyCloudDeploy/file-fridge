@@ -661,6 +661,38 @@ code {
 /* ========================================
    Responsive Design
    ======================================== */
+
+/* Tablet breakpoint */
+@media (max-width: 992px) {
+    /* Improve navbar collapsed state */
+    .navbar-collapse {
+        padding: var(--spacing-md) 0;
+    }
+
+    .navbar-nav .nav-link {
+        padding: var(--spacing-md) var(--spacing-md) !important;
+        margin: var(--spacing-xs) 0;
+        border-radius: var(--radius-md);
+    }
+
+    .navbar-nav .nav-link.active::after {
+        display: none;
+    }
+
+    /* Stat cards on dashboard/stats - adjust size */
+    .stat-card h3,
+    .card h2,
+    .card h3 {
+        font-size: 1.5rem;
+    }
+
+    /* Modal fullscreen on tablet and below */
+    .modal-lg .modal-dialog {
+        max-width: calc(100% - var(--spacing-lg));
+        margin: var(--spacing-md) auto;
+    }
+}
+
 @media (max-width: 768px) {
     :root {
         --spacing-lg: 1rem;
@@ -685,6 +717,113 @@ code {
     .card-body {
         padding: var(--spacing-md);
     }
+
+    /* Page titles - smaller on mobile */
+    h1 {
+        font-size: 1.5rem;
+    }
+
+    h2 {
+        font-size: 1.25rem;
+    }
+
+    /* Improve touch targets */
+    .btn {
+        min-height: 44px;
+        padding: var(--spacing-sm) var(--spacing-md);
+    }
+
+    .btn-sm {
+        min-height: 36px;
+        padding: var(--spacing-xs) var(--spacing-sm);
+    }
+
+    /* Input groups - stack on mobile */
+    .input-group-mobile-stack {
+        flex-direction: column;
+    }
+
+    .input-group-mobile-stack > * {
+        width: 100%;
+        border-radius: var(--radius-md) !important;
+        margin-bottom: var(--spacing-xs);
+    }
+
+    .input-group-mobile-stack > *:last-child {
+        margin-bottom: 0;
+    }
+
+    /* Action button spacing */
+    .btn-group .btn,
+    .btn-group-sm .btn {
+        margin: 2px;
+    }
+
+    /* Table header text */
+    .table thead th {
+        font-size: 0.7rem;
+        padding: var(--spacing-sm);
+    }
+
+    .table td {
+        padding: var(--spacing-sm);
+    }
+
+    /* Card header */
+    .card-header {
+        padding: var(--spacing-sm) var(--spacing-md);
+        font-size: 1rem;
+    }
+
+    /* Code elements in tables should not cause overflow */
+    .table code {
+        word-break: break-all;
+        white-space: normal;
+        font-size: 0.75rem;
+    }
+
+    /* Cards and list items should not overflow */
+    .card-body {
+        overflow: hidden;
+    }
+
+    .list-group-item {
+        overflow: hidden;
+    }
+
+    /* File path display - truncate on mobile */
+    .file-path-cell {
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* Stat card numbers on mobile */
+    .stat-card h3 {
+        font-size: 1.25rem;
+    }
+
+    /* Filter row stacking */
+    .filters-row > [class*="col-"] {
+        margin-bottom: var(--spacing-sm);
+    }
+
+    /* Search input group adjustments */
+    .search-group .input-group {
+        flex-wrap: wrap;
+    }
+
+    .search-group .form-control {
+        flex: 1 1 100%;
+        margin-bottom: var(--spacing-xs);
+        border-radius: var(--radius-md) !important;
+    }
+
+    .search-group .btn {
+        flex: 1 1 auto;
+        border-radius: var(--radius-md) !important;
+    }
 }
 
 @media (max-width: 576px) {
@@ -695,6 +834,88 @@ code {
 
     .toast-container {
         bottom: var(--spacing-sm);
+    }
+
+    /* Even smaller titles on phone */
+    h1 {
+        font-size: 1.25rem;
+    }
+
+    /* Mobile-only: icon buttons */
+    .btn-icon-mobile .btn-text {
+        display: none;
+    }
+
+    .btn-icon-mobile .btn {
+        padding: var(--spacing-xs) var(--spacing-sm);
+    }
+
+    /* Table cells on small screens */
+    .table td,
+    .table th {
+        padding: var(--spacing-xs);
+        font-size: 0.8rem;
+    }
+
+    /* Modal - near fullscreen on phones */
+    .modal-dialog {
+        margin: var(--spacing-xs);
+        max-width: calc(100% - var(--spacing-sm));
+    }
+
+    .modal-body {
+        padding: var(--spacing-md);
+    }
+
+    .modal-header,
+    .modal-footer {
+        padding: var(--spacing-sm) var(--spacing-md);
+    }
+
+    /* Badge size */
+    .badge {
+        font-size: 0.65rem;
+        padding: 0.2rem 0.4rem;
+    }
+
+    /* Progress bar height */
+    .progress {
+        height: 1rem;
+    }
+
+    /* Spinner size */
+    .spinner-border {
+        width: 2rem;
+        height: 2rem;
+    }
+}
+
+/* PWA safe area insets for notched phones */
+@supports (padding: max(0px)) {
+    body {
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+    }
+
+    .navbar {
+        padding-top: max(var(--spacing-md), env(safe-area-inset-top));
+        padding-left: max(0px, env(safe-area-inset-left));
+        padding-right: max(0px, env(safe-area-inset-right));
+    }
+
+    footer {
+        padding-bottom: max(var(--spacing-lg), env(safe-area-inset-bottom));
+    }
+}
+
+/* Helper class for hiding on mobile */
+.d-mobile-none {
+    display: table-cell;
+}
+
+@media (max-width: 767.98px) {
+    .d-mobile-none {
+        display: none !important;
     }
 }
 

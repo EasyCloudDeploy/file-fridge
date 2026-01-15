@@ -11,61 +11,61 @@
     </div>
 </div>
 
-        <div class="row mb-4">
-            <div class="col-md-3">
-                <div class="card text-white bg-primary">
-                    <div class="card-body">
-                        <h5 class="card-title">
-                            <i class="bi bi-file-earmark"></i> Total Files Moved
-                        </h5>
-                        <h2 class="mb-0" id="totalFiles">0</h2>
+        <div class="row mb-4 g-3">
+            <div class="col-6 col-md-3">
+                <div class="card text-white bg-primary h-100">
+                    <div class="card-body py-3">
+                        <h6 class="card-title mb-1">
+                            <i class="bi bi-file-earmark"></i> <span class="d-none d-sm-inline">Total </span>Files<span class="d-none d-lg-inline"> Moved</span>
+                        </h6>
+                        <h3 class="mb-0" id="totalFiles">0</h3>
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="card text-white bg-success">
-                    <div class="card-body">
-                        <h5 class="card-title">
-                            <i class="bi bi-hdd"></i> Total Size Moved
-                        </h5>
-                        <h2 class="mb-0" id="totalSize">0.00 GB</h2>
+            <div class="col-6 col-md-3">
+                <div class="card text-white bg-success h-100">
+                    <div class="card-body py-3">
+                        <h6 class="card-title mb-1">
+                            <i class="bi bi-hdd"></i> <span class="d-none d-sm-inline">Total </span>Size<span class="d-none d-lg-inline"> Moved</span>
+                        </h6>
+                        <h3 class="mb-0" id="totalSize">0.00 GB</h3>
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="card text-white bg-info">
-                    <div class="card-body">
-                        <h5 class="card-title">
-                            <i class="bi bi-folder"></i> Monitored Paths
-                        </h5>
-                        <h2 class="mb-0" id="pathsCount">0</h2>
+            <div class="col-6 col-md-3">
+                <div class="card text-white bg-info h-100">
+                    <div class="card-body py-3">
+                        <h6 class="card-title mb-1">
+                            <i class="bi bi-folder"></i> <span class="d-none d-sm-inline">Monitored </span>Paths
+                        </h6>
+                        <h3 class="mb-0" id="pathsCount">0</h3>
                     </div>
                 </div>
             </div>
-            <div class="col-md-3">
-                <div class="card text-white bg-warning">
-                    <div class="card-body">
-                        <h5 class="card-title">
-                            <i class="bi bi-clock-history"></i> Last 24 Hours
-                        </h5>
-                        <h2 class="mb-0" id="recentCount">0</h2>
+            <div class="col-6 col-md-3">
+                <div class="card text-white bg-warning h-100">
+                    <div class="card-body py-3">
+                        <h6 class="card-title mb-1">
+                            <i class="bi bi-clock-history"></i> <span class="d-none d-sm-inline">Last </span>24h
+                        </h6>
+                        <h3 class="mb-0" id="recentCount">0</h3>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="row mb-4">
-            <div class="col-md-6">
+        <div class="row mb-4 g-3">
+            <div class="col-12 col-md-6">
                 <div class="card h-100">
-                    <div class="card-header">
-                        <h5 class="mb-0">
-                            <i class="bi bi-thermometer-sun"></i> Hot Storage Status
-                        </h5>
+                    <div class="card-header py-2">
+                        <h6 class="mb-0">
+                            <i class="bi bi-thermometer-sun"></i> Hot Storage<span class="d-none d-sm-inline"> Status</span>
+                        </h6>
                     </div>
                     <div class="card-body">
                         <div id="hotStorageStatusList">
                             <div class="text-center">
-                                <div class="spinner-border" role="status">
+                                <div class="spinner-border spinner-border-sm" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
                             </div>
@@ -73,17 +73,17 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-6">
+            <div class="col-12 col-md-6">
                 <div class="card h-100">
-                    <div class="card-header">
-                        <h5 class="mb-0">
-                            <i class="bi bi-snow"></i> Cold Storage Status
-                        </h5>
+                    <div class="card-header py-2">
+                        <h6 class="mb-0">
+                            <i class="bi bi-snow"></i> Cold Storage<span class="d-none d-sm-inline"> Status</span>
+                        </h6>
                     </div>
                     <div class="card-body">
                         <div id="storageStatusList">
                             <div class="text-center">
-                                <div class="spinner-border" role="status">
+                                <div class="spinner-border spinner-border-sm" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
                             </div>
@@ -93,18 +93,18 @@
             </div>
         </div>
 
-        <div class="row">
-            <div class="col-md-6">
+        <div class="row g-3">
+            <div class="col-12 col-md-6">
                 <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">
+                    <div class="card-header py-2">
+                        <h6 class="mb-0">
                             <i class="bi bi-folder"></i> Monitored Paths
-                        </h5>
+                        </h6>
                     </div>
                     <div class="card-body">
                         <div id="pathsList">
                             <div class="text-center">
-                                <div class="spinner-border" role="status">
+                                <div class="spinner-border spinner-border-sm" role="status">
                                     <span class="visually-hidden">Loading...</span>
                                 </div>
                             </div>
@@ -112,12 +112,12 @@
                     </div>
                 </div>
             </div>
-            <div class="col-md-6">
+            <div class="col-12 col-md-6">
                 <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">
+                    <div class="card-header py-2">
+                        <h6 class="mb-0">
                             <i class="bi bi-clock-history"></i> Recent Activity
-                        </h5>
+                        </h6>
                     </div>
                     <div class="card-body">
                         <div class="table-responsive">
@@ -125,7 +125,7 @@
                                 <thead>
                                     <tr>
                                         <th>File</th>
-                                        <th>Size</th>
+                                        <th class="d-none d-sm-table-cell">Size</th>
                                         <th>Time</th>
                                     </tr>
                                 </thead>

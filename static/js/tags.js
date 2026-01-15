@@ -122,16 +122,16 @@ function renderTags() {
         return `
             <tr>
                 <td>
-                    <div style="width: 30px; height: 30px; background-color: ${color}; border-radius: 4px; border: 1px solid #dee2e6;"></div>
+                    <div style="width: 24px; height: 24px; background-color: ${color}; border-radius: 4px; border: 1px solid #dee2e6;"></div>
                 </td>
                 <td>
                     <span class="badge" style="background-color: ${color};">${escapeHtml(tag.name)}</span>
                 </td>
-                <td>${escapeHtml(tag.description || '')}</td>
+                <td class="d-none d-md-table-cell">${escapeHtml(tag.description || '')}</td>
                 <td>
                     <span class="badge bg-secondary">${fileCount}</span>
                 </td>
-                <td>${createdDate}</td>
+                <td class="d-none d-lg-table-cell">${createdDate}</td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary" onclick="editTag(${tag.id})" title="Edit tag">
                         <i class="bi bi-pencil"></i>
@@ -418,17 +418,17 @@ function renderTagRules() {
         const tagColor = tag.color || '#6c757d';
         const tagName = tag.name || 'Unknown';
         const enabledBadge = rule.enabled
-            ? '<span class="badge bg-success">Enabled</span>'
-            : '<span class="badge bg-secondary">Disabled</span>';
+            ? '<span class="badge bg-success"><span class="d-none d-sm-inline">Enabled</span><i class="bi bi-check d-sm-none"></i></span>'
+            : '<span class="badge bg-secondary"><span class="d-none d-sm-inline">Disabled</span><i class="bi bi-x d-sm-none"></i></span>';
 
         return `
             <tr>
                 <td>${enabledBadge}</td>
                 <td><span class="badge" style="background-color: ${tagColor};">${escapeHtml(tagName)}</span></td>
-                <td><code>${escapeHtml(rule.criterion_type)}</code></td>
-                <td><code>${escapeHtml(rule.operator)}</code></td>
-                <td><code>${escapeHtml(rule.value)}</code></td>
-                <td>${rule.priority}</td>
+                <td class="d-none d-md-table-cell"><code>${escapeHtml(rule.criterion_type)}</code></td>
+                <td class="d-none d-lg-table-cell"><code>${escapeHtml(rule.operator)}</code></td>
+                <td><code class="small">${escapeHtml(rule.value)}</code></td>
+                <td class="d-none d-md-table-cell">${rule.priority}</td>
                 <td>
                     <button class="btn btn-sm btn-outline-primary" onclick="editTagRule(${rule.id})" title="Edit rule">
                         <i class="bi bi-pencil"></i>
