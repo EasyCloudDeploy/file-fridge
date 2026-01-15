@@ -137,8 +137,6 @@ def list_files(
 
             if file_status:
                 query = query.filter(FileInventory.status == file_status)
-            else:
-                query = query.filter(FileInventory.status.in_([FileStatus.ACTIVE, FileStatus.MIGRATING]))
 
             if search:
                 search_pattern = f"%{search}%"
