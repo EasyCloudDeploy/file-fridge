@@ -5,6 +5,7 @@ const API_BASE_URL = '/api/v1';
 let currentSearch = '';
 let currentPathId = null;
 let currentStorageType = null;
+let currentFileStatus = null;
 let currentTagIds = [];
 let currentSortBy = 'last_seen';
 let currentSortOrder = 'desc';
@@ -159,16 +160,16 @@ function renderFilesTable(files) {
         }
 
         row.innerHTML = `
-            <td><code>${escapeHtml(file.file_path)}</code></td>
+            <td class="file-path-cell"><code>${escapeHtml(file.file_path)}</code></td>
             <td>${storageBadge}</td>
-            <td>${storageLocationHtml}</td>
-            <td>${formatBytes(file.file_size)}</td>
-            <td><small>${mtime}</small></td>
-            <td><small>${atime}</small></td>
-            <td><small>${ctime}</small></td>
+            <td class="d-none d-lg-table-cell">${storageLocationHtml}</td>
+            <td class="d-none d-md-table-cell">${formatBytes(file.file_size)}</td>
+            <td class="d-none d-xl-table-cell"><small>${mtime}</small></td>
+            <td class="d-none d-xl-table-cell"><small>${atime}</small></td>
+            <td class="d-none d-xl-table-cell"><small>${ctime}</small></td>
             <td><span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span></td>
-            <td><small>${formatDate(file.last_seen)}</small></td>
-            <td>${tagsHtml}</td>
+            <td class="d-none d-lg-table-cell"><small>${formatDate(file.last_seen)}</small></td>
+            <td class="d-none d-md-table-cell">${tagsHtml}</td>
             <td>${actionButton}</td>
         `;
     });
@@ -203,28 +204,28 @@ function appendFileRow(tableBody, file) {
         actionButton = `
             <span class="text-warning">
                 <span class="spinner-border spinner-border-sm" role="status"></span>
-                Migrating...
+                <span class="d-none d-sm-inline">Migrating...</span>
             </span>`;
     } else if (storageUnavailable) {
         actionButton = `
             <span class="text-danger" title="Storage unavailable - reconnect drive to perform actions">
-                <i class="bi bi-hdd-network"></i> Offline
+                <i class="bi bi-hdd-network"></i><span class="d-none d-sm-inline"> Offline</span>
             </span>`;
     } else if (file.storage_type === 'cold') {
         actionButton = `
             <div class="btn-group btn-group-sm" role="group">
                 <button type="button" class="btn btn-warning" onclick="showThawModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Move file back to hot storage">
-                    <i class="bi bi-fire"></i> Thaw
+                    <i class="bi bi-fire"></i><span class="d-none d-lg-inline"> Thaw</span>
                 </button>
                 <button type="button" class="btn btn-outline-primary" onclick="showRelocateModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Move to another cold storage location">
-                    <i class="bi bi-arrow-right-circle"></i> Relocate
+                    <i class="bi bi-arrow-right-circle"></i><span class="d-none d-xl-inline"> Relocate</span>
                 </button>
             </div>`;
     } else {
         // Hot storage files - show freeze button
         actionButton = `
             <button type="button" class="btn btn-sm btn-info" onclick="showFreezeModal(${file.id}, '${escapeHtml(file.file_path)}')" title="Send to cold storage">
-                <i class="bi bi-snow"></i> Fridge
+                <i class="bi bi-snow"></i><span class="d-none d-lg-inline"> Fridge</span>
             </button>`;
     }
 
@@ -259,16 +260,16 @@ function appendFileRow(tableBody, file) {
         : '';
 
     row.innerHTML = `
-        <td><code>${escapeHtml(file.file_path)}</code></td>
+        <td class="file-path-cell"><code>${escapeHtml(file.file_path)}</code></td>
         <td>${storageBadge}</td>
-        <td>${storageLocationHtml}</td>
-        <td>${formatBytes(file.file_size)}</td>
-        <td><small>${mtime}</small></td>
-        <td><small>${atime}</small></td>
-        <td><small>${ctime}</small></td>
+        <td class="d-none d-lg-table-cell">${storageLocationHtml}</td>
+        <td class="d-none d-md-table-cell">${formatBytes(file.file_size)}</td>
+        <td class="d-none d-xl-table-cell"><small>${mtime}</small></td>
+        <td class="d-none d-xl-table-cell"><small>${atime}</small></td>
+        <td class="d-none d-xl-table-cell"><small>${ctime}</small></td>
         <td>${pinIndicator}<span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span></td>
-        <td><small>${formatDate(file.last_seen)}</small></td>
-        <td>${tagsHtml}</td>
+        <td class="d-none d-lg-table-cell"><small>${formatDate(file.last_seen)}</small></td>
+        <td class="d-none d-md-table-cell">${tagsHtml}</td>
         <td>${actionButton}</td>
     `;
 }
@@ -440,6 +441,9 @@ async function loadFilesList() {
         if (currentStorageType) {
             params.append('storage_type', currentStorageType);
         }
+        if (currentFileStatus) { // New line
+            params.append('status', currentFileStatus); // New line
+        }
         if (currentSearch) {
             params.append('search', currentSearch);
         }
@@ -532,6 +536,14 @@ async function loadPathsForFilter() {
                 updateFilters();
             });
         }
+
+        // Setup status filter
+        const statusSelect = document.getElementById('status_filter');
+        if (statusSelect) {
+            statusSelect.addEventListener('change', function() {
+                updateFilters();
+            });
+        }
     } catch (error) {
         console.error('Error loading paths for filter:', error);
         showNotification(`Failed to load paths: ${error.message}`, 'error');
@@ -542,10 +554,12 @@ async function loadPathsForFilter() {
 function updateFilters() {
     const pathSelect = document.getElementById('path_id_filter');
     const storageSelect = document.getElementById('storage_filter');
+    const statusSelect = document.getElementById('status_filter'); // New line
     const tagSelect = document.getElementById('tag_filter');
 
     currentPathId = pathSelect && pathSelect.value ? parseInt(pathSelect.value) : null;
     currentStorageType = storageSelect && storageSelect.value ? storageSelect.value : null;
+    currentFileStatus = statusSelect && statusSelect.value ? statusSelect.value : null; // New line
 
     // Get selected tag IDs from multi-select
     if (tagSelect) {
@@ -1254,6 +1268,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const urlParams = new URLSearchParams(window.location.search);
     currentPathId = urlParams.get('path_id') ? parseInt(urlParams.get('path_id')) : null;
     currentStorageType = urlParams.get('storage_type') || null;
+    currentFileStatus = urlParams.get('status') || null; // Read status from URL
+
+    // Set initial value for status filter
+    const statusSelect = document.getElementById('status_filter');
+    if (statusSelect && currentFileStatus) {
+        statusSelect.value = currentFileStatus;
+    }
 
     loadFilesList();
     loadPathsForFilter();

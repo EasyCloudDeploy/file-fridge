@@ -137,30 +137,30 @@ function renderNotifiers() {
 
     tbody.innerHTML = allNotifiers.map(notifier => {
         const statusBadge = notifier.enabled
-            ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i> Enabled</span>'
-            : '<span class="badge bg-secondary"><i class="bi bi-dash-circle"></i> Disabled</span>';
+            ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i><span class="d-none d-sm-inline"> Enabled</span></span>'
+            : '<span class="badge bg-secondary"><i class="bi bi-dash-circle"></i><span class="d-none d-sm-inline"> Disabled</span></span>';
 
         const typeBadge = notifier.type === 'email'
-            ? '<span class="badge bg-primary"><i class="bi bi-envelope"></i> Email</span>'
-            : '<span class="badge bg-info"><i class="bi bi-webhook"></i> Webhook</span>';
+            ? '<span class="badge bg-primary"><i class="bi bi-envelope"></i><span class="d-none d-lg-inline"> Email</span></span>'
+            : '<span class="badge bg-info"><i class="bi bi-webhook"></i><span class="d-none d-lg-inline"> Webhook</span></span>';
 
         const levelBadge = getLevelBadge(notifier.filter_level);
 
-        const createdDate = new Date(notifier.created_at).toLocaleString();
+        const createdDate = new Date(notifier.created_at).toLocaleDateString();
 
         // Truncate address if too long
-        const displayAddress = notifier.address.length > 50
-            ? notifier.address.substring(0, 47) + '...'
+        const displayAddress = notifier.address.length > 35
+            ? notifier.address.substring(0, 32) + '...'
             : notifier.address;
 
         return `
             <tr>
                 <td>${statusBadge}</td>
                 <td><strong>${escapeHtml(notifier.name)}</strong></td>
-                <td>${typeBadge}</td>
-                <td><code>${escapeHtml(displayAddress)}</code></td>
-                <td>${levelBadge}</td>
-                <td><small class="text-muted">${createdDate}</small></td>
+                <td class="d-none d-md-table-cell">${typeBadge}</td>
+                <td class="d-none d-lg-table-cell"><code class="small">${escapeHtml(displayAddress)}</code></td>
+                <td class="d-none d-md-table-cell">${levelBadge}</td>
+                <td class="d-none d-xl-table-cell"><small class="text-muted">${createdDate}</small></td>
                 <td>
                     <div class="btn-group btn-group-sm" role="group">
                         <button class="btn btn-outline-primary" onclick="testNotifier(${notifier.id})" title="Test">

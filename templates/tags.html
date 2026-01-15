@@ -5,11 +5,11 @@
 {% block content %}
     <div class="container mt-4">
         <div class="row mb-4">
-            <div class="col-md-8">
+            <div class="col-12 col-md-8 mb-2 mb-md-0">
                 <h2>Tag Management</h2>
-                <p class="text-muted">Create and manage tags to organize your archived files</p>
+                <p class="text-muted d-none d-md-block">Create and manage tags to organize your archived files</p>
             </div>
-            <div class="col-md-4 text-end">
+            <div class="col-12 col-md-4 text-md-end">
                 <button class="btn btn-primary" id="create_tag_btn">
                     <i class="bi bi-plus-circle"></i> Create Tag
                 </button>
@@ -38,21 +38,23 @@
                                 </button>
                             </div>
                             <div id="tags_table_container" style="display: none;">
+                                <div class="table-responsive">
                                 <table class="table table-hover">
                                     <thead>
                                         <tr>
                                             <th style="width: 50px;">Color</th>
                                             <th>Name</th>
-                                            <th>Description</th>
-                                            <th style="width: 100px;">Files</th>
-                                            <th style="width: 150px;">Created</th>
-                                            <th style="width: 120px;">Actions</th>
+                                            <th class="d-none d-md-table-cell">Description</th>
+                                            <th style="width: 80px;">Files</th>
+                                            <th class="d-none d-lg-table-cell" style="width: 150px;">Created</th>
+                                            <th style="width: 100px;">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="tags_table_body">
                                         <!-- Populated by JavaScript -->
                                     </tbody>
                                 </table>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -62,16 +64,16 @@
 
         <!-- Tag Rules Section -->
         <div class="row mt-5">
-            <div class="col-md-8">
+            <div class="col-12 col-md-8 mb-2 mb-md-0">
                 <h3>Automated Tag Rules</h3>
-                <p class="text-muted">Define rules to automatically tag files based on criteria like extension, path pattern, or size</p>
+                <p class="text-muted d-none d-md-block">Define rules to automatically tag files based on criteria like extension, path pattern, or size</p>
             </div>
-            <div class="col-md-4 text-end">
+            <div class="col-12 col-md-4 text-md-end">
                 <button class="btn btn-success" id="create_rule_btn">
-                    <i class="bi bi-plus-circle"></i> Create Rule
+                    <i class="bi bi-plus-circle"></i> <span class="d-none d-sm-inline">Create</span> Rule
                 </button>
                 <button class="btn btn-outline-primary" id="apply_rules_btn" title="Apply all enabled rules to existing files">
-                    <i class="bi bi-play-circle"></i> Apply Rules
+                    <i class="bi bi-play-circle"></i> Apply<span class="d-none d-sm-inline"> Rules</span>
                 </button>
             </div>
         </div>
@@ -98,22 +100,24 @@
                                 </button>
                             </div>
                             <div id="rules_table_container" style="display: none;">
+                                <div class="table-responsive">
                                 <table class="table table-hover">
                                     <thead>
                                         <tr>
-                                            <th style="width: 60px;">Enabled</th>
+                                            <th style="width: 50px;"><span class="d-none d-sm-inline">Enabled</span><span class="d-sm-none">On</span></th>
                                             <th>Tag</th>
-                                            <th>Criterion</th>
-                                            <th>Operator</th>
+                                            <th class="d-none d-md-table-cell">Criterion</th>
+                                            <th class="d-none d-lg-table-cell">Operator</th>
                                             <th>Value</th>
-                                            <th style="width: 80px;">Priority</th>
-                                            <th style="width: 120px;">Actions</th>
+                                            <th class="d-none d-md-table-cell" style="width: 70px;">Priority</th>
+                                            <th style="width: 100px;">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="rules_table_body">
                                         <!-- Populated by JavaScript -->
                                     </tbody>
                                 </table>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -124,7 +128,7 @@
 
     <!-- Create/Edit Tag Modal -->
     <div class="modal fade" id="tagModal" tabindex="-1" aria-labelledby="tagModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-fullscreen-sm-down">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="tagModalLabel">Create Tag</h5>
@@ -179,7 +183,7 @@
 
     <!-- Delete Confirmation Modal -->
     <div class="modal fade" id="deleteTagModal" tabindex="-1" aria-labelledby="deleteTagModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-fullscreen-sm-down">
             <div class="modal-content">
                 <div class="modal-header bg-danger text-white">
                     <h5 class="modal-title" id="deleteTagModalLabel">Delete Tag</h5>
@@ -202,7 +206,7 @@
 
     <!-- Create/Edit Tag Rule Modal -->
     <div class="modal fade" id="tagRuleModal" tabindex="-1" aria-labelledby="tagRuleModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-lg modal-fullscreen-md-down">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="tagRuleModalLabel">Create Tag Rule</h5>
@@ -291,7 +295,7 @@
 
     <!-- Delete Rule Confirmation Modal -->
     <div class="modal fade" id="deleteRuleModal" tabindex="-1" aria-labelledby="deleteRuleModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-fullscreen-sm-down">
             <div class="modal-content">
                 <div class="modal-header bg-danger text-white">
                     <h5 class="modal-title" id="deleteRuleModalLabel">Delete Rule</h5>

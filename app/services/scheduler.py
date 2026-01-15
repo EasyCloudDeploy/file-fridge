@@ -1,13 +1,23 @@
-"""Scheduler service for periodic file scans."""
 import logging
+import time
+import traceback
+import shutil
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.executors.pool import ThreadPoolExecutor
 from sqlalchemy.orm import Session, sessionmaker
+
 from app.database import engine
 from app.models import MonitoredPath
 from app.services.file_workflow_service import file_workflow_service
 from app.services.stats_cleanup import cleanup_old_stats_job_func
+from app.services.notification_service import notification_service
+from app.services.notification_events import (
+    NotificationEvent,
+    SyncSuccessData,
+    SyncErrorData,
+    LowDiskSpaceData,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +176,35 @@ class SchedulerService:
             logger.error(f"Error adding stats cleanup job: {e}")
 
 
+def check_disk_space_and_notify(path: MonitoredPath, db: Session):
+    """Check disk space for all cold storage locations and send notifications if low."""
+    # TODO: Make this threshold configurable
+    low_space_threshold_percent = 90.0
+
+    for location in path.storage_locations:
+        try:
+            total, used, free = shutil.disk_usage(location.path)
+            used_percent = (used / total) * 100
+
+            if used_percent >= low_space_threshold_percent:
+                payload = LowDiskSpaceData(
+                    storage_name=location.name,
+                    storage_path=location.path,
+                    free_space_gb=round(free / (1024**3), 2),
+                    total_space_gb=round(total / (1024**3), 2),
+                    threshold_percent=low_space_threshold_percent,
+                )
+                notification_service.dispatch_event(
+                    db=db,
+                    event_type=NotificationEvent.LOW_DISK_SPACE,
+                    data=payload,
+                )
+        except FileNotFoundError:
+            logger.warning(f"Could not check disk space for {location.name}: path not found at {location.path}")
+        except Exception as e:
+            logger.error(f"Error checking disk space for {location.name}: {e}")
+
+
 def scan_path_job_func(path_id: int):
     """
     Module-level function to scan a path.
@@ -173,24 +212,67 @@ def scan_path_job_func(path_id: int):
     Uses separate database session to avoid interfering with API requests.
     """
     db = SchedulerSessionLocal()
-    try:
-        path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
-        if not path or not path.enabled:
-            logger.debug(f"Path {path_id} not found or not enabled, skipping scan")
-            return
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
+    if not path or not path.enabled:
+        logger.debug(f"Path {path_id} not found or not enabled, skipping scan")
+        db.close()
+        return
 
+    start_time = time.time()
+    try:
         logger.info(f"Starting scan for path {path_id} ({path.name})")
         result = file_workflow_service.process_path(path, db)
+        duration = time.time() - start_time
+
+        # Send notifications for individual errors during the scan
         if result['errors']:
-            logger.error(f"Scan for path {path_id} completed with {len(result['errors'])} errors:")
-            for error in result['errors']:
-                logger.error(f"  - {error}")
-        logger.info(f"Completed scan for path {path_id}: {result['files_moved']} files moved, {len(result['errors'])} errors")
+            for error_msg in result['errors']:
+                error_payload = SyncErrorData(
+                    path_name=path.name,
+                    error_message=error_msg
+                )
+                notification_service.dispatch_event(
+                    db=db,
+                    event_type=NotificationEvent.SYNC_ERROR,
+                    data=error_payload,
+                )
+
+        # Send success notification
+        success_payload = SyncSuccessData(
+            path_name=path.name,
+            files_scanned=result.get("total_scanned", 0),
+            files_moved_to_cold=result.get("files_moved", 0),
+            files_thawed_from_cold=0,  # This info is not yet available from the service
+            duration_seconds=round(duration, 2),
+        )
+        notification_service.dispatch_event(
+            db=db,
+            event_type=NotificationEvent.SYNC_SUCCESS,
+            data=success_payload,
+        )
+
+        # Check disk space after a successful scan
+        check_disk_space_and_notify(path, db)
+
+        logger.info(f"Completed scan for path {path_id}: {result['files_moved']} files moved, {len(result['errors'])} errors in {duration:.2f}s")
 
     except Exception as e:
-        logger.error(f"Error scanning path {path_id}: {str(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
+        duration = time.time() - start_time
+        tb_str = traceback.format_exc()
+        logger.error(f"Fatal error scanning path {path_id} after {duration:.2f}s: {str(e)}")
+        logger.error(f"Traceback: {tb_str}")
+
+        # Send fatal error notification
+        error_payload = SyncErrorData(
+            path_name=path.name if path else f"ID {path_id}",
+            error_message=f"A fatal error occurred during the scan: {str(e)}",
+            traceback=tb_str,
+        )
+        notification_service.dispatch_event(
+            db=db,
+            event_type=NotificationEvent.SYNC_ERROR,
+            data=error_payload,
+        )
     finally:
         try:
             db.close()

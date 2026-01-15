@@ -56,30 +56,30 @@ async function loadPathsList() {
                         <td>
                             <strong>${escapeHtml(path.name)}</strong>
                             ${path.error_message ? `
-                                <div class="alert alert-danger alert-sm mt-1 mb-0 py-1 px-2" role="alert">
+                                <div class="alert alert-danger alert-sm mt-1 mb-0 py-1 px-2 d-none d-md-block" role="alert">
                                     <i class="bi bi-exclamation-triangle-fill"></i> <strong>Error:</strong> ${escapeHtml(path.error_message)}
                                 </div>
                             ` : ''}
                         </td>
-                        <td><code>${escapeHtml(path.source_path)}</code></td>
-                        <td>
+                        <td class="d-none d-md-table-cell"><code class="small">${escapeHtml(path.source_path)}</code></td>
+                        <td class="d-none d-lg-table-cell">
                             ${path.storage_locations && path.storage_locations.length > 0
                                 ? (path.storage_locations.length === 1
-                                    ? `<code>${escapeHtml(path.storage_locations[0].path)}</code>`
-                                    : `<code>${escapeHtml(path.storage_locations[0].path)}</code> <span class="badge bg-secondary">+${path.storage_locations.length - 1} more</span>`
+                                    ? `<code class="small">${escapeHtml(path.storage_locations[0].path)}</code>`
+                                    : `<code class="small">${escapeHtml(path.storage_locations[0].path)}</code> <span class="badge bg-secondary">+${path.storage_locations.length - 1}</span>`
                                   )
                                 : '<span class="text-muted">None</span>'
                             }
                         </td>
-                        <td><span class="badge bg-info">${escapeHtml(path.operation_type)}</span></td>
-                        <td>${Math.floor(path.check_interval_seconds / 60)} min</td>
+                        <td class="d-none d-sm-table-cell"><span class="badge bg-info">${escapeHtml(path.operation_type)}</span></td>
+                        <td class="d-none d-lg-table-cell">${Math.floor(path.check_interval_seconds / 60)} min</td>
                         <td>
                             <span class="badge bg-${path.enabled ? 'success' : 'secondary'}">
                                 ${path.enabled ? 'Enabled' : 'Disabled'}
                             </span>
                             ${path.error_message ? `
                                 <br><span class="badge bg-danger mt-1">
-                                    <i class="bi bi-exclamation-triangle-fill"></i> Error State
+                                    <i class="bi bi-exclamation-triangle-fill"></i><span class="d-none d-sm-inline"> Error</span>
                                 </span>
                             ` : ''}
                         </td>
@@ -124,10 +124,11 @@ async function loadPathDetail(pathId) {
     if (errorEl) errorEl.style.display = 'none';
     
     try {
-        const [pathResponse, criteriaResponse, storageResponse] = await Promise.all([
+        const [pathResponse, criteriaResponse, storageResponse, hotStorageResponse] = await Promise.all([
             fetch(`${API_BASE_URL}/paths/${pathId}`),
             fetch(`${API_BASE_URL}/criteria/path/${pathId}`),
-            fetch(`${API_BASE_URL}/storage/stats`)
+            fetch(`${API_BASE_URL}/storage/stats`),
+            fetch(`${API_BASE_URL}/paths/stats`)
         ]);
         
         if (!pathResponse.ok) {
@@ -141,6 +142,7 @@ async function loadPathDetail(pathId) {
         const path = await pathResponse.json();
         const criteria = await criteriaResponse.ok ? await criteriaResponse.json() : [];
         const storageStats = await storageResponse.ok ? await storageResponse.json() : [];
+        const hotStorageStats = await hotStorageResponse.ok ? await hotStorageResponse.json() : [];
         
         // Update page title
         document.title = `${path.name} - File Fridge`;
@@ -239,6 +241,50 @@ async function loadPathDetail(pathId) {
             `;
         }
         
+        // Render hot storage status (source path)
+        const hotStorageCardBody = document.getElementById('hot-storage-status-card');
+        if (hotStorageCardBody) {
+            // Find stats for the source path
+            const sourceStat = hotStorageStats.find(s =>
+                path.source_path.startsWith(s.path) || s.path.startsWith(path.source_path)
+            );
+
+            if (!sourceStat) {
+                hotStorageCardBody.innerHTML = '<p class="text-muted">Storage stats not available.</p>';
+            } else if (sourceStat.error) {
+                hotStorageCardBody.innerHTML = `
+                    <div class="mb-2">
+                        <div class="text-truncate mb-1" title="${escapeHtml(path.source_path)}"><strong>${escapeHtml(path.source_path)}</strong></div>
+                        <div class="alert alert-danger mb-0 py-2">
+                            <strong>Error:</strong> ${escapeHtml(sourceStat.error)}
+                        </div>
+                    </div>`;
+            } else {
+                const usedPercent = (sourceStat.used_bytes / sourceStat.total_bytes) * 100;
+                let progressBarClass = 'bg-success';
+                if (usedPercent > 70) {
+                    progressBarClass = 'bg-danger';
+                } else if (usedPercent > 50) {
+                    progressBarClass = 'bg-warning';
+                }
+
+                hotStorageCardBody.innerHTML = `
+                    <div class="mb-2">
+                        <div class="text-truncate mb-1" title="${escapeHtml(path.source_path)}"><strong>${escapeHtml(path.source_path)}</strong></div>
+                        <div class="progress" style="height: 18px;">
+                            <div class="progress-bar ${progressBarClass}" role="progressbar" style="width: ${usedPercent.toFixed(1)}%;" aria-valuenow="${usedPercent.toFixed(1)}" aria-valuemin="0" aria-valuemax="100">
+                                ${usedPercent.toFixed(1)}%
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between text-muted small mt-1">
+                            <span>Used: ${formatBytes(sourceStat.used_bytes)}</span>
+                            <span>Free: ${formatBytes(sourceStat.free_bytes)}</span>
+                            <span>Total: ${formatBytes(sourceStat.total_bytes)}</span>
+                        </div>
+                    </div>`;
+            }
+        }
+
         // Render storage status
         const storageCardBody = document.getElementById('storage-status-card');
         if (storageCardBody) {

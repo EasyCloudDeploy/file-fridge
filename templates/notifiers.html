@@ -5,11 +5,11 @@
 {% block content %}
     <div class="container mt-4">
         <div class="row mb-4">
-            <div class="col-md-8">
+            <div class="col-12 col-md-8 mb-2 mb-md-0">
                 <h2><i class="bi bi-bell"></i> Notification Settings</h2>
-                <p class="text-muted">Configure email and webhook destinations for system alerts and notifications</p>
+                <p class="text-muted d-none d-md-block">Configure email and webhook destinations for system alerts and notifications</p>
             </div>
-            <div class="col-md-4 text-end">
+            <div class="col-12 col-md-4 text-md-end">
                 <button class="btn btn-primary" id="create_notifier_btn">
                     <i class="bi bi-plus-circle"></i> Add Notifier
                 </button>
@@ -47,13 +47,13 @@
                                     <table class="table table-hover">
                                         <thead>
                                             <tr>
-                                                <th style="width: 60px;">Status</th>
+                                                <th style="width: 50px;">Status</th>
                                                 <th>Name</th>
-                                                <th>Type</th>
-                                                <th>Address</th>
-                                                <th>Filter Level</th>
-                                                <th style="width: 150px;">Created</th>
-                                                <th style="width: 180px;">Actions</th>
+                                                <th class="d-none d-md-table-cell">Type</th>
+                                                <th class="d-none d-lg-table-cell">Address</th>
+                                                <th class="d-none d-md-table-cell">Level</th>
+                                                <th class="d-none d-xl-table-cell" style="width: 150px;">Created</th>
+                                                <th style="width: 140px;">Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody id="notifiers_table_body">
@@ -71,7 +71,7 @@
 
     <!-- Create/Edit Notifier Modal -->
     <div class="modal fade" id="notifier_modal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog modal-lg modal-fullscreen-md-down">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="notifier_modal_title">Add Notifier</h5>

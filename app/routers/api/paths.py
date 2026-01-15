@@ -1,6 +1,7 @@
 """API routes for path management."""
 import logging
 import os
+import shutil
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -89,6 +90,65 @@ def list_paths(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
         )
         result.append(summary)
     return result
+
+
+@router.get("/stats", response_model=List[schemas.StorageStats])
+def get_hot_storage_stats(db: Session = Depends(get_db)):
+    """Get storage statistics for all monitored paths (hot storage)."""
+    paths = db.query(MonitoredPath).all()
+
+    unique_volumes = {}
+    for path in paths:
+        path_str = path.source_path
+        try:
+            # Get the device ID for the path
+            device_id = os.stat(path_str).st_dev
+            if device_id not in unique_volumes:
+                unique_volumes[device_id] = path_str
+        except FileNotFoundError:
+            # Handle cases where the path doesn't exist
+            if 'not_found' not in unique_volumes:
+                unique_volumes['not_found'] = []
+            unique_volumes['not_found'].append(path_str)
+        except Exception as e:
+            # Handle other potential errors
+            logger.error(f"Error stating path {path_str}: {e}")
+            if 'error' not in unique_volumes:
+                unique_volumes['error'] = []
+            unique_volumes['error'].append(path_str)
+
+    stats_list = []
+    for device_id, path_str in unique_volumes.items():
+        if device_id == 'not_found' or device_id == 'error':
+            for p in path_str:
+                stats_list.append(schemas.StorageStats(
+                    path=p,
+                    total_bytes=0,
+                    used_bytes=0,
+                    free_bytes=0,
+                    error="Path not found or error stating path."
+                ))
+            continue
+
+        try:
+            total, used, free = shutil.disk_usage(path_str)
+            stats_list.append(schemas.StorageStats(
+                path=path_str,
+                total_bytes=total,
+                used_bytes=used,
+                free_bytes=free,
+            ))
+        except Exception as e:
+            logger.error(f"Error getting disk usage for {path_str}: {e}")
+            stats_list.append(schemas.StorageStats(
+                path=path_str,
+                total_bytes=0,
+                used_bytes=0,
+                free_bytes=0,
+                error=str(e),
+            ))
+
+    return stats_list
 
 
 @router.post("", response_model=schemas.MonitoredPath, status_code=status.HTTP_201_CREATED)
