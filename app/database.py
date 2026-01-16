@@ -1,10 +1,12 @@
 """Database setup and session management."""
+import logging
+from pathlib import Path
+
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
 from app.config import settings
-import logging
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,7 @@ def ensure_database_directory():
             db_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Ensured database directory exists: {db_dir}")
         except Exception as e:
-            logger.error(f"Failed to create database directory {db_dir}: {e}")
+            logger.exception("Failed to create database directory", exc_info=e) # Fixed TRY400
             raise
 
 
@@ -64,11 +66,11 @@ def init_db():
     Incremental schema changes are handled by Alembic migrations.
     See app/database_migrations.py for the migration system.
     """
-    # Import models to ensure they're registered with Base.metadata
+    # Import models here to avoid circular import
+    # (models.py imports Base from this file)
     from app import models  # noqa: F401
 
     # Create all tables that don't exist
     # This is idempotent - existing tables are not affected
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables initialized")
-

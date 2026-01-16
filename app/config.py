@@ -1,9 +1,11 @@
 """Application configuration."""
-from pydantic_settings import BaseSettings
-from pydantic import model_validator, computed_field
-from typing import Optional
-from os import path
 import logging
+import logging
+from pathlib import Path
+from typing import Optional
+
+from pydantic import computed_field, model_validator
+from pydantic_settings import BaseSettings
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +35,8 @@ class Settings(BaseSettings):
         if self.database_path.startswith("/"):
             # Absolute path needs four slashes
             return f"sqlite:///{self.database_path}"
-        else:
-            # Relative path needs three slashes
-            return f"sqlite:///{self.database_path}"
+        # Relative path needs three slashes
+        return f"sqlite:///{self.database_path}"
 
     # Allow atime over network mounts
     # Override via ALLOW_ATIME_OVER_NETWORK_MOUNTS environment variable
@@ -78,15 +79,16 @@ class Settings(BaseSettings):
     # FileRecord entries older than this will be automatically deleted
     stats_retention_days: int = 30
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def read_version_file(self):
         """Read version from VERSION file if app_version is still default and file exists."""
-        if self.app_version == "0.0.0" and path.exists("VERSION"):
+        version_file = Path("VERSION")
+        if self.app_version == "0.0.0" and version_file.exists():
             try:
-                with open("VERSION", "r") as f:
+                with version_file.open("r") as f:
                     self.app_version = f.read().strip()
             except Exception as e:
-                logger.exception(f"Error reading VERSION file: {e}")
+                logger.exception("Error reading VERSION file", exc_info=e)
         return self
 
     class Config:
@@ -124,8 +126,8 @@ def translate_path_for_symlink(container_path: str) -> str:
         return container_path
 
     # Normalize prefixes (remove trailing slashes)
-    container_prefix = settings.container_path_prefix.rstrip('/')
-    host_prefix = settings.host_path_prefix.rstrip('/')
+    container_prefix = settings.container_path_prefix.rstrip("/")
+    host_prefix = settings.host_path_prefix.rstrip("/")
 
     # If path starts with container prefix, replace with host prefix
     if container_path.startswith(container_prefix):
@@ -135,4 +137,3 @@ def translate_path_for_symlink(container_path: str) -> str:
 
     # Path doesn't match container prefix, return as-is
     return container_path
-

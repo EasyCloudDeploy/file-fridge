@@ -1,23 +1,24 @@
 import logging
+import shutil
 import time
 import traceback
-import shutil
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+
 from apscheduler.executors.pool import ThreadPoolExecutor
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import engine
 from app.models import MonitoredPath
 from app.services.file_workflow_service import file_workflow_service
-from app.services.stats_cleanup import cleanup_old_stats_job_func
-from app.services.notification_service import notification_service
 from app.services.notification_events import (
-    NotificationEvent,
-    SyncSuccessData,
-    SyncErrorData,
     LowDiskSpaceData,
+    NotificationEvent,
+    SyncErrorData,
+    SyncSuccessData,
 )
+from app.services.notification_service import notification_service
+from app.services.stats_cleanup import cleanup_old_stats_job_func
 
 logger = logging.getLogger(__name__)
 
@@ -28,29 +29,29 @@ SchedulerSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=eng
 
 class SchedulerService:
     """Manages scheduled file scans."""
-    
+
     def __init__(self):
         """Initialize scheduler."""
         # Use SQLite jobstore - APScheduler needs a separate table
         # Use a separate database file for jobstore to avoid conflicts
         db_url = str(engine.url)
-        if db_url.startswith('sqlite:///'):
+        if db_url.startswith("sqlite:///"):
             # Use a separate database file for scheduler jobs
-            jobstore_url = db_url.replace('.db', '_scheduler.db')
+            jobstore_url = db_url.replace(".db", "_scheduler.db")
         else:
             jobstore_url = db_url
         jobstore = SQLAlchemyJobStore(url=jobstore_url)
 
         self.scheduler = BackgroundScheduler(
-            jobstores={'default': jobstore},
-            executors={'default': ThreadPoolExecutor(5)},
+            jobstores={"default": jobstore},
+            executors={"default": ThreadPoolExecutor(5)},
             job_defaults={
-                'coalesce': True,  # Skip overlapping jobs
-                'max_instances': 1,  # Only one instance per job
-                'misfire_grace_time': 30  # Allow 30 seconds grace time for missed jobs
+                "coalesce": True,  # Skip overlapping jobs
+                "max_instances": 1,  # Only one instance per job
+                "misfire_grace_time": 30  # Allow 30 seconds grace time for missed jobs
             }
         )
-    
+
     def start(self):
         """Start the scheduler."""
         if not self.scheduler.running:
@@ -71,7 +72,7 @@ class SchedulerService:
                 except:
                     pass
                 raise
-    
+
     def stop(self):
         """Stop the scheduler gracefully."""
         if self.scheduler.running:
@@ -87,7 +88,7 @@ class SchedulerService:
                     logger.info("Scheduler force-stopped")
                 except Exception as e2:
                     logger.error(f"Error during forced scheduler shutdown: {e2}")
-    
+
     def _load_existing_jobs(self):
         """Load existing monitored paths as scheduled jobs."""
         if not self.scheduler.running:
@@ -107,7 +108,7 @@ class SchedulerService:
             logger.error(f"Error loading existing jobs: {e}")
         finally:
             db.close()
-    
+
     def add_path_job(self, path: MonitoredPath):
         """Add or update a scheduled job for a path."""
         if not self.scheduler.running:
@@ -125,7 +126,7 @@ class SchedulerService:
                 # Use a module-level function instead of instance method to avoid serialization issues
                 self.scheduler.add_job(
                     scan_path_job_func,
-                    'interval',
+                    "interval",
                     seconds=path.check_interval_seconds,
                     id=job_id,
                     args=[path.id],
@@ -134,18 +135,18 @@ class SchedulerService:
                 logger.info(f"Added scheduled job for path {path.id} ({path.name})")
         except Exception as e:
             logger.error(f"Error adding job for path {path.id}: {e}")
-    
+
     def remove_path_job(self, path_id: int):
         """Remove scheduled job for a path."""
         job_id = f"scan_path_{path_id}"
         if self.scheduler.get_job(job_id):
             self.scheduler.remove_job(job_id)
             logger.info(f"Removed scheduled job for path {path_id}")
-    
+
     def trigger_scan(self, path_id: int):
         """Manually trigger a scan for a path."""
         scan_path_job_func(path_id)
-    
+
     def _scan_path_job(self, path_id: int):
         """Job function to scan a path (kept for backward compatibility, but use scan_path_job_func instead)."""
         scan_path_job_func(path_id)
@@ -165,7 +166,7 @@ class SchedulerService:
             # Schedule to run daily at 2 AM
             self.scheduler.add_job(
                 cleanup_old_stats_job_func,
-                'cron',
+                "cron",
                 hour=2,
                 minute=0,
                 id=job_id,
@@ -225,8 +226,8 @@ def scan_path_job_func(path_id: int):
         duration = time.time() - start_time
 
         # Send notifications for individual errors during the scan
-        if result['errors']:
-            for error_msg in result['errors']:
+        if result["errors"]:
+            for error_msg in result["errors"]:
                 error_payload = SyncErrorData(
                     path_name=path.name,
                     error_message=error_msg
@@ -259,13 +260,13 @@ def scan_path_job_func(path_id: int):
     except Exception as e:
         duration = time.time() - start_time
         tb_str = traceback.format_exc()
-        logger.error(f"Fatal error scanning path {path_id} after {duration:.2f}s: {str(e)}")
+        logger.error(f"Fatal error scanning path {path_id} after {duration:.2f}s: {e!s}")
         logger.error(f"Traceback: {tb_str}")
 
         # Send fatal error notification
         error_payload = SyncErrorData(
             path_name=path.name if path else f"ID {path_id}",
-            error_message=f"A fatal error occurred during the scan: {str(e)}",
+            error_message=f"A fatal error occurred during the scan: {e!s}",
             traceback=tb_str,
         )
         notification_service.dispatch_event(

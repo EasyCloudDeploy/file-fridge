@@ -2,6 +2,58 @@
 
 {% block title %}Files - File Fridge{% endblock %}
 
+{% block extra_head %}
+    <!-- AG Grid CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-grid.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-theme-quartz.css">
+    <style>
+        #filesGrid {
+            height: 70vh;
+            min-height: 400px;
+        }
+        .ag-theme-quartz {
+            --ag-font-size: 13px;
+        }
+        .file-path-cell {
+            font-family: monospace;
+            font-size: 12px;
+        }
+        /* Bulk actions toolbar */
+        .bulk-actions-toolbar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bs-body-bg);
+            border-top: 2px solid var(--bs-primary);
+            padding: 0.75rem 1rem;
+            display: none;
+            align-items: center;
+            gap: 1rem;
+            z-index: 1050;
+            box-shadow: 0 -4px 12px rgba(0,0,0,0.15);
+        }
+        .bulk-actions-toolbar .selection-info {
+            font-weight: 500;
+            color: var(--bs-primary);
+        }
+        .bulk-actions-toolbar .btn-group {
+            flex-wrap: wrap;
+            gap: 0.25rem;
+        }
+        @media (max-width: 768px) {
+            .bulk-actions-toolbar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0.5rem;
+            }
+            .bulk-actions-toolbar .btn-group {
+                justify-content: center;
+            }
+        }
+    </style>
+{% endblock %}
+
 {% block content %}
         <div class="row">
             <div class="col-12">
@@ -76,7 +128,7 @@
         <div class="row">
             <div class="col-12">
                 <div class="card">
-                    <div class="card-body">
+                    <div class="card-body p-2">
                         <div id="files-loading" class="text-center py-5">
                             <div class="spinner-border text-primary" role="status">
                                 <span class="visually-hidden">Loading files...</span>
@@ -86,52 +138,7 @@
                                 <div class="progress-bar" id="stream-progress" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                             </div>
                         </div>
-                        <div id="files-content" style="display: none;">
-                            <div class="virtual-table-container" id="virtualTableContainer">
-                                <table class="table table-hover" id="filesTable">
-                                    <thead>
-                                        <tr>
-                                            <th class="sortable" data-sort="file_path">
-                                                <span class="d-none d-md-inline">File Path</span>
-                                                <span class="d-md-none">File</span>
-                                                <i class="bi bi-arrow-down-up"></i>
-                                            </th>
-                                            <th class="sortable" data-sort="storage_type">
-                                                <span class="d-none d-sm-inline">Storage</span>
-                                                <span class="d-sm-none"><i class="bi bi-thermometer-half" title="Storage"></i></span>
-                                                <i class="bi bi-arrow-down-up d-none d-sm-inline"></i>
-                                            </th>
-                                            <th class="d-none d-lg-table-cell">
-                                                Cold Storage Location
-                                            </th>
-                                            <th class="sortable d-none d-md-table-cell" data-sort="file_size">
-                                                Size <i class="bi bi-arrow-down-up"></i>
-                                            </th>
-                                            <th class="sortable d-none d-xl-table-cell" data-sort="file_mtime">
-                                                Modified <i class="bi bi-arrow-down-up"></i>
-                                            </th>
-                                            <th class="sortable d-none d-xl-table-cell" data-sort="file_atime">
-                                                Accessed <i class="bi bi-arrow-down-up"></i>
-                                            </th>
-                                            <th class="sortable d-none d-xl-table-cell" data-sort="file_ctime">
-                                                Changed <i class="bi bi-arrow-down-up"></i>
-                                            </th>
-                                            <th class="sortable" data-sort="status">
-                                                Status <i class="bi bi-arrow-down-up d-none d-sm-inline"></i>
-                                            </th>
-                                            <th class="sortable d-none d-lg-table-cell" data-sort="last_seen">
-                                                Last Seen <i class="bi bi-arrow-down-up"></i>
-                                            </th>
-                                            <th class="d-none d-md-table-cell">Tags</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <!-- Virtual rows will be rendered here by JavaScript -->
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
+                        <div id="filesGrid" class="ag-theme-quartz" style="display: none;"></div>
                         <div id="no-files-message" class="text-center py-5" style="display: none;">
                             <i class="bi bi-file-earmark-x display-1 text-muted"></i>
                             <p class="text-muted mt-3">No files found.</p>
@@ -141,10 +148,10 @@
             </div>
         </div>
 
-        <!-- Pagination Controls -->
-        <div class="row mt-3">
-            <div class="col-12" id="pagination-controls">
-                <!-- Pagination will be rendered here by JavaScript -->
+        <!-- Status Bar -->
+        <div class="row mt-2">
+            <div class="col-12">
+                <p class="text-center text-muted mb-0" id="status-bar"></p>
             </div>
         </div>
 
@@ -298,9 +305,162 @@
                 </div>
             </div>
         </div>
+
+        <!-- Bulk Actions Toolbar -->
+        <div id="bulk-actions-toolbar" class="bulk-actions-toolbar">
+            <span class="selection-info">
+                <i class="bi bi-check2-square"></i>
+                <span id="selection-count">0 files selected</span>
+            </span>
+            <div class="btn-group" role="group" aria-label="Bulk actions">
+                <button type="button" class="btn btn-warning btn-sm" id="bulk-thaw-btn" title="Thaw selected files">
+                    <i class="bi bi-fire"></i> Thaw
+                </button>
+                <button type="button" class="btn btn-info btn-sm" id="bulk-freeze-btn" title="Freeze selected files">
+                    <i class="bi bi-snow"></i> Freeze
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="bulk-add-tag-btn" title="Add tag to selected files">
+                    <i class="bi bi-tag"></i> Add Tag
+                </button>
+                <button type="button" class="btn btn-outline-primary btn-sm" id="bulk-remove-tag-btn" title="Remove tag from selected files">
+                    <i class="bi bi-tag-x"></i> Remove Tag
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" id="bulk-pin-btn" title="Pin selected files">
+                    <i class="bi bi-pin"></i> Pin
+                </button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="bulk-unpin-btn" title="Unpin selected files">
+                    <i class="bi bi-pin-angle"></i> Unpin
+                </button>
+            </div>
+            <button type="button" class="btn btn-link btn-sm text-muted" id="clear-selection-btn">
+                <i class="bi bi-x-lg"></i> Clear
+            </button>
+        </div>
+
+        <!-- Bulk Thaw Modal -->
+        <div class="modal fade" id="bulkThawModal" tabindex="-1" aria-labelledby="bulkThawModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="bulkThawModalLabel"><i class="bi bi-fire"></i> Bulk Thaw Files</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Move <strong id="bulkThawCount">0</strong> files from cold storage back to hot storage?</p>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="bulkThawPinCheckbox">
+                            <label class="form-check-label" for="bulkThawPinCheckbox">
+                                <i class="bi bi-pin-angle"></i> Pin files after thawing
+                            </label>
+                            <div class="form-text">Pinned files will not be moved to cold storage during automatic scans</div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-warning" id="confirmBulkThawBtn">
+                            <i class="bi bi-fire"></i> Thaw Files
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bulk Freeze Modal -->
+        <div class="modal fade" id="bulkFreezeModal" tabindex="-1" aria-labelledby="bulkFreezeModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="bulkFreezeModalLabel"><i class="bi bi-snow"></i> Bulk Freeze Files</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Move <strong id="bulkFreezeCount">0</strong> files to cold storage?</p>
+                        <div class="mb-3">
+                            <label for="bulkFreezeLocationSelect" class="form-label">Storage Location</label>
+                            <select class="form-select" id="bulkFreezeLocationSelect">
+                                <option value="">Loading...</option>
+                            </select>
+                            <div class="form-text">Select the cold storage location for these files</div>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="bulkFreezePinCheckbox">
+                            <label class="form-check-label" for="bulkFreezePinCheckbox">
+                                <i class="bi bi-pin-angle"></i> Pin files after freezing
+                            </label>
+                            <div class="form-text">Pinned files will not be moved back to hot storage during automatic scans</div>
+                        </div>
+                        <div class="alert alert-info mt-3">
+                            <i class="bi bi-info-circle"></i>
+                            <small>Files from paths not associated with the selected storage location will be skipped.</small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-info" id="confirmBulkFreezeBtn" disabled>
+                            <i class="bi bi-snow"></i> Freeze Files
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bulk Add Tag Modal -->
+        <div class="modal fade" id="bulkAddTagModal" tabindex="-1" aria-labelledby="bulkAddTagModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="bulkAddTagModalLabel"><i class="bi bi-tag"></i> Add Tag to Files</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Add a tag to <strong id="bulkAddTagCount">0</strong> selected files.</p>
+                        <div class="mb-3">
+                            <label for="bulkAddTagSelect" class="form-label">Select Tag</label>
+                            <select class="form-select" id="bulkAddTagSelect">
+                                <option value="">Select a tag...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="confirmBulkAddTagBtn" disabled>
+                            <i class="bi bi-tag"></i> Add Tag
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bulk Remove Tag Modal -->
+        <div class="modal fade" id="bulkRemoveTagModal" tabindex="-1" aria-labelledby="bulkRemoveTagModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="bulkRemoveTagModalLabel"><i class="bi bi-tag-x"></i> Remove Tag from Files</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Remove a tag from <strong id="bulkRemoveTagCount">0</strong> selected files.</p>
+                        <div class="mb-3">
+                            <label for="bulkRemoveTagSelect" class="form-label">Select Tag to Remove</label>
+                            <select class="form-select" id="bulkRemoveTagSelect">
+                                <option value="">Select a tag...</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-danger" id="confirmBulkRemoveTagBtn" disabled>
+                            <i class="bi bi-tag-x"></i> Remove Tag
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
 {% endblock %}
 
 {% block extra_scripts %}
-    <script src="/static/js/virtual-table.js"></script>
+    <!-- AG Grid JS -->
+    <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/dist/ag-grid-community.min.js"></script>
     <script src="/static/js/files.js"></script>
 {% endblock %}

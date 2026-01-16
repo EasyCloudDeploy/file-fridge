@@ -1,7 +1,9 @@
 """API routes for file cleanup."""
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import Optional
+
 from app.database import get_db
 from app.services.file_cleanup import FileCleanup
 

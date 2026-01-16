@@ -36,9 +36,8 @@ class IndexingManager:
                 logger.info(f"Creating .noindex file to prevent Spotlight indexing: {noindex_path}")
                 noindex_path.touch()
                 return True
-            else:
-                logger.debug(f".noindex file already exists: {noindex_path}")
-                return True
+            logger.debug(f".noindex file already exists: {noindex_path}")
+            return True
 
         except Exception as e:
             logger.error(f"Failed to create .noindex file in {directory}: {e}")
@@ -69,9 +68,8 @@ class IndexingManager:
                 logger.info(f"Removing .noindex file to allow Spotlight indexing: {noindex_path}")
                 noindex_path.unlink()
                 return True
-            else:
-                logger.debug(f".noindex file doesn't exist: {noindex_path}")
-                return True
+            logger.debug(f".noindex file doesn't exist: {noindex_path}")
+            return True
 
         except Exception as e:
             logger.error(f"Failed to remove .noindex file from {directory}: {e}")
@@ -105,8 +103,8 @@ class IndexingManager:
 
         success = hot_success and cold_success
         if success:
-            logger.info(f"Successfully managed .noindex files for both directories")
+            logger.info("Successfully managed .noindex files for both directories")
         else:
-            logger.warning(f"Failed to manage .noindex files for one or more directories")
+            logger.warning("Failed to manage .noindex files for one or more directories")
 
         return success

@@ -3,13 +3,21 @@ import logging
 import threading
 import time
 import uuid
+from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Dict, Optional, List
-from dataclasses import dataclass, field, asdict
 from pathlib import Path
+from typing import Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
-from app.models import FileInventory, FileRecord, MonitoredPath, ColdStorageLocation, StorageType, OperationType, FileStatus
+from app.models import (
+    ColdStorageLocation,
+    FileInventory,
+    FileRecord,
+    FileStatus,
+    MonitoredPath,
+    OperationType,
+)
 from app.services.file_mover import FileMover
 
 logger = logging.getLogger(__name__)
@@ -44,7 +52,7 @@ class RelocationTask:
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
-        data['percent_complete'] = self.percent_complete
+        data["percent_complete"] = self.percent_complete
         return data
 
 
@@ -313,7 +321,7 @@ class RelocationTaskManager:
                 existing_task_id = self._tasks_by_inventory[inventory_id]
                 existing_task = self._tasks.get(existing_task_id)
                 if existing_task and existing_task.status in ["pending", "running"]:
-                    raise ValueError(f"A relocation task is already in progress for this file")
+                    raise ValueError("A relocation task is already in progress for this file")
 
             task_id = str(uuid.uuid4())
             task = RelocationTask(

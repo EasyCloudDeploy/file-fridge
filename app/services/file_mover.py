@@ -1,12 +1,12 @@
 """File moving service."""
+import logging
 import os
 import shutil
 from pathlib import Path
-import logging
-from typing import Optional, Callable
+from typing import Callable, Optional
 
-from app.models import OperationType, MonitoredPath
 from app.config import translate_path_for_symlink
+from app.models import MonitoredPath, OperationType
 
 logger = logging.getLogger(__name__)
 
@@ -63,12 +63,11 @@ def move_file(
 
         if operation_type == OperationType.MOVE:
             return _move(source, destination, progress_callback)
-        elif operation_type == OperationType.COPY:
+        if operation_type == OperationType.COPY:
             return _copy(source, destination, progress_callback)
-        elif operation_type == OperationType.SYMLINK:
+        if operation_type == OperationType.SYMLINK:
             return _move_and_symlink(source, destination, progress_callback)
-        else:
-            return False, f"Unknown operation type: {operation_type}"
+        return False, f"Unknown operation type: {operation_type}"
     except Exception as e:
         return False, str(e)
 
@@ -89,7 +88,7 @@ def _move(source: Path, destination: Path, progress_callback: Optional[Callable[
             source.unlink()
             return True, None
     except Exception as e:
-        return False, f"Move failed: {str(e)}"
+        return False, f"Move failed: {e!s}"
 
 
 def _move_symlink(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> tuple[bool, Optional[str]]:
@@ -121,7 +120,7 @@ def _move_symlink(source: Path, destination: Path, progress_callback: Optional[C
         source.unlink()
         return True, None
     except (OSError, RuntimeError) as e:
-        return False, f"Failed to handle symlink: {str(e)}"
+        return False, f"Failed to handle symlink: {e!s}"
 
 
 def _copy(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> tuple[bool, Optional[str]]:
@@ -130,7 +129,7 @@ def _copy(source: Path, destination: Path, progress_callback: Optional[Callable[
         _copy_with_progress(source, destination, progress_callback)
         return True, None
     except Exception as e:
-        return False, f"Copy failed: {str(e)}"
+        return False, f"Copy failed: {e!s}"
 
 
 def _copy_with_progress(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> None:
@@ -143,7 +142,7 @@ def _copy_with_progress(source: Path, destination: Path, progress_callback: Opti
         bytes_transferred = 0
         last_report = 0
 
-        with open(source, 'rb') as fsrc, open(destination, 'wb') as fdst:
+        with open(source, "rb") as fsrc, open(destination, "wb") as fdst:
             while True:
                 chunk = fsrc.read(64 * 1024)
                 if not chunk:
@@ -204,9 +203,9 @@ def _move_and_symlink(source: Path, destination: Path, progress_callback: Option
                 destination.rename(original_source)
             except:
                 pass
-            return False, f"Symlink creation failed: {str(e)}"
+            return False, f"Symlink creation failed: {e!s}"
     except Exception as e:
-        return False, f"Move and symlink failed: {str(e)}"
+        return False, f"Move and symlink failed: {e!s}"
 
 
 def preserve_directory_structure(source_path: Path, base_source: Path, base_destination: Path) -> Path:

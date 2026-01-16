@@ -1,9 +1,11 @@
 """Statistics cleanup service for data retention management."""
 import logging
 from datetime import datetime, timedelta
+
 from sqlalchemy.orm import Session
-from app.models import FileRecord
+
 from app.config import settings
+from app.models import FileRecord
 
 logger = logging.getLogger(__name__)
 

@@ -1,13 +1,14 @@
 """API routes for statistics."""
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 from datetime import datetime, timedelta
 
-from app.database import get_db
-from app.models import FileRecord, MonitoredPath, FileInventory, StorageType, Criteria, PinnedFile
-from app.schemas import Statistics, DetailedStatistics
+from fastapi import APIRouter, Depends
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from app.config import settings
+from app.database import get_db
+from app.models import Criteria, FileInventory, FileRecord, MonitoredPath, PinnedFile, StorageType
+from app.schemas import DetailedStatistics, Statistics
 from app.services.stats_cleanup import stats_cleanup_service
 
 router = APIRouter(prefix="/api/v1/stats", tags=["stats"])

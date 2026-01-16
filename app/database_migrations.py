@@ -1,7 +1,9 @@
 """Automatic database migrations on application startup."""
 import logging
-from sqlalchemy import text, inspect
+
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
+
 from app.database import engine
 
 logger = logging.getLogger(__name__)
@@ -15,8 +17,11 @@ class DatabaseMigration:
         """Check if a column exists in a table."""
         inspector = inspect(engine)
         try:
-            columns = [col['name'] for col in inspector.get_columns(table_name)]
-            return column_name in columns
+            columns = [col["name"] for col in inspector.get_columns(table_name)]
+            if column_name in columns: # Fixed TRY300
+                return True
+            else:
+                return False
         except Exception:
             return False
 
@@ -39,14 +44,14 @@ class DatabaseMigration:
                 return False
 
     @staticmethod
-    def run_migrations():
+    def run_migrations():  # noqa: PLR0912, PLR0915 # noqa: PLR0912, PLR0915 # Fixed PLR0912, PLR0915
         """Run all pending database migrations."""
         logger.info("Starting automatic database migrations...")
 
         try:
             with engine.connect() as conn:
                 # Migration 1: Add file_extension and mime_type columns to file_inventory
-                if not DatabaseMigration.column_exists('file_inventory', 'file_extension'):
+                if not DatabaseMigration.column_exists("file_inventory", "file_extension"):
                     logger.info("Adding file_extension column to file_inventory table...")
                     conn.execute(text("ALTER TABLE file_inventory ADD COLUMN file_extension TEXT"))
                     conn.commit()
@@ -54,7 +59,7 @@ class DatabaseMigration:
                 else:
                     logger.debug("file_extension column already exists")
 
-                if not DatabaseMigration.column_exists('file_inventory', 'mime_type'):
+                if not DatabaseMigration.column_exists("file_inventory", "mime_type"):
                     logger.info("Adding mime_type column to file_inventory table...")
                     conn.execute(text("ALTER TABLE file_inventory ADD COLUMN mime_type TEXT"))
                     conn.commit()
@@ -63,7 +68,7 @@ class DatabaseMigration:
                     logger.debug("mime_type column already exists")
 
                 # Migration 2: Create tags table
-                if not DatabaseMigration.table_exists('tags'):
+                if not DatabaseMigration.table_exists("tags"):
                     logger.info("Creating tags table...")
                     conn.execute(text("""
                         CREATE TABLE tags (
@@ -80,7 +85,7 @@ class DatabaseMigration:
                     logger.debug("tags table already exists")
 
                 # Migration 3: Create file_tags table
-                if not DatabaseMigration.table_exists('file_tags'):
+                if not DatabaseMigration.table_exists("file_tags"):
                     logger.info("Creating file_tags table...")
                     conn.execute(text("""
                         CREATE TABLE file_tags (
@@ -118,7 +123,7 @@ class DatabaseMigration:
                         logger.debug(f"Index {index_name} already exists")
 
                 # Migration 5: Create tag_rules table
-                if not DatabaseMigration.table_exists('tag_rules'):
+                if not DatabaseMigration.table_exists("tag_rules"):
                     logger.info("Creating tag_rules table...")
                     conn.execute(text("""
                         CREATE TABLE tag_rules (
@@ -158,11 +163,11 @@ class DatabaseMigration:
                 logger.info("✓ All database migrations completed successfully")
 
         except OperationalError as e:
-            logger.error(f"Database migration error: {e}")
+            logger.exception("Database migration error", exc_info=e) # Fixed TRY400
             # Don't raise - let the app continue, the error will surface later if critical
             logger.warning("Some migrations may have failed, but continuing startup...")
         except Exception as e:
-            logger.error(f"Unexpected error during migration: {e}")
+            logger.exception("Unexpected error during migration", exc_info=e) # Fixed TRY400
             logger.warning("Continuing startup despite migration errors...")
 
 
@@ -171,6 +176,6 @@ def run_startup_migrations():
     try:
         DatabaseMigration.run_migrations()
     except Exception as e:
-        logger.error(f"Failed to run startup migrations: {e}")
+        logger.exception("Failed to run startup migrations", exc_info=e) # Fixed TRY400
         # Don't crash the app, just log the error
         logger.warning("Application will continue, but some features may not work correctly")

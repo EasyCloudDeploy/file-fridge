@@ -1,17 +1,18 @@
 """File freezing service - move files from hot storage to cold storage."""
-import os
 import logging
 from pathlib import Path
 from typing import Optional, Tuple
+
 from sqlalchemy.orm import Session
+
 from app.models import (
+    ColdStorageLocation,
     FileInventory,
     FileRecord,
-    PinnedFile,
     MonitoredPath,
-    ColdStorageLocation,
-    StorageType,
     OperationType,
+    PinnedFile,
+    StorageType,
 )
 from app.services.file_mover import move_file, preserve_directory_structure
 
@@ -124,7 +125,7 @@ class FileFreezer:
             return True, None, str(destination_path)
 
         except Exception as e:
-            logger.error(f"Error freezing file: {str(e)}")
+            logger.error(f"Error freezing file: {e!s}")
             if db:
                 db.rollback()
             return False, str(e), None

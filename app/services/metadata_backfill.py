@@ -1,9 +1,11 @@
 """Service for backfilling metadata for existing files in inventory."""
 import logging
 from pathlib import Path
-from typing import Dict, Optional
-from sqlalchemy.orm import Session
+from typing import Dict
+
 from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
 from app.models import FileInventory
 from app.services.file_metadata import FileMetadataExtractor
 
@@ -152,8 +154,7 @@ class MetadataBackfillService:
             if updated:
                 logger.debug(f"Updated metadata for: {file_path}")
                 return "updated"
-            else:
-                return "skipped"
+            return "skipped"
 
         except Exception as e:
             logger.error(f"Failed to extract metadata for {file_path}: {e}")

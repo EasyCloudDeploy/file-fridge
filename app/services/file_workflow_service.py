@@ -1,28 +1,33 @@
 """Unified file workflow service - scanning, moving, and inventory management."""
-import os
-import logging
 import fnmatch
 import json
+import logging
+import os
 import shutil
 import time
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Tuple, Optional, Dict, Iterator
 from datetime import datetime
+from pathlib import Path
+from typing import Dict, Iterator, List
 
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.database import engine
 from app.models import (
-    MonitoredPath, FileRecord, FileInventory, FileStatus, StorageType,
-    Criteria, PinnedFile, CriterionType
+    CriterionType,
+    FileInventory,
+    FileRecord,
+    FileStatus,
+    MonitoredPath,
+    PinnedFile,
+    StorageType,
 )
 from app.services.criteria_matcher import CriteriaMatcher
-from app.services.file_mover import FileMover
 from app.services.file_cleanup import FileCleanup
+from app.services.file_mover import FileMover
 from app.services.file_reconciliation import FileReconciliation
 from app.services.scan_progress import scan_progress_manager
 from app.utils.network_detection import check_atime_availability
-from app.database import engine
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +102,7 @@ class FileWorkflowService:
                 if duplicate_results["errors"]:
                     results["errors"].extend(duplicate_results["errors"])
             except Exception as e:
-                logger.warning(f"Error during cleanup for path {path.id}: {str(e)}")
+                logger.warning(f"Error during cleanup for path {path.id}: {e!s}")
 
             try:
                 # Scan phase
@@ -129,7 +134,7 @@ class FileWorkflowService:
                                 else:
                                     results["errors"].append(thaw_result["error"])
                             except Exception as e:
-                                results["errors"].append(f"Exception thawing {cold_path}: {str(e)}")
+                                results["errors"].append(f"Exception thawing {cold_path}: {e!s}")
 
                 # Process moves to cold storage
                 if matching_files:
@@ -149,7 +154,7 @@ class FileWorkflowService:
                                 else:
                                     results["errors"].append(file_result["error"])
                             except Exception as e:
-                                results["errors"].append(f"Exception processing {file_path}: {str(e)}")
+                                results["errors"].append(f"Exception processing {file_path}: {e!s}")
 
                 # Reconciliation phase
                 try:
@@ -159,10 +164,10 @@ class FileWorkflowService:
                     if reconciliation_stats["errors"]:
                         results["errors"].extend(reconciliation_stats["errors"])
                 except Exception as e:
-                    results["errors"].append(f"Reconciliation error: {str(e)}")
+                    results["errors"].append(f"Reconciliation error: {e!s}")
 
             except Exception as e:
-                results["errors"].append(f"Error processing path {path.id}: {str(e)}")
+                results["errors"].append(f"Error processing path {path.id}: {e!s}")
                 scan_progress_manager.finish_scan(path.id, status="failed")
                 return results
 
@@ -170,14 +175,14 @@ class FileWorkflowService:
             return results
 
         except Exception as e:
-            logger.error(f"Unexpected error in process_path for path {path.id}: {str(e)}", exc_info=True)
+            logger.error(f"Unexpected error in process_path for path {path.id}: {e!s}", exc_info=True)
             scan_progress_manager.finish_scan(path.id, status="failed")
             return {
                 "path_id": path.id,
                 "files_found": 0,
                 "files_moved": 0,
                 "files_cleaned": 0,
-                "errors": [f"Unexpected error: {str(e)}"]
+                "errors": [f"Unexpected error: {e!s}"]
             }
 
     def _scan_path(self, path: MonitoredPath, db: Session) -> dict:
@@ -203,7 +208,7 @@ class FileWorkflowService:
                 db.commit()
                 logger.error(f"Scan aborted for {path.name}: {error_msg}")
                 return {"to_cold": [], "to_hot": [], "inventory_updated": 0, "skipped_hot": 0, "skipped_cold": 0}
-            elif path.error_message:
+            if path.error_message:
                 path.error_message = None
                 db.commit()
 
@@ -243,11 +248,10 @@ class FileWorkflowService:
                         files_to_thaw.append((file_path, actual_file_path))
                     else:
                         files_skipped_hot += 1
+                elif not is_symlink_to_cold:
+                    matching_files.append((file_path, matched_ids))
                 else:
-                    if not is_symlink_to_cold:
-                        matching_files.append((file_path, matched_ids))
-                    else:
-                        files_skipped_cold += 1
+                    files_skipped_cold += 1
             except (OSError, PermissionError) as e:
                 logger.debug(f"Access error for {file_path}: {e}")
                 continue
@@ -407,8 +411,8 @@ class FileWorkflowService:
                 scan_progress_manager.complete_file_operation(path.id, file_name, "move_to_cold", success=False, error=error)
 
         except Exception as e:
-            result["error"] = f"Error processing {file_path}: {str(e)}"
-            logger.error(f"Error processing {file_path}: {str(e)}", exc_info=True)
+            result["error"] = f"Error processing {file_path}: {e!s}"
+            logger.error(f"Error processing {file_path}: {e!s}", exc_info=True)
         finally:
             db.close()
 
@@ -445,10 +449,10 @@ class FileWorkflowService:
                 result["success"] = True
 
             except Exception as e:
-                result["error"] = f"Failed to move file back {cold_storage_path}: {str(e)}"
+                result["error"] = f"Failed to move file back {cold_storage_path}: {e!s}"
 
         except Exception as e:
-            result["error"] = f"Error thawing {cold_storage_path}: {str(e)}"
+            result["error"] = f"Error thawing {cold_storage_path}: {e!s}"
         finally:
             db.close()
 
@@ -502,7 +506,7 @@ class FileWorkflowService:
         try:
             with os.scandir(str(path)) as it:
                 for entry in it:
-                    if entry.name.startswith('.'):
+                    if entry.name.startswith("."):
                         continue
                     if any(fnmatch.fnmatch(entry.name, p) for p in self.IGNORED_PATTERNS):
                         continue
@@ -549,12 +553,12 @@ class FileWorkflowService:
                 is_symlink = Path(entry.path).is_symlink()
 
                 results.append({
-                    'path': entry.path,
-                    'size': stat.st_size,
-                    'mtime': datetime.fromtimestamp(stat.st_mtime),
-                    'atime': datetime.fromtimestamp(stat.st_atime),
-                    'ctime': datetime.fromtimestamp(stat.st_ctime),
-                    'is_symlink': is_symlink
+                    "path": entry.path,
+                    "size": stat.st_size,
+                    "mtime": datetime.fromtimestamp(stat.st_mtime),
+                    "atime": datetime.fromtimestamp(stat.st_atime),
+                    "ctime": datetime.fromtimestamp(stat.st_ctime),
+                    "is_symlink": is_symlink
                 })
             except OSError:
                 continue
@@ -562,8 +566,8 @@ class FileWorkflowService:
 
     def _update_db_entries(self, path: MonitoredPath, files: List[Dict], tier: StorageType, db: Session) -> int:
         """Synchronize file metadata with the database."""
-        from app.services.tag_rule_service import TagRuleService
         from app.services.file_metadata import FileMetadataExtractor
+        from app.services.tag_rule_service import TagRuleService
 
         count = 0
         tag_rule_service = TagRuleService(db)
@@ -572,28 +576,28 @@ class FileWorkflowService:
 
         for info in files:
             actual_tier = tier
-            if tier == StorageType.HOT and info.get('is_symlink', False):
+            if tier == StorageType.HOT and info.get("is_symlink", False):
                 actual_tier = StorageType.COLD
 
             entry = db.query(FileInventory).filter(
                 FileInventory.path_id == path.id,
-                FileInventory.file_path == info['path']
+                FileInventory.file_path == info["path"]
             ).first()
 
             if entry:
                 updated = False
-                if entry.file_size != info['size'] or entry.status != FileStatus.ACTIVE or entry.storage_type != actual_tier:
-                    entry.file_size = info['size']
-                    entry.file_mtime = info['mtime']
-                    entry.file_atime = info['atime']
-                    entry.file_ctime = info['ctime']
+                if entry.file_size != info["size"] or entry.status != FileStatus.ACTIVE or entry.storage_type != actual_tier:
+                    entry.file_size = info["size"]
+                    entry.file_mtime = info["mtime"]
+                    entry.file_atime = info["atime"]
+                    entry.file_ctime = info["ctime"]
                     entry.status = FileStatus.ACTIVE
                     entry.storage_type = actual_tier
                     updated = True
 
                 if entry.file_extension is None or entry.mime_type is None:
                     try:
-                        file_path = Path(info['path'])
+                        file_path = Path(info["path"])
                         if file_path.exists():
                             extension, mime_type, checksum = FileMetadataExtractor.extract_metadata(file_path)
                             if entry.file_extension is None and extension:
@@ -602,7 +606,7 @@ class FileWorkflowService:
                             if entry.mime_type is None and mime_type:
                                 entry.mime_type = mime_type
                                 updated = True
-                            if entry.checksum is None and checksum and info['size'] < 1024 * 1024 * 100:
+                            if entry.checksum is None and checksum and info["size"] < 1024 * 1024 * 100:
                                 entry.checksum = checksum
                                 updated = True
                     except Exception as e:
@@ -617,17 +621,17 @@ class FileWorkflowService:
                 checksum = None
 
                 try:
-                    file_path = Path(info['path'])
+                    file_path = Path(info["path"])
                     if file_path.exists():
                         extension, mime_type, checksum = FileMetadataExtractor.extract_metadata(file_path)
                 except Exception as e:
                     logger.debug(f"Could not extract metadata for {info['path']}: {e}")
 
                 new_entry = FileInventory(
-                    path_id=path.id, file_path=info['path'],
-                    storage_type=actual_tier, file_size=info['size'],
-                    file_mtime=info['mtime'], file_atime=info['atime'],
-                    file_ctime=info['ctime'], status=FileStatus.ACTIVE,
+                    path_id=path.id, file_path=info["path"],
+                    storage_type=actual_tier, file_size=info["size"],
+                    file_mtime=info["mtime"], file_atime=info["atime"],
+                    file_ctime=info["ctime"], status=FileStatus.ACTIVE,
                     file_extension=extension, mime_type=mime_type, checksum=checksum
                 )
                 db.add(new_entry)

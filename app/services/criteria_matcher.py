@@ -1,23 +1,24 @@
 """Criteria matching service - find-compatible file matching."""
-import os
-import re
-import stat
-import time
 import fnmatch
 import logging
+import os
 import platform
+import re
+import stat
 import subprocess
+import time
+from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
-from app.models import CriterionType, Operator, Criteria
+from typing import List, Optional
+
+from app.models import Criteria, CriterionType, Operator
 
 logger = logging.getLogger(__name__)
 
 
 class CriteriaMatcher:
     """Matches files against criteria (find-compatible)."""
-    
+
     @staticmethod
     def match_file(file_path: Path, criteria: List[Criteria], actual_file_path: Optional[Path] = None) -> tuple[bool, List[int]]:
         """
@@ -82,7 +83,7 @@ class CriteriaMatcher:
 
         logger.debug(f"File {file_path}: All {len(criteria)} criteria matched ({context})")
         return True, matched_ids
-    
+
     @staticmethod
     def _match_criterion(file_path: Path, stat_info: os.stat_result, criterion: Criteria) -> bool:
         """Match a single criterion."""
@@ -94,7 +95,7 @@ class CriteriaMatcher:
             return CriteriaMatcher._match_time(
                 stat_info.st_mtime, operator, value, "mtime"
             )
-        elif criterion_type == CriterionType.ATIME:
+        if criterion_type == CriterionType.ATIME:
             # On macOS, also check "Last Open" metadata from extended attributes
             # Use the most recent of atime or Last Open date
             atime = stat_info.st_atime
@@ -125,27 +126,26 @@ class CriteriaMatcher:
             return CriteriaMatcher._match_time(
                 atime, operator, value, "atime"
             )
-        elif criterion_type == CriterionType.CTIME:
+        if criterion_type == CriterionType.CTIME:
             return CriteriaMatcher._match_time(
                 stat_info.st_ctime, operator, value, "ctime"
             )
-        elif criterion_type == CriterionType.SIZE:
+        if criterion_type == CriterionType.SIZE:
             return CriteriaMatcher._match_size(stat_info.st_size, operator, value)
-        elif criterion_type == CriterionType.NAME:
+        if criterion_type == CriterionType.NAME:
             return CriteriaMatcher._match_name(file_path.name, operator, value, case_sensitive=True)
-        elif criterion_type == CriterionType.INAME:
+        if criterion_type == CriterionType.INAME:
             return CriteriaMatcher._match_name(file_path.name, operator, value, case_sensitive=False)
-        elif criterion_type == CriterionType.TYPE:
+        if criterion_type == CriterionType.TYPE:
             return CriteriaMatcher._match_type(file_path, stat_info, value)
-        elif criterion_type == CriterionType.PERM:
+        if criterion_type == CriterionType.PERM:
             return CriteriaMatcher._match_perm(stat_info.st_mode, value)
-        elif criterion_type == CriterionType.USER:
+        if criterion_type == CriterionType.USER:
             return CriteriaMatcher._match_user(stat_info.st_uid, value)
-        elif criterion_type == CriterionType.GROUP:
+        if criterion_type == CriterionType.GROUP:
             return CriteriaMatcher._match_group(stat_info.st_gid, value)
-        else:
-            return False
-    
+        return False
+
     @staticmethod
     def _match_time(timestamp: float, operator: Operator, value: str, time_type: str) -> bool:
         """
@@ -165,19 +165,19 @@ class CriteriaMatcher:
             # Simple, direct comparisons
             if operator == Operator.GT:
                 return age_minutes > minutes
-            elif operator == Operator.LT:
+            if operator == Operator.LT:
                 return age_minutes < minutes
-            elif operator == Operator.EQ:
+            if operator == Operator.EQ:
                 # Small tolerance for exact time matching (0.5 minutes = 30 seconds)
                 return abs(age_minutes - minutes) < 0.5
-            elif operator == Operator.GTE:
+            if operator == Operator.GTE:
                 return age_minutes >= minutes
-            elif operator == Operator.LTE:
+            if operator == Operator.LTE:
                 return age_minutes <= minutes
         except (ValueError, TypeError):
             return False
         return False
-    
+
     @staticmethod
     def _match_size(size: int, operator: Operator, value: str) -> bool:
         """Match file size criteria."""
@@ -185,67 +185,67 @@ class CriteriaMatcher:
             # Parse size value (supports suffixes: c, k, M, G)
             value_lower = value.lower().strip()
             multiplier = 1
-            
-            if value_lower.endswith('c'):
+
+            if value_lower.endswith("c"):
                 multiplier = 1
                 value_lower = value_lower[:-1]
-            elif value_lower.endswith('k'):
+            elif value_lower.endswith("k"):
                 multiplier = 1024
                 value_lower = value_lower[:-1]
-            elif value_lower.endswith('m'):
+            elif value_lower.endswith("m"):
                 multiplier = 1024 * 1024
                 value_lower = value_lower[:-1]
-            elif value_lower.endswith('g'):
+            elif value_lower.endswith("g"):
                 multiplier = 1024 * 1024 * 1024
                 value_lower = value_lower[:-1]
-            
+
             target_size = int(float(value_lower) * multiplier)
-            
+
             if operator == Operator.GT:
                 return size > target_size
-            elif operator == Operator.LT:
+            if operator == Operator.LT:
                 return size < target_size
-            elif operator == Operator.EQ:
+            if operator == Operator.EQ:
                 return size == target_size
-            elif operator == Operator.GTE:
+            if operator == Operator.GTE:
                 return size >= target_size
-            elif operator == Operator.LTE:
+            if operator == Operator.LTE:
                 return size <= target_size
         except (ValueError, TypeError):
             return False
         return False
-    
+
     @staticmethod
     def _match_name(filename: str, operator: Operator, value: str, case_sensitive: bool = True) -> bool:
         """Match filename criteria."""
         if not case_sensitive:
             filename = filename.lower()
             value = value.lower()
-        
+
         if operator == Operator.EQ:
             return filename == value
-        elif operator == Operator.CONTAINS:
+        if operator == Operator.CONTAINS:
             return value in filename
-        elif operator == Operator.MATCHES:
+        if operator == Operator.MATCHES:
             return fnmatch.fnmatch(filename, value)
-        elif operator == Operator.REGEX:
+        if operator == Operator.REGEX:
             try:
                 return bool(re.search(value, filename))
             except re.error:
                 return False
         return False
-    
+
     @staticmethod
     def _match_type(file_path: Path, stat_info: os.stat_result, value: str) -> bool:
         """Match file type criteria."""
-        if value == 'f' or value == 'file':
+        if value == "f" or value == "file":
             return file_path.is_file()
-        elif value == 'd' or value == 'directory':
+        if value == "d" or value == "directory":
             return file_path.is_dir()
-        elif value == 'l' or value == 'link':
+        if value == "l" or value == "link":
             return file_path.is_symlink()
         return False
-    
+
     @staticmethod
     def _match_perm(mode: int, value: str) -> bool:
         """Match permission criteria."""
@@ -254,19 +254,18 @@ class CriteriaMatcher:
             if value.isdigit():
                 target_perm = int(value, 8)
                 return (mode & 0o777) == target_perm
-            else:
-                # Simple symbolic permission matching
-                # For now, just check if file is readable/writable/executable
-                if 'r' in value and not (mode & stat.S_IRUSR):
-                    return False
-                if 'w' in value and not (mode & stat.S_IWUSR):
-                    return False
-                if 'x' in value and not (mode & stat.S_IXUSR):
-                    return False
-                return True
+            # Simple symbolic permission matching
+            # For now, just check if file is readable/writable/executable
+            if "r" in value and not (mode & stat.S_IRUSR):
+                return False
+            if "w" in value and not (mode & stat.S_IWUSR):
+                return False
+            if "x" in value and not (mode & stat.S_IXUSR):
+                return False
+            return True
         except (ValueError, TypeError):
             return False
-    
+
     @staticmethod
     def _match_user(uid: int, value: str) -> bool:
         """Match user criteria."""
@@ -280,7 +279,7 @@ class CriteriaMatcher:
                 return uid == target_uid
             except (ValueError, TypeError):
                 return False
-    
+
     @staticmethod
     def _match_group(gid: int, value: str) -> bool:
         """Match group criteria."""
@@ -294,7 +293,7 @@ class CriteriaMatcher:
                 return gid == target_gid
             except (ValueError, TypeError):
                 return False
-    
+
     @staticmethod
     def _get_macos_last_open_time(file_path: Path) -> Optional[float]:
         """
@@ -310,31 +309,31 @@ class CriteriaMatcher:
         """
         if platform.system() != "Darwin":
             return None
-        
+
         try:
             # Method 1: Try mdls (Spotlight metadata) - most reliable
             try:
                 result = subprocess.run(
-                    ['mdls', '-name', 'kMDItemLastUsedDate', str(file_path)],
-                    capture_output=True,
+                    ["mdls", "-name", "kMDItemLastUsedDate", str(file_path)],
+                    check=False, capture_output=True,
                     timeout=2,
                     text=True
                 )
                 if result.returncode == 0 and result.stdout:
                     # Parse output like: kMDItemLastUsedDate = 2024-01-01 12:00:00 +0000
                     output = result.stdout.strip()
-                    if '=' in output:
-                        date_str = output.split('=', 1)[1].strip()
-                        if date_str and date_str != '(null)':
+                    if "=" in output:
+                        date_str = output.split("=", 1)[1].strip()
+                        if date_str and date_str != "(null)":
                             # Parse date string (format: YYYY-MM-DD HH:MM:SS +0000 or YYYY-MM-DD HH:MM:SS -0000)
                             try:
                                 from datetime import timezone
                                 # Try parsing with timezone first
-                                if '+' in date_str or (date_str.count('-') >= 3 and date_str[-5] in '+-'):
+                                if "+" in date_str or (date_str.count("-") >= 3 and date_str[-5] in "+-"):
                                     # Has timezone info - use strptime with %z to properly parse timezone
                                     try:
                                         # Parse with timezone (e.g., "2024-01-15 10:30:00 +0000")
-                                        dt = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S %z')
+                                        dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
                                         # dt is now timezone-aware, convert to Unix timestamp
                                         # timestamp() will correctly convert from any timezone to Unix time
                                         timestamp = dt.timestamp()
@@ -342,10 +341,10 @@ class CriteriaMatcher:
                                         return timestamp
                                     except ValueError:
                                         # If %z parsing fails, try manual UTC parsing
-                                        parts = date_str.rsplit(' ', 1)
+                                        parts = date_str.rsplit(" ", 1)
                                         if len(parts) == 2:
                                             date_part = parts[0]
-                                            dt_naive = datetime.strptime(date_part, '%Y-%m-%d %H:%M:%S')
+                                            dt_naive = datetime.strptime(date_part, "%Y-%m-%d %H:%M:%S")
                                             # Assume UTC and create timezone-aware datetime
                                             dt_utc = dt_naive.replace(tzinfo=timezone.utc)
                                             timestamp = dt_utc.timestamp()
@@ -353,7 +352,7 @@ class CriteriaMatcher:
                                             return timestamp
                                 else:
                                     # No timezone info, assume UTC (mdls typically returns UTC)
-                                    dt_naive = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
+                                    dt_naive = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
                                     # Mark as UTC timezone-aware
                                     dt_utc = dt_naive.replace(tzinfo=timezone.utc)
                                     timestamp = dt_utc.timestamp()
@@ -361,15 +360,14 @@ class CriteriaMatcher:
                                     return timestamp
                             except ValueError as e:
                                 logger.debug(f"File {file_path}: Failed to parse mdls date '{date_str}': {e}")
-                                pass
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 pass
-            
+
             # Method 2: Try xattr extended attributes
             try:
                 result = subprocess.run(
-                    ['xattr', '-p', 'com.apple.lastuseddate#PS', str(file_path)],
-                    capture_output=True,
+                    ["xattr", "-p", "com.apple.lastuseddate#PS", str(file_path)],
+                    check=False, capture_output=True,
                     timeout=2,
                     text=True
                 )
@@ -379,9 +377,9 @@ class CriteriaMatcher:
                     pass
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 pass
-            
+
         except Exception as e:
             logger.debug(f"File {file_path}: Error getting macOS Last Open time: {e}")
-        
+
         return None
 
