@@ -2,19 +2,20 @@
 import logging
 import os
 import shutil
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pathlib import Path
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
-from typing import List
-from pathlib import Path
-from app.database import get_db
-from app.models import MonitoredPath, CriterionType, ColdStorageLocation, FileInventory
+
 from app import schemas
-from app.services.scheduler import scheduler_service
+from app.database import get_db
+from app.models import ColdStorageLocation, CriterionType, FileInventory, MonitoredPath
 from app.services.scan_progress import scan_progress_manager
-from app.services.path_migration import PathMigrationService
-from app.utils.network_detection import check_atime_availability
+from app.services.scheduler import scheduler_service
 from app.utils.indexing import IndexingManager
+from app.utils.network_detection import check_atime_availability
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ def list_paths(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     result = []
     for path, file_count in paths_with_counts:
         summary = schemas.MonitoredPathSummary(
-            **{k: v for k, v in path.__dict__.items() if not k.startswith('_')},
+            **{k: v for k, v in path.__dict__.items() if not k.startswith("_")},
             file_count=file_count,
             is_path_present=os.path.exists(path.source_path),
         )
@@ -107,19 +108,19 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
                 unique_volumes[device_id] = path_str
         except FileNotFoundError:
             # Handle cases where the path doesn't exist
-            if 'not_found' not in unique_volumes:
-                unique_volumes['not_found'] = []
-            unique_volumes['not_found'].append(path_str)
+            if "not_found" not in unique_volumes:
+                unique_volumes["not_found"] = []
+            unique_volumes["not_found"].append(path_str)
         except Exception as e:
             # Handle other potential errors
             logger.error(f"Error stating path {path_str}: {e}")
-            if 'error' not in unique_volumes:
-                unique_volumes['error'] = []
-            unique_volumes['error'].append(path_str)
+            if "error" not in unique_volumes:
+                unique_volumes["error"] = []
+            unique_volumes["error"].append(path_str)
 
     stats_list = []
     for device_id, path_str in unique_volumes.items():
-        if device_id == 'not_found' or device_id == 'error':
+        if device_id == "not_found" or device_id == "error":
             for p in path_str:
                 stats_list.append(schemas.StorageStats(
                     path=p,
@@ -184,7 +185,7 @@ def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)
         )
 
     # Create path without storage_location_ids (not a DB column)
-    path_data = path.model_dump(exclude={'storage_location_ids'})
+    path_data = path.model_dump(exclude={"storage_location_ids"})
     db_path = MonitoredPath(**path_data)
     db_path.storage_locations = storage_locations
 
@@ -231,7 +232,7 @@ def get_path(path_id: int, db: Session = Depends(get_db)):
     file_count = db.query(func.count(FileInventory.id)).filter(FileInventory.path_id == path_id).scalar()
 
     return schemas.MonitoredPathSummary(
-        **{k: v for k, v in db_path.__dict__.items() if not k.startswith('_')},
+        **{k: v for k, v in db_path.__dict__.items() if not k.startswith("_")},
         file_count=file_count,
         is_path_present=os.path.exists(db_path.source_path),
     )
@@ -263,7 +264,7 @@ def update_path(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Source path does not exist or is not a directory: {update_data['source_path']}"
             )
-    
+
     # Check for duplicate name if name is being updated
     if "name" in update_data:
         existing = db.query(MonitoredPath).filter(
@@ -277,7 +278,7 @@ def update_path(
             )
 
     # Handle storage_location_ids update if provided
-    storage_location_ids = update_data.pop('storage_location_ids', None)
+    storage_location_ids = update_data.pop("storage_location_ids", None)
     if storage_location_ids is not None:
         storage_locations = db.query(ColdStorageLocation).filter(
             ColdStorageLocation.id.in_(storage_location_ids)
@@ -333,21 +334,21 @@ def delete_path(
         path_id: The path ID to delete
         undo_operations: If True, move all files back from cold storage before deleting
     """
-    
+
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
     if not path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Path with id {path_id} not found"
         )
-    
+
     results = {
         "path_id": path_id,
         "undo_operations": undo_operations,
         "files_reversed": 0,
         "errors": []
     }
-    
+
     # If undo_operations is True, reverse all file operations first
     if undo_operations:
         from app.services.path_reverser import PathReverser
@@ -355,14 +356,14 @@ def delete_path(
         reverse_results = PathReverser.reverse_path_operations(path_id, db)
         results["files_reversed"] = reverse_results["files_reversed"]
         results["errors"] = reverse_results["errors"]
-    
+
     # Remove from scheduler
     scheduler_service.remove_path_job(path_id)
-    
+
     # Delete the path
     db.delete(path)
     db.commit()
-    
+
     return results
 
 

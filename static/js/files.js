@@ -1,4 +1,4 @@
-// Files browser JavaScript - client-side rendering with virtual scrolling and pagination
+// Files browser JavaScript - AG Grid implementation with streaming data
 const API_BASE_URL = '/api/v1';
 
 // Filter state
@@ -15,13 +15,14 @@ let totalItems = 0;
 let nextCursor = null;
 let hasMoreData = false;
 let isLoadingMore = false;
-let pageSize = 200; // Load 200 files per page
+let pageSize = 200;
 
 // Streaming state
 let currentAbortController = null;
 
-// Virtual table instance
-let virtualTable = null;
+// AG Grid instance
+let gridApi = null;
+let allRowData = [];
 
 // Utility functions
 function escapeHtml(text) {
@@ -39,6 +40,7 @@ function formatBytes(bytes) {
 }
 
 function formatDate(dateString) {
+    if (!dateString) return '';
     const date = new Date(dateString);
     return date.toLocaleString();
 }
@@ -48,109 +50,47 @@ function showNotification(message, type = 'success') {
     showToast(message, type);
 }
 
-// Sorting functions (server-side sorting)
-function handleSortClick(column) {
-    if (currentSortBy === column) {
-        // Toggle direction
-        currentSortOrder = currentSortOrder === 'asc' ? 'desc' : 'asc';
-    } else {
-        // New column, default to descending
-        currentSortBy = column;
-        currentSortOrder = 'desc';
-    }
-
-    loadFilesList();
+// Cell Renderers for AG Grid
+function filePathCellRenderer(params) {
+    if (!params.value) return '';
+    return `<code class="file-path-cell">${escapeHtml(params.value)}</code>`;
 }
 
-function updateSortIndicators() {
-    // Remove all sort classes
-    document.querySelectorAll('th.sortable').forEach(th => {
-        th.classList.remove('sort-asc', 'sort-desc');
-    });
-
-    // Add current sort class
-    const currentHeader = document.querySelector(`th[data-sort="${currentSortBy}"]`);
-    if (currentHeader) {
-        currentHeader.classList.add(`sort-${currentSortOrder}`);
+function storageCellRenderer(params) {
+    const storageType = params.value;
+    if (storageType === 'hot') {
+        return '<span class="badge bg-success">Hot</span>';
+    } else if (storageType === 'cold') {
+        return '<span class="badge bg-info">Cold</span>';
     }
+    return '';
 }
 
-/**
- * Create a table row element for a file (used by VirtualTable)
- */
-function createFileRow(file, index) {
-    const row = document.createElement('tr');
-    row.className = 'virtual-table-row';
-    row.dataset.fileId = file.id;
-    row.dataset.filePath = file.file_path;
-
-    const storageBadge = file.storage_type === 'hot'
-        ? '<span class="badge bg-success">Hot</span>'
-        : '<span class="badge bg-info">Cold</span>';
-
-    // Storage location display for cold storage files
-    let storageLocationHtml = '<span class="text-muted">-</span>';
-    if (file.storage_type === 'cold' && file.storage_location) {
-        if (file.storage_location.available === false) {
-            storageLocationHtml = `
-                <span class="badge bg-danger" title="Storage unavailable - drive may be ejected">
-                    <i class="bi bi-exclamation-triangle"></i> ${escapeHtml(file.storage_location.name)}
-                </span>`;
-        } else {
-            storageLocationHtml = `<span class="badge bg-secondary">${escapeHtml(file.storage_location.name)}</span>`;
-        }
+function storageLocationCellRenderer(params) {
+    const file = params.data;
+    if (file.storage_type !== 'cold' || !file.storage_location) {
+        return '<span class="text-muted">-</span>';
     }
-
-    const isMigrating = file.status === 'migrating';
-    const storageUnavailable = file.storage_type === 'cold' &&
-        file.storage_location && file.storage_location.available === false;
-
-    let actionButton;
-    if (isMigrating) {
-        actionButton = `
-            <span class="text-warning">
-                <span class="spinner-border spinner-border-sm" role="status"></span>
-                <span class="d-none d-sm-inline">Migrating...</span>
-            </span>`;
-    } else if (storageUnavailable) {
-        actionButton = `
-            <span class="text-danger" title="Storage unavailable - reconnect drive to perform actions">
-                <i class="bi bi-hdd-network"></i><span class="d-none d-sm-inline"> Offline</span>
-            </span>`;
-    } else if (file.storage_type === 'cold') {
-        actionButton = `
-            <div class="btn-group btn-group-sm" role="group">
-                <button type="button" class="btn btn-warning" data-action="thaw" title="Move file back to hot storage">
-                    <i class="bi bi-fire"></i><span class="d-none d-lg-inline"> Thaw</span>
-                </button>
-                <button type="button" class="btn btn-outline-primary" data-action="relocate" title="Move to another cold storage location">
-                    <i class="bi bi-arrow-right-circle"></i><span class="d-none d-xl-inline"> Relocate</span>
-                </button>
-            </div>`;
-    } else {
-        // Hot storage files - show freeze button
-        actionButton = `
-            <button type="button" class="btn btn-sm btn-info" data-action="freeze" title="Send to cold storage">
-                <i class="bi bi-snow"></i><span class="d-none d-lg-inline"> Fridge</span>
-            </button>`;
+    if (file.storage_location.available === false) {
+        return `<span class="badge bg-danger" title="Storage unavailable - drive may be ejected">
+            <i class="bi bi-exclamation-triangle"></i> ${escapeHtml(file.storage_location.name)}
+        </span>`;
     }
+    return `<span class="badge bg-secondary">${escapeHtml(file.storage_location.name)}</span>`;
+}
 
-    const mtime = file.file_mtime ? formatDate(file.file_mtime) : '<span class="text-muted">N/A</span>';
-    const atime = file.file_atime ? formatDate(file.file_atime) : '<span class="text-muted">N/A</span>';
-    const ctime = file.file_ctime ? formatDate(file.file_ctime) : '<span class="text-muted">N/A</span>';
+function sizeCellRenderer(params) {
+    if (params.value === null || params.value === undefined) return '';
+    return formatBytes(params.value);
+}
 
-    let tagsHtml = '';
-    if (file.tags && file.tags.length > 0) {
-        tagsHtml = file.tags.map(ft => {
-            const color = ft.tag && ft.tag.color ? ft.tag.color : '#6c757d';
-            const name = ft.tag && ft.tag.name ? ft.tag.name : 'Unknown';
-            return `<span class="badge me-1" style="background-color: ${color};">${escapeHtml(name)}</span>`;
-        }).join('');
-    }
-    tagsHtml += `<button type="button" class="btn btn-sm btn-outline-primary" data-action="manageTags" title="Manage tags">
-        <i class="bi bi-tags"></i>
-    </button>`;
+function dateCellRenderer(params) {
+    if (!params.value) return '<span class="text-muted">N/A</span>';
+    return `<small>${formatDate(params.value)}</small>`;
+}
 
+function statusCellRenderer(params) {
+    const file = params.data;
     let statusBadgeClass = 'bg-secondary';
     if (file.status === 'active') {
         statusBadgeClass = 'bg-success';
@@ -160,67 +100,254 @@ function createFileRow(file, index) {
         statusBadgeClass = 'bg-danger';
     }
 
-    // Pin indicator shown next to status
     const pinIndicator = file.is_pinned
         ? '<i class="bi bi-pin-fill text-secondary me-1" title="File is pinned"></i>'
         : '';
 
-    row.innerHTML = `
-        <td class="file-path-cell"><code>${escapeHtml(file.file_path)}</code></td>
-        <td>${storageBadge}</td>
-        <td class="d-none d-lg-table-cell">${storageLocationHtml}</td>
-        <td class="d-none d-md-table-cell">${formatBytes(file.file_size)}</td>
-        <td class="d-none d-xl-table-cell"><small>${mtime}</small></td>
-        <td class="d-none d-xl-table-cell"><small>${atime}</small></td>
-        <td class="d-none d-xl-table-cell"><small>${ctime}</small></td>
-        <td>${pinIndicator}<span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span></td>
-        <td class="d-none d-lg-table-cell"><small>${formatDate(file.last_seen)}</small></td>
-        <td class="d-none d-md-table-cell">${tagsHtml}</td>
-        <td>${actionButton}</td>
-    `;
-
-    return row;
+    return `${pinIndicator}<span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span>`;
 }
 
-/**
- * Initialize virtual table
- */
-function initVirtualTable() {
-    const container = document.getElementById('virtualTableContainer');
-    const tbody = document.querySelector('#filesTable tbody');
+function tagsCellRenderer(params) {
+    const file = params.data;
+    let tagsHtml = '';
+    if (file.tags && file.tags.length > 0) {
+        tagsHtml = file.tags.map(ft => {
+            const color = ft.tag && ft.tag.color ? ft.tag.color : '#6c757d';
+            const name = ft.tag && ft.tag.name ? ft.tag.name : 'Unknown';
+            return `<span class="badge me-1" style="background-color: ${color};">${escapeHtml(name)}</span>`;
+        }).join('');
+    }
+    tagsHtml += `<button type="button" class="btn btn-sm btn-outline-primary" data-action="manageTags" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Manage tags">
+        <i class="bi bi-tags"></i>
+    </button>`;
+    return tagsHtml;
+}
 
-    if (!container || !tbody) {
-        console.error('Virtual table elements not found');
-        return;
+function actionsCellRenderer(params) {
+    const file = params.data;
+    const isMigrating = file.status === 'migrating';
+    const storageUnavailable = file.storage_type === 'cold' &&
+        file.storage_location && file.storage_location.available === false;
+
+    if (isMigrating) {
+        return `<span class="text-warning">
+            <span class="spinner-border spinner-border-sm" role="status"></span>
+            <span class="d-none d-sm-inline">Migrating...</span>
+        </span>`;
     }
 
-    virtualTable = new VirtualTable({
-        container: container,
-        tbody: tbody,
-        rowHeight: 48,
-        bufferSize: 10,
-        renderRow: createFileRow,
-        onNearEnd: loadMoreFiles,
-        nearEndThreshold: 500
-    });
+    if (storageUnavailable) {
+        return `<span class="text-danger" title="Storage unavailable - reconnect drive to perform actions">
+            <i class="bi bi-hdd-network"></i><span class="d-none d-sm-inline"> Offline</span>
+        </span>`;
+    }
 
-    // Setup event delegation for action buttons
-    tbody.addEventListener('click', handleRowAction);
+    if (file.storage_type === 'cold') {
+        return `<div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-warning" data-action="thaw" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Move file back to hot storage">
+                <i class="bi bi-fire"></i><span class="d-none d-lg-inline"> Thaw</span>
+            </button>
+            <button type="button" class="btn btn-outline-primary" data-action="relocate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Move to another cold storage location">
+                <i class="bi bi-arrow-right-circle"></i><span class="d-none d-xl-inline"> Relocate</span>
+            </button>
+        </div>`;
+    }
+
+    // Hot storage files - show freeze button
+    return `<button type="button" class="btn btn-sm btn-info" data-action="freeze" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Send to cold storage">
+        <i class="bi bi-snow"></i><span class="d-none d-lg-inline"> Fridge</span>
+    </button>`;
 }
 
-/**
- * Handle action button clicks via event delegation
- */
-function handleRowAction(event) {
+// AG Grid Column Definitions
+const columnDefs = [
+    {
+        headerName: '',
+        field: 'selected',
+        width: 50,
+        maxWidth: 50,
+        checkboxSelection: true,
+        headerCheckboxSelection: true,
+        headerCheckboxSelectionFilteredOnly: true,
+        sortable: false,
+        resizable: false,
+        pinned: 'left'
+    },
+    {
+        field: 'file_path',
+        headerName: 'File Path',
+        cellRenderer: filePathCellRenderer,
+        flex: 2,
+        minWidth: 200,
+        sortable: true,
+        resizable: true,
+        tooltipField: 'file_path'
+    },
+    {
+        field: 'storage_type',
+        headerName: 'Storage',
+        cellRenderer: storageCellRenderer,
+        width: 90,
+        sortable: true,
+        resizable: true
+    },
+    {
+        headerName: 'Location',
+        cellRenderer: storageLocationCellRenderer,
+        width: 130,
+        sortable: false,
+        resizable: true
+    },
+    {
+        field: 'file_size',
+        headerName: 'Size',
+        cellRenderer: sizeCellRenderer,
+        width: 100,
+        sortable: true,
+        resizable: true,
+        type: 'numericColumn'
+    },
+    {
+        field: 'file_mtime',
+        headerName: 'Modified',
+        cellRenderer: dateCellRenderer,
+        width: 160,
+        sortable: true,
+        resizable: true
+    },
+    {
+        field: 'file_atime',
+        headerName: 'Accessed',
+        cellRenderer: dateCellRenderer,
+        width: 160,
+        sortable: true,
+        resizable: true
+    },
+    {
+        field: 'file_ctime',
+        headerName: 'Changed',
+        cellRenderer: dateCellRenderer,
+        width: 160,
+        sortable: true,
+        resizable: true
+    },
+    {
+        field: 'status',
+        headerName: 'Status',
+        cellRenderer: statusCellRenderer,
+        width: 110,
+        sortable: true,
+        resizable: true
+    },
+    {
+        field: 'last_seen',
+        headerName: 'Last Seen',
+        cellRenderer: dateCellRenderer,
+        width: 160,
+        sortable: true,
+        resizable: true
+    },
+    {
+        headerName: 'Tags',
+        cellRenderer: tagsCellRenderer,
+        width: 150,
+        sortable: false,
+        resizable: true,
+        autoHeight: true
+    },
+    {
+        headerName: 'Actions',
+        cellRenderer: actionsCellRenderer,
+        width: 150,
+        sortable: false,
+        resizable: false,
+        pinned: 'right'
+    }
+];
+
+// AG Grid Options
+const gridOptions = {
+    columnDefs: columnDefs,
+    rowData: [],
+    defaultColDef: {
+        resizable: true,
+        sortable: true
+    },
+    animateRows: true,
+    rowHeight: 48,
+    headerHeight: 40,
+    suppressCellFocus: true,
+    enableCellTextSelection: true,
+    ensureDomOrder: true,
+    getRowId: params => String(params.data.id),
+    onSortChanged: onGridSortChanged,
+    onGridReady: onGridReady,
+    onBodyScroll: onBodyScroll,
+    onSelectionChanged: onSelectionChanged,
+    tooltipShowDelay: 500,
+    rowSelection: 'multiple',
+    suppressRowClickSelection: true,
+    overlayLoadingTemplate: '<span class="spinner-border spinner-border-sm text-primary" role="status"></span> Loading...',
+    overlayNoRowsTemplate: '<span class="text-muted">No files found</span>'
+};
+
+// Handle AG Grid sort changes
+function onGridSortChanged(event) {
+    const sortModel = event.api.getColumnState().filter(col => col.sort);
+    if (sortModel.length > 0) {
+        const sortedColumn = sortModel[0];
+        const fieldToSortBy = {
+            'file_path': 'file_path',
+            'storage_type': 'storage_type',
+            'file_size': 'file_size',
+            'file_mtime': 'file_mtime',
+            'file_atime': 'file_atime',
+            'file_ctime': 'file_ctime',
+            'status': 'status',
+            'last_seen': 'last_seen'
+        };
+
+        const apiSortField = fieldToSortBy[sortedColumn.colId];
+        if (apiSortField) {
+            currentSortBy = apiSortField;
+            currentSortOrder = sortedColumn.sort;
+            loadFilesList();
+        }
+    }
+}
+
+// Handle grid ready
+function onGridReady(params) {
+    gridApi = params.api;
+
+    // Add click handler for action buttons
+    document.getElementById('filesGrid').addEventListener('click', handleActionClick);
+}
+
+// Handle body scroll for infinite scrolling
+function onBodyScroll(event) {
+    if (!gridApi || isLoadingMore || !hasMoreData) return;
+
+    const verticalScrollPosition = event.top;
+    const gridBody = document.querySelector('.ag-body-viewport');
+    if (!gridBody) return;
+
+    const maxScrollTop = gridBody.scrollHeight - gridBody.clientHeight;
+
+    // Load more when near the bottom
+    if (maxScrollTop - verticalScrollPosition < 500) {
+        loadMoreFiles();
+    }
+}
+
+// Handle action button clicks
+function handleActionClick(event) {
     const button = event.target.closest('[data-action]');
     if (!button) return;
 
-    const row = button.closest('tr');
-    if (!row) return;
-
-    const fileId = parseInt(row.dataset.fileId);
-    const filePath = row.dataset.filePath;
     const action = button.dataset.action;
+    const fileId = parseInt(button.dataset.fileId);
+    const filePath = button.dataset.filePath;
 
     switch (action) {
         case 'thaw':
@@ -236,6 +363,17 @@ function handleRowAction(event) {
             showManageTagsModal(fileId, filePath);
             break;
     }
+}
+
+// Initialize AG Grid
+function initGrid() {
+    const gridDiv = document.getElementById('filesGrid');
+    if (!gridDiv) {
+        console.error('Grid container not found');
+        return;
+    }
+
+    agGrid.createGrid(gridDiv, gridOptions);
 }
 
 // Handle metadata message from stream
@@ -254,12 +392,6 @@ function handleStreamMetadata(metadata) {
     if (progressContainer) {
         progressContainer.style.display = 'block';
     }
-
-    // Show content container early so rows can be appended
-    const contentEl = document.getElementById('files-content');
-    if (contentEl && totalItems > 0) {
-        contentEl.style.display = 'block';
-    }
 }
 
 // Update progress bar during streaming
@@ -277,7 +409,7 @@ function handleStreamComplete(message) {
     console.log(`Stream complete: ${message.count} files in ${message.duration_ms}ms`);
     hasMoreData = message.has_more;
     nextCursor = message.next_cursor;
-    renderStreamSummary();
+    updateStatusBar();
 }
 
 // Handle stream error
@@ -286,27 +418,25 @@ function handleStreamError(message) {
     showNotification(`Error loading files: ${message.message}. Received ${message.partial_count} files before error.`, 'error');
 }
 
-// Render summary after streaming completes
-function renderStreamSummary() {
-    const paginationEl = document.getElementById('pagination-controls');
-    if (!paginationEl) return;
+// Update status bar
+function updateStatusBar() {
+    const statusBar = document.getElementById('status-bar');
+    if (!statusBar) return;
 
-    const loadedCount = virtualTable ? virtualTable.getCount() : 0;
+    const loadedCount = allRowData.length;
     const moreText = hasMoreData ? ' (scroll for more)' : '';
 
-    paginationEl.innerHTML = `
-        <p class="text-center text-muted">
-            Showing ${loadedCount.toLocaleString()} of ${totalItems.toLocaleString()} files${moreText}
-        </p>
-    `;
+    statusBar.textContent = `Showing ${loadedCount.toLocaleString()} of ${totalItems.toLocaleString()} files${moreText}`;
 }
 
 // Process NDJSON stream
-async function processNDJSONStream(body) {
+async function processNDJSONStream(body, append = false) {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let receivedCount = 0;
+    const batchSize = 50;
+    let batch = [];
 
     try {
         while (true) {
@@ -314,12 +444,10 @@ async function processNDJSONStream(body) {
 
             if (done) break;
 
-            // Decode chunk and add to buffer
             buffer += decoder.decode(value, { stream: true });
 
-            // Process complete lines
             const lines = buffer.split('\n');
-            buffer = lines.pop(); // Keep incomplete line in buffer
+            buffer = lines.pop();
 
             for (const line of lines) {
                 if (!line.trim()) continue;
@@ -332,10 +460,23 @@ async function processNDJSONStream(body) {
                             handleStreamMetadata(message);
                             break;
                         case 'file':
-                            if (virtualTable) {
-                                virtualTable.appendData(message.data);
-                            }
+                            batch.push(message.data);
                             receivedCount++;
+
+                            // Process batch when it reaches size
+                            if (batch.length >= batchSize) {
+                                if (append) {
+                                    allRowData = allRowData.concat(batch);
+                                } else {
+                                    allRowData = allRowData.concat(batch);
+                                }
+
+                                if (gridApi) {
+                                    gridApi.setGridOption('rowData', allRowData);
+                                }
+                                batch = [];
+                            }
+
                             updateStreamProgress(receivedCount, totalItems);
                             break;
                         case 'complete':
@@ -348,6 +489,14 @@ async function processNDJSONStream(body) {
                 } catch (parseError) {
                     console.error('Failed to parse NDJSON line:', line, parseError);
                 }
+            }
+        }
+
+        // Process remaining batch
+        if (batch.length > 0) {
+            allRowData = allRowData.concat(batch);
+            if (gridApi) {
+                gridApi.setGridOption('rowData', allRowData);
             }
         }
 
@@ -379,17 +528,6 @@ async function loadMoreFiles() {
 
     isLoadingMore = true;
 
-    // Show loading indicator
-    const paginationEl = document.getElementById('pagination-controls');
-    if (paginationEl) {
-        paginationEl.innerHTML = `
-            <p class="text-center text-muted">
-                <span class="spinner-border spinner-border-sm" role="status"></span>
-                Loading more files...
-            </p>
-        `;
-    }
-
     try {
         const params = buildQueryParams();
         params.append('cursor', nextCursor);
@@ -401,8 +539,8 @@ async function loadMoreFiles() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        await processNDJSONStream(response.body);
-        renderStreamSummary();
+        await processNDJSONStream(response.body, true);
+        updateStatusBar();
 
     } catch (error) {
         console.error('Error loading more files:', error);
@@ -444,9 +582,9 @@ function buildQueryParams() {
 // Load and render files list via streaming
 async function loadFilesList() {
     const loadingEl = document.getElementById('files-loading');
-    const contentEl = document.getElementById('files-content');
+    const gridEl = document.getElementById('filesGrid');
     const emptyEl = document.getElementById('no-files-message');
-    const paginationEl = document.getElementById('pagination-controls');
+    const statusBar = document.getElementById('status-bar');
 
     // Abort any in-progress stream
     if (currentAbortController) {
@@ -461,13 +599,14 @@ async function loadFilesList() {
 
     // Show loading state
     if (loadingEl) loadingEl.style.display = 'block';
-    if (contentEl) contentEl.style.display = 'none';
+    if (gridEl) gridEl.style.display = 'none';
     if (emptyEl) emptyEl.style.display = 'none';
-    if (paginationEl) paginationEl.innerHTML = '';
+    if (statusBar) statusBar.textContent = '';
 
-    // Reset virtual table
-    if (virtualTable) {
-        virtualTable.reset();
+    // Reset row data
+    allRowData = [];
+    if (gridApi) {
+        gridApi.setGridOption('rowData', []);
     }
 
     // Reset progress
@@ -500,10 +639,8 @@ async function loadFilesList() {
         if (totalItems === 0) {
             if (emptyEl) emptyEl.style.display = 'block';
         } else {
-            if (contentEl) contentEl.style.display = 'block';
+            if (gridEl) gridEl.style.display = 'block';
         }
-
-        updateSortIndicators();
 
     } catch (error) {
         if (error.name === 'AbortError') {
@@ -549,7 +686,6 @@ async function loadPathsForFilter() {
             select.innerHTML = '<option value="">All Paths</option>' +
                 paths.map(p => `<option value="${p.id}" ${currentPathId == p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
 
-            // Add change event listener
             select.addEventListener('change', function() {
                 updateFilters();
             });
@@ -598,7 +734,7 @@ function updateFilters() {
         const selectedOptions = Array.from(tagSelect.selectedOptions);
         currentTagIds = selectedOptions
             .map(opt => opt.value)
-            .filter(val => val !== '') // Filter out "All Tags" option
+            .filter(val => val !== '')
             .map(val => parseInt(val));
     }
 
@@ -620,7 +756,6 @@ async function loadTagsForFilter() {
                     return `<option value="${tag.id}" style="background-color: ${color}20;">${escapeHtml(tag.name)} (${tag.file_count})</option>`;
                 }).join('');
 
-            // Add change event listener
             select.addEventListener('change', function() {
                 updateFilters();
             });
@@ -636,7 +771,6 @@ function clearTagFilter() {
     const tagSelect = document.getElementById('tag_filter');
     if (tagSelect) {
         tagSelect.selectedIndex = 0;
-        // Clear all selections
         Array.from(tagSelect.options).forEach(opt => opt.selected = false);
     }
     currentTagIds = [];
@@ -648,13 +782,9 @@ function showThawModal(inventoryId, filePath) {
     const modal = document.getElementById('thawModal');
     if (!modal) return;
 
-    // Update modal content
     document.getElementById('thawFileName').textContent = filePath;
-
-    // Set inventory ID for the confirm button
     document.getElementById('confirmThawBtn').dataset.inventoryId = inventoryId;
 
-    // Show modal
     const bsModal = new bootstrap.Modal(modal);
     bsModal.show();
 }
@@ -679,11 +809,9 @@ async function thawFile() {
         const data = await response.json();
         showNotification('File thawed successfully' + (pin ? ' and pinned' : ''));
 
-        // Close modal
         const modal = bootstrap.Modal.getInstance(document.getElementById('thawModal'));
         if (modal) modal.hide();
 
-        // Reload files
         loadFilesList();
     } catch (error) {
         console.error('Error thawing file:', error);
@@ -709,7 +837,6 @@ async function togglePin(inventoryId, currentlyPinned) {
         const data = await response.json();
         showNotification(data.message);
 
-        // Reload files to show updated pin status
         loadFilesList();
     } catch (error) {
         console.error(`Error ${action}ning file:`, error);
@@ -728,7 +855,6 @@ async function showFreezeModal(inventoryId, filePath) {
     const modal = document.getElementById('freezeModal');
     if (!modal) return;
 
-    // Reset modal state
     document.getElementById('freezeFileName').textContent = filePath;
     document.getElementById('freezeLocationSelect').innerHTML = '<option value="">Loading locations...</option>';
     document.getElementById('freezeLocationSelect').disabled = true;
@@ -741,13 +867,11 @@ async function showFreezeModal(inventoryId, filePath) {
         errorEl.classList.add('d-none');
     }
 
-    // Show modal
     if (!freezeModal) {
         freezeModal = new bootstrap.Modal(modal);
     }
     freezeModal.show();
 
-    // Load freeze options
     await loadFreezeOptions(inventoryId);
 }
 
@@ -767,7 +891,6 @@ async function loadFreezeOptions(inventoryId) {
         const data = await response.json();
 
         if (!data.can_freeze || data.available_locations.length === 0) {
-            // No locations available
             selectEl.innerHTML = '<option value="">No storage locations available</option>';
             selectEl.disabled = true;
             confirmBtn.disabled = true;
@@ -776,7 +899,6 @@ async function loadFreezeOptions(inventoryId) {
                 errorEl.classList.remove('d-none');
             }
         } else {
-            // Filter to available locations only
             const availableLocations = data.available_locations.filter(loc => loc.available);
 
             if (availableLocations.length === 0) {
@@ -788,14 +910,12 @@ async function loadFreezeOptions(inventoryId) {
                     errorEl.classList.remove('d-none');
                 }
             } else if (availableLocations.length === 1) {
-                // Only one location - preselect it
                 selectEl.innerHTML = availableLocations.map(loc =>
                     `<option value="${loc.id}" selected>${escapeHtml(loc.name)} (${escapeHtml(loc.path)})</option>`
                 ).join('');
                 selectEl.disabled = false;
                 confirmBtn.disabled = false;
             } else {
-                // Multiple locations - let user choose
                 selectEl.innerHTML = '<option value="">Select storage location...</option>' +
                     availableLocations.map(loc =>
                         `<option value="${loc.id}">${escapeHtml(loc.name)} (${escapeHtml(loc.path)})</option>`
@@ -836,13 +956,11 @@ async function freezeFile() {
 
     if (!storageLocationId || !currentFreezeInventoryId) return;
 
-    // Disable button during operation
     if (confirmBtn) {
         confirmBtn.disabled = true;
         confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Freezing...';
     }
 
-    // Clear previous error
     if (errorEl) {
         errorEl.textContent = '';
         errorEl.classList.add('d-none');
@@ -861,10 +979,8 @@ async function freezeFile() {
         const data = await response.json();
         showNotification(`File sent to ${data.storage_location.name}` + (pin ? ' and pinned' : ''));
 
-        // Close modal
         if (freezeModal) freezeModal.hide();
 
-        // Reload files to show updated state
         loadFilesList();
     } catch (error) {
         console.error('Error freezing file:', error);
@@ -874,7 +990,6 @@ async function freezeFile() {
             errorEl.classList.remove('d-none');
         }
     } finally {
-        // Reset button
         if (confirmBtn) {
             confirmBtn.disabled = false;
             confirmBtn.innerHTML = '<i class="bi bi-snow"></i> Send to Fridge';
@@ -925,16 +1040,6 @@ async function cleanupDuplicates() {
     }
 }
 
-// Setup sortable column click handlers
-function setupSortHandlers() {
-    document.querySelectorAll('th.sortable').forEach(header => {
-        header.addEventListener('click', function() {
-            const column = this.getAttribute('data-sort');
-            handleSortClick(column);
-        });
-    });
-}
-
 // Tag Management Functions
 let currentFileId = null;
 let allAvailableTags = [];
@@ -965,25 +1070,20 @@ async function showManageTagsModal(fileId, filePath) {
     const modal = document.getElementById('manageTagsModal');
     if (!modal) return;
 
-    // Update modal content
     document.getElementById('tagFileName').textContent = filePath;
 
-    // Load available tags if not already loaded
     if (allAvailableTags.length === 0) {
         await loadAvailableTags();
     }
 
-    // Populate tag select dropdown
     const selectEl = document.getElementById('addTagSelect');
     if (selectEl) {
         selectEl.innerHTML = '<option value="">Select a tag...</option>' +
             allAvailableTags.map(tag => `<option value="${tag.id}">${escapeHtml(tag.name)}</option>`).join('');
     }
 
-    // Load current tags for this file
     await loadFileTags(fileId);
 
-    // Show modal
     if (!manageTagsModal) {
         manageTagsModal = new bootstrap.Modal(modal);
     }
@@ -1036,7 +1136,6 @@ async function addTagToFile() {
     const errorEl = document.getElementById('tagError');
     const successEl = document.getElementById('tagSuccess');
 
-    // Clear previous messages
     if (errorEl) {
         errorEl.textContent = '';
         errorEl.classList.add('d-none');
@@ -1063,19 +1162,15 @@ async function addTagToFile() {
             throw new Error(error.detail || 'Failed to add tag');
         }
 
-        // Show success message
         if (successEl) {
             successEl.textContent = 'Tag added successfully';
             successEl.classList.remove('d-none');
         }
 
-        // Reset select
         if (selectEl) selectEl.value = '';
 
-        // Reload tags for this file
         await loadFileTags(currentFileId);
 
-        // Reload files list to update the table
         loadFilesList();
     } catch (error) {
         console.error('Error adding tag:', error);
@@ -1091,7 +1186,6 @@ async function removeTag(fileId, tagId) {
     const errorEl = document.getElementById('tagError');
     const successEl = document.getElementById('tagSuccess');
 
-    // Clear previous messages
     if (errorEl) {
         errorEl.textContent = '';
         errorEl.classList.add('d-none');
@@ -1111,16 +1205,13 @@ async function removeTag(fileId, tagId) {
             throw new Error(error.detail || 'Failed to remove tag');
         }
 
-        // Show success message
         if (successEl) {
             successEl.textContent = 'Tag removed successfully';
             successEl.classList.remove('d-none');
         }
 
-        // Reload tags for this file
         await loadFileTags(fileId);
 
-        // Reload files list to update the table
         loadFilesList();
     } catch (error) {
         console.error('Error removing tag:', error);
@@ -1140,7 +1231,6 @@ async function showRelocateModal(inventoryId, filePath) {
     const modal = document.getElementById('relocateModal');
     if (!modal) return;
 
-    // Reset modal state
     document.getElementById('relocateFileName').textContent = filePath;
     document.getElementById('relocateCurrentLocation').innerHTML = '<span class="text-muted">Loading...</span>';
     document.getElementById('relocateTargetSelect').innerHTML = '<option value="">Loading locations...</option>';
@@ -1157,13 +1247,11 @@ async function showRelocateModal(inventoryId, filePath) {
         noOptionsEl.classList.add('d-none');
     }
 
-    // Show modal
     if (!relocateModal) {
         relocateModal = new bootstrap.Modal(modal);
     }
     relocateModal.show();
 
-    // Load relocate options
     await loadRelocateOptions(inventoryId);
 }
 
@@ -1184,7 +1272,6 @@ async function loadRelocateOptions(inventoryId) {
 
         const data = await response.json();
 
-        // Show current location
         const currentLocation = data.available_locations.find(loc => loc.is_current);
         if (currentLocation) {
             currentLocationEl.innerHTML = `<span class="badge bg-info me-2">${escapeHtml(currentLocation.name)}</span><small class="text-muted">${escapeHtml(currentLocation.path)}</small>`;
@@ -1192,17 +1279,14 @@ async function loadRelocateOptions(inventoryId) {
             currentLocationEl.innerHTML = '<span class="text-muted">Unknown</span>';
         }
 
-        // Filter to get only non-current locations
         const targetLocations = data.available_locations.filter(loc => !loc.is_current);
 
         if (!data.can_relocate || targetLocations.length === 0) {
-            // No other locations available
             selectEl.innerHTML = '<option value="">No other locations available</option>';
             selectEl.disabled = true;
             confirmBtn.disabled = true;
             if (noOptionsEl) noOptionsEl.classList.remove('d-none');
         } else {
-            // Populate target locations
             selectEl.innerHTML = '<option value="">Select target location...</option>' +
                 targetLocations.map(loc =>
                     `<option value="${loc.id}">${escapeHtml(loc.name)} (${escapeHtml(loc.path)})</option>`
@@ -1241,13 +1325,11 @@ async function relocateFile() {
 
     if (!targetLocationId || !currentRelocateInventoryId) return;
 
-    // Disable button during operation
     if (confirmBtn) {
         confirmBtn.disabled = true;
         confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Starting...';
     }
 
-    // Clear previous error
     if (errorEl) {
         errorEl.textContent = '';
         errorEl.classList.add('d-none');
@@ -1271,13 +1353,10 @@ async function relocateFile() {
 
         const data = await response.json();
 
-        // Task was created successfully - it runs in the background
         showNotification(`Relocation started: moving file to ${data.target_location.name}. This will complete in the background.`);
 
-        // Close modal
         if (relocateModal) relocateModal.hide();
 
-        // Reload files to show updated state
         loadFilesList();
     } catch (error) {
         console.error('Error starting relocation:', error);
@@ -1287,13 +1366,465 @@ async function relocateFile() {
             errorEl.classList.remove('d-none');
         }
     } finally {
-        // Reset button
         if (confirmBtn) {
             confirmBtn.disabled = false;
             confirmBtn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> Relocate File';
         }
     }
 }
+
+// ============================================
+// Bulk Actions Support
+// ============================================
+
+let selectedFiles = [];
+let bulkFreezeModal = null;
+let bulkAddTagModal = null;
+let bulkRemoveTagModal = null;
+
+// Handle selection change
+function onSelectionChanged(event) {
+    selectedFiles = event.api.getSelectedRows();
+    updateBulkActionsToolbar();
+}
+
+// Update bulk actions toolbar visibility and state
+function updateBulkActionsToolbar() {
+    const toolbar = document.getElementById('bulk-actions-toolbar');
+    const countEl = document.getElementById('selection-count');
+
+    if (!toolbar) return;
+
+    if (selectedFiles.length > 0) {
+        toolbar.style.display = 'flex';
+        if (countEl) {
+            countEl.textContent = `${selectedFiles.length} file${selectedFiles.length > 1 ? 's' : ''} selected`;
+        }
+
+        // Update button states based on selection
+        const hotFiles = selectedFiles.filter(f => f.storage_type === 'hot');
+        const coldFiles = selectedFiles.filter(f => f.storage_type === 'cold');
+
+        const thawBtn = document.getElementById('bulk-thaw-btn');
+        const freezeBtn = document.getElementById('bulk-freeze-btn');
+
+        if (thawBtn) {
+            thawBtn.disabled = coldFiles.length === 0;
+            thawBtn.title = coldFiles.length === 0 ? 'Select cold storage files to thaw' : `Thaw ${coldFiles.length} file(s)`;
+        }
+        if (freezeBtn) {
+            freezeBtn.disabled = hotFiles.length === 0;
+            freezeBtn.title = hotFiles.length === 0 ? 'Select hot storage files to freeze' : `Freeze ${hotFiles.length} file(s)`;
+        }
+    } else {
+        toolbar.style.display = 'none';
+    }
+}
+
+// Clear selection
+function clearSelection() {
+    if (gridApi) {
+        gridApi.deselectAll();
+    }
+    selectedFiles = [];
+    updateBulkActionsToolbar();
+}
+
+// Get selected file IDs
+function getSelectedFileIds() {
+    return selectedFiles.map(f => f.id);
+}
+
+// Show bulk thaw confirmation
+function showBulkThawModal() {
+    const coldFiles = selectedFiles.filter(f => f.storage_type === 'cold');
+    if (coldFiles.length === 0) {
+        showNotification('No cold storage files selected', 'warning');
+        return;
+    }
+
+    const modal = document.getElementById('bulkThawModal');
+    if (!modal) return;
+
+    document.getElementById('bulkThawCount').textContent = coldFiles.length;
+    document.getElementById('bulkThawPinCheckbox').checked = false;
+
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+}
+
+// Execute bulk thaw
+async function executeBulkThaw() {
+    const coldFiles = selectedFiles.filter(f => f.storage_type === 'cold');
+    const fileIds = coldFiles.map(f => f.id);
+    const pinCheckbox = document.getElementById('bulkThawPinCheckbox');
+    const pin = pinCheckbox ? pinCheckbox.checked : false;
+
+    const confirmBtn = document.getElementById('confirmBulkThawBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Thawing...';
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/files/bulk/thaw?pin=${pin}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_ids: fileIds })
+        });
+
+        if (!response.ok) {
+            throw new Error('Bulk thaw request failed');
+        }
+
+        const result = await response.json();
+        showNotification(`Thawed ${result.successful} of ${result.total} files` +
+            (result.failed > 0 ? ` (${result.failed} failed)` : ''));
+
+        bootstrap.Modal.getInstance(document.getElementById('bulkThawModal'))?.hide();
+        clearSelection();
+        loadFilesList();
+
+    } catch (error) {
+        console.error('Bulk thaw error:', error);
+        showNotification(`Bulk thaw failed: ${error.message}`, 'error');
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="bi bi-fire"></i> Thaw Files';
+        }
+    }
+}
+
+// Show bulk freeze modal
+async function showBulkFreezeModal() {
+    const hotFiles = selectedFiles.filter(f => f.storage_type === 'hot');
+    if (hotFiles.length === 0) {
+        showNotification('No hot storage files selected', 'warning');
+        return;
+    }
+
+    const modal = document.getElementById('bulkFreezeModal');
+    if (!modal) return;
+
+    document.getElementById('bulkFreezeCount').textContent = hotFiles.length;
+    document.getElementById('bulkFreezeLocationSelect').innerHTML = '<option value="">Loading...</option>';
+    document.getElementById('bulkFreezeLocationSelect').disabled = true;
+    document.getElementById('confirmBulkFreezeBtn').disabled = true;
+    document.getElementById('bulkFreezePinCheckbox').checked = false;
+
+    if (!bulkFreezeModal) {
+        bulkFreezeModal = new bootstrap.Modal(modal);
+    }
+    bulkFreezeModal.show();
+
+    // Load storage locations
+    try {
+        const response = await fetch(`${API_BASE_URL}/storage/locations`);
+        if (!response.ok) throw new Error('Failed to load storage locations');
+
+        const locations = await response.json();
+        const selectEl = document.getElementById('bulkFreezeLocationSelect');
+
+        if (locations.length === 0) {
+            selectEl.innerHTML = '<option value="">No storage locations available</option>';
+        } else {
+            selectEl.innerHTML = '<option value="">Select storage location...</option>' +
+                locations.map(loc => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`).join('');
+            selectEl.disabled = false;
+        }
+    } catch (error) {
+        console.error('Error loading storage locations:', error);
+        document.getElementById('bulkFreezeLocationSelect').innerHTML =
+            '<option value="">Error loading locations</option>';
+    }
+}
+
+// Handle bulk freeze location change
+function onBulkFreezeLocationChange() {
+    const selectEl = document.getElementById('bulkFreezeLocationSelect');
+    const confirmBtn = document.getElementById('confirmBulkFreezeBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = !selectEl || !selectEl.value;
+    }
+}
+
+// Execute bulk freeze
+async function executeBulkFreeze() {
+    const hotFiles = selectedFiles.filter(f => f.storage_type === 'hot');
+    const fileIds = hotFiles.map(f => f.id);
+    const selectEl = document.getElementById('bulkFreezeLocationSelect');
+    const storageLocationId = selectEl ? parseInt(selectEl.value) : null;
+    const pinCheckbox = document.getElementById('bulkFreezePinCheckbox');
+    const pin = pinCheckbox ? pinCheckbox.checked : false;
+
+    if (!storageLocationId) return;
+
+    const confirmBtn = document.getElementById('confirmBulkFreezeBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Freezing...';
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/files/bulk/freeze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_ids: fileIds,
+                storage_location_id: storageLocationId,
+                pin: pin
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error('Bulk freeze request failed');
+        }
+
+        const result = await response.json();
+        showNotification(`Frozen ${result.successful} of ${result.total} files` +
+            (result.failed > 0 ? ` (${result.failed} failed)` : ''));
+
+        bulkFreezeModal?.hide();
+        clearSelection();
+        loadFilesList();
+
+    } catch (error) {
+        console.error('Bulk freeze error:', error);
+        showNotification(`Bulk freeze failed: ${error.message}`, 'error');
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="bi bi-snow"></i> Freeze Files';
+        }
+    }
+}
+
+// Show bulk add tag modal
+async function showBulkAddTagModal() {
+    if (selectedFiles.length === 0) return;
+
+    const modal = document.getElementById('bulkAddTagModal');
+    if (!modal) return;
+
+    document.getElementById('bulkAddTagCount').textContent = selectedFiles.length;
+
+    // Load tags if needed
+    if (allAvailableTags.length === 0) {
+        await loadAvailableTags();
+    }
+
+    const selectEl = document.getElementById('bulkAddTagSelect');
+    if (selectEl) {
+        selectEl.innerHTML = '<option value="">Select a tag...</option>' +
+            allAvailableTags.map(tag =>
+                `<option value="${tag.id}">${escapeHtml(tag.name)}</option>`
+            ).join('');
+    }
+
+    document.getElementById('confirmBulkAddTagBtn').disabled = true;
+
+    if (!bulkAddTagModal) {
+        bulkAddTagModal = new bootstrap.Modal(modal);
+    }
+    bulkAddTagModal.show();
+}
+
+// Handle bulk add tag select change
+function onBulkAddTagSelectChange() {
+    const selectEl = document.getElementById('bulkAddTagSelect');
+    const confirmBtn = document.getElementById('confirmBulkAddTagBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = !selectEl || !selectEl.value;
+    }
+}
+
+// Execute bulk add tag
+async function executeBulkAddTag() {
+    const fileIds = getSelectedFileIds();
+    const selectEl = document.getElementById('bulkAddTagSelect');
+    const tagId = selectEl ? parseInt(selectEl.value) : null;
+
+    if (!tagId) return;
+
+    const confirmBtn = document.getElementById('confirmBulkAddTagBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Adding...';
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags/bulk/add`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_ids: fileIds, tag_id: tagId })
+        });
+
+        if (!response.ok) {
+            throw new Error('Bulk add tag request failed');
+        }
+
+        const result = await response.json();
+        showNotification(`Added tag to ${result.successful} of ${result.total} files` +
+            (result.failed > 0 ? ` (${result.failed} failed)` : ''));
+
+        bulkAddTagModal?.hide();
+        clearSelection();
+        loadFilesList();
+
+    } catch (error) {
+        console.error('Bulk add tag error:', error);
+        showNotification(`Bulk add tag failed: ${error.message}`, 'error');
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="bi bi-tag"></i> Add Tag';
+        }
+    }
+}
+
+// Show bulk remove tag modal
+async function showBulkRemoveTagModal() {
+    if (selectedFiles.length === 0) return;
+
+    const modal = document.getElementById('bulkRemoveTagModal');
+    if (!modal) return;
+
+    document.getElementById('bulkRemoveTagCount').textContent = selectedFiles.length;
+
+    // Load tags if needed
+    if (allAvailableTags.length === 0) {
+        await loadAvailableTags();
+    }
+
+    const selectEl = document.getElementById('bulkRemoveTagSelect');
+    if (selectEl) {
+        selectEl.innerHTML = '<option value="">Select a tag...</option>' +
+            allAvailableTags.map(tag =>
+                `<option value="${tag.id}">${escapeHtml(tag.name)}</option>`
+            ).join('');
+    }
+
+    document.getElementById('confirmBulkRemoveTagBtn').disabled = true;
+
+    if (!bulkRemoveTagModal) {
+        bulkRemoveTagModal = new bootstrap.Modal(modal);
+    }
+    bulkRemoveTagModal.show();
+}
+
+// Handle bulk remove tag select change
+function onBulkRemoveTagSelectChange() {
+    const selectEl = document.getElementById('bulkRemoveTagSelect');
+    const confirmBtn = document.getElementById('confirmBulkRemoveTagBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = !selectEl || !selectEl.value;
+    }
+}
+
+// Execute bulk remove tag
+async function executeBulkRemoveTag() {
+    const fileIds = getSelectedFileIds();
+    const selectEl = document.getElementById('bulkRemoveTagSelect');
+    const tagId = selectEl ? parseInt(selectEl.value) : null;
+
+    if (!tagId) return;
+
+    const confirmBtn = document.getElementById('confirmBulkRemoveTagBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Removing...';
+    }
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/tags/bulk/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_ids: fileIds, tag_id: tagId })
+        });
+
+        if (!response.ok) {
+            throw new Error('Bulk remove tag request failed');
+        }
+
+        const result = await response.json();
+        showNotification(`Removed tag from ${result.successful} of ${result.total} files` +
+            (result.failed > 0 ? ` (${result.failed} failed)` : ''));
+
+        bulkRemoveTagModal?.hide();
+        clearSelection();
+        loadFilesList();
+
+    } catch (error) {
+        console.error('Bulk remove tag error:', error);
+        showNotification(`Bulk remove tag failed: ${error.message}`, 'error');
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="bi bi-tag-x"></i> Remove Tag';
+        }
+    }
+}
+
+// Execute bulk pin
+async function executeBulkPin() {
+    const fileIds = getSelectedFileIds();
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/files/bulk/pin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_ids: fileIds })
+        });
+
+        if (!response.ok) {
+            throw new Error('Bulk pin request failed');
+        }
+
+        const result = await response.json();
+        showNotification(`Pinned ${result.successful} of ${result.total} files` +
+            (result.failed > 0 ? ` (${result.failed} failed)` : ''));
+
+        clearSelection();
+        loadFilesList();
+
+    } catch (error) {
+        console.error('Bulk pin error:', error);
+        showNotification(`Bulk pin failed: ${error.message}`, 'error');
+    }
+}
+
+// Execute bulk unpin
+async function executeBulkUnpin() {
+    const fileIds = getSelectedFileIds();
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/files/bulk/unpin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_ids: fileIds })
+        });
+
+        if (!response.ok) {
+            throw new Error('Bulk unpin request failed');
+        }
+
+        const result = await response.json();
+        showNotification(`Unpinned ${result.successful} of ${result.total} files` +
+            (result.failed > 0 ? ` (${result.failed} failed)` : ''));
+
+        clearSelection();
+        loadFilesList();
+
+    } catch (error) {
+        console.error('Bulk unpin error:', error);
+        showNotification(`Bulk unpin failed: ${error.message}`, 'error');
+    }
+}
+
+// ============================================
+// Initialization
+// ============================================
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
@@ -1302,19 +1833,17 @@ document.addEventListener('DOMContentLoaded', function() {
     currentStorageType = urlParams.get('storage_type') || null;
     currentFileStatus = urlParams.get('status') || null;
 
-    // Set initial value for status filter
     const statusSelect = document.getElementById('status_filter');
     if (statusSelect && currentFileStatus) {
         statusSelect.value = currentFileStatus;
     }
 
-    // Initialize virtual table
-    initVirtualTable();
+    // Initialize AG Grid
+    initGrid();
 
     loadFilesList();
     loadPathsForFilter();
     loadTagsForFilter();
-    setupSortHandlers();
 
     // Setup event handlers
     const confirmBtn = document.getElementById('confirmThawBtn');
@@ -1322,7 +1851,6 @@ document.addEventListener('DOMContentLoaded', function() {
         confirmBtn.addEventListener('click', thawFile);
     }
 
-    // Setup search
     const searchInput = document.getElementById('search_input');
     if (searchInput) {
         searchInput.addEventListener('keypress', function(e) {
@@ -1342,7 +1870,6 @@ document.addEventListener('DOMContentLoaded', function() {
         clearBtn.addEventListener('click', clearSearch);
     }
 
-    // Setup tag management
     const addTagSelect = document.getElementById('addTagSelect');
     if (addTagSelect) {
         addTagSelect.addEventListener('change', function() {
@@ -1358,13 +1885,11 @@ document.addEventListener('DOMContentLoaded', function() {
         addTagBtn.addEventListener('click', addTagToFile);
     }
 
-    // Setup clear tag filter
     const clearTagFilterBtn = document.getElementById('clear_tag_filter_btn');
     if (clearTagFilterBtn) {
         clearTagFilterBtn.addEventListener('click', clearTagFilter);
     }
 
-    // Setup relocate modal
     const relocateTargetSelect = document.getElementById('relocateTargetSelect');
     if (relocateTargetSelect) {
         relocateTargetSelect.addEventListener('change', onRelocateTargetChange);
@@ -1375,7 +1900,6 @@ document.addEventListener('DOMContentLoaded', function() {
         confirmRelocateBtn.addEventListener('click', relocateFile);
     }
 
-    // Setup freeze modal
     const freezeLocationSelect = document.getElementById('freezeLocationSelect');
     if (freezeLocationSelect) {
         freezeLocationSelect.addEventListener('change', onFreezeLocationChange);
@@ -1386,13 +1910,84 @@ document.addEventListener('DOMContentLoaded', function() {
         confirmFreezeBtn.addEventListener('click', freezeFile);
     }
 
-    // Reset thaw modal checkbox when modal is shown
     const thawModal = document.getElementById('thawModal');
     if (thawModal) {
         thawModal.addEventListener('show.bs.modal', function() {
             const checkbox = document.getElementById('thawPinCheckbox');
             if (checkbox) checkbox.checked = false;
         });
+    }
+
+    // Bulk action event handlers
+    const bulkThawBtn = document.getElementById('bulk-thaw-btn');
+    if (bulkThawBtn) {
+        bulkThawBtn.addEventListener('click', showBulkThawModal);
+    }
+
+    const bulkFreezeBtn = document.getElementById('bulk-freeze-btn');
+    if (bulkFreezeBtn) {
+        bulkFreezeBtn.addEventListener('click', showBulkFreezeModal);
+    }
+
+    const bulkAddTagBtn = document.getElementById('bulk-add-tag-btn');
+    if (bulkAddTagBtn) {
+        bulkAddTagBtn.addEventListener('click', showBulkAddTagModal);
+    }
+
+    const bulkRemoveTagBtn = document.getElementById('bulk-remove-tag-btn');
+    if (bulkRemoveTagBtn) {
+        bulkRemoveTagBtn.addEventListener('click', showBulkRemoveTagModal);
+    }
+
+    const bulkPinBtn = document.getElementById('bulk-pin-btn');
+    if (bulkPinBtn) {
+        bulkPinBtn.addEventListener('click', executeBulkPin);
+    }
+
+    const bulkUnpinBtn = document.getElementById('bulk-unpin-btn');
+    if (bulkUnpinBtn) {
+        bulkUnpinBtn.addEventListener('click', executeBulkUnpin);
+    }
+
+    const clearSelectionBtn = document.getElementById('clear-selection-btn');
+    if (clearSelectionBtn) {
+        clearSelectionBtn.addEventListener('click', clearSelection);
+    }
+
+    // Bulk modal confirm buttons
+    const confirmBulkThawBtn = document.getElementById('confirmBulkThawBtn');
+    if (confirmBulkThawBtn) {
+        confirmBulkThawBtn.addEventListener('click', executeBulkThaw);
+    }
+
+    const confirmBulkFreezeBtn = document.getElementById('confirmBulkFreezeBtn');
+    if (confirmBulkFreezeBtn) {
+        confirmBulkFreezeBtn.addEventListener('click', executeBulkFreeze);
+    }
+
+    const bulkFreezeLocationSelect = document.getElementById('bulkFreezeLocationSelect');
+    if (bulkFreezeLocationSelect) {
+        bulkFreezeLocationSelect.addEventListener('change', onBulkFreezeLocationChange);
+    }
+
+    const confirmBulkAddTagBtn = document.getElementById('confirmBulkAddTagBtn');
+    if (confirmBulkAddTagBtn) {
+        confirmBulkAddTagBtn.addEventListener('click', executeBulkAddTag);
+    }
+
+    const bulkAddTagSelect = document.getElementById('bulkAddTagSelect');
+    if (bulkAddTagSelect) {
+        bulkAddTagSelect.addEventListener('change', onBulkAddTagSelectChange);
+    }
+
+    const confirmBulkRemoveTagBtn = document.getElementById('confirmBulkRemoveTagBtn');
+    if (confirmBulkRemoveTagBtn) {
+        confirmBulkRemoveTagBtn.addEventListener('click', executeBulkRemoveTag);
+    }
+
+    const bulkRemoveTagSelect = document.getElementById('bulkRemoveTagSelect');
+    if (bulkRemoveTagSelect) {
+        bulkRemoveTagSelect.addEventListener('change', onBulkRemoveTagSelectChange);
     }
 });
 
@@ -1401,7 +1996,7 @@ window.addEventListener('beforeunload', () => {
     if (currentAbortController) {
         currentAbortController.abort();
     }
-    if (virtualTable) {
-        virtualTable.destroy();
+    if (gridApi) {
+        gridApi.destroy();
     }
 });

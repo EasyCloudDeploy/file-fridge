@@ -1,11 +1,13 @@
 """Service for evaluating and applying tag rules to files."""
+import fnmatch
 import logging
 import re
-import fnmatch
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict
+
 from sqlalchemy.orm import Session
-from app.models import TagRule, FileInventory, FileTag, TagRuleCriterionType, Operator
+
+from app.models import FileInventory, FileTag, Operator, TagRule, TagRuleCriterionType
 
 logger = logging.getLogger(__name__)
 
@@ -30,17 +32,16 @@ class TagRuleService:
         try:
             if rule.criterion_type == TagRuleCriterionType.EXTENSION:
                 return self._evaluate_extension(rule, file)
-            elif rule.criterion_type == TagRuleCriterionType.PATH_PATTERN:
+            if rule.criterion_type == TagRuleCriterionType.PATH_PATTERN:
                 return self._evaluate_path_pattern(rule, file)
-            elif rule.criterion_type == TagRuleCriterionType.MIME_TYPE:
+            if rule.criterion_type == TagRuleCriterionType.MIME_TYPE:
                 return self._evaluate_mime_type(rule, file)
-            elif rule.criterion_type == TagRuleCriterionType.SIZE:
+            if rule.criterion_type == TagRuleCriterionType.SIZE:
                 return self._evaluate_size(rule, file)
-            elif rule.criterion_type == TagRuleCriterionType.NAME_PATTERN:
+            if rule.criterion_type == TagRuleCriterionType.NAME_PATTERN:
                 return self._evaluate_name_pattern(rule, file)
-            else:
-                logger.warning(f"Unknown criterion type: {rule.criterion_type}")
-                return False
+            logger.warning(f"Unknown criterion type: {rule.criterion_type}")
+            return False
         except Exception as e:
             logger.error(f"Error evaluating rule {rule.id}: {e}")
             return False
@@ -54,15 +55,14 @@ class TagRuleService:
         rule_ext = rule.value.lower()
 
         # Ensure extension starts with dot
-        if not rule_ext.startswith('.'):
-            rule_ext = f'.{rule_ext}'
+        if not rule_ext.startswith("."):
+            rule_ext = f".{rule_ext}"
 
         if rule.operator == Operator.EQ or rule.operator == Operator.MATCHES:
             return file_ext == rule_ext
-        elif rule.operator == Operator.CONTAINS:
+        if rule.operator == Operator.CONTAINS:
             return rule_ext in file_ext
-        else:
-            return False
+        return False
 
     def _evaluate_path_pattern(self, rule: TagRule, file: FileInventory) -> bool:
         """Evaluate path pattern rule (glob or regex)."""
@@ -72,7 +72,7 @@ class TagRuleService:
         if rule.operator == Operator.MATCHES:
             # Glob pattern matching
             return fnmatch.fnmatch(file.file_path, rule.value)
-        elif rule.operator == Operator.REGEX:
+        if rule.operator == Operator.REGEX:
             # Regex pattern matching
             try:
                 pattern = re.compile(rule.value)
@@ -96,19 +96,18 @@ class TagRuleService:
 
         if rule.operator == Operator.EQ:
             return file_mime == rule_mime
-        elif rule.operator == Operator.CONTAINS:
+        if rule.operator == Operator.CONTAINS:
             return rule_mime in file_mime
-        elif rule.operator == Operator.MATCHES:
+        if rule.operator == Operator.MATCHES:
             # Support wildcard patterns like "image/*"
-            if '*' in rule_mime:
-                pattern = rule_mime.replace('*', '.*')
+            if "*" in rule_mime:
+                pattern = rule_mime.replace("*", ".*")
                 try:
                     return bool(re.match(f"^{pattern}$", file_mime))
                 except re.error:
                     return False
             return file_mime == rule_mime
-        else:
-            return False
+        return False
 
     def _evaluate_size(self, rule: TagRule, file: FileInventory) -> bool:
         """Evaluate file size rule."""
@@ -121,16 +120,15 @@ class TagRuleService:
 
             if rule.operator == Operator.GT:
                 return file.file_size > size_value
-            elif rule.operator == Operator.LT:
+            if rule.operator == Operator.LT:
                 return file.file_size < size_value
-            elif rule.operator == Operator.EQ:
+            if rule.operator == Operator.EQ:
                 return file.file_size == size_value
-            elif rule.operator == Operator.GTE:
+            if rule.operator == Operator.GTE:
                 return file.file_size >= size_value
-            elif rule.operator == Operator.LTE:
+            if rule.operator == Operator.LTE:
                 return file.file_size <= size_value
-            else:
-                return False
+            return False
         except ValueError as e:
             logger.error(f"Invalid size value in rule {rule.id}: {e}")
             return False
@@ -145,7 +143,7 @@ class TagRuleService:
         if rule.operator == Operator.MATCHES:
             # Glob pattern matching
             return fnmatch.fnmatch(filename, rule.value)
-        elif rule.operator == Operator.REGEX:
+        if rule.operator == Operator.REGEX:
             # Regex pattern matching
             try:
                 pattern = re.compile(rule.value)
@@ -167,18 +165,18 @@ class TagRuleService:
         size_str = size_str.strip().upper()
 
         # Extract number and unit
-        match = re.match(r'^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$', size_str)
+        match = re.match(r"^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$", size_str)
         if not match:
             raise ValueError(f"Invalid size format: {size_str}")
 
         number = float(match.group(1))
-        unit = match.group(2) or 'B'
+        unit = match.group(2) or "B"
 
         multipliers = {
-            'B': 1,
-            'KB': 1024,
-            'MB': 1024 * 1024,
-            'GB': 1024 * 1024 * 1024
+            "B": 1,
+            "KB": 1024,
+            "MB": 1024 * 1024,
+            "GB": 1024 * 1024 * 1024
         }
 
         return int(number * multipliers[unit])
@@ -210,7 +208,7 @@ class TagRuleService:
         file_tag = FileTag(
             file_id=file.id,
             tag_id=rule.tag_id,
-            tagged_by='auto-rule'
+            tagged_by="auto-rule"
         )
         self.db.add(file_tag)
         return True

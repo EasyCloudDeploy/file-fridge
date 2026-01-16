@@ -1,22 +1,40 @@
 """API routes for file management."""
-import json
-import time
-import logging
 import base64
-from typing import Optional, Generator
-
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+import json
+import logging
+import time
 from pathlib import Path
+from typing import Generator, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import FileRecord, MonitoredPath, FileInventory, StorageType, FileStatus, ColdStorageLocation, PinnedFile, OperationType
-from app.schemas import FileMoveRequest, FileRelocateRequest, StorageType as StorageTypeSchema
+from app.models import (
+    ColdStorageLocation,
+    FileInventory,
+    FileRecord,
+    FileStatus,
+    MonitoredPath,
+    PinnedFile,
+    StorageType,
+)
+from app.schemas import (
+    BulkActionResponse,
+    BulkActionResult,
+    BulkFileActionRequest,
+    BulkFreezeRequest,
+    FileMoveRequest,
+    FileRelocateRequest,
+)
+from app.schemas import (
+    StorageType as StorageTypeSchema,
+)
+from app.services.file_freezer import FileFreezer
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
-from app.services.file_freezer import FileFreezer
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 logger = logging.getLogger(__name__)
@@ -45,7 +63,7 @@ def _serialize_file(file: FileInventory, paths_map: dict, pinned_paths_set: set 
         "id": file.id,
         "path_id": file.path_id,
         "file_path": file.file_path,
-        "storage_type": file.storage_type.value if hasattr(file.storage_type, 'value') else file.storage_type,
+        "storage_type": file.storage_type.value if hasattr(file.storage_type, "value") else file.storage_type,
         "file_size": file.file_size,
         "file_mtime": file.file_mtime.isoformat() if file.file_mtime else None,
         "file_atime": file.file_atime.isoformat() if file.file_atime else None,
@@ -53,7 +71,7 @@ def _serialize_file(file: FileInventory, paths_map: dict, pinned_paths_set: set 
         "checksum": file.checksum,
         "file_extension": file.file_extension,
         "mime_type": file.mime_type,
-        "status": file.status.value if hasattr(file.status, 'value') else file.status,
+        "status": file.status.value if hasattr(file.status, "value") else file.status,
         "last_seen": file.last_seen.isoformat() if file.last_seen else None,
         "created_at": file.created_at.isoformat() if file.created_at else None,
         "tags": [
@@ -120,7 +138,7 @@ def list_files(
             tag_id_list = None
             if tag_ids:
                 try:
-                    tag_id_list = [int(tid.strip()) for tid in tag_ids.split(',') if tid.strip()]
+                    tag_id_list = [int(tid.strip()) for tid in tag_ids.split(",") if tid.strip()]
                 except ValueError:
                     yield json.dumps({
                         "type": "error",
@@ -147,7 +165,7 @@ def list_files(
                 query = query.filter(FileInventory.file_path.ilike(search_pattern))
 
             if extension:
-                ext = extension if extension.startswith('.') else f'.{extension}'
+                ext = extension if extension.startswith(".") else f".{extension}"
                 query = query.filter(FileInventory.file_extension == ext.lower())
 
             if mime_type:
@@ -186,7 +204,7 @@ def list_files(
             cursor_data = None
             if cursor:
                 try:
-                    cursor_json = base64.b64decode(cursor).decode('utf-8')
+                    cursor_json = base64.b64decode(cursor).decode("utf-8")
                     cursor_data = json.loads(cursor_json)
                 except (ValueError, json.JSONDecodeError) as e:
                     yield json.dumps({
@@ -198,8 +216,8 @@ def list_files(
 
             # Apply cursor-based pagination (keyset pagination)
             if cursor_data:
-                last_id = cursor_data.get('id')
-                last_sort_value = cursor_data.get('sort_value')
+                last_id = cursor_data.get("id")
+                last_sort_value = cursor_data.get("sort_value")
 
                 if last_id is not None and last_sort_value is not None:
                     # For nullable fields, handle None values
@@ -218,23 +236,22 @@ def list_files(
                                     and_(sort_field == last_sort_value, FileInventory.id < last_id)
                                 )
                             )
+                    # ASC: get rows where (sort_value > last) OR (sort_value == last AND id > last_id)
+                    elif last_sort_value is None:
+                        # If last value was None, get non-null values or higher ids with null
+                        query = query.filter(
+                            or_(
+                                sort_field.isnot(None),
+                                and_(sort_field.is_(None), FileInventory.id > last_id)
+                            )
+                        )
                     else:
-                        # ASC: get rows where (sort_value > last) OR (sort_value == last AND id > last_id)
-                        if last_sort_value is None:
-                            # If last value was None, get non-null values or higher ids with null
-                            query = query.filter(
-                                or_(
-                                    sort_field.isnot(None),
-                                    and_(sort_field.is_(None), FileInventory.id > last_id)
-                                )
+                        query = query.filter(
+                            or_(
+                                sort_field > last_sort_value,
+                                and_(sort_field == last_sort_value, FileInventory.id > last_id)
                             )
-                        else:
-                            query = query.filter(
-                                or_(
-                                    sort_field > last_sort_value,
-                                    and_(sort_field == last_sort_value, FileInventory.id > last_id)
-                                )
-                            )
+                        )
 
             # Apply sorting with secondary sort by id for stable pagination
             if is_descending:
@@ -266,18 +283,18 @@ def list_files(
                 # Get the sort value for cursor
                 sort_value_raw = getattr(last_file, sort_by, None) if sort_by in valid_sort_fields else last_file.last_seen
                 # Convert datetime/enum to string for JSON serialization
-                if hasattr(sort_value_raw, 'isoformat'):
+                if hasattr(sort_value_raw, "isoformat"):
                     sort_value = sort_value_raw.isoformat()
-                elif hasattr(sort_value_raw, 'value'):
+                elif hasattr(sort_value_raw, "value"):
                     sort_value = sort_value_raw.value
                 else:
                     sort_value = sort_value_raw
 
                 cursor_obj = {
-                    'id': last_file.id,
-                    'sort_value': sort_value
+                    "id": last_file.id,
+                    "sort_value": sort_value
                 }
-                next_cursor = base64.b64encode(json.dumps(cursor_obj).encode('utf-8')).decode('utf-8')
+                next_cursor = base64.b64encode(json.dumps(cursor_obj).encode("utf-8")).decode("utf-8")
 
             # Send metadata first (with pagination info)
             metadata = {
@@ -419,7 +436,7 @@ def browse_files(
         except (OSError, ValueError) as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid directory path: {str(e)}"
+                detail=f"Invalid directory path: {e!s}"
             )
 
         if not dir_path.exists() or not dir_path.is_dir():
@@ -461,7 +478,7 @@ def browse_files(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {str(e)}"
+            detail=f"Error browsing directory: {e!s}"
         )
 
 
@@ -707,13 +724,13 @@ def relocate_file(
     if not current_location:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Could not determine current storage location for file"
+            detail="Could not determine current storage location for file"
         )
 
     if current_location.id == request.target_storage_location_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File is already in the target storage location"
+            detail="File is already in the target storage location"
         )
 
     file_size = current_file_path.stat().st_size
@@ -975,3 +992,364 @@ def unpin_file(inventory_id: int, db: Session = Depends(get_db)):
         "file_path": file.file_path,
         "is_pinned": False
     }
+
+
+# Bulk Operations Endpoints
+
+
+@router.post("/bulk/thaw", response_model=BulkActionResponse)
+def bulk_thaw_files(
+    request: BulkFileActionRequest,
+    pin: bool = Query(False, description="Pin files after thawing"),
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk thaw multiple files from cold storage to hot storage.
+
+    Only files that are currently in cold storage will be processed.
+    """
+    results = []
+    successful = 0
+    failed = 0
+
+    for file_id in request.file_ids:
+        try:
+            # Get the file from inventory
+            inventory_entry = db.query(FileInventory).filter(
+                FileInventory.id == file_id,
+                FileInventory.storage_type == StorageType.COLD
+            ).first()
+
+            if not inventory_entry:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message="File not found in cold storage"
+                ))
+                failed += 1
+                continue
+
+            # Get the file record
+            file_record = db.query(FileRecord).filter(
+                FileRecord.cold_storage_path == inventory_entry.file_path
+            ).first()
+
+            if not file_record:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message="No file record found"
+                ))
+                failed += 1
+                continue
+
+            # Thaw the file
+            success, error = FileThawer.thaw_file(file_record, pin=pin, db=db)
+
+            if success:
+                inventory_entry.status = FileStatus.ACTIVE
+                db.commit()
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=True,
+                    message="File thawed successfully"
+                ))
+                successful += 1
+            else:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message=error or "Failed to thaw file"
+                ))
+                failed += 1
+
+        except Exception as e:
+            logger.exception(f"Error thawing file {file_id}")
+            results.append(BulkActionResult(
+                file_id=file_id,
+                success=False,
+                message=str(e)
+            ))
+            failed += 1
+
+    return BulkActionResponse(
+        total=len(request.file_ids),
+        successful=successful,
+        failed=failed,
+        results=results
+    )
+
+
+@router.post("/bulk/freeze", response_model=BulkActionResponse)
+def bulk_freeze_files(
+    request: BulkFreezeRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk freeze multiple files from hot storage to cold storage.
+
+    All files must belong to monitored paths that have the specified
+    storage location configured.
+    """
+    results = []
+    successful = 0
+    failed = 0
+
+    # Validate storage location exists
+    target_location = db.query(ColdStorageLocation).filter(
+        ColdStorageLocation.id == request.storage_location_id
+    ).first()
+
+    if not target_location:
+        return BulkActionResponse(
+            total=len(request.file_ids),
+            successful=0,
+            failed=len(request.file_ids),
+            results=[
+                BulkActionResult(
+                    file_id=fid,
+                    success=False,
+                    message=f"Storage location {request.storage_location_id} not found"
+                )
+                for fid in request.file_ids
+            ]
+        )
+
+    # Check storage location is accessible
+    if not Path(target_location.path).exists():
+        return BulkActionResponse(
+            total=len(request.file_ids),
+            successful=0,
+            failed=len(request.file_ids),
+            results=[
+                BulkActionResult(
+                    file_id=fid,
+                    success=False,
+                    message=f"Storage location {target_location.name} is not accessible"
+                )
+                for fid in request.file_ids
+            ]
+        )
+
+    for file_id in request.file_ids:
+        try:
+            # Get the file from inventory
+            inventory_entry = db.query(FileInventory).filter(
+                FileInventory.id == file_id,
+                FileInventory.storage_type == StorageType.HOT
+            ).first()
+
+            if not inventory_entry:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message="File not found in hot storage"
+                ))
+                failed += 1
+                continue
+
+            # Get the monitored path
+            monitored_path = db.query(MonitoredPath).filter(
+                MonitoredPath.id == inventory_entry.path_id
+            ).first()
+
+            if not monitored_path:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message="Monitored path not found"
+                ))
+                failed += 1
+                continue
+
+            # Validate storage location belongs to this path
+            path_location_ids = [loc.id for loc in monitored_path.storage_locations]
+            if request.storage_location_id not in path_location_ids:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message="Storage location not associated with this path"
+                ))
+                failed += 1
+                continue
+
+            # Freeze the file
+            success, error, cold_path = FileFreezer.freeze_file(
+                file=inventory_entry,
+                monitored_path=monitored_path,
+                storage_location=target_location,
+                pin=request.pin,
+                db=db
+            )
+
+            if success:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=True,
+                    message=f"File frozen to {target_location.name}"
+                ))
+                successful += 1
+            else:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message=error or "Failed to freeze file"
+                ))
+                failed += 1
+
+        except Exception as e:
+            logger.exception(f"Error freezing file {file_id}")
+            results.append(BulkActionResult(
+                file_id=file_id,
+                success=False,
+                message=str(e)
+            ))
+            failed += 1
+
+    return BulkActionResponse(
+        total=len(request.file_ids),
+        successful=successful,
+        failed=failed,
+        results=results
+    )
+
+
+@router.post("/bulk/pin", response_model=BulkActionResponse)
+def bulk_pin_files(
+    request: BulkFileActionRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk pin multiple files to exclude them from automatic scan operations.
+    """
+    results = []
+    successful = 0
+    failed = 0
+
+    for file_id in request.file_ids:
+        try:
+            # Get the file from inventory
+            file = db.query(FileInventory).filter(FileInventory.id == file_id).first()
+
+            if not file:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message="File not found"
+                ))
+                failed += 1
+                continue
+
+            # Check if already pinned
+            existing_pin = db.query(PinnedFile).filter(
+                PinnedFile.file_path == file.file_path
+            ).first()
+
+            if existing_pin:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=True,
+                    message="File already pinned"
+                ))
+                successful += 1
+                continue
+
+            # Create new pin
+            pinned = PinnedFile(
+                path_id=file.path_id,
+                file_path=file.file_path
+            )
+            db.add(pinned)
+            db.commit()
+
+            results.append(BulkActionResult(
+                file_id=file_id,
+                success=True,
+                message="File pinned successfully"
+            ))
+            successful += 1
+
+        except Exception as e:
+            db.rollback()
+            logger.exception(f"Error pinning file {file_id}")
+            results.append(BulkActionResult(
+                file_id=file_id,
+                success=False,
+                message=str(e)
+            ))
+            failed += 1
+
+    return BulkActionResponse(
+        total=len(request.file_ids),
+        successful=successful,
+        failed=failed,
+        results=results
+    )
+
+
+@router.post("/bulk/unpin", response_model=BulkActionResponse)
+def bulk_unpin_files(
+    request: BulkFileActionRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk unpin multiple files to allow automatic scan operations.
+    """
+    results = []
+    successful = 0
+    failed = 0
+
+    for file_id in request.file_ids:
+        try:
+            # Get the file from inventory
+            file = db.query(FileInventory).filter(FileInventory.id == file_id).first()
+
+            if not file:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message="File not found"
+                ))
+                failed += 1
+                continue
+
+            # Find and delete the pin
+            pin = db.query(PinnedFile).filter(
+                PinnedFile.file_path == file.file_path
+            ).first()
+
+            if not pin:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=True,
+                    message="File not pinned"
+                ))
+                successful += 1
+                continue
+
+            db.delete(pin)
+            db.commit()
+
+            results.append(BulkActionResult(
+                file_id=file_id,
+                success=True,
+                message="File unpinned successfully"
+            ))
+            successful += 1
+
+        except Exception as e:
+            db.rollback()
+            logger.exception(f"Error unpinning file {file_id}")
+            results.append(BulkActionResult(
+                file_id=file_id,
+                success=False,
+                message=str(e)
+            ))
+            failed += 1
+
+    return BulkActionResponse(
+        total=len(request.file_ids),
+        successful=successful,
+        failed=failed,
+        results=results
+    )

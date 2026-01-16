@@ -1,19 +1,20 @@
 """File thawing service - move files back from cold storage."""
+import logging
 import os
 import shutil
-import logging
 from pathlib import Path
 from typing import Optional, Tuple
+
 from sqlalchemy.orm import Session
-from app.models import FileRecord, PinnedFile, MonitoredPath
-from app.services.file_mover import FileMover
+
+from app.models import FileRecord, PinnedFile
 
 logger = logging.getLogger(__name__)
 
 
 class FileThawer:
     """Handles moving files back from cold storage to hot storage."""
-    
+
     @staticmethod
     def thaw_file(
         file_record: FileRecord,
@@ -48,7 +49,7 @@ class FileThawer:
                 try:
                     FileThawer._move_preserving_timestamps(cold_path, original_path)
                 except Exception as e:
-                    return False, f"Failed to move file back: {str(e)}"
+                    return False, f"Failed to move file back: {e!s}"
             elif file_record.operation_type.value == "copy":
                 # For copy, file is still in original location, just remove from cold storage
                 # Actually, if it was copied, the original should still exist
@@ -58,13 +59,13 @@ class FileThawer:
                     try:
                         FileThawer._move_preserving_timestamps(cold_path, original_path)
                     except Exception as e:
-                        return False, f"Failed to move file back: {str(e)}"
+                        return False, f"Failed to move file back: {e!s}"
                 else:
                     # Original exists, just remove from cold storage
                     try:
                         cold_path.unlink()
                     except Exception as e:
-                        return False, f"Failed to remove from cold storage: {str(e)}"
+                        return False, f"Failed to remove from cold storage: {e!s}"
             else:  # MOVE
                 # Move file back from cold storage to original location, preserving timestamps
                 try:
@@ -72,7 +73,7 @@ class FileThawer:
                     original_path.parent.mkdir(parents=True, exist_ok=True)
                     FileThawer._move_preserving_timestamps(cold_path, original_path)
                 except Exception as e:
-                    return False, f"Failed to move file back: {str(e)}"
+                    return False, f"Failed to move file back: {e!s}"
 
             # If pinning, add to pinned files
             if pin and db:
@@ -94,7 +95,7 @@ class FileThawer:
             return True, None
 
         except Exception as e:
-            logger.error(f"Error thawing file: {str(e)}")
+            logger.error(f"Error thawing file: {e!s}")
             return False, str(e)
 
     @staticmethod

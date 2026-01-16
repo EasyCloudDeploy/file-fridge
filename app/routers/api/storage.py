@@ -2,13 +2,21 @@
 import logging
 import os
 import shutil
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
-from typing import List
 from pathlib import Path
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
 from app.database import get_db
-from app.models import MonitoredPath, ColdStorageLocation, FileInventory, FileRecord
-from app.schemas import StorageStats, ColdStorageLocationCreate, ColdStorageLocationUpdate, ColdStorageLocation as ColdStorageLocationSchema, ColdStorageLocationWithStats
+from app.models import ColdStorageLocation, FileInventory, FileRecord
+from app.schemas import ColdStorageLocation as ColdStorageLocationSchema
+from app.schemas import (
+    ColdStorageLocationCreate,
+    ColdStorageLocationUpdate,
+    ColdStorageLocationWithStats,
+    StorageStats,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,26 +38,26 @@ def get_storage_stats(db: Session = Depends(get_db)):
                 unique_volumes[device_id] = path_str
         except FileNotFoundError:
             # Handle cases where the path doesn't exist
-            if 'not_found' not in unique_volumes:
-                unique_volumes['not_found'] = []
-            unique_volumes['not_found'].append(path_str)
+            if "not_found" not in unique_volumes:
+                unique_volumes["not_found"] = []
+            unique_volumes["not_found"].append(path_str)
         except Exception as e:
             # Handle other potential errors
             logger.error(f"Error stating path {path_str}: {e}")
-            if 'error' not in unique_volumes:
-                unique_volumes['error'] = []
-            unique_volumes['error'].append(path_str)
+            if "error" not in unique_volumes:
+                unique_volumes["error"] = []
+            unique_volumes["error"].append(path_str)
 
     stats_list = []
     for device_id, path_str in unique_volumes.items():
-        if device_id == 'not_found' or device_id == 'error':
+        if device_id == "not_found" or device_id == "error":
             for p in path_str:
                 stats_list.append(StorageStats(
                     path=p,
                     total_bytes=0,
                     used_bytes=0,
                     free_bytes=0,
-                    error=f"Path not found or error stating path."
+                    error="Path not found or error stating path."
                 ))
             continue
 
@@ -80,7 +88,7 @@ def get_storage_stats(db: Session = Depends(get_db)):
 def list_storage_locations(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """List all cold storage locations."""
     locations = db.query(ColdStorageLocation).offset(skip).limit(limit).all()
-    
+
     locations_with_stats = []
     for loc in locations:
         locations_with_stats.append(
@@ -118,7 +126,7 @@ def create_storage_location(location: ColdStorageLocationCreate, db: Session = D
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot create storage location path: {str(e)}"
+                detail=f"Cannot create storage location path: {e!s}"
             )
 
     if not path_obj.is_dir():
@@ -195,7 +203,7 @@ def update_storage_location(
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Cannot create storage location path: {str(e)}"
+                    detail=f"Cannot create storage location path: {e!s}"
                 )
 
         if not path_obj.is_dir():
@@ -255,7 +263,7 @@ def delete_storage_location(
         # 2. Delete file records from the database
         for record in file_records:
             db.delete(record)
-        
+
         for inv_file in inventory_files:
             db.delete(inv_file)
 
@@ -273,7 +281,7 @@ def delete_storage_location(
 
         # 4. Disassociate monitored paths
         location.paths.clear()
-        
+
         db.commit()  # Commit record deletions and path disassociation
 
     # Delete the location itself

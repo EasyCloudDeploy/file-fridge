@@ -1,17 +1,19 @@
 """Pydantic schemas for API validation."""
-from pydantic import BaseModel, Field, validator
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
+
+from pydantic import BaseModel, Field, validator
+
 from app.models import (
-    OperationType,
     CriterionType,
+    DispatchStatus,
+    FileStatus,
+    NotificationLevel,
+    NotifierType,
+    OperationType,
     Operator,
     StorageType,
-    FileStatus,
     TagRuleCriterionType,
-    NotifierType,
-    NotificationLevel,
-    DispatchStatus,
 )
 
 
@@ -25,7 +27,6 @@ class CriteriaBase(BaseModel):
 
 class CriteriaCreate(CriteriaBase):
     """Schema for creating criteria."""
-    pass
 
 
 class CriteriaUpdate(BaseModel):
@@ -54,7 +55,6 @@ class ColdStorageLocationBase(BaseModel):
 
 class ColdStorageLocationCreate(ColdStorageLocationBase):
     """Schema for creating cold storage location."""
-    pass
 
 
 class ColdStorageLocationUpdate(BaseModel):
@@ -394,18 +394,18 @@ class NotifierBase(BaseModel):
 class NotifierCreate(NotifierBase):
     """Schema for creating a notifier."""
 
-    @validator('smtp_host')
+    @validator("smtp_host")
     def validate_smtp_host_for_email(cls, v, values):
         """Ensure smtp_host is provided for email notifiers."""
-        if values.get('type') == NotifierType.EMAIL and not v:
-            raise ValueError('smtp_host is required for EMAIL notifiers')
+        if values.get("type") == NotifierType.EMAIL and not v:
+            raise ValueError("smtp_host is required for EMAIL notifiers")
         return v
 
-    @validator('smtp_sender')
+    @validator("smtp_sender")
     def validate_smtp_sender_for_email(cls, v, values):
         """Ensure smtp_sender is provided for email notifiers."""
-        if values.get('type') == NotifierType.EMAIL and not v:
-            raise ValueError('smtp_sender is required for EMAIL notifiers')
+        if values.get("type") == NotifierType.EMAIL and not v:
+            raise ValueError("smtp_sender is required for EMAIL notifiers")
         return v
 
 
@@ -444,7 +444,6 @@ class NotificationBase(BaseModel):
 
 class NotificationCreate(NotificationBase):
     """Schema for creating a notification."""
-    pass
 
 
 class Notification(NotificationBase):
@@ -482,6 +481,42 @@ class TestNotifierResponse(BaseModel):
     success: bool
     message: str
     notifier_name: str
+
+
+# Bulk Operations Schemas
+
+
+class BulkFileActionRequest(BaseModel):
+    """Request for bulk file operations (thaw, pin, unpin)."""
+    file_ids: List[int] = Field(..., min_length=1, description="List of file inventory IDs")
+
+
+class BulkFreezeRequest(BaseModel):
+    """Request for bulk freeze operation."""
+    file_ids: List[int] = Field(..., min_length=1, description="List of file inventory IDs")
+    storage_location_id: int = Field(..., description="Target cold storage location ID")
+    pin: bool = Field(False, description="Pin files after freezing")
+
+
+class BulkTagRequest(BaseModel):
+    """Request for bulk tag operations."""
+    file_ids: List[int] = Field(..., min_length=1, description="List of file inventory IDs")
+    tag_id: int = Field(..., description="Tag ID to add or remove")
+
+
+class BulkActionResult(BaseModel):
+    """Result for a single file in bulk operation."""
+    file_id: int
+    success: bool
+    message: Optional[str] = None
+
+
+class BulkActionResponse(BaseModel):
+    """Response for bulk operations."""
+    total: int
+    successful: int
+    failed: int
+    results: List[BulkActionResult]
 
 
 # Rebuild models to resolve forward references

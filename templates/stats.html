@@ -111,62 +111,84 @@
             </div>
         </div>
 
-        <!-- Chart -->
+        <!-- Charts Row -->
         <div class="row mb-4">
-            <div class="col-12">
-                <div class="card">
+            <!-- Activity Trend Chart -->
+            <div class="col-lg-8">
+                <div class="card h-100">
                     <div class="card-header py-2">
-                        <h6 class="mb-0"><i class="bi bi-graph-up"></i> Activity<span class="d-none d-sm-inline"> Trend</span> (Last 30 Days)</h6>
+                        <h6 class="mb-0"><i class="bi bi-graph-up"></i> Activity Trend (Last 30 Days)</h6>
                     </div>
                     <div class="card-body">
                         <div id="daily-chart-loading" class="text-center py-4">
                             <div class="spinner-border spinner-border-sm text-primary" role="status">
-                                <span class="visually-hidden">Loading chart data...</span>
+                                <span class="visually-hidden">Loading...</span>
                             </div>
                             <p class="text-muted mt-2 small">Loading chart data...</p>
                         </div>
-                        <canvas id="dailyChart" style="display: none; max-height: 250px;"></canvas>
+                        <canvas id="dailyChart" style="display: none; max-height: 280px;"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Storage Distribution Chart -->
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-header py-2">
+                        <h6 class="mb-0"><i class="bi bi-pie-chart-fill"></i> Storage Distribution</h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="storage-chart-loading" class="text-center py-4">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="text-muted mt-2 small">Loading chart data...</p>
+                        </div>
+                        <canvas id="storageChart" style="display: none; max-height: 280px;"></canvas>
                     </div>
                 </div>
             </div>
         </div>
 
+        <!-- Top Paths Charts -->
         <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-folder-fill"></i> Top Paths by Files</h5>
+            <!-- Top Paths by Files -->
+            <div class="col-lg-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header py-2">
+                        <h6 class="mb-0"><i class="bi bi-folder-symlink"></i> Top Paths by Files</h6>
                     </div>
                     <div class="card-body">
-                        <div id="path-stats-loading" class="text-center py-5">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading path statistics...</span>
+                        <div id="top-files-chart-loading" class="text-center py-4">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
                             </div>
-                            <p class="text-muted mt-3">Loading path statistics...</p>
+                             <p class="text-muted mt-2 small">Loading chart data...</p>
                         </div>
-                        <div id="path-stats-content" style="display: none;">
-                            <div class="table-responsive">
-                                <table class="table table-hover" id="pathStatsTable">
-                                    <thead>
-                                        <tr>
-                                            <th>Path Name</th>
-                                            <th>Files Moved</th>
-                                            <th>Total Size</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <!-- Path stats will be loaded here by JavaScript -->
-                                    </tbody>
-                                </table>
+                        <canvas id="topPathsByFilesChart" style="display: none; max-height: 250px;"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top Paths by Size -->
+            <div class="col-lg-6 mb-4">
+                <div class="card h-100">
+                    <div class="card-header py-2">
+                        <h6 class="mb-0"><i class="bi bi-hdd-fill"></i> Top Paths by Size</h6>
+                    </div>
+                    <div class="card-body">
+                        <div id="top-size-chart-loading" class="text-center py-4">
+                            <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
                             </div>
+                             <p class="text-muted mt-2 small">Loading chart data...</p>
                         </div>
-                        <div id="no-path-stats-message" class="text-center py-5" style="display: none;">
-                            <p class="text-muted">No statistics available yet.</p>
-                        </div>
+                        <canvas id="topPathsBySizeChart" style="display: none; max-height: 250px;"></canvas>
                     </div>
                 </div>
             </div>
         </div>
+
 {% endblock %}
 
 {% block extra_scripts %}

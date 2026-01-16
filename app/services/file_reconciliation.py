@@ -2,9 +2,10 @@
 import logging
 from pathlib import Path
 from typing import Dict
+
 from sqlalchemy.orm import Session
-from app.models import MonitoredPath, FileInventory, FileRecord, StorageType, OperationType
-from app.services.file_mover import FileMover
+
+from app.models import FileInventory, MonitoredPath, OperationType, StorageType
 
 logger = logging.getLogger(__name__)
 
@@ -95,14 +96,13 @@ class FileReconciliation:
                             stats["symlinks_skipped"] += 1
                             logger.debug(f"Symlink already exists: {expected_symlink_path} -> {cold_file_path}")
                             continue
-                        else:
-                            # Symlink points to wrong location - log warning but don't fix
-                            logger.warning(
-                                f"Symlink points to wrong location: {expected_symlink_path} "
-                                f"-> {target} (expected {cold_file_path})"
-                            )
-                            stats["symlinks_skipped"] += 1
-                            continue
+                        # Symlink points to wrong location - log warning but don't fix
+                        logger.warning(
+                            f"Symlink points to wrong location: {expected_symlink_path} "
+                            f"-> {target} (expected {cold_file_path})"
+                        )
+                        stats["symlinks_skipped"] += 1
+                        continue
                     except (OSError, RuntimeError):
                         # Broken symlink - will be recreated below
                         logger.info(f"Broken symlink found, will recreate: {expected_symlink_path}")
@@ -134,7 +134,7 @@ class FileReconciliation:
                 logger.info(f"Recreated missing symlink: {expected_symlink_path} -> {cold_file_path}")
 
             except Exception as e:
-                error_msg = f"Failed to create symlink {expected_symlink_path} -> {cold_file_path}: {str(e)}"
+                error_msg = f"Failed to create symlink {expected_symlink_path} -> {cold_file_path}: {e!s}"
                 logger.error(error_msg)
                 stats["errors"].append(error_msg)
 
@@ -175,7 +175,7 @@ class FileReconciliation:
 
         # Scan cold storage directory
         for file_path in dest_base.rglob("*"):
-            if file_path.is_file() and not file_path.name.startswith('.'):
+            if file_path.is_file() and not file_path.name.startswith("."):
                 stats["files_checked"] += 1
 
                 # Check if file is in inventory

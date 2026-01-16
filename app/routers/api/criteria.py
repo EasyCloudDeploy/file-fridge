@@ -1,12 +1,14 @@
 """API routes for criteria management."""
 import logging
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+
 from app.database import get_db
-from app.models import Criteria, MonitoredPath, CriterionType
-from app.schemas import CriteriaCreate, CriteriaUpdate, Criteria as CriteriaSchema
-from app.services.scheduler import scheduler_service
+from app.models import Criteria, CriterionType, MonitoredPath
+from app.schemas import Criteria as CriteriaSchema
+from app.schemas import CriteriaCreate, CriteriaUpdate
 from app.utils.network_detection import check_atime_availability
 
 logger = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ def create_criteria(path_id: int, criteria: CriteriaCreate, db: Session = Depend
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Path with id {path_id} not found"
         )
-    
+
     # Validate: Check if atime criteria is being created and cold storage is a network mount
     if criteria.criterion_type == CriterionType.ATIME and criteria.enabled:
         atime_available, error_msg = check_atime_availability(path.cold_storage_path)
@@ -44,19 +46,19 @@ def create_criteria(path_id: int, criteria: CriteriaCreate, db: Session = Depend
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=error_msg
             )
-    
+
     db_criteria = Criteria(path_id=path_id, **criteria.model_dump())
     db.add(db_criteria)
     db.commit()
     db.refresh(db_criteria)
-    
+
     # Re-validate path configuration to update error state
     from app.routers.api.paths import validate_path_configuration
     try:
         validate_path_configuration(path, db)
     except HTTPException:
         pass  # Error already set on path
-    
+
     return db_criteria
 
 
@@ -81,14 +83,14 @@ def update_criteria(criteria_id: int, criteria_update: CriteriaUpdate, db: Sessi
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Criteria with id {criteria_id} not found"
         )
-    
+
     path = criteria.path
-    
+
     # Check if we're enabling atime criteria or changing to atime type
     update_data = criteria_update.model_dump(exclude_unset=True)
     will_be_atime = update_data.get("criterion_type", criteria.criterion_type) == CriterionType.ATIME
     will_be_enabled = update_data.get("enabled", criteria.enabled if "enabled" not in update_data else True)
-    
+
     # Validate: Check if atime criteria is being enabled and cold storage is a network mount
     if will_be_atime and will_be_enabled:
         atime_available, error_msg = check_atime_availability(path.cold_storage_path)
@@ -97,20 +99,20 @@ def update_criteria(criteria_id: int, criteria_update: CriteriaUpdate, db: Sessi
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=error_msg
             )
-    
+
     for field, value in update_data.items():
         setattr(criteria, field, value)
-    
+
     db.commit()
     db.refresh(criteria)
-    
+
     # Re-validate path configuration to update error state
     from app.routers.api.paths import validate_path_configuration
     try:
         validate_path_configuration(path, db)
     except HTTPException:
         pass  # Error already set on path
-    
+
     return criteria
 
 
@@ -123,19 +125,19 @@ def delete_criteria(criteria_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Criteria with id {criteria_id} not found"
         )
-    
+
     path_id = criteria.path_id
-    
+
     # Delete the criterion
     db.delete(criteria)
     db.commit()
-    
+
     # Check if there are any remaining enabled criteria for this path
     remaining_criteria = db.query(Criteria).filter(
         Criteria.path_id == path_id,
         Criteria.enabled == True
     ).count()
-    
+
     # If no criteria remain, reverse all operations (move files back)
     if remaining_criteria == 0:
         from app.services.path_reverser import PathReverser
@@ -144,6 +146,5 @@ def delete_criteria(criteria_id: int, db: Session = Depends(get_db)):
         if results["errors"]:
             logger.warning(f"Some errors occurred while reversing operations: {results['errors']}")
         logger.info(f"Reversed {results['files_reversed']} files for path {path_id}")
-    
-    return None
+
 

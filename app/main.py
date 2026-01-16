@@ -1,13 +1,23 @@
 """Main FastAPI application entry point."""
 import logging
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
 from app.config import settings
 from app.database import init_db
 from app.database_migrations import run_startup_migrations
-from app.routers.api import paths as api_paths, criteria as api_criteria, files as api_files, stats as api_stats, cleanup as api_cleanup, tags as api_tags, tag_rules as api_tag_rules, storage as api_storage, notifiers as api_notifiers
+from app.routers.api import cleanup as api_cleanup
+from app.routers.api import criteria as api_criteria
+from app.routers.api import files as api_files
+from app.routers.api import notifiers as api_notifiers
+from app.routers.api import paths as api_paths
+from app.routers.api import stats as api_stats
+from app.routers.api import storage as api_storage
+from app.routers.api import tag_rules as api_tag_rules
+from app.routers.api import tags as api_tags
 from app.routers.web.views import router as web_router
 from app.services.scheduler import scheduler_service
 
@@ -16,11 +26,11 @@ handlers = [logging.StreamHandler()]  # Always log to stdout
 
 # Add file logging if LOG_FILE_PATH is set
 if settings.log_file_path:
-    handlers.append(logging.FileHandler(settings.log_file_path, mode='a'))
+    handlers.append(logging.FileHandler(settings.log_file_path, mode="a"))
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=handlers
 )
 

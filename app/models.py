@@ -1,8 +1,11 @@
 """SQLAlchemy database models."""
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Text, Enum as SQLEnum, Index, Table
+import enum
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Table, Text
+from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-import enum
+
 from app.database import Base
 
 
@@ -41,10 +44,10 @@ class Operator(str, enum.Enum):
 
 # Association table for many-to-many relationship between MonitoredPath and ColdStorageLocation
 path_storage_location_association = Table(
-    'path_storage_location_association',
+    "path_storage_location_association",
     Base.metadata,
-    Column('path_id', Integer, ForeignKey('monitored_paths.id'), primary_key=True),
-    Column('storage_location_id', Integer, ForeignKey('cold_storage_locations.id'), primary_key=True)
+    Column("path_id", Integer, ForeignKey("monitored_paths.id"), primary_key=True),
+    Column("storage_location_id", Integer, ForeignKey("cold_storage_locations.id"), primary_key=True)
 )
 
 
@@ -102,7 +105,7 @@ class MonitoredPath(Base):
 class Criteria(Base):
     """File matching criteria."""
     __tablename__ = "criteria"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     path_id = Column(Integer, ForeignKey("monitored_paths.id"), nullable=False)
     criterion_type = Column(SQLEnum(CriterionType), nullable=False)
@@ -110,7 +113,7 @@ class Criteria(Base):
     value = Column(String, nullable=False)
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+
     path = relationship("MonitoredPath", back_populates="criteria")
 
 
@@ -122,12 +125,14 @@ class FileRecord(Base):
     path_id = Column(Integer, ForeignKey("monitored_paths.id"), nullable=True)
     original_path = Column(String, nullable=False)
     cold_storage_path = Column(String, nullable=False)
+    cold_storage_location_id = Column(Integer, ForeignKey("cold_storage_locations.id"), nullable=True, index=True)
     file_size = Column(Integer, nullable=False)
     moved_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     operation_type = Column(SQLEnum(OperationType), nullable=False)
     criteria_matched = Column(Text)  # JSON string of matched criteria IDs
 
     path = relationship("MonitoredPath", back_populates="file_records")
+    storage_location = relationship("ColdStorageLocation")
     # Note: Relationship to FileInventory is handled via back-reference from FileInventory
 
 
@@ -164,20 +169,24 @@ class FileInventory(Base):
     status = Column(SQLEnum(FileStatus), default=FileStatus.ACTIVE, index=True)
     last_seen = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    cold_storage_location_id = Column(Integer, ForeignKey("cold_storage_locations.id"), nullable=True, index=True)
 
     # Composite indexes for common query patterns
     __table_args__ = (
         # Index for filtering by path, storage type, and status (common query pattern)
-        Index('idx_inventory_path_storage_status', 'path_id', 'storage_type', 'status'),
+        Index("idx_inventory_path_storage_status", "path_id", "storage_type", "status"),
         # Index for filtering by storage type and status with sorting by last_seen
-        Index('idx_inventory_storage_status_lastseen', 'storage_type', 'status', 'last_seen'),
+        Index("idx_inventory_storage_status_lastseen", "storage_type", "status", "last_seen"),
         # Index for searching by file extension
-        Index('idx_inventory_extension', 'file_extension'),
-        {'sqlite_autoincrement': True},  # For SQLite
+        Index("idx_inventory_extension", "file_extension"),
+        {"sqlite_autoincrement": True},  # For SQLite
     )
 
     # Relationship back to monitored path
     path = relationship("MonitoredPath", back_populates="file_inventory")
+
+    # Relationship to cold storage location
+    storage_location = relationship("ColdStorageLocation")
 
     # Relationship to tags
     tags = relationship("FileTag", back_populates="file", cascade="all, delete-orphan")
@@ -222,8 +231,8 @@ class FileTag(Base):
 
     # Composite index for unique file-tag pairs
     __table_args__ = (
-        Index('idx_file_tag_unique', 'file_id', 'tag_id', unique=True),
-        {'sqlite_autoincrement': True},
+        Index("idx_file_tag_unique", "file_id", "tag_id", unique=True),
+        {"sqlite_autoincrement": True},
     )
 
     # Relationships

@@ -1,21 +1,28 @@
 """Notification service for creating and dispatching notifications."""
 import logging
-from typing import Dict, Any, Optional, List
 from datetime import datetime
-from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import Any, Dict, List, Optional
 
 import aiosmtplib
 import httpx
-from sqlalchemy.orm import Session
 from fastapi import BackgroundTasks
+from sqlalchemy.orm import Session
 
-from app.models import Notifier, Notification, NotificationDispatch, NotifierType, NotificationLevel, DispatchStatus
+from app.models import (
+    DispatchStatus,
+    Notification,
+    NotificationDispatch,
+    NotificationLevel,
+    Notifier,
+    NotifierType,
+)
 from app.services.notification_events import (
+    LowDiskSpaceData,
     NotificationEvent,
-    SyncSuccessData,
     SyncErrorData,
-    LowDiskSpaceData
+    SyncSuccessData,
 )
 
 logger = logging.getLogger(__name__)
@@ -161,12 +168,12 @@ class NotificationService:
                     message=notification.message,
                     metadata=metadata,
                     smtp_config={
-                        'smtp_host': notifier.smtp_host,
-                        'smtp_port': notifier.smtp_port,
-                        'smtp_user': notifier.smtp_user,
-                        'smtp_password': notifier.smtp_password,
-                        'smtp_sender': notifier.smtp_sender,
-                        'smtp_use_tls': notifier.smtp_use_tls,
+                        "smtp_host": notifier.smtp_host,
+                        "smtp_port": notifier.smtp_port,
+                        "smtp_user": notifier.smtp_user,
+                        "smtp_password": notifier.smtp_password,
+                        "smtp_sender": notifier.smtp_sender,
+                        "smtp_use_tls": notifier.smtp_use_tls,
                     }
                 )
             elif notifier.type == NotifierType.GENERIC_WEBHOOK:
@@ -184,7 +191,7 @@ class NotificationService:
 
         except Exception as e:
             logger.exception(f"Unexpected error dispatching to notifier '{notifier.name}': {e}")
-            self._log_dispatch(db, notification, notifier, DispatchStatus.FAILED, f"Unexpected error: {str(e)}")
+            self._log_dispatch(db, notification, notifier, DispatchStatus.FAILED, f"Unexpected error: {e!s}")
 
     async def _send_email(
         self,
@@ -198,12 +205,12 @@ class NotificationService:
         if not smtp_config:
             return False, "SMTP configuration is required for email notifications"
 
-        smtp_host = smtp_config.get('smtp_host')
-        smtp_port = smtp_config.get('smtp_port', 587)
-        smtp_user = smtp_config.get('smtp_user')
-        smtp_password = smtp_config.get('smtp_password')
-        smtp_sender = smtp_config.get('smtp_sender')
-        smtp_use_tls = smtp_config.get('smtp_use_tls', True)
+        smtp_host = smtp_config.get("smtp_host")
+        smtp_port = smtp_config.get("smtp_port", 587)
+        smtp_user = smtp_config.get("smtp_user")
+        smtp_password = smtp_config.get("smtp_password")
+        smtp_sender = smtp_config.get("smtp_sender")
+        smtp_use_tls = smtp_config.get("smtp_use_tls", True)
 
         if not smtp_host:
             return False, "SMTP host is not configured"
@@ -238,9 +245,9 @@ class NotificationService:
             return True, f"Email sent successfully to {address}"
 
         except aiosmtplib.SMTPException as e:
-            return False, f"SMTP error: {str(e)}"
+            return False, f"SMTP error: {e!s}"
         except Exception as e:
-            return False, f"Error sending email: {str(e)}"
+            return False, f"Error sending email: {e!s}"
 
     async def _send_webhook(
         self,
@@ -267,15 +274,14 @@ class NotificationService:
 
                 if 200 <= response.status_code < 300:
                     return True, f"Webhook sent (Status: {response.status_code})"
-                else:
-                    return False, f"Webhook returned status {response.status_code}"
+                return False, f"Webhook returned status {response.status_code}"
 
         except httpx.TimeoutException:
             return False, f"Webhook timed out after {self.WEBHOOK_TIMEOUT}s"
         except httpx.RequestError as e:
-            return False, f"Webhook request failed: {str(e)}"
+            return False, f"Webhook request failed: {e!s}"
         except Exception as e:
-            return False, f"Error sending webhook: {str(e)}"
+            return False, f"Error sending webhook: {e!s}"
 
     def _log_dispatch(
         self,
@@ -319,26 +325,25 @@ class NotificationService:
                     message=test_message,
                     metadata=test_metadata,
                     smtp_config={
-                        'smtp_host': notifier.smtp_host,
-                        'smtp_port': notifier.smtp_port,
-                        'smtp_user': notifier.smtp_user,
-                        'smtp_password': notifier.smtp_password,
-                        'smtp_sender': notifier.smtp_sender,
-                        'smtp_use_tls': notifier.smtp_use_tls,
+                        "smtp_host": notifier.smtp_host,
+                        "smtp_port": notifier.smtp_port,
+                        "smtp_user": notifier.smtp_user,
+                        "smtp_password": notifier.smtp_password,
+                        "smtp_sender": notifier.smtp_sender,
+                        "smtp_use_tls": notifier.smtp_use_tls,
                     }
                 )
-            elif notifier.type == NotifierType.GENERIC_WEBHOOK:
+            if notifier.type == NotifierType.GENERIC_WEBHOOK:
                 return await self._send_webhook(
                     url=notifier.address,
                     level="INFO",
                     message=test_message,
                     metadata=test_metadata
                 )
-            else:
-                return False, f"Unknown notifier type: {notifier.type}"
+            return False, f"Unknown notifier type: {notifier.type}"
 
         except Exception as e:
-            return False, f"Error testing notifier: {str(e)}"
+            return False, f"Error testing notifier: {e!s}"
 
     @staticmethod
     def _format_text_message(level: str, message: str, metadata: Optional[Dict[str, Any]] = None) -> str:

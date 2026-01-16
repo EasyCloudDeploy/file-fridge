@@ -3,9 +3,9 @@ import logging
 import threading
 import time
 import uuid
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Dict, Optional, List
-from dataclasses import dataclass, field, asdict
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -46,24 +46,24 @@ class ScanProgress:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
         # Convert FileOperation objects to dicts
-        data['current_operations'] = [
+        data["current_operations"] = [
             {
-                'file_name': op.file_name,
-                'operation': op.operation,
-                'bytes_total': op.bytes_total,
-                'bytes_transferred': op.bytes_transferred,
-                'percent': op.percent
+                "file_name": op.file_name,
+                "operation": op.operation,
+                "bytes_total": op.bytes_total,
+                "bytes_transferred": op.bytes_transferred,
+                "percent": op.percent
             }
             for op in self.current_operations
         ]
         # Add progress summary
-        data['progress'] = {
-            'total_files': self.total_files,
-            'files_processed': self.files_processed,
-            'files_moved_to_cold': self.files_moved_to_cold,
-            'files_moved_to_hot': self.files_moved_to_hot,
-            'files_skipped': self.files_skipped,
-            'percent': self.percent_complete
+        data["progress"] = {
+            "total_files": self.total_files,
+            "files_processed": self.files_processed,
+            "files_moved_to_cold": self.files_moved_to_cold,
+            "files_moved_to_hot": self.files_moved_to_hot,
+            "files_skipped": self.files_skipped,
+            "percent": self.percent_complete
         }
         return data
 
@@ -262,9 +262,8 @@ class ScanProgressManager:
                     progress.files_moved_to_hot += 1
                 elif operation == "skip":
                     progress.files_skipped += 1
-            else:
-                if error:
-                    progress.errors.append(f"{file_name}: {error}")
+            elif error:
+                progress.errors.append(f"{file_name}: {error}")
 
     def finish_scan(self, path_id: int, status: str = "completed"):
         """

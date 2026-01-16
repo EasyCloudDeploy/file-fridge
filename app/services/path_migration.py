@@ -2,9 +2,11 @@
 import logging
 import shutil
 from pathlib import Path
-from typing import Tuple, List, Dict
+from typing import Dict, Tuple
+
 from sqlalchemy.orm import Session
-from app.models import MonitoredPath, FileRecord, FileInventory
+
+from app.models import FileInventory, FileRecord
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ class PathMigrationService:
         filesystem_files = []
         if old_path_obj.exists():
             filesystem_files = list(old_path_obj.rglob("*"))
-            filesystem_files = [f for f in filesystem_files if f.is_file() and not f.name.startswith('.')]
+            filesystem_files = [f for f in filesystem_files if f.is_file() and not f.name.startswith(".")]
 
         return {
             "file_records_count": len(file_records),

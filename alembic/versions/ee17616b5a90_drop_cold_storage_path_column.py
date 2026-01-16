@@ -7,13 +7,13 @@ Create Date: 2026-01-08 06:52:13.801654
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'ee17616b5a90'
-down_revision: Union[str, None] = '1660b8cad608'
+revision: str = "ee17616b5a90"
+down_revision: Union[str, None] = "1660b8cad608"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -63,4 +63,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Add back cold_storage_path column (will be empty after downgrade)."""
     # Add column back as nullable since we can't restore the data
-    op.add_column('monitored_paths', sa.Column('cold_storage_path', sa.String(), nullable=True))
+    op.add_column("monitored_paths", sa.Column("cold_storage_path", sa.String(), nullable=True))

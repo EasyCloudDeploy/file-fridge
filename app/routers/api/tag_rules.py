@@ -1,11 +1,14 @@
 """API routes for tag rule management."""
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from typing import List
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
 from app.database import get_db
-from app.models import TagRule as TagRuleModel, Tag
-from app.schemas import TagRule as TagRuleSchema, TagRuleCreate, TagRuleUpdate
+from app.models import Tag
+from app.models import TagRule as TagRuleModel
+from app.schemas import TagRule as TagRuleSchema
+from app.schemas import TagRuleCreate, TagRuleUpdate
 
 router = APIRouter(prefix="/api/v1/tag-rules", tags=["tag-rules"])
 
@@ -86,7 +89,6 @@ def delete_tag_rule(rule_id: int, db: Session = Depends(get_db)):
 
     db.delete(rule)
     db.commit()
-    return None
 
 
 @router.post("/apply", status_code=status.HTTP_200_OK)

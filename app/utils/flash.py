@@ -1,7 +1,7 @@
 """Flash message utilities for session-based messaging."""
-from starlette.middleware.sessions import SessionMiddleware
-from starlette.requests import Request
 from typing import Optional
+
+from starlette.requests import Request
 
 
 def get_flash(request: Request, key: str = "message") -> Optional[str]:

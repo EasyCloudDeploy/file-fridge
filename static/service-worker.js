@@ -13,7 +13,7 @@ const STATIC_ASSETS = [
   '/static/js/stats.js',
   '/static/js/tags.js',
   '/static/js/notifiers.js',
-  '/static/js/config.js',
+
   '/static/icons/icon-192.svg',
   '/static/icons/icon-512.svg',
   '/static/manifest.json'

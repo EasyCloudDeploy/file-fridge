@@ -1,12 +1,28 @@
 """API routes for tag management."""
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+import logging
 from typing import List
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
+
 from app.database import get_db
-from app.models import Tag, FileTag, FileInventory
-from app.schemas import Tag as TagSchema, TagCreate, TagUpdate, FileTagCreate, FileTagResponse, TagWithCount
+from app.models import FileInventory, FileTag, Tag
+from app.schemas import (
+    BulkActionResponse,
+    BulkActionResult,
+    BulkTagRequest,
+    FileTagCreate,
+    FileTagResponse,
+    TagCreate,
+    TagUpdate,
+    TagWithCount,
+)
+from app.schemas import (
+    Tag as TagSchema,
+)
 
 router = APIRouter(prefix="/api/v1/tags", tags=["tags"])
 
@@ -16,7 +32,7 @@ def list_tags(db: Session = Depends(get_db)):
     """List all tags with file counts."""
     tags_with_counts = db.query(
         Tag,
-        func.count(FileTag.id).label('file_count')
+        func.count(FileTag.id).label("file_count")
     ).outerjoin(FileTag, Tag.id == FileTag.tag_id)\
      .group_by(Tag.id)\
      .order_by(Tag.name)\
@@ -24,12 +40,12 @@ def list_tags(db: Session = Depends(get_db)):
 
     return [
         {
-            'id': tag.id,
-            'name': tag.name,
-            'description': tag.description,
-            'color': tag.color,
-            'created_at': tag.created_at,
-            'file_count': file_count
+            "id": tag.id,
+            "name": tag.name,
+            "description": tag.description,
+            "color": tag.color,
+            "created_at": tag.created_at,
+            "file_count": file_count
         }
         for tag, file_count in tags_with_counts
     ]
@@ -95,7 +111,6 @@ def delete_tag(tag_id: int, db: Session = Depends(get_db)):
 
     db.delete(tag)
     db.commit()
-    return None
 
 
 @router.post("/files/{file_id}/tags", response_model=FileTagResponse, status_code=status.HTTP_201_CREATED)
@@ -148,7 +163,6 @@ def remove_tag_from_file(file_id: int, tag_id: int, db: Session = Depends(get_db
 
     db.delete(file_tag)
     db.commit()
-    return None
 
 
 @router.get("/files/{file_id}/tags", response_model=List[FileTagResponse])
@@ -162,3 +176,180 @@ def get_file_tags(file_id: int, db: Session = Depends(get_db)):
         )
 
     return db.query(FileTag).filter(FileTag.file_id == file_id).all()
+
+
+# Bulk Tag Operations
+
+
+@router.post("/bulk/add", response_model=BulkActionResponse)
+def bulk_add_tag(request: BulkTagRequest, db: Session = Depends(get_db)):
+    """
+    Add a tag to multiple files.
+
+    Files that already have the tag will be counted as successful.
+    """
+    results = []
+    successful = 0
+    failed = 0
+
+    # Validate tag exists
+    tag = db.query(Tag).filter(Tag.id == request.tag_id).first()
+    if not tag:
+        return BulkActionResponse(
+            total=len(request.file_ids),
+            successful=0,
+            failed=len(request.file_ids),
+            results=[
+                BulkActionResult(
+                    file_id=fid,
+                    success=False,
+                    message=f"Tag with ID {request.tag_id} not found"
+                )
+                for fid in request.file_ids
+            ]
+        )
+
+    for file_id in request.file_ids:
+        try:
+            # Check file exists
+            file_inv = db.query(FileInventory).filter(FileInventory.id == file_id).first()
+            if not file_inv:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message="File not found"
+                ))
+                failed += 1
+                continue
+
+            # Check if already tagged
+            existing = db.query(FileTag).filter(
+                FileTag.file_id == file_id,
+                FileTag.tag_id == request.tag_id
+            ).first()
+
+            if existing:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=True,
+                    message="File already has this tag"
+                ))
+                successful += 1
+                continue
+
+            # Add tag
+            file_tag = FileTag(
+                file_id=file_id,
+                tag_id=request.tag_id,
+                tagged_by="bulk_operation"
+            )
+            db.add(file_tag)
+            db.commit()
+
+            results.append(BulkActionResult(
+                file_id=file_id,
+                success=True,
+                message=f"Tag '{tag.name}' added"
+            ))
+            successful += 1
+
+        except Exception as e:
+            db.rollback()
+            logger.exception(f"Error adding tag to file {file_id}")
+            results.append(BulkActionResult(
+                file_id=file_id,
+                success=False,
+                message=str(e)
+            ))
+            failed += 1
+
+    return BulkActionResponse(
+        total=len(request.file_ids),
+        successful=successful,
+        failed=failed,
+        results=results
+    )
+
+
+@router.post("/bulk/remove", response_model=BulkActionResponse)
+def bulk_remove_tag(request: BulkTagRequest, db: Session = Depends(get_db)):
+    """
+    Remove a tag from multiple files.
+
+    Files that don't have the tag will be counted as successful.
+    """
+    results = []
+    successful = 0
+    failed = 0
+
+    # Validate tag exists
+    tag = db.query(Tag).filter(Tag.id == request.tag_id).first()
+    if not tag:
+        return BulkActionResponse(
+            total=len(request.file_ids),
+            successful=0,
+            failed=len(request.file_ids),
+            results=[
+                BulkActionResult(
+                    file_id=fid,
+                    success=False,
+                    message=f"Tag with ID {request.tag_id} not found"
+                )
+                for fid in request.file_ids
+            ]
+        )
+
+    for file_id in request.file_ids:
+        try:
+            # Check file exists
+            file_inv = db.query(FileInventory).filter(FileInventory.id == file_id).first()
+            if not file_inv:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message="File not found"
+                ))
+                failed += 1
+                continue
+
+            # Find and remove tag
+            file_tag = db.query(FileTag).filter(
+                FileTag.file_id == file_id,
+                FileTag.tag_id == request.tag_id
+            ).first()
+
+            if not file_tag:
+                results.append(BulkActionResult(
+                    file_id=file_id,
+                    success=True,
+                    message="File doesn't have this tag"
+                ))
+                successful += 1
+                continue
+
+            db.delete(file_tag)
+            db.commit()
+
+            results.append(BulkActionResult(
+                file_id=file_id,
+                success=True,
+                message=f"Tag '{tag.name}' removed"
+            ))
+            successful += 1
+
+        except Exception as e:
+            db.rollback()
+            logger.exception(f"Error removing tag from file {file_id}")
+            results.append(BulkActionResult(
+                file_id=file_id,
+                success=False,
+                message=str(e)
+            ))
+            failed += 1
+
+    return BulkActionResponse(
+        total=len(request.file_ids),
+        successful=successful,
+        failed=failed,
+        results=results
+    )
