@@ -160,6 +160,39 @@ class DatabaseMigration:
                     else:
                         logger.debug(f"Index {index_name} already exists")
 
+                # Migration 7: Add cold_storage_location_id to file_records
+                if not DatabaseMigration.column_exists("file_records", "cold_storage_location_id"):
+                    logger.info("Adding cold_storage_location_id column to file_records table...")
+                    conn.execute(text("ALTER TABLE file_records ADD COLUMN cold_storage_location_id INTEGER REFERENCES cold_storage_locations(id)"))
+                    conn.commit()
+                    logger.info("✓ Added cold_storage_location_id column to file_records")
+                else:
+                    logger.debug("cold_storage_location_id column already exists in file_records")
+
+                # Migration 8: Add cold_storage_location_id to file_inventory
+                if not DatabaseMigration.column_exists("file_inventory", "cold_storage_location_id"):
+                    logger.info("Adding cold_storage_location_id column to file_inventory table...")
+                    conn.execute(text("ALTER TABLE file_inventory ADD COLUMN cold_storage_location_id INTEGER REFERENCES cold_storage_locations(id)"))
+                    conn.commit()
+                    logger.info("✓ Added cold_storage_location_id column to file_inventory")
+                else:
+                    logger.debug("cold_storage_location_id column already exists in file_inventory")
+
+                # Migration 9: Create indexes for cold_storage_location_id
+                cold_storage_indexes = [
+                    ("idx_file_records_cold_storage_location_id", "CREATE INDEX idx_file_records_cold_storage_location_id ON file_records(cold_storage_location_id)"),
+                    ("idx_file_inventory_cold_storage_location_id", "CREATE INDEX idx_file_inventory_cold_storage_location_id ON file_inventory(cold_storage_location_id)"),
+                ]
+
+                for index_name, index_sql in cold_storage_indexes:
+                    if not DatabaseMigration.index_exists(index_name):
+                        logger.info(f"Creating index {index_name}...")
+                        conn.execute(text(index_sql))
+                        conn.commit()
+                        logger.info(f"✓ Created index {index_name}")
+                    else:
+                        logger.debug(f"Index {index_name} already exists")
+
                 logger.info("✓ All database migrations completed successfully")
 
         except OperationalError as e:
