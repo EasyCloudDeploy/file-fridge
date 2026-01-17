@@ -472,6 +472,14 @@ def trigger_scan(path_id: int, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot scan path: {error_msg}"
         )
 
+    # Validate path accessibility before triggering scan
+    is_valid, error_msg = validate_path_access(path.source_path, path_id)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot scan path: {error_msg}"
+        )
+
     # Check if a scan is already running
     # Note: This is a best-effort check; the scan_progress_manager.start_scan()
     # method provides atomic protection against concurrent scans
