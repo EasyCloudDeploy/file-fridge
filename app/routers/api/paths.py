@@ -540,3 +540,26 @@ def get_scan_progress(path_id: int, db: Session = Depends(get_db)):
         progress["path_name"] = path.name
 
     return progress
+
+
+@router.get("/{path_id}/scan-errors", response_model=schemas.PathScanErrors)
+def get_scan_errors(path_id: int, db: Session = Depends(get_db)):
+    """
+    Get the error log from the last scan for a path.
+
+    This endpoint is used for lazy-loading error details in the UI.
+    The error log is not included in the list view to keep payloads light.
+    """
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
+    if not path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Path with id {path_id} not found"
+        )
+
+    return schemas.PathScanErrors(
+        path_id=path.id,
+        path_name=path.name,
+        last_scan_at=path.last_scan_at,
+        last_scan_status=path.last_scan_status,
+        last_scan_error_log=path.last_scan_error_log,
+    )

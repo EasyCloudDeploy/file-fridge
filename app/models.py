@@ -46,6 +46,14 @@ class Operator(str, enum.Enum):
     MATCHES = "matches"  # For glob patterns
 
 
+class ScanStatus(str, enum.Enum):
+    """Scan execution status."""
+
+    SUCCESS = "success"
+    FAILURE = "failure"
+    PENDING = "pending"
+
+
 # Association table for many-to-many relationship between MonitoredPath and ColdStorageLocation
 path_storage_location_association = Table(
     "path_storage_location_association",
@@ -93,6 +101,11 @@ class MonitoredPath(Base):
     error_message = Column(
         Text, nullable=True
     )  # Error state message (e.g., atime unavailable on network mount)
+    last_scan_at = Column(DateTime(timezone=True), nullable=True)  # When the last scan finished
+    last_scan_status = Column(
+        SQLEnum(ScanStatus), nullable=True
+    )  # Status of the last scan (SUCCESS, FAILURE, PENDING)
+    last_scan_error_log = Column(Text, nullable=True)  # Full error log from the last scan
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
