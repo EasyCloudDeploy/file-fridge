@@ -21,6 +21,7 @@ from app.models import (
     FileStatus,
     MonitoredPath,
     PinnedFile,
+    ScanStatus,
     StorageType,
 )
 from app.services.criteria_matcher import CriteriaMatcher
@@ -75,18 +76,28 @@ class FileWorkflowService:
 
         logger.info(f"Started scan {scan_id} for path {path.id}")
 
+        # Mark scan as pending
+        path.last_scan_status = ScanStatus.PENDING
+        db.commit()
+
         try:
             if path.error_message:
                 logger.warning(
                     f"Path {path.name} (ID: {path.id}) is in error state: {path.error_message}"
                 )
                 scan_progress_manager.finish_scan(path.id, status="failed")
+                # Update scan status in database
+                error_log = f"Path is in error state: {path.error_message}"
+                path.last_scan_at = datetime.now()
+                path.last_scan_status = ScanStatus.FAILURE
+                path.last_scan_error_log = error_log
+                db.commit()
                 return {
                     "path_id": path.id,
                     "files_found": 0,
                     "files_moved": 0,
                     "files_cleaned": 0,
-                    "errors": [f"Path is in error state: {path.error_message}"],
+                    "errors": [error_log],
                 }
 
             results = {
@@ -187,9 +198,24 @@ class FileWorkflowService:
             except Exception as e:
                 results["errors"].append(f"Error processing path {path.id}: {e!s}")
                 scan_progress_manager.finish_scan(path.id, status="failed")
+                # Update scan status in database
+                path.last_scan_at = datetime.now()
+                path.last_scan_status = ScanStatus.FAILURE
+                path.last_scan_error_log = "\n".join(results["errors"])
+                db.commit()
                 return results
 
             scan_progress_manager.finish_scan(path.id, status="completed")
+            # Update scan status in database - success
+            path.last_scan_at = datetime.now()
+            if results["errors"]:
+                # Partial success - completed but with some errors
+                path.last_scan_status = ScanStatus.FAILURE
+                path.last_scan_error_log = "\n".join(results["errors"])
+            else:
+                path.last_scan_status = ScanStatus.SUCCESS
+                path.last_scan_error_log = None
+            db.commit()
             return results
 
         except Exception as e:
@@ -197,12 +223,22 @@ class FileWorkflowService:
                 f"Unexpected error in process_path for path {path.id}: {e!s}", exc_info=True
             )
             scan_progress_manager.finish_scan(path.id, status="failed")
+            # Update scan status in database
+            error_log = f"Unexpected error: {e!s}"
+            try:
+                path.last_scan_at = datetime.now()
+                path.last_scan_status = ScanStatus.FAILURE
+                path.last_scan_error_log = error_log
+                db.commit()
+            except Exception:
+                # If we can't update the database, log and continue
+                logger.warning(f"Could not update scan status for path {path.id}")
             return {
                 "path_id": path.id,
                 "files_found": 0,
                 "files_moved": 0,
                 "files_cleaned": 0,
-                "errors": [f"Unexpected error: {e!s}"],
+                "errors": [error_log],
             }
 
     def _scan_path(self, path: MonitoredPath, db: Session) -> dict:

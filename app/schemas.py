@@ -13,6 +13,7 @@ from app.models import (
     NotifierType,
     OperationType,
     Operator,
+    ScanStatus,
     StorageType,
     TagRuleCriterionType,
 )
@@ -98,6 +99,8 @@ class MonitoredPathBase(BaseModel):
         True  # Create .noindex file to prevent macOS Spotlight from corrupting timestamps
     )
     error_message: Optional[str] = None  # Error state message
+    last_scan_at: Optional[datetime] = None  # When the last scan finished
+    last_scan_status: Optional[ScanStatus] = None  # Status of the last scan
 
 
 class MonitoredPathCreate(MonitoredPathBase):
@@ -145,6 +148,19 @@ class MonitoredPathSummary(MonitoredPathBase):
     file_count: int
     is_path_present: Optional[bool] = None
     storage_locations: List[ColdStorageLocation] = []
+
+    class Config:
+        from_attributes = True
+
+
+class PathScanErrors(BaseModel):
+    """Schema for path scan errors response (lazy-loaded)."""
+
+    path_id: int
+    path_name: str
+    last_scan_at: Optional[datetime] = None
+    last_scan_status: Optional[ScanStatus] = None
+    last_scan_error_log: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -448,7 +464,8 @@ class NotifierCreate(NotifierBase):
     """Schema for creating a notifier."""
 
     @validator("smtp_host")
-    def validate_smtp_host_for_email(self, v, values):
+    @classmethod
+    def validate_smtp_host_for_email(cls, v, values):
         """Ensure smtp_host is provided for email notifiers."""
         if values.get("type") == NotifierType.EMAIL and not v:
             msg = "smtp_host is required for EMAIL notifiers"
@@ -456,7 +473,8 @@ class NotifierCreate(NotifierBase):
         return v
 
     @validator("smtp_sender")
-    def validate_smtp_sender_for_email(self, v, values):
+    @classmethod
+    def validate_smtp_sender_for_email(cls, v, values):
         """Ensure smtp_sender is provided for email notifiers."""
         if values.get("type") == NotifierType.EMAIL and not v:
             msg = "smtp_sender is required for EMAIL notifiers"

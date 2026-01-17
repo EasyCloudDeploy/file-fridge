@@ -52,6 +52,19 @@ async function loadPathsList() {
                     if (path.error_message) {
                         row.classList.add('table-danger');
                     }
+                    // Format last scan info
+                    let lastScanDisplay = '<span class="text-muted">Never</span>';
+                    if (path.last_scan_at) {
+                        const scanDate = new Date(path.last_scan_at);
+                        const statusBadge = path.last_scan_status === 'success'
+                            ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i></span>'
+                            : path.last_scan_status === 'failure'
+                                ? `<span class="badge bg-danger" style="cursor: pointer;" onclick="showScanErrors(${path.id})" title="View Errors"><i class="bi bi-exclamation-triangle"></i></span>`
+                                : path.last_scan_status === 'pending'
+                                    ? '<span class="badge bg-warning"><i class="bi bi-hourglass-split"></i></span>'
+                                    : '';
+                        lastScanDisplay = `${statusBadge} <span class="small">${scanDate.toLocaleDateString()} ${scanDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>`;
+                    }
                     row.innerHTML = `
                         <td>
                             <strong>${escapeHtml(path.name)}</strong>
@@ -83,6 +96,7 @@ async function loadPathsList() {
                                 </span>
                             ` : ''}
                         </td>
+                        <td class="d-none d-md-table-cell">${lastScanDisplay}</td>
                         <td>
                             <div class="btn-group btn-group-sm">
                                 <a href="/paths/${path.id}" class="btn btn-outline-primary" title="View">
@@ -108,6 +122,55 @@ async function loadPathsList() {
         console.error('Error loading paths:', error);
         showNotification(`Failed to load paths: ${error.message}`, 'error');
         if (emptyEl) emptyEl.style.display = 'block';
+    } finally {
+        if (loadingEl) loadingEl.style.display = 'none';
+    }
+}
+
+// Show scan errors modal with lazy loading
+async function showScanErrors(pathId) {
+    const modal = new bootstrap.Modal(document.getElementById('scanErrorsModal'));
+    const loadingEl = document.getElementById('scan-errors-loading');
+    const contentEl = document.getElementById('scan-errors-content');
+    const emptyEl = document.getElementById('scan-errors-empty');
+
+    // Reset modal state
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (contentEl) contentEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    // Show modal immediately with loading state
+    modal.show();
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/paths/${pathId}/scan-errors`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+
+        // Update modal content
+        document.getElementById('scan-errors-path-name').textContent = data.path_name;
+        document.getElementById('scan-errors-last-scan').textContent = data.last_scan_at
+            ? new Date(data.last_scan_at).toLocaleString()
+            : 'Never';
+
+        const statusEl = document.getElementById('scan-errors-status');
+        if (statusEl) {
+            statusEl.textContent = data.last_scan_status || 'Unknown';
+            statusEl.className = 'badge ' + (data.last_scan_status === 'success' ? 'bg-success' :
+                data.last_scan_status === 'failure' ? 'bg-danger' :
+                data.last_scan_status === 'pending' ? 'bg-warning' : 'bg-secondary');
+        }
+
+        if (data.last_scan_error_log) {
+            document.getElementById('scan-errors-log').textContent = data.last_scan_error_log;
+            if (contentEl) contentEl.style.display = 'block';
+        } else {
+            if (emptyEl) emptyEl.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error loading scan errors:', error);
+        showNotification(`Failed to load scan errors: ${error.message}`, 'error');
+        modal.hide();
     } finally {
         if (loadingEl) loadingEl.style.display = 'none';
     }
