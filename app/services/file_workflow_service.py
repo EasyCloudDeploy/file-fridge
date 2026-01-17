@@ -703,23 +703,15 @@ class FileWorkflowService:
         return updated_count + missing
 
     def _scan_flat_list(self, directory_path: str) -> List[Dict]:
-        """Get metadata for inventory updates.
-
-        Note: Symlinks are intentionally skipped. When files are moved with SYMLINK
-        operation, the actual file in cold storage is tracked in inventory, not the
-        symlink pointer in hot storage.
-        """
+        """Get metadata for inventory updates."""
         results = []
         if not os.path.exists(directory_path):
             return results
 
         for entry in self._recursive_scandir(Path(directory_path)):
             try:
-                # Skip symlinks - they are pointers, not files to be tracked
-                if Path(entry.path).is_symlink():
-                    continue
-
                 stat = entry.stat(follow_symlinks=False)
+                is_symlink = Path(entry.path).is_symlink()
 
                 results.append(
                     {
