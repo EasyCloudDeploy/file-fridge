@@ -650,6 +650,34 @@ class PasswordChange(BaseModel):
     new_password: str = Field(..., min_length=8, description="New password (minimum 8 characters)")
 
 
+# ========================================
+# File Browser Schemas
+# ========================================
+
+
+class BrowserItem(BaseModel):
+    """Schema for a file or directory in the browser."""
+
+    name: str = Field(..., description="File or directory name")
+    path: str = Field(..., description="Absolute path to the file or directory")
+    is_dir: bool = Field(..., description="Whether this is a directory")
+    size: int = Field(0, description="File size in bytes (0 for directories)")
+    modified: float = Field(..., description="Last modified timestamp")
+    inventory_status: Optional[str] = Field(
+        None, description="Inventory status: 'HOT', 'COLD', or None if not tracked"
+    )
+
+
+class BrowserResponse(BaseModel):
+    """Response for directory browsing."""
+
+    current_path: str = Field(..., description="Current directory path")
+    total_items: int = Field(..., description="Total number of items in current directory")
+    total_files: int = Field(0, description="Number of files in current directory")
+    total_dirs: int = Field(0, description="Number of directories in current directory")
+    items: List[BrowserItem] = Field(default_factory=list, description="List of items in directory")
+
+
 # Rebuild models to resolve forward references
 MonitoredPath.model_rebuild()
 FileInventory.model_rebuild()

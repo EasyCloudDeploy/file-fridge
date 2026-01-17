@@ -303,7 +303,75 @@ async function loadPathDetail(pathId) {
                 </tr>
             `;
         }
-        
+
+        // Render last scan status
+        const lastScanStatusCardBody = document.getElementById('last-scan-status-card');
+        if (lastScanStatusCardBody) {
+            if (!path.last_scan_at) {
+                lastScanStatusCardBody.innerHTML = `
+                    <div class="mb-2">
+                        <span class="text-muted">Never scanned</span>
+                    </div>
+                    <div>
+                        <i class="bi bi-info-circle text-info me-2"></i>
+                        <small class="text-muted">No scan history available</small>
+                    </div>
+                `;
+            } else {
+                const scanDate = new Date(path.last_scan_at);
+                let statusBadge = '';
+                let statusText = '';
+                let statusClass = '';
+
+                switch (path.last_scan_status) {
+                    case 'success':
+                        statusBadge = '<i class="bi bi-check-circle-fill text-success"></i>';
+                        statusText = 'Completed successfully';
+                        statusClass = 'text-success';
+                        break;
+                    case 'failure':
+                        statusBadge = '<i class="bi bi-exclamation-triangle-fill text-danger"></i>';
+                        statusText = 'Completed with errors';
+                        statusClass = 'text-danger';
+                        break;
+                    case 'pending':
+                        statusBadge = '<i class="bi bi-hourglass-split text-warning"></i>';
+                        statusText = 'In progress';
+                        statusClass = 'text-warning';
+                        break;
+                    default:
+                        statusBadge = '<i class="bi bi-question-circle text-secondary"></i>';
+                        statusText = 'Unknown status';
+                        statusClass = 'text-secondary';
+                }
+
+                let errorDisplay = '';
+                if (path.last_scan_status === 'failure' && path.last_scan_error_log) {
+                    errorDisplay = `
+                        <div class="mt-3">
+                            <button type="button" class="btn btn-outline-danger btn-sm w-100" onclick="showScanErrors(${pathId})">
+                                <i class="bi bi-exclamation-triangle-fill me-2"></i>View Error Details
+                            </button>
+                        </div>
+                    `;
+                }
+
+                lastScanStatusCardBody.innerHTML = `
+                    <div class="mb-2">
+                        <div class="d-flex align-items-center mb-1">
+                            ${statusBadge}
+                            <span class="ms-2 ${statusClass}">${statusText}</span>
+                        </div>
+                    </div>
+                    <div>
+                        <strong>Last Scan:</strong>
+                        <div class="text-muted small">${scanDate.toLocaleDateString()} ${scanDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+                    </div>
+                    ${errorDisplay}
+                `;
+            }
+        }
+
         // Render hot storage status (source path)
         const hotStorageCardBody = document.getElementById('hot-storage-status-card');
         if (hotStorageCardBody) {
