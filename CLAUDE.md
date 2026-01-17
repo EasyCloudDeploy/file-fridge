@@ -341,6 +341,25 @@ TagRuleService.apply_rules_to_files(file_ids)
 
 ## Key Development Conventions
 
+### ⚠️ Critical Rules - READ FIRST
+
+**1. Package Manager:**
+- **ALWAYS use UV** - This is a UV project, not pip
+- All commands must use `uv run` prefix
+- Never suggest pip install or pip-based workflows
+
+**2. Database Migrations:**
+- **NEVER make direct database changes** in code
+- **ALWAYS create Alembic migrations** for schema changes
+- Users have existing production databases that must upgrade smoothly
+- Every schema change requires: `uv run alembic revision --autogenerate -m "description"`
+- Test both upgrade and downgrade paths
+
+**3. Backward Compatibility:**
+- Maintain compatibility with existing user data
+- Consider migration paths when changing data structures
+- Document breaking changes clearly
+
 ### Code Style
 
 **Formatting (Black):**
@@ -373,11 +392,15 @@ TagRuleService.apply_rules_to_files(file_ids)
 - Add `.order_by()` for consistent results
 - Use indexes for filtered columns
 
-**Migrations:**
-- Create Alembic migration for schema changes: `alembic revision --autogenerate -m "description"`
-- Update `database_migrations.py` for critical changes (backward compatibility)
-- Test migrations on fresh database
-- Keep migrations idempotent
+**Migrations (CRITICAL):**
+- **NEVER make direct database changes** - Users have existing databases that must be upgradeable
+- **ALWAYS use Alembic migrations** for ANY schema change (adding tables, columns, indexes, constraints, etc.)
+- Create migration: `uv run alembic revision --autogenerate -m "description"`
+- Review and test the generated migration before committing
+- Also update `database_migrations.py` for critical changes (backward compatibility layer)
+- Test migrations on fresh database AND test upgrade path from previous versions
+- Keep migrations idempotent and reversible (implement both upgrade and downgrade)
+- **Remember:** Every user must be able to migrate from any previous version to the latest
 
 ### API Conventions
 
@@ -542,10 +565,19 @@ class NewResource(Base):
     value = Column(Integer)
 ```
 
-3. **Create migration**:
+3. **Create migration (REQUIRED for any database changes)**:
 ```bash
-alembic revision --autogenerate -m "Add new_resources table"
-alembic upgrade head
+# Generate migration from model changes
+uv run alembic revision --autogenerate -m "Add new_resources table"
+
+# Review the generated migration file in alembic/versions/
+# Verify it correctly represents your changes
+
+# Apply migration to your local database
+uv run alembic upgrade head
+
+# IMPORTANT: Never make database changes without creating a migration!
+# Users with existing databases depend on migrations to upgrade their schemas.
 ```
 
 4. **Add endpoint** in `app/routers/api/new_resource.py`:
@@ -602,19 +634,35 @@ scheduler.add_job(
 
 ### Add a Database Migration
 
+**CRITICAL: ALL database schema changes MUST go through migrations!**
+
 ```bash
-# Auto-generate migration from model changes
-alembic revision --autogenerate -m "Add new column to users"
+# 1. Make changes to your SQLAlchemy models in app/models.py
 
-# Review migration file in alembic/versions/
-# Edit if needed
+# 2. Auto-generate migration from model changes
+uv run alembic revision --autogenerate -m "Add new column to users"
 
-# Apply migration
-alembic upgrade head
+# 3. IMPORTANT: Review migration file in alembic/versions/
+#    - Verify it correctly represents your intended changes
+#    - Check for data migration needs (not just schema)
+#    - Ensure both upgrade() and downgrade() are correct
+#    - Edit if needed
 
-# Rollback if needed
-alembic downgrade -1
+# 4. Apply migration to your local database
+uv run alembic upgrade head
+
+# 5. Test the migration
+#    - Test on a fresh database
+#    - Test upgrading from previous version
+#    - Test rollback if needed: uv run alembic downgrade -1
+
+# 6. Commit the migration file with your code changes
 ```
+
+**Remember:** Users have production databases. Never:
+- Make direct schema changes in code without migrations
+- Skip migration testing
+- Forget to commit migration files
 
 ### Run Tests
 
