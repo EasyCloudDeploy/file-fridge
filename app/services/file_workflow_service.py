@@ -542,30 +542,41 @@ class FileWorkflowService:
         return updated_count + missing
 
     def _scan_flat_list(self, directory_path: str) -> List[Dict]:
-        """Get metadata for inventory updates."""
+        """Get metadata for inventory updates.
+
+        Note: Symlinks are intentionally skipped. When files are moved with SYMLINK
+        operation, the actual file in cold storage is tracked in inventory, not the
+        symlink pointer in hot storage.
+        """
         results = []
         if not os.path.exists(directory_path):
             return results
 
         for entry in self._recursive_scandir(Path(directory_path)):
             try:
+                # Skip symlinks - they are pointers, not files to be tracked
+                if Path(entry.path).is_symlink():
+                    continue
+
                 stat = entry.stat(follow_symlinks=False)
-                is_symlink = Path(entry.path).is_symlink()
 
                 results.append({
                     "path": entry.path,
                     "size": stat.st_size,
                     "mtime": datetime.fromtimestamp(stat.st_mtime),
                     "atime": datetime.fromtimestamp(stat.st_atime),
-                    "ctime": datetime.fromtimestamp(stat.st_ctime),
-                    "is_symlink": is_symlink
+                    "ctime": datetime.fromtimestamp(stat.st_ctime)
                 })
             except OSError:
                 continue
         return results
 
     def _update_db_entries(self, path: MonitoredPath, files: List[Dict], tier: StorageType, db: Session) -> int:
-        """Synchronize file metadata with the database."""
+        """Synchronize file metadata with the database.
+
+        Note: Symlinks are not included in the files list (filtered by _scan_flat_list),
+        so we only track actual files in the inventory.
+        """
         from app.services.file_metadata import FileMetadataExtractor
         from app.services.tag_rule_service import TagRuleService
 
@@ -575,10 +586,6 @@ class FileWorkflowService:
         updated_files = []
 
         for info in files:
-            actual_tier = tier
-            if tier == StorageType.HOT and info.get("is_symlink", False):
-                actual_tier = StorageType.COLD
-
             entry = db.query(FileInventory).filter(
                 FileInventory.path_id == path.id,
                 FileInventory.file_path == info["path"]
@@ -586,13 +593,13 @@ class FileWorkflowService:
 
             if entry:
                 updated = False
-                if entry.file_size != info["size"] or entry.status != FileStatus.ACTIVE or entry.storage_type != actual_tier:
+                if entry.file_size != info["size"] or entry.status != FileStatus.ACTIVE or entry.storage_type != tier:
                     entry.file_size = info["size"]
                     entry.file_mtime = info["mtime"]
                     entry.file_atime = info["atime"]
                     entry.file_ctime = info["ctime"]
                     entry.status = FileStatus.ACTIVE
-                    entry.storage_type = actual_tier
+                    entry.storage_type = tier
                     updated = True
 
                 if entry.file_extension is None or entry.mime_type is None:
@@ -629,7 +636,7 @@ class FileWorkflowService:
 
                 new_entry = FileInventory(
                     path_id=path.id, file_path=info["path"],
-                    storage_type=actual_tier, file_size=info["size"],
+                    storage_type=tier, file_size=info["size"],
                     file_mtime=info["mtime"], file_atime=info["atime"],
                     file_ctime=info["ctime"], status=FileStatus.ACTIVE,
                     file_extension=extension, mime_type=mime_type, checksum=checksum
