@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import init_db
 from app.database_migrations import run_startup_migrations
 from app.routers.api import auth as api_auth
+from app.routers.api import browser as api_browser
 from app.routers.api import cleanup as api_cleanup
 from app.routers.api import criteria as api_criteria
 from app.routers.api import files as api_files
@@ -75,6 +76,7 @@ app.include_router(api_auth.router)
 
 # Protected API routers - require authentication
 api_dependencies = [Depends(get_current_user)]
+app.include_router(api_browser.router, dependencies=api_dependencies)
 app.include_router(api_paths.router, dependencies=api_dependencies)
 app.include_router(api_criteria.router, dependencies=api_dependencies)
 app.include_router(api_files.router, dependencies=api_dependencies)

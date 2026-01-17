@@ -20,7 +20,12 @@
 
                             <div class="mb-3">
                                 <label for="path" class="form-label">Path *</label>
-                                <input type="text" class="form-control" id="path" name="path" required>
+                                <div class="input-group">
+                                    <input type="text" class="form-control" id="path" name="path" required>
+                                    <button class="btn btn-outline-secondary" type="button" onclick="fileBrowser.open({targetInputId: 'path', initialPath: document.getElementById('path').value || '/'})">
+                                        <i class="bi bi-folder2-open"></i> Browse
+                                    </button>
+                                </div>
                                 <small class="form-text text-muted">The absolute file system path to the storage location</small>
                             </div>
 
@@ -37,8 +42,12 @@
                 </div>
             </div>
         </div>
+
+        <!-- Include File Browser Modal -->
+        {% include 'components/file_browser_modal.html' %}
 {% endblock %}
 
 {% block extra_scripts %}
+    <script src="/static/js/file-browser.js"></script>
     <script src="/static/js/storage-location-form.js"></script>
 {% endblock %}

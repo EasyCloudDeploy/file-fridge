@@ -1,0 +1,129 @@
+<!-- File Browser Modal Component -->
+<div class="modal fade" id="fileBrowserModal" tabindex="-1" aria-labelledby="fileBrowserModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title" id="fileBrowserModalLabel">
+                    <i class="bi bi-folder2-open"></i> Browse File System
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Address Bar -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="row g-2">
+                            <div class="col">
+                                <div class="input-group">
+                                    <span class="input-group-text">
+                                        <i class="bi bi-folder"></i>
+                                    </span>
+                                    <input type="text" class="form-control font-monospace" id="browserAddressBar" placeholder="/path/to/directory">
+                                    <button class="btn btn-outline-primary" type="button" id="browserGoBtn">
+                                        <i class="bi bi-arrow-right-circle"></i> Go
+                                    </button>
+                                    <button class="btn btn-outline-secondary" type="button" id="browserRefreshBtn" title="Refresh">
+                                        <i class="bi bi-arrow-clockwise"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col">
+                                <small class="text-muted">
+                                    <i class="bi bi-info-circle"></i>
+                                    <span id="browserStats">0 items</span>
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Browser Content -->
+                <div class="card">
+                    <div class="card-body">
+                        <!-- Loading State -->
+                        <div id="browserLoading" class="text-center py-5" style="display: none;">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="mt-2 text-muted">Loading directory...</p>
+                        </div>
+
+                        <!-- Error State -->
+                        <div id="browserError" class="alert alert-danger" role="alert" style="display: none;">
+                            <i class="bi bi-exclamation-triangle-fill"></i>
+                            <span id="browserErrorMessage"></span>
+                        </div>
+
+                        <!-- Directory Listing -->
+                        <div id="browserContent" style="max-height: 500px; overflow-y: auto;">
+                            <table class="table table-hover table-sm">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th style="width: 40px;"></th>
+                                        <th>Name</th>
+                                        <th style="width: 120px;">Size</th>
+                                        <th style="width: 100px;">Status</th>
+                                        <th style="width: 100px;" class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="browserTableBody">
+                                    <!-- Items will be populated by JavaScript -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="bi bi-x-circle"></i> Cancel
+                </button>
+                <button type="button" class="btn btn-primary" id="browserSelectBtn" style="display: none;">
+                    <i class="bi bi-check-circle"></i> Select
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- CSS for inventory status badges -->
+<style>
+    .inventory-badge-hot {
+        background-color: #28a745;
+        color: white;
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+    }
+
+    .inventory-badge-cold {
+        background-color: #17a2b8;
+        color: white;
+        font-size: 0.75rem;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+    }
+
+    .browser-item-row {
+        cursor: pointer;
+    }
+
+    .browser-item-row:hover {
+        background-color: #f8f9fa;
+    }
+
+    .browser-item-row.selected {
+        background-color: #e3f2fd;
+    }
+
+    .browser-dir-name {
+        font-weight: 500;
+        color: #0d6efd;
+    }
+
+    .browser-file-name {
+        color: #495057;
+    }
+</style>

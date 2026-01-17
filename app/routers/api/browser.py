@@ -1,0 +1,137 @@
+"""API routes for file system browsing."""
+
+import logging
+from pathlib import Path
+from typing import Dict, Set
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.models import FileInventory, StorageType
+from app.schemas import BrowserItem, BrowserResponse
+from app.security import get_current_user
+
+router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
+logger = logging.getLogger(__name__)
+
+
+@router.get("/list", response_model=BrowserResponse)
+def list_directory(
+    path: str = Query("/", description="Directory path to browse"),
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Browse a directory and return its contents with inventory status.
+
+    This endpoint is unrestricted (admins can browse anywhere) and includes
+    inventory status for files that are tracked in the database.
+
+    Args:
+        path: Directory path to browse (defaults to root)
+        db: Database session
+        current_user: Authenticated user (admin access required)
+
+    Returns:
+        BrowserResponse with directory contents and statistics
+
+    Raises:
+        HTTPException: 400 if path is invalid, 404 if path doesn't exist
+    """
+    try:
+        # Resolve the path to handle any '..' or symlinks
+        try:
+            resolved_path = Path(path).resolve()
+        except (OSError, ValueError) as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid directory path: {e!s}",
+            )
+
+        # Verify path exists and is a directory
+        if not resolved_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Directory does not exist: {path}",
+            )
+
+        if not resolved_path.is_dir():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Path is not a directory: {path}",
+            )
+
+        # Get inventory status for all files in this directory
+        # Build a map of file_path -> inventory_status
+        inventory_map: Dict[str, str] = {}
+        try:
+            # Query all files in the current directory from inventory
+            inventory_entries = (
+                db.query(FileInventory.file_path, FileInventory.storage_type)
+                .filter(FileInventory.file_path.like(f"{resolved_path}/%"))
+                .all()
+            )
+
+            for file_path, storage_type in inventory_entries:
+                # Only include files directly in this directory (not subdirectories)
+                if Path(file_path).parent == resolved_path:
+                    inventory_map[file_path] = (
+                        storage_type.value if hasattr(storage_type, "value") else str(storage_type)
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to fetch inventory status: {e}")
+            # Continue without inventory status on error
+
+        # List directory contents
+        items = []
+        total_files = 0
+        total_dirs = 0
+
+        for item in sorted(resolved_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+            try:
+                stat_info = item.stat()
+                is_dir = item.is_dir()
+
+                # Get inventory status for files
+                inventory_status = None
+                if not is_dir:
+                    inventory_status = inventory_map.get(str(item))
+
+                browser_item = BrowserItem(
+                    name=item.name,
+                    path=str(item),
+                    is_dir=is_dir,
+                    size=stat_info.st_size if not is_dir else 0,
+                    modified=stat_info.st_mtime,
+                    inventory_status=inventory_status,
+                )
+
+                items.append(browser_item)
+
+                if is_dir:
+                    total_dirs += 1
+                else:
+                    total_files += 1
+
+            except (OSError, PermissionError) as e:
+                # Skip items we can't access
+                logger.debug(f"Skipping inaccessible item {item}: {e}")
+                continue
+
+        return BrowserResponse(
+            current_path=str(resolved_path),
+            total_items=len(items),
+            total_files=total_files,
+            total_dirs=total_dirs,
+            items=items,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error browsing directory {path}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error browsing directory: {e!s}",
+        )
