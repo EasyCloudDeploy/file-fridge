@@ -1,4 +1,5 @@
 """Service to reverse file operations when criteria are removed or paths are deleted."""
+
 import logging
 import shutil
 from pathlib import Path
@@ -18,28 +19,25 @@ class PathReverser:
     def reverse_path_operations(path_id: int, db: Session) -> Dict[str, any]:
         """
         Reverse all file operations for a path (move files back from cold storage).
-        
+
         Args:
             path_id: The path ID to reverse operations for
             db: Database session
-        
+
         Returns:
             dict with results:
             - files_reversed: int - number of files successfully moved back
             - errors: List[str] - list of error messages
         """
-        results = {
-            "files_reversed": 0,
-            "errors": []
-        }
+        results = {"files_reversed": 0, "errors": []}
 
         try:
             # Get all file records for this path
-            file_records = db.query(FileRecord).filter(
-                FileRecord.path_id == path_id
-            ).all()
+            file_records = db.query(FileRecord).filter(FileRecord.path_id == path_id).all()
 
-            logger.info(f"Reversing operations for path {path_id}: {len(file_records)} files to process")
+            logger.info(
+                f"Reversing operations for path {path_id}: {len(file_records)} files to process"
+            )
 
             for file_record in file_records:
                 try:
@@ -50,20 +48,24 @@ class PathReverser:
                         db.delete(file_record)
                         logger.info(f"Reversed operation for file: {file_record.original_path}")
                     else:
-                        results["errors"].append(f"Failed to reverse {file_record.original_path}: {error}")
+                        results["errors"].append(
+                            f"Failed to reverse {file_record.original_path}: {error}"
+                        )
                         logger.error(f"Failed to reverse {file_record.original_path}: {error}")
                 except Exception as e:
                     error_msg = f"Error reversing {file_record.original_path}: {e!s}"
                     results["errors"].append(error_msg)
-                    logger.error(error_msg)
+                    logger.exception(error_msg)
 
             db.commit()
-            logger.info(f"Path reversal complete: {results['files_reversed']} files reversed, {len(results['errors'])} errors")
+            logger.info(
+                f"Path reversal complete: {results['files_reversed']} files reversed, {len(results['errors'])} errors"
+            )
 
         except Exception as e:
             error_msg = f"Error during path reversal: {e!s}"
             results["errors"].append(error_msg)
-            logger.error(error_msg)
+            logger.exception(error_msg)
             db.rollback()
 
         return results
@@ -72,10 +74,10 @@ class PathReverser:
     def _reverse_file_operation(file_record: FileRecord) -> tuple[bool, Optional[str]]:
         """
         Reverse a single file operation.
-        
+
         Args:
             file_record: The FileRecord to reverse
-        
+
         Returns:
             (success: bool, error_message: Optional[str])
         """
@@ -134,4 +136,3 @@ class PathReverser:
 
         except Exception as e:
             return False, str(e)
-

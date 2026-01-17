@@ -1,5 +1,5 @@
 """Application configuration."""
-import logging
+
 import logging
 from pathlib import Path
 from typing import Optional
@@ -132,7 +132,7 @@ def translate_path_for_symlink(container_path: str) -> str:
     # If path starts with container prefix, replace with host prefix
     if container_path.startswith(container_prefix):
         # Replace the prefix
-        relative_path = container_path[len(container_prefix):]
+        relative_path = container_path[len(container_prefix) :]
         return host_prefix + relative_path
 
     # Path doesn't match container prefix, return as-is

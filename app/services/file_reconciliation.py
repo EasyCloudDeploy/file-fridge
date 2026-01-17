@@ -1,4 +1,5 @@
 """File reconciliation service - recovers missing symlinks and validates file integrity."""
+
 import logging
 from pathlib import Path
 from typing import Dict
@@ -38,12 +39,14 @@ class FileReconciliation:
             "symlinks_checked": 0,
             "symlinks_created": 0,
             "symlinks_skipped": 0,  # Already exist
-            "errors": []
+            "errors": [],
         }
 
         # Only reconcile symlinks if operation type is symlink
         if path.operation_type != OperationType.SYMLINK:
-            logger.debug(f"Skipping symlink reconciliation for {path.name} - operation type is {path.operation_type.value}")
+            logger.debug(
+                f"Skipping symlink reconciliation for {path.name} - operation type is {path.operation_type.value}"
+            )
             return stats
 
         logger.info(f"Starting symlink reconciliation for path: {path.name}")
@@ -52,36 +55,60 @@ class FileReconciliation:
         dest_base = Path(path.cold_storage_path)
 
         # Get all files in cold storage from inventory
-        cold_files = db.query(FileInventory).filter(
-            FileInventory.path_id == path.id,
-            FileInventory.storage_type == StorageType.COLD,
-            FileInventory.status == "active"
-        ).all()
+        cold_files = (
+            db.query(FileInventory)
+            .filter(
+                FileInventory.path_id == path.id,
+                FileInventory.storage_type == StorageType.COLD,
+                FileInventory.status == "active",
+            )
+            .all()
+        )
 
         logger.info(f"Found {len(cold_files)} files in cold storage inventory")
+
+        # Existence caches to avoid redundant filesystem calls
+        dir_exists_cache = {}
+        file_exists_cache = {}
+
+        def check_path_exists(p: Path) -> bool:
+            p_str = str(p)
+            if p_str in file_exists_cache:
+                return file_exists_cache[p_str]
+
+            if p.exists():
+                file_exists_cache[p_str] = True
+                return True
+
+            # If it doesn't exist, check if its parent exists (optimization for missing folders)
+            parent = p.parent
+            parent_str = str(parent)
+            if parent_str in dir_exists_cache and not dir_exists_cache[parent_str]:
+                file_exists_cache[p_str] = False
+                return False
+
+            parent_exists = parent.exists()
+            dir_exists_cache[parent_str] = parent_exists
+            file_exists_cache[p_str] = False
+            return False
 
         for inventory_entry in cold_files:
             stats["symlinks_checked"] += 1
             cold_file_path = Path(inventory_entry.file_path)
 
             # Determine where the symlink should be in hot storage
-            # The cold storage path might be the actual file OR could be a symlink in hot storage
-
-            # Check if this is a path in cold storage
             try:
                 # If the file is in cold storage directory, calculate corresponding hot path
                 relative_path = cold_file_path.relative_to(dest_base)
                 expected_symlink_path = source_base / relative_path
             except ValueError:
-                # File path is not under cold storage base - might be a symlink path
-                # Check if it's already in hot storage (no symlink needed)
+                # File path is not under cold storage base
                 try:
-                    cold_file_path.relative_to(source_base)
-                    # File is in hot storage, skip
+                    cold_file_path.relative_to(source_path)
+                    # File is already in hot storage, skip
                     stats["symlinks_skipped"] += 1
                     continue
                 except ValueError:
-                    # Path is neither in hot nor cold storage - this is unexpected
                     logger.warning(f"File path not in hot or cold storage: {cold_file_path}")
                     continue
 
@@ -92,11 +119,9 @@ class FileReconciliation:
                     try:
                         target = expected_symlink_path.resolve(strict=True)
                         if target == cold_file_path:
-                            # Symlink exists and points to correct location
                             stats["symlinks_skipped"] += 1
-                            logger.debug(f"Symlink already exists: {expected_symlink_path} -> {cold_file_path}")
                             continue
-                        # Symlink points to wrong location - log warning but don't fix
+
                         logger.warning(
                             f"Symlink points to wrong location: {expected_symlink_path} "
                             f"-> {target} (expected {cold_file_path})"
@@ -118,24 +143,28 @@ class FileReconciliation:
 
             # Create the missing symlink
             try:
-                # Ensure parent directory exists
-                expected_symlink_path.parent.mkdir(parents=True, exist_ok=True)
-
-                # Verify the cold storage file actually exists
-                if not cold_file_path.exists():
+                # Verify the cold storage file actually exists (using cache)
+                if not check_path_exists(cold_file_path):
                     logger.warning(f"Cold storage file does not exist: {cold_file_path}")
                     stats["errors"].append(f"Cold storage file missing: {cold_file_path}")
                     continue
+
+                # Ensure parent directory exists
+                expected_symlink_path.parent.mkdir(parents=True, exist_ok=True)
 
                 # Create symlink pointing to cold storage file
                 expected_symlink_path.symlink_to(cold_file_path)
 
                 stats["symlinks_created"] += 1
-                logger.info(f"Recreated missing symlink: {expected_symlink_path} -> {cold_file_path}")
+                logger.info(
+                    f"Recreated missing symlink: {expected_symlink_path} -> {cold_file_path}"
+                )
 
             except Exception as e:
-                error_msg = f"Failed to create symlink {expected_symlink_path} -> {cold_file_path}: {e!s}"
-                logger.error(error_msg)
+                error_msg = (
+                    f"Failed to create symlink {expected_symlink_path} -> {cold_file_path}: {e!s}"
+                )
+                logger.exception(error_msg)
                 stats["errors"].append(error_msg)
 
         logger.info(
@@ -161,11 +190,7 @@ class FileReconciliation:
         Returns:
             Dictionary with verification statistics
         """
-        stats = {
-            "files_checked": 0,
-            "files_tracked": 0,
-            "files_untracked": 0
-        }
+        stats = {"files_checked": 0, "files_tracked": 0, "files_untracked": 0}
 
         dest_base = Path(path.cold_storage_path)
 
@@ -179,10 +204,13 @@ class FileReconciliation:
                 stats["files_checked"] += 1
 
                 # Check if file is in inventory
-                inventory_entry = db.query(FileInventory).filter(
-                    FileInventory.path_id == path.id,
-                    FileInventory.file_path == str(file_path)
-                ).first()
+                inventory_entry = (
+                    db.query(FileInventory)
+                    .filter(
+                        FileInventory.path_id == path.id, FileInventory.file_path == str(file_path)
+                    )
+                    .first()
+                )
 
                 if inventory_entry:
                     stats["files_tracked"] += 1

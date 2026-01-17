@@ -1,4 +1,5 @@
 """Service for backfilling metadata for existing files in inventory."""
+
 import logging
 from pathlib import Path
 from typing import Dict
@@ -36,24 +37,23 @@ class MetadataBackfillService:
         logger.info("Starting metadata backfill for existing files...")
 
         # Find all files missing metadata
-        files_needing_update = self.db.query(FileInventory).filter(
-            or_(
-                FileInventory.file_extension.is_(None),
-                FileInventory.mime_type.is_(None),
-                FileInventory.checksum.is_(None) if compute_checksum else False
+        files_needing_update = (
+            self.db.query(FileInventory)
+            .filter(
+                or_(
+                    FileInventory.file_extension.is_(None),
+                    FileInventory.mime_type.is_(None),
+                    FileInventory.checksum.is_(None) if compute_checksum else False,
+                )
             )
-        ).all()
+            .all()
+        )
 
         total_files = len(files_needing_update)
         logger.info(f"Found {total_files} files needing metadata updates")
 
         if total_files == 0:
-            return {
-                "files_processed": 0,
-                "files_skipped": 0,
-                "files_failed": 0,
-                "total_files": 0
-            }
+            return {"files_processed": 0, "files_skipped": 0, "files_failed": 0, "total_files": 0}
 
         files_processed = 0
         files_skipped = 0
@@ -62,14 +62,13 @@ class MetadataBackfillService:
 
         # Process in batches for better performance
         for i in range(0, total_files, batch_size):
-            batch = files_needing_update[i:i + batch_size]
+            batch = files_needing_update[i : i + batch_size]
             batch_count += 1
 
             for file_entry in batch:
                 try:
                     result = self._update_file_metadata(
-                        file_entry,
-                        compute_checksum=compute_checksum
+                        file_entry, compute_checksum=compute_checksum
                     )
 
                     if result == "updated":
@@ -80,7 +79,7 @@ class MetadataBackfillService:
                         files_failed += 1
 
                 except Exception as e:
-                    logger.error(f"Error processing file {file_entry.file_path}: {e}")
+                    logger.exception(f"Error processing file {file_entry.file_path}: {e}")
                     files_failed += 1
 
             # Commit after each batch
@@ -92,7 +91,7 @@ class MetadataBackfillService:
                     f"({files_skipped} skipped, {files_failed} failed)"
                 )
             except Exception as e:
-                logger.error(f"Error committing batch {batch_count}: {e}")
+                logger.exception(f"Error committing batch {batch_count}: {e}")
                 self.db.rollback()
                 files_failed += len(batch)
 
@@ -107,13 +106,11 @@ class MetadataBackfillService:
             "files_processed": files_processed,
             "files_skipped": files_skipped,
             "files_failed": files_failed,
-            "total_files": total_files
+            "total_files": total_files,
         }
 
     def _update_file_metadata(
-        self,
-        file_entry: FileInventory,
-        compute_checksum: bool = True
+        self, file_entry: FileInventory, compute_checksum: bool = True
     ) -> str:
         """
         Update metadata for a single file.
@@ -157,14 +154,11 @@ class MetadataBackfillService:
             return "skipped"
 
         except Exception as e:
-            logger.error(f"Failed to extract metadata for {file_path}: {e}")
+            logger.exception(f"Failed to extract metadata for {file_path}: {e}")
             return "failed"
 
     def backfill_path(
-        self,
-        path_id: int,
-        batch_size: int = 100,
-        compute_checksum: bool = True
+        self, path_id: int, batch_size: int = 100, compute_checksum: bool = True
     ) -> Dict[str, int]:
         """
         Backfill metadata for files in a specific monitored path.
@@ -180,25 +174,24 @@ class MetadataBackfillService:
         logger.info(f"Starting metadata backfill for path ID {path_id}...")
 
         # Find files for this path missing metadata
-        files_needing_update = self.db.query(FileInventory).filter(
-            FileInventory.path_id == path_id,
-            or_(
-                FileInventory.file_extension.is_(None),
-                FileInventory.mime_type.is_(None),
-                FileInventory.checksum.is_(None) if compute_checksum else False
+        files_needing_update = (
+            self.db.query(FileInventory)
+            .filter(
+                FileInventory.path_id == path_id,
+                or_(
+                    FileInventory.file_extension.is_(None),
+                    FileInventory.mime_type.is_(None),
+                    FileInventory.checksum.is_(None) if compute_checksum else False,
+                ),
             )
-        ).all()
+            .all()
+        )
 
         total_files = len(files_needing_update)
         logger.info(f"Found {total_files} files in path {path_id} needing metadata updates")
 
         if total_files == 0:
-            return {
-                "files_processed": 0,
-                "files_skipped": 0,
-                "files_failed": 0,
-                "total_files": 0
-            }
+            return {"files_processed": 0, "files_skipped": 0, "files_failed": 0, "total_files": 0}
 
         files_processed = 0
         files_skipped = 0
@@ -207,14 +200,13 @@ class MetadataBackfillService:
 
         # Process in batches
         for i in range(0, total_files, batch_size):
-            batch = files_needing_update[i:i + batch_size]
+            batch = files_needing_update[i : i + batch_size]
             batch_count += 1
 
             for file_entry in batch:
                 try:
                     result = self._update_file_metadata(
-                        file_entry,
-                        compute_checksum=compute_checksum
+                        file_entry, compute_checksum=compute_checksum
                     )
 
                     if result == "updated":
@@ -225,7 +217,7 @@ class MetadataBackfillService:
                         files_failed += 1
 
                 except Exception as e:
-                    logger.error(f"Error processing file {file_entry.file_path}: {e}")
+                    logger.exception(f"Error processing file {file_entry.file_path}: {e}")
                     files_failed += 1
 
             # Commit after each batch
@@ -236,7 +228,7 @@ class MetadataBackfillService:
                     f"Processed {files_processed}/{total_files} files"
                 )
             except Exception as e:
-                logger.error(f"Error committing batch {batch_count}: {e}")
+                logger.exception(f"Error committing batch {batch_count}: {e}")
                 self.db.rollback()
                 files_failed += len(batch)
 
@@ -251,5 +243,5 @@ class MetadataBackfillService:
             "files_processed": files_processed,
             "files_skipped": files_skipped,
             "files_failed": files_failed,
-            "total_files": total_files
+            "total_files": total_files,
         }

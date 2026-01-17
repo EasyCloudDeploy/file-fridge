@@ -1,4 +1,5 @@
 """API endpoints for notifier management."""
+
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -18,11 +19,7 @@ router = APIRouter(prefix="/api/v1/notifiers", tags=["notifiers"])
 
 
 @router.get("", response_model=List[Notifier])
-def list_notifiers(
-    skip: int = 0,
-    limit: int = 100,
-    db: Session = Depends(get_db)
-):
+def list_notifiers(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     """
     List all configured notifiers.
 
@@ -34,15 +31,11 @@ def list_notifiers(
     Returns:
         List of notifiers
     """
-    notifiers = db.query(NotifierModel).offset(skip).limit(limit).all()
-    return notifiers
+    return db.query(NotifierModel).offset(skip).limit(limit).all()
 
 
 @router.get("/{notifier_id}", response_model=Notifier)
-def get_notifier(
-    notifier_id: int,
-    db: Session = Depends(get_db)
-):
+def get_notifier(notifier_id: int, db: Session = Depends(get_db)):
     """
     Get a specific notifier by ID.
 
@@ -60,16 +53,13 @@ def get_notifier(
     if not notifier:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Notifier with ID {notifier_id} not found"
+            detail=f"Notifier with ID {notifier_id} not found",
         )
     return notifier
 
 
 @router.post("", response_model=Notifier, status_code=status.HTTP_201_CREATED)
-def create_notifier(
-    notifier: NotifierCreate,
-    db: Session = Depends(get_db)
-):
+def create_notifier(notifier: NotifierCreate, db: Session = Depends(get_db)):
     """
     Create a new notifier.
 
@@ -89,9 +79,7 @@ def create_notifier(
 
 @router.put("/{notifier_id}", response_model=Notifier)
 def update_notifier(
-    notifier_id: int,
-    notifier_update: NotifierUpdate,
-    db: Session = Depends(get_db)
+    notifier_id: int, notifier_update: NotifierUpdate, db: Session = Depends(get_db)
 ):
     """
     Update an existing notifier.
@@ -111,7 +99,7 @@ def update_notifier(
     if not db_notifier:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Notifier with ID {notifier_id} not found"
+            detail=f"Notifier with ID {notifier_id} not found",
         )
 
     # Update only provided fields
@@ -125,10 +113,7 @@ def update_notifier(
 
 
 @router.delete("/{notifier_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_notifier(
-    notifier_id: int,
-    db: Session = Depends(get_db)
-):
+def delete_notifier(notifier_id: int, db: Session = Depends(get_db)):
     """
     Delete a notifier.
 
@@ -143,7 +128,7 @@ def delete_notifier(
     if not db_notifier:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Notifier with ID {notifier_id} not found"
+            detail=f"Notifier with ID {notifier_id} not found",
         )
 
     db.delete(db_notifier)
@@ -151,10 +136,7 @@ def delete_notifier(
 
 
 @router.post("/{notifier_id}/test", response_model=TestNotifierResponse)
-async def test_notifier(
-    notifier_id: int,
-    db: Session = Depends(get_db)
-):
+async def test_notifier(notifier_id: int, db: Session = Depends(get_db)):
     """
     Send a test notification to a specific notifier.
 
@@ -175,14 +157,10 @@ async def test_notifier(
     if not notifier:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Notifier with ID {notifier_id} not found"
+            detail=f"Notifier with ID {notifier_id} not found",
         )
 
     # Send test notification
     success, message = await notification_service.test_notifier(db, notifier_id)
 
-    return TestNotifierResponse(
-        success=success,
-        message=message,
-        notifier_name=notifier.name
-    )
+    return TestNotifierResponse(success=success, message=message, notifier_name=notifier.name)

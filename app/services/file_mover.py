@@ -1,4 +1,7 @@
 """File moving service."""
+
+import builtins
+import contextlib
 import logging
 import os
 import shutil
@@ -20,7 +23,7 @@ def move_file(
     destination: Path,
     operation_type: OperationType,
     path_config: Optional[MonitoredPath] = None,
-    progress_callback: Optional[Callable[[int], None]] = None
+    progress_callback: Optional[Callable[[int], None]] = None,
 ) -> tuple[bool, Optional[str]]:
     """
     Move/copy/symlink a file.
@@ -47,12 +50,17 @@ def move_file(
         destination.parent.mkdir(parents=True, exist_ok=True)
 
         # Check available space for operations that copy data
-        if operation_type in [OperationType.MOVE, OperationType.COPY] or (operation_type == OperationType.SYMLINK and not source.is_symlink()):
+        if operation_type in [OperationType.MOVE, OperationType.COPY] or (
+            operation_type == OperationType.SYMLINK and not source.is_symlink()
+        ):
             try:
                 file_size = source.stat().st_size
                 _, _, free_space = shutil.disk_usage(destination.parent)
                 if file_size + (1024 * 1024) > free_space:
-                    return False, f"Not enough space for {source.name}. Required: {file_size}, Available: {free_space}"
+                    return (
+                        False,
+                        f"Not enough space for {source.name}. Required: {file_size}, Available: {free_space}",
+                    )
             except FileNotFoundError:
                 # Source file doesn't exist
                 if not source.exists():
@@ -72,7 +80,9 @@ def move_file(
         return False, str(e)
 
 
-def _move(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> tuple[bool, Optional[str]]:
+def _move(
+    source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None
+) -> tuple[bool, Optional[str]]:
     """Move file (atomic if same filesystem, otherwise copy+delete)."""
     try:
         if source.is_symlink():
@@ -91,7 +101,9 @@ def _move(source: Path, destination: Path, progress_callback: Optional[Callable[
         return False, f"Move failed: {e!s}"
 
 
-def _move_symlink(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> tuple[bool, Optional[str]]:
+def _move_symlink(
+    source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None
+) -> tuple[bool, Optional[str]]:
     """Handle moving a symlink."""
     try:
         symlink_target = source.readlink()
@@ -123,7 +135,9 @@ def _move_symlink(source: Path, destination: Path, progress_callback: Optional[C
         return False, f"Failed to handle symlink: {e!s}"
 
 
-def _copy(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> tuple[bool, Optional[str]]:
+def _copy(
+    source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None
+) -> tuple[bool, Optional[str]]:
     """Copy file preserving metadata."""
     try:
         _copy_with_progress(source, destination, progress_callback)
@@ -132,7 +146,9 @@ def _copy(source: Path, destination: Path, progress_callback: Optional[Callable[
         return False, f"Copy failed: {e!s}"
 
 
-def _copy_with_progress(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> None:
+def _copy_with_progress(
+    source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None
+) -> None:
     """Copy file with optional progress tracking and timestamp preservation."""
     stat_info = source.stat()
     file_size = stat_info.st_size
@@ -165,7 +181,9 @@ def _copy_with_progress(source: Path, destination: Path, progress_callback: Opti
     os.utime(str(destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
 
 
-def _move_and_symlink(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> tuple[bool, Optional[str]]:
+def _move_and_symlink(
+    source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None
+) -> tuple[bool, Optional[str]]:
     """Move file and create symlink at original location."""
     try:
         original_source = source
@@ -199,16 +217,16 @@ def _move_and_symlink(source: Path, destination: Path, progress_callback: Option
             return True, None
         except OSError as e:
             # Try to restore file on symlink failure
-            try:
+            with contextlib.suppress(builtins.BaseException):
                 destination.rename(original_source)
-            except:
-                pass
             return False, f"Symlink creation failed: {e!s}"
     except Exception as e:
         return False, f"Move and symlink failed: {e!s}"
 
 
-def preserve_directory_structure(source_path: Path, base_source: Path, base_destination: Path) -> Path:
+def preserve_directory_structure(
+    source_path: Path, base_source: Path, base_destination: Path
+) -> Path:
     """Calculate destination path preserving directory structure."""
     try:
         relative_path = source_path.relative_to(base_source)

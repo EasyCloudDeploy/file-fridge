@@ -1,6 +1,8 @@
 """File cleanup service - removes records for files that no longer exist."""
+
 import logging
 from pathlib import Path
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -13,22 +15,37 @@ class FileCleanup:
     """Handles cleanup of file records for files that no longer exist."""
 
     @staticmethod
-    def cleanup_missing_files(db: Session, path_id: int = None) -> dict:
+    def cleanup_missing_files(db: Session, path_id: Optional[int] = None) -> dict:
         """
         Clean up FileRecord entries for files that no longer exist.
-        
+
         Args:
             db: Database session
             path_id: Optional path ID to limit cleanup to a specific path
-        
+
         Returns:
             dict with cleanup results
         """
-        results = {
-            "checked": 0,
-            "removed": 0,
-            "errors": []
-        }
+        results = {"checked": 0, "removed": 0, "errors": []}
+
+        # Directory existence cache to avoid redundant filesystem calls
+        dir_exists_cache = {}
+
+        def check_path_exists(p: Path) -> bool:
+            # If the path itself exists, return True
+            if p.exists():
+                return True
+
+            # If the path doesn't exist, check if its parent exists
+            # (Caching parent existence helps when many files in a missing directory are checked)
+            parent = p.parent
+            parent_str = str(parent)
+            if parent_str in dir_exists_cache and not dir_exists_cache[parent_str]:
+                return False  # Parent is known to be missing
+
+            parent_exists = parent.exists()
+            dir_exists_cache[parent_str] = parent_exists
+            return False
 
         try:
             # Query all file records
@@ -47,7 +64,7 @@ class FileCleanup:
                     if file_record.operation_type == OperationType.MOVE:
                         # For move, file should be in cold storage
                         cold_path = Path(file_record.cold_storage_path)
-                        if not cold_path.exists():
+                        if not check_path_exists(cold_path):
                             should_remove = True
                             logger.info(f"File not found in cold storage (move): {cold_path}")
 
@@ -57,9 +74,13 @@ class FileCleanup:
                         cold_path = Path(file_record.cold_storage_path)
 
                         # If both original and cold storage don't exist, remove record
-                        if not original_path.exists() and not cold_path.exists():
+                        if not check_path_exists(original_path) and not check_path_exists(
+                            cold_path
+                        ):
                             should_remove = True
-                            logger.info(f"Both original and cold storage files missing (copy): {original_path}, {cold_path}")
+                            logger.info(
+                                f"Both original and cold storage files missing (copy): {original_path}, {cold_path}"
+                            )
                         # If at least one exists, keep the record
 
                     elif file_record.operation_type == OperationType.SYMLINK:
@@ -72,16 +93,20 @@ class FileCleanup:
                             # Symlink exists, check if target exists
                             try:
                                 target = original_path.resolve()
-                                if not target.exists():
+                                if not check_path_exists(target):
                                     should_remove = True
-                                    logger.info(f"Symlink target missing: {original_path} -> {target}")
+                                    logger.info(
+                                        f"Symlink target missing: {original_path} -> {target}"
+                                    )
                             except Exception:
                                 should_remove = True
                                 logger.info(f"Symlink broken: {original_path}")
-                        elif not cold_path.exists():
+                        elif not check_path_exists(cold_path):
                             # Neither symlink nor cold storage file exists
                             should_remove = True
-                            logger.info(f"Both symlink and cold storage missing: {original_path}, {cold_path}")
+                            logger.info(
+                                f"Both symlink and cold storage missing: {original_path}, {cold_path}"
+                            )
 
                     if should_remove:
                         db.delete(file_record)
@@ -91,37 +116,35 @@ class FileCleanup:
                 except Exception as e:
                     error_msg = f"Error checking file record {file_record.id}: {e!s}"
                     results["errors"].append(error_msg)
-                    logger.error(error_msg)
+                    logger.exception(error_msg)
 
             db.commit()
-            logger.info(f"Cleanup complete: checked {results['checked']}, removed {results['removed']}")
+            logger.info(
+                f"Cleanup complete: checked {results['checked']}, removed {results['removed']}"
+            )
 
         except Exception as e:
             error_msg = f"Error during cleanup: {e!s}"
             results["errors"].append(error_msg)
-            logger.error(error_msg)
+            logger.exception(error_msg)
             db.rollback()
 
         return results
 
     @staticmethod
-    def cleanup_duplicates(db: Session, path_id: int = None) -> dict:
+    def cleanup_duplicates(db: Session, path_id: Optional[int] = None) -> dict:
         """
         Clean up duplicate FileRecord entries.
         Keeps the most recent record for each unique file.
-        
+
         Args:
             db: Database session
             path_id: Optional path ID to limit cleanup to a specific path
-        
+
         Returns:
             dict with cleanup results
         """
-        results = {
-            "checked": 0,
-            "removed": 0,
-            "errors": []
-        }
+        results = {"checked": 0, "removed": 0, "errors": []}
 
         try:
             # Query all file records
@@ -151,18 +174,21 @@ class FileCleanup:
                         # Existing record is newer, remove current one
                         db.delete(file_record)
                         results["removed"] += 1
-                        logger.info(f"Removed duplicate FileRecord {file_record.id} (older) for {key}")
+                        logger.info(
+                            f"Removed duplicate FileRecord {file_record.id} (older) for {key}"
+                        )
                 else:
                     seen[key] = file_record
 
             db.commit()
-            logger.info(f"Duplicate cleanup complete: checked {results['checked']}, removed {results['removed']}")
+            logger.info(
+                f"Duplicate cleanup complete: checked {results['checked']}, removed {results['removed']}"
+            )
 
         except Exception as e:
             error_msg = f"Error during duplicate cleanup: {e!s}"
             results["errors"].append(error_msg)
-            logger.error(error_msg)
+            logger.exception(error_msg)
             db.rollback()
 
         return results
-

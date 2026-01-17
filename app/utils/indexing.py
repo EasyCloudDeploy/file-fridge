@@ -1,4 +1,5 @@
 """Utilities for managing macOS Spotlight indexing."""
+
 import logging
 from pathlib import Path
 
@@ -40,7 +41,7 @@ class IndexingManager:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to create .noindex file in {directory}: {e}")
+            logger.exception(f"Failed to create .noindex file in {directory}: {e}")
             return False
 
     @staticmethod
@@ -72,11 +73,13 @@ class IndexingManager:
             return True
 
         except Exception as e:
-            logger.error(f"Failed to remove .noindex file from {directory}: {e}")
+            logger.exception(f"Failed to remove .noindex file from {directory}: {e}")
             return False
 
     @staticmethod
-    def manage_noindex_files(source_path: str, cold_storage_path: str, prevent_indexing: bool) -> bool:
+    def manage_noindex_files(
+        source_path: str, cold_storage_path: str, prevent_indexing: bool
+    ) -> bool:
         """
         Manage .noindex files for both hot and cold storage directories.
 

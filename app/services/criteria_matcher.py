@@ -1,4 +1,5 @@
 """Criteria matching service - find-compatible file matching."""
+
 import fnmatch
 import logging
 import os
@@ -20,7 +21,9 @@ class CriteriaMatcher:
     """Matches files against criteria (find-compatible)."""
 
     @staticmethod
-    def match_file(file_path: Path, criteria: List[Criteria], actual_file_path: Optional[Path] = None) -> tuple[bool, List[int]]:
+    def match_file(
+        file_path: Path, criteria: List[Criteria], actual_file_path: Optional[Path] = None
+    ) -> tuple[bool, List[int]]:
         """
         Evaluates if a file matches the criteria (is ACTIVE and should be kept in HOT storage).
 
@@ -48,15 +51,15 @@ class CriteriaMatcher:
             stat_info = stat_path.stat()
 
             # Simple, direct criteria evaluation
-            return CriteriaMatcher._check_criteria(
-                file_path, stat_info, enabled_criteria, "file"
-            )
+            return CriteriaMatcher._check_criteria(file_path, stat_info, enabled_criteria, "file")
         except (OSError, FileNotFoundError) as e:
             logger.debug(f"File {file_path}: Cannot stat - {e}")
             return False, []
 
     @staticmethod
-    def _check_criteria(file_path: Path, stat_info: os.stat_result, criteria: List[Criteria], context: str = "file") -> tuple[bool, List[int]]:
+    def _check_criteria(
+        file_path: Path, stat_info: os.stat_result, criteria: List[Criteria], context: str = "file"
+    ) -> tuple[bool, List[int]]:
         """
         Check if a file (or symlink) matches all criteria.
 
@@ -75,10 +78,14 @@ class CriteriaMatcher:
         for criterion in criteria:
             matches = CriteriaMatcher._match_criterion(file_path, stat_info, criterion)
             if matches:
-                logger.debug(f"File {file_path}: ✓ Criterion {criterion.id} ({criterion.criterion_type.value} {criterion.operator.value} {criterion.value}) MATCHED ({context})")
+                logger.debug(
+                    f"File {file_path}: ✓ Criterion {criterion.id} ({criterion.criterion_type.value} {criterion.operator.value} {criterion.value}) MATCHED ({context})"
+                )
                 matched_ids.append(criterion.id)
             else:
-                logger.debug(f"File {file_path}: ✗ Criterion {criterion.id} ({criterion.criterion_type.value} {criterion.operator.value} {criterion.value}) NOT MATCHED ({context})")
+                logger.debug(
+                    f"File {file_path}: ✗ Criterion {criterion.id} ({criterion.criterion_type.value} {criterion.operator.value} {criterion.value}) NOT MATCHED ({context})"
+                )
                 return False, []
 
         logger.debug(f"File {file_path}: All {len(criteria)} criteria matched ({context})")
@@ -92,9 +99,7 @@ class CriteriaMatcher:
         value = criterion.value
 
         if criterion_type == CriterionType.MTIME:
-            return CriteriaMatcher._match_time(
-                stat_info.st_mtime, operator, value, "mtime"
-            )
+            return CriteriaMatcher._match_time(stat_info.st_mtime, operator, value, "mtime")
         if criterion_type == CriterionType.ATIME:
             # On macOS, also check "Last Open" metadata from extended attributes
             # Use the most recent of atime or Last Open date
@@ -108,34 +113,42 @@ class CriteriaMatcher:
                     if last_open_time > atime:
                         atime = last_open_time
                         used_source = "macOS Last Open"
-                        logger.debug(f"File {file_path}: Using macOS Last Open time ({datetime.fromtimestamp(last_open_time)}) instead of atime ({datetime.fromtimestamp(original_atime)})")
+                        logger.debug(
+                            f"File {file_path}: Using macOS Last Open time ({datetime.fromtimestamp(last_open_time)}) instead of atime ({datetime.fromtimestamp(original_atime)})"
+                        )
                     else:
                         used_source = "atime (newer than Last Open)"
-                        logger.debug(f"File {file_path}: Using atime ({datetime.fromtimestamp(original_atime)}) instead of macOS Last Open ({datetime.fromtimestamp(last_open_time)})")
+                        logger.debug(
+                            f"File {file_path}: Using atime ({datetime.fromtimestamp(original_atime)}) instead of macOS Last Open ({datetime.fromtimestamp(last_open_time)})"
+                        )
                 else:
                     # Last Open time is None - file has NEVER been opened by user
                     # Treat as "infinitely old" (epoch time) so it's moved to cold storage
                     # Don't use atime as fallback because atime can be recent even if file was never opened
                     atime = 0.0  # Unix epoch (Jan 1, 1970)
                     used_source = "macOS Last Open (never opened - using epoch)"
-                    logger.debug(f"File {file_path}: macOS Last Open time not available (never opened), treating as very old (epoch time) instead of using atime ({datetime.fromtimestamp(original_atime)})")
+                    logger.debug(
+                        f"File {file_path}: macOS Last Open time not available (never opened), treating as very old (epoch time) instead of using atime ({datetime.fromtimestamp(original_atime)})"
+                    )
             else:
-                logger.debug(f"File {file_path}: Non-macOS system, using atime ({datetime.fromtimestamp(original_atime)})")
+                logger.debug(
+                    f"File {file_path}: Non-macOS system, using atime ({datetime.fromtimestamp(original_atime)})"
+                )
 
-            logger.debug(f"File {file_path}: Final atime for criteria check: {datetime.fromtimestamp(atime)} (source: {used_source})")
-            return CriteriaMatcher._match_time(
-                atime, operator, value, "atime"
+            logger.debug(
+                f"File {file_path}: Final atime for criteria check: {datetime.fromtimestamp(atime)} (source: {used_source})"
             )
+            return CriteriaMatcher._match_time(atime, operator, value, "atime")
         if criterion_type == CriterionType.CTIME:
-            return CriteriaMatcher._match_time(
-                stat_info.st_ctime, operator, value, "ctime"
-            )
+            return CriteriaMatcher._match_time(stat_info.st_ctime, operator, value, "ctime")
         if criterion_type == CriterionType.SIZE:
             return CriteriaMatcher._match_size(stat_info.st_size, operator, value)
         if criterion_type == CriterionType.NAME:
             return CriteriaMatcher._match_name(file_path.name, operator, value, case_sensitive=True)
         if criterion_type == CriterionType.INAME:
-            return CriteriaMatcher._match_name(file_path.name, operator, value, case_sensitive=False)
+            return CriteriaMatcher._match_name(
+                file_path.name, operator, value, case_sensitive=False
+            )
         if criterion_type == CriterionType.TYPE:
             return CriteriaMatcher._match_type(file_path, stat_info, value)
         if criterion_type == CriterionType.PERM:
@@ -216,7 +229,9 @@ class CriteriaMatcher:
         return False
 
     @staticmethod
-    def _match_name(filename: str, operator: Operator, value: str, case_sensitive: bool = True) -> bool:
+    def _match_name(
+        filename: str, operator: Operator, value: str, case_sensitive: bool = True
+    ) -> bool:
         """Match filename criteria."""
         if not case_sensitive:
             filename = filename.lower()
@@ -238,11 +253,11 @@ class CriteriaMatcher:
     @staticmethod
     def _match_type(file_path: Path, stat_info: os.stat_result, value: str) -> bool:
         """Match file type criteria."""
-        if value == "f" or value == "file":
+        if value in {"f", "file"}:
             return file_path.is_file()
-        if value == "d" or value == "directory":
+        if value in {"d", "directory"}:
             return file_path.is_dir()
-        if value == "l" or value == "link":
+        if value in {"l", "link"}:
             return file_path.is_symlink()
         return False
 
@@ -260,9 +275,7 @@ class CriteriaMatcher:
                 return False
             if "w" in value and not (mode & stat.S_IWUSR):
                 return False
-            if "x" in value and not (mode & stat.S_IXUSR):
-                return False
-            return True
+            return not ("x" in value and not mode & stat.S_IXUSR)
         except (ValueError, TypeError):
             return False
 
@@ -271,6 +284,7 @@ class CriteriaMatcher:
         """Match user criteria."""
         try:
             import pwd
+
             target_uid = pwd.getpwnam(value).pw_uid
             return uid == target_uid
         except (KeyError, ValueError, ImportError):
@@ -285,6 +299,7 @@ class CriteriaMatcher:
         """Match group criteria."""
         try:
             import grp
+
             target_gid = grp.getgrnam(value).gr_gid
             return gid == target_gid
         except (KeyError, ValueError, ImportError):
@@ -298,12 +313,12 @@ class CriteriaMatcher:
     def _get_macos_last_open_time(file_path: Path) -> Optional[float]:
         """
         Get macOS "Last Open" time from extended attributes or Spotlight metadata.
-        
+
         On macOS, Finder access updates extended attributes rather than atime.
         This function attempts to retrieve the Last Open date using:
         1. mdls (Spotlight metadata) - kMDItemLastUsedDate
         2. xattr extended attributes - com.apple.lastuseddate#PS
-        
+
         Returns:
             Unix timestamp as float, or None if not available
         """
@@ -315,9 +330,10 @@ class CriteriaMatcher:
             try:
                 result = subprocess.run(
                     ["mdls", "-name", "kMDItemLastUsedDate", str(file_path)],
-                    check=False, capture_output=True,
+                    check=False,
+                    capture_output=True,
                     timeout=2,
-                    text=True
+                    text=True,
                 )
                 if result.returncode == 0 and result.stdout:
                     # Parse output like: kMDItemLastUsedDate = 2024-01-01 12:00:00 +0000
@@ -328,8 +344,11 @@ class CriteriaMatcher:
                             # Parse date string (format: YYYY-MM-DD HH:MM:SS +0000 or YYYY-MM-DD HH:MM:SS -0000)
                             try:
                                 from datetime import timezone
+
                                 # Try parsing with timezone first
-                                if "+" in date_str or (date_str.count("-") >= 3 and date_str[-5] in "+-"):
+                                if "+" in date_str or (
+                                    date_str.count("-") >= 3 and date_str[-5] in "+-"
+                                ):
                                     # Has timezone info - use strptime with %z to properly parse timezone
                                     try:
                                         # Parse with timezone (e.g., "2024-01-15 10:30:00 +0000")
@@ -337,18 +356,24 @@ class CriteriaMatcher:
                                         # dt is now timezone-aware, convert to Unix timestamp
                                         # timestamp() will correctly convert from any timezone to Unix time
                                         timestamp = dt.timestamp()
-                                        logger.debug(f"File {file_path}: Got Last Open from mdls: {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp)})")
+                                        logger.debug(
+                                            f"File {file_path}: Got Last Open from mdls: {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp)})"
+                                        )
                                         return timestamp
                                     except ValueError:
                                         # If %z parsing fails, try manual UTC parsing
                                         parts = date_str.rsplit(" ", 1)
                                         if len(parts) == 2:
                                             date_part = parts[0]
-                                            dt_naive = datetime.strptime(date_part, "%Y-%m-%d %H:%M:%S")
+                                            dt_naive = datetime.strptime(
+                                                date_part, "%Y-%m-%d %H:%M:%S"
+                                            )
                                             # Assume UTC and create timezone-aware datetime
                                             dt_utc = dt_naive.replace(tzinfo=timezone.utc)
                                             timestamp = dt_utc.timestamp()
-                                            logger.debug(f"File {file_path}: Got Last Open from mdls (manual UTC): {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp)})")
+                                            logger.debug(
+                                                f"File {file_path}: Got Last Open from mdls (manual UTC): {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp)})"
+                                            )
                                             return timestamp
                                 else:
                                     # No timezone info, assume UTC (mdls typically returns UTC)
@@ -356,10 +381,14 @@ class CriteriaMatcher:
                                     # Mark as UTC timezone-aware
                                     dt_utc = dt_naive.replace(tzinfo=timezone.utc)
                                     timestamp = dt_utc.timestamp()
-                                    logger.debug(f"File {file_path}: Got Last Open from mdls (assumed UTC): {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp)})")
+                                    logger.debug(
+                                        f"File {file_path}: Got Last Open from mdls (assumed UTC): {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp)})"
+                                    )
                                     return timestamp
                             except ValueError as e:
-                                logger.debug(f"File {file_path}: Failed to parse mdls date '{date_str}': {e}")
+                                logger.debug(
+                                    f"File {file_path}: Failed to parse mdls date '{date_str}': {e}"
+                                )
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 pass
 
@@ -367,9 +396,10 @@ class CriteriaMatcher:
             try:
                 result = subprocess.run(
                     ["xattr", "-p", "com.apple.lastuseddate#PS", str(file_path)],
-                    check=False, capture_output=True,
+                    check=False,
+                    capture_output=True,
                     timeout=2,
-                    text=True
+                    text=True,
                 )
                 if result.returncode == 0 and result.stdout:
                     # Extended attribute format may vary, try to parse
@@ -382,4 +412,3 @@ class CriteriaMatcher:
             logger.debug(f"File {file_path}: Error getting macOS Last Open time: {e}")
 
         return None
-

@@ -1,4 +1,5 @@
 """Notification service for creating and dispatching notifications."""
+
 import logging
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -55,7 +56,9 @@ class NotificationService:
             background_tasks=background_tasks,
         )
 
-    def _format_event(self, event_type: NotificationEvent, data: Any) -> tuple[str, str, Dict[str, Any]]:
+    def _format_event(
+        self, event_type: NotificationEvent, data: Any
+    ) -> tuple[str, str, Dict[str, Any]]:
         """Format a notification event into a message and metadata."""
         if event_type == NotificationEvent.SYNC_SUCCESS:
             data: SyncSuccessData
@@ -79,7 +82,6 @@ class NotificationService:
 
         return level, message, metadata
 
-
     async def create_and_dispatch_notification(
         self,
         db: Session,
@@ -93,7 +95,8 @@ class NotificationService:
         try:
             notification_level = NotificationLevel(level.lower())
         except ValueError:
-            raise ValueError(f"Invalid notification level: {level}. Must be INFO, WARNING, or ERROR.")
+            msg = f"Invalid notification level: {level}. Must be INFO, WARNING, or ERROR."
+            raise ValueError(msg)
 
         # Create notification record
         notification = Notification(level=notification_level, message=message)
@@ -130,19 +133,16 @@ class NotificationService:
         }
         level_value = level_hierarchy[level]
 
-        notifiers = db.query(Notifier).filter(Notifier.enabled == True).all()
+        notifiers = db.query(Notifier).filter(Notifier.enabled).all()
 
-        return [
-            n for n in notifiers
-            if level_value >= level_hierarchy[n.filter_level]
-        ]
+        return [n for n in notifiers if level_value >= level_hierarchy[n.filter_level]]
 
     async def _dispatch_to_notifiers(
         self,
         db: Session,
         notification: Notification,
         notifiers: List[Notifier],
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Dispatch a notification to multiple notifiers."""
         logger.info(f"Dispatching notification #{notification.id} to {len(notifiers)} notifier(s)")
@@ -155,10 +155,12 @@ class NotificationService:
         db: Session,
         notification: Notification,
         notifier: Notifier,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Dispatch a notification to a single notifier."""
-        logger.info(f"Dispatching to notifier '{notifier.name}' ({notifier.type}) at {notifier.address}")
+        logger.info(
+            f"Dispatching to notifier '{notifier.name}' ({notifier.type}) at {notifier.address}"
+        )
 
         try:
             if notifier.type == NotifierType.EMAIL:
@@ -174,14 +176,14 @@ class NotificationService:
                         "smtp_password": notifier.smtp_password,
                         "smtp_sender": notifier.smtp_sender,
                         "smtp_use_tls": notifier.smtp_use_tls,
-                    }
+                    },
                 )
             elif notifier.type == NotifierType.GENERIC_WEBHOOK:
                 success, details = await self._send_webhook(
                     url=notifier.address,
                     level=notification.level.value,
                     message=notification.message,
-                    metadata=metadata
+                    metadata=metadata,
                 )
             else:
                 success, details = False, f"Unknown notifier type: {notifier.type}"
@@ -191,7 +193,9 @@ class NotificationService:
 
         except Exception as e:
             logger.exception(f"Unexpected error dispatching to notifier '{notifier.name}': {e}")
-            self._log_dispatch(db, notification, notifier, DispatchStatus.FAILED, f"Unexpected error: {e!s}")
+            self._log_dispatch(
+                db, notification, notifier, DispatchStatus.FAILED, f"Unexpected error: {e!s}"
+            )
 
     async def _send_email(
         self,
@@ -199,7 +203,7 @@ class NotificationService:
         level: str,
         message: str,
         metadata: Optional[Dict[str, Any]] = None,
-        smtp_config: Optional[Dict[str, Any]] = None
+        smtp_config: Optional[Dict[str, Any]] = None,
     ) -> tuple:
         """Send an email notification."""
         if not smtp_config:
@@ -250,11 +254,7 @@ class NotificationService:
             return False, f"Error sending email: {e!s}"
 
     async def _send_webhook(
-        self,
-        url: str,
-        level: str,
-        message: str,
-        metadata: Optional[Dict[str, Any]] = None
+        self, url: str, level: str, message: str, metadata: Optional[Dict[str, Any]] = None
     ) -> tuple:
         """Send a webhook notification."""
         try:
@@ -289,18 +289,17 @@ class NotificationService:
         notification: Notification,
         notifier: Notifier,
         status: DispatchStatus,
-        details: str
+        details: str,
     ) -> None:
         """Log a dispatch attempt to the database."""
         dispatch_log = NotificationDispatch(
-            notification_id=notification.id,
-            notifier_id=notifier.id,
-            status=status,
-            details=details
+            notification_id=notification.id, notifier_id=notifier.id, status=status, details=details
         )
         db.add(dispatch_log)
         db.commit()
-        logger.info(f"Dispatch: notification #{notification.id} to '{notifier.name}' - {status.value}")
+        logger.info(
+            f"Dispatch: notification #{notification.id} to '{notifier.name}' - {status.value}"
+        )
 
     async def test_notifier(self, db: Session, notifier_id: int) -> tuple:
         """Send a test notification to a specific notifier."""
@@ -331,14 +330,11 @@ class NotificationService:
                         "smtp_password": notifier.smtp_password,
                         "smtp_sender": notifier.smtp_sender,
                         "smtp_use_tls": notifier.smtp_use_tls,
-                    }
+                    },
                 )
             if notifier.type == NotifierType.GENERIC_WEBHOOK:
                 return await self._send_webhook(
-                    url=notifier.address,
-                    level="INFO",
-                    message=test_message,
-                    metadata=test_metadata
+                    url=notifier.address, level="INFO", message=test_message, metadata=test_metadata
                 )
             return False, f"Unknown notifier type: {notifier.type}"
 
@@ -346,7 +342,9 @@ class NotificationService:
             return False, f"Error testing notifier: {e!s}"
 
     @staticmethod
-    def _format_text_message(level: str, message: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    def _format_text_message(
+        level: str, message: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Format a notification message as plain text."""
         formatted = f"[{level.upper()}] {message}"
         if metadata:
@@ -356,7 +354,9 @@ class NotificationService:
         return formatted
 
     @staticmethod
-    def _format_html_message(level: str, message: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    def _format_html_message(
+        level: str, message: str, metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Format a notification message as HTML."""
         color_map = {"INFO": "#2196F3", "WARNING": "#FF9800", "ERROR": "#F44336"}
         color = color_map.get(level.upper(), "#666666")

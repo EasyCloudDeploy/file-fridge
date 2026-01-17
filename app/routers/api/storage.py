@@ -1,4 +1,5 @@
 """API routes for storage management."""
+
 import logging
 import os
 import shutil
@@ -43,46 +44,53 @@ def get_storage_stats(db: Session = Depends(get_db)):
             unique_volumes["not_found"].append(path_str)
         except Exception as e:
             # Handle other potential errors
-            logger.error(f"Error stating path {path_str}: {e}")
+            logger.exception(f"Error stating path {path_str}: {e}")
             if "error" not in unique_volumes:
                 unique_volumes["error"] = []
             unique_volumes["error"].append(path_str)
 
     stats_list = []
     for device_id, path_str in unique_volumes.items():
-        if device_id == "not_found" or device_id == "error":
+        if device_id in {"not_found", "error"}:
             for p in path_str:
-                stats_list.append(StorageStats(
-                    path=p,
-                    total_bytes=0,
-                    used_bytes=0,
-                    free_bytes=0,
-                    error="Path not found or error stating path."
-                ))
+                stats_list.append(
+                    StorageStats(
+                        path=p,
+                        total_bytes=0,
+                        used_bytes=0,
+                        free_bytes=0,
+                        error="Path not found or error stating path.",
+                    )
+                )
             continue
 
         try:
             total, used, free = shutil.disk_usage(path_str)
-            stats_list.append(StorageStats(
-                path=path_str,
-                total_bytes=total,
-                used_bytes=used,
-                free_bytes=free,
-            ))
+            stats_list.append(
+                StorageStats(
+                    path=path_str,
+                    total_bytes=total,
+                    used_bytes=used,
+                    free_bytes=free,
+                )
+            )
         except Exception as e:
-            logger.error(f"Error getting disk usage for {path_str}: {e}")
-            stats_list.append(StorageStats(
-                path=path_str,
-                total_bytes=0,
-                used_bytes=0,
-                free_bytes=0,
-                error=str(e),
-            ))
+            logger.exception(f"Error getting disk usage for {path_str}: {e}")
+            stats_list.append(
+                StorageStats(
+                    path=path_str,
+                    total_bytes=0,
+                    used_bytes=0,
+                    free_bytes=0,
+                    error=str(e),
+                )
+            )
 
     return stats_list
 
 
 # ColdStorageLocation CRUD endpoints
+
 
 @router.get("/locations", response_model=List[ColdStorageLocationWithStats])
 def list_storage_locations(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
@@ -92,30 +100,34 @@ def list_storage_locations(skip: int = 0, limit: int = 100, db: Session = Depend
     locations_with_stats = []
     for loc in locations:
         locations_with_stats.append(
-            ColdStorageLocationWithStats(
-                **loc.__dict__,
-                path_count=len(loc.paths)
-            )
+            ColdStorageLocationWithStats(**loc.__dict__, path_count=len(loc.paths))
         )
     return locations_with_stats
 
-@router.post("/locations", response_model=ColdStorageLocationSchema, status_code=status.HTTP_201_CREATED)
+
+@router.post(
+    "/locations", response_model=ColdStorageLocationSchema, status_code=status.HTTP_201_CREATED
+)
 def create_storage_location(location: ColdStorageLocationCreate, db: Session = Depends(get_db)):
     """Create a new cold storage location."""
     # Check for duplicate name
-    existing_name = db.query(ColdStorageLocation).filter(ColdStorageLocation.name == location.name).first()
+    existing_name = (
+        db.query(ColdStorageLocation).filter(ColdStorageLocation.name == location.name).first()
+    )
     if existing_name:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Storage location with name '{location.name}' already exists"
+            detail=f"Storage location with name '{location.name}' already exists",
         )
 
     # Check for duplicate path
-    existing_path = db.query(ColdStorageLocation).filter(ColdStorageLocation.path == location.path).first()
+    existing_path = (
+        db.query(ColdStorageLocation).filter(ColdStorageLocation.path == location.path).first()
+    )
     if existing_path:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Storage location with path '{location.path}' already exists"
+            detail=f"Storage location with path '{location.path}' already exists",
         )
 
     # Validate path exists
@@ -126,13 +138,13 @@ def create_storage_location(location: ColdStorageLocationCreate, db: Session = D
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Cannot create storage location path: {e!s}"
+                detail=f"Cannot create storage location path: {e!s}",
             )
 
     if not path_obj.is_dir():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Path is not a directory: {location.path}"
+            detail=f"Path is not a directory: {location.path}",
         )
 
     db_location = ColdStorageLocation(**location.model_dump())
@@ -150,49 +162,55 @@ def get_storage_location(location_id: int, db: Session = Depends(get_db)):
     if not location:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Storage location with id {location_id} not found"
+            detail=f"Storage location with id {location_id} not found",
         )
     return location
 
 
 @router.put("/locations/{location_id}", response_model=ColdStorageLocationSchema)
 def update_storage_location(
-    location_id: int,
-    location_update: ColdStorageLocationUpdate,
-    db: Session = Depends(get_db)
+    location_id: int, location_update: ColdStorageLocationUpdate, db: Session = Depends(get_db)
 ):
     """Update a cold storage location."""
     location = db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
     if not location:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Storage location with id {location_id} not found"
+            detail=f"Storage location with id {location_id} not found",
         )
 
     update_data = location_update.model_dump(exclude_unset=True)
 
     # Check for duplicate name if name is being updated
     if "name" in update_data:
-        existing = db.query(ColdStorageLocation).filter(
-            ColdStorageLocation.name == update_data["name"],
-            ColdStorageLocation.id != location_id
-        ).first()
+        existing = (
+            db.query(ColdStorageLocation)
+            .filter(
+                ColdStorageLocation.name == update_data["name"],
+                ColdStorageLocation.id != location_id,
+            )
+            .first()
+        )
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Storage location with name '{update_data['name']}' already exists"
+                detail=f"Storage location with name '{update_data['name']}' already exists",
             )
 
     # Check for duplicate path if path is being updated
     if "path" in update_data:
-        existing = db.query(ColdStorageLocation).filter(
-            ColdStorageLocation.path == update_data["path"],
-            ColdStorageLocation.id != location_id
-        ).first()
+        existing = (
+            db.query(ColdStorageLocation)
+            .filter(
+                ColdStorageLocation.path == update_data["path"],
+                ColdStorageLocation.id != location_id,
+            )
+            .first()
+        )
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Storage location with path '{update_data['path']}' already exists"
+                detail=f"Storage location with path '{update_data['path']}' already exists",
             )
 
         # Validate new path
@@ -203,13 +221,13 @@ def update_storage_location(
             except Exception as e:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Cannot create storage location path: {e!s}"
+                    detail=f"Cannot create storage location path: {e!s}",
                 )
 
         if not path_obj.is_dir():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path is not a directory: {update_data['path']}"
+                detail=f"Path is not a directory: {update_data['path']}",
             )
 
     # Update fields
@@ -226,7 +244,7 @@ def update_storage_location(
 def delete_storage_location(
     location_id: int,
     force: bool = Query(False, description="Force delete the location even if it's not empty"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Delete a cold storage location.
@@ -239,7 +257,7 @@ def delete_storage_location(
     if not location:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Storage location with id {location_id} not found"
+            detail=f"Storage location with id {location_id} not found",
         )
 
     # Standard delete: Check if location is still in use by monitored paths
@@ -248,7 +266,7 @@ def delete_storage_location(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot delete storage location '{location.name}' because it is still associated with "
-                   f"{len(location.paths)} monitored path(s): {', '.join(path_names)}"
+            f"{len(location.paths)} monitored path(s): {', '.join(path_names)}",
         )
 
     # Force delete: Clean up all associated data
@@ -257,8 +275,14 @@ def delete_storage_location(
 
         # 1. Find all files in this storage location
         # We need to check both FileInventory and FileRecord for paths
-        inventory_files = db.query(FileInventory).filter(FileInventory.file_path.like(f"{location.path}%")).all()
-        file_records = db.query(FileRecord).filter(FileRecord.cold_storage_path.like(f"{location.path}%")).all()
+        inventory_files = (
+            db.query(FileInventory).filter(FileInventory.file_path.like(f"{location.path}%")).all()
+        )
+        file_records = (
+            db.query(FileRecord)
+            .filter(FileRecord.cold_storage_path.like(f"{location.path}%"))
+            .all()
+        )
 
         # 2. Delete file records from the database
         for record in file_records:
@@ -275,8 +299,10 @@ def delete_storage_location(
         except FileNotFoundError:
             logger.warning(f"Path not found, proceeding with DB deletion: {location.path}")
         except Exception as e:
-            logger.error(f"Error deleting storage directory '{location.path}': {e}. "
-                         f"Manual cleanup may be required.")
+            logger.exception(
+                f"Error deleting storage directory '{location.path}': {e}. "
+                f"Manual cleanup may be required."
+            )
             # We don't re-raise, to allow DB cleanup to proceed
 
         # 4. Disassociate monitored paths

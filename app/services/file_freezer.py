@@ -1,4 +1,5 @@
 """File freezing service - move files from hot storage to cold storage."""
+
 import logging
 from pathlib import Path
 from typing import Optional, Tuple
@@ -28,7 +29,7 @@ class FileFreezer:
         monitored_path: MonitoredPath,
         storage_location: ColdStorageLocation,
         pin: bool = False,
-        db: Optional[Session] = None
+        db: Optional[Session] = None,
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Move a file from hot storage to cold storage.
@@ -75,7 +76,7 @@ class FileFreezer:
                 source_path,
                 destination_path,
                 monitored_path.operation_type,
-                path_config=monitored_path
+                path_config=monitored_path,
             )
 
             if not success:
@@ -89,7 +90,7 @@ class FileFreezer:
                 cold_storage_location_id=storage_location.id,
                 file_size=file.file_size,
                 operation_type=monitored_path.operation_type,
-                criteria_matched="manual_freeze"
+                criteria_matched="manual_freeze",
             )
             db.add(file_record)
 
@@ -105,15 +106,10 @@ class FileFreezer:
             if pin:
                 # Use the cold storage path for pinning (so it won't be auto-thawed)
                 pin_path = str(destination_path)
-                existing = db.query(PinnedFile).filter(
-                    PinnedFile.file_path == pin_path
-                ).first()
+                existing = db.query(PinnedFile).filter(PinnedFile.file_path == pin_path).first()
 
                 if not existing:
-                    pinned = PinnedFile(
-                        path_id=monitored_path.id,
-                        file_path=pin_path
-                    )
+                    pinned = PinnedFile(path_id=monitored_path.id, file_path=pin_path)
                     db.add(pinned)
                     logger.info(f"Pinned file: {pin_path}")
 
@@ -125,7 +121,7 @@ class FileFreezer:
             return True, None, str(destination_path)
 
         except Exception as e:
-            logger.error(f"Error freezing file: {e!s}")
+            logger.exception(f"Error freezing file: {e!s}")
             if db:
                 db.rollback()
             return False, str(e), None

@@ -1,9 +1,10 @@
 """Service for evaluating and applying tag rules to files."""
+
 import fnmatch
 import logging
 import re
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
@@ -43,7 +44,7 @@ class TagRuleService:
             logger.warning(f"Unknown criterion type: {rule.criterion_type}")
             return False
         except Exception as e:
-            logger.error(f"Error evaluating rule {rule.id}: {e}")
+            logger.exception(f"Error evaluating rule {rule.id}: {e}")
             return False
 
     def _evaluate_extension(self, rule: TagRule, file: FileInventory) -> bool:
@@ -58,7 +59,7 @@ class TagRuleService:
         if not rule_ext.startswith("."):
             rule_ext = f".{rule_ext}"
 
-        if rule.operator == Operator.EQ or rule.operator == Operator.MATCHES:
+        if rule.operator in (Operator.EQ, Operator.MATCHES):
             return file_ext == rule_ext
         if rule.operator == Operator.CONTAINS:
             return rule_ext in file_ext
@@ -78,7 +79,7 @@ class TagRuleService:
                 pattern = re.compile(rule.value)
                 return bool(pattern.search(file.file_path))
             except re.error as e:
-                logger.error(f"Invalid regex pattern in rule {rule.id}: {e}")
+                logger.exception(f"Invalid regex pattern in rule {rule.id}: {e}")
                 return False
         elif rule.operator == Operator.CONTAINS:
             # Simple substring match
@@ -130,7 +131,7 @@ class TagRuleService:
                 return file.file_size <= size_value
             return False
         except ValueError as e:
-            logger.error(f"Invalid size value in rule {rule.id}: {e}")
+            logger.exception(f"Invalid size value in rule {rule.id}: {e}")
             return False
 
     def _evaluate_name_pattern(self, rule: TagRule, file: FileInventory) -> bool:
@@ -149,7 +150,7 @@ class TagRuleService:
                 pattern = re.compile(rule.value)
                 return bool(pattern.search(filename))
             except re.error as e:
-                logger.error(f"Invalid regex pattern in rule {rule.id}: {e}")
+                logger.exception(f"Invalid regex pattern in rule {rule.id}: {e}")
                 return False
         elif rule.operator == Operator.CONTAINS:
             # Simple substring match
@@ -167,17 +168,13 @@ class TagRuleService:
         # Extract number and unit
         match = re.match(r"^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB)?$", size_str)
         if not match:
-            raise ValueError(f"Invalid size format: {size_str}")
+            msg = f"Invalid size format: {size_str}"
+            raise ValueError(msg)
 
         number = float(match.group(1))
         unit = match.group(2) or "B"
 
-        multipliers = {
-            "B": 1,
-            "KB": 1024,
-            "MB": 1024 * 1024,
-            "GB": 1024 * 1024 * 1024
-        }
+        multipliers = {"B": 1, "KB": 1024, "MB": 1024 * 1024, "GB": 1024 * 1024 * 1024}
 
         return int(number * multipliers[unit])
 
@@ -196,37 +193,39 @@ class TagRuleService:
             return False
 
         # Check if file already has this tag
-        existing_tag = self.db.query(FileTag).filter(
-            FileTag.file_id == file.id,
-            FileTag.tag_id == rule.tag_id
-        ).first()
+        existing_tag = (
+            self.db.query(FileTag)
+            .filter(FileTag.file_id == file.id, FileTag.tag_id == rule.tag_id)
+            .first()
+        )
 
         if existing_tag:
             return False  # Already tagged
 
         # Add tag
-        file_tag = FileTag(
-            file_id=file.id,
-            tag_id=rule.tag_id,
-            tagged_by="auto-rule"
-        )
+        file_tag = FileTag(file_id=file.id, tag_id=rule.tag_id, tagged_by="auto-rule")
         self.db.add(file_tag)
         return True
 
-    def apply_rules_to_file(self, file: FileInventory) -> int:
+    def apply_rules_to_file(self, file: FileInventory, rules: Optional[list[TagRule]] = None) -> int:
         """
-        Apply all enabled rules to a single file.
+        Apply rules to a single file.
+
+        Args:
+            file: The file to tag
+            rules: Optional pre-fetched list of enabled rules. If None, rules will be fetched from DB.
 
         Returns:
             Number of tags added
         """
-        # Get all enabled rules ordered by priority
-        rules = self.db.query(TagRule).filter(
-            TagRule.enabled == True
-        ).order_by(
-            TagRule.priority.desc(),
-            TagRule.created_at.asc()
-        ).all()
+        if rules is None:
+            # Get all enabled rules ordered by priority
+            rules = (
+                self.db.query(TagRule)
+                .filter(TagRule.enabled)
+                .order_by(TagRule.priority.desc(), TagRule.created_at.asc())
+                .all()
+            )
 
         tags_added = 0
         for rule in rules:
@@ -248,12 +247,12 @@ class TagRuleService:
         logger.info("Applying all tag rules to file inventory...")
 
         # Get all enabled rules
-        rules = self.db.query(TagRule).filter(
-            TagRule.enabled == True
-        ).order_by(
-            TagRule.priority.desc(),
-            TagRule.created_at.asc()
-        ).all()
+        rules = (
+            self.db.query(TagRule)
+            .filter(TagRule.enabled)
+            .order_by(TagRule.priority.desc(), TagRule.created_at.asc())
+            .all()
+        )
 
         if not rules:
             logger.info("No enabled tag rules found")
@@ -279,8 +278,7 @@ class TagRuleService:
         # Final commit
         self.db.commit()
 
-        logger.info(f"Tag rule application complete: {files_processed} files processed, {tags_added} tags added")
-        return {
-            "files_processed": files_processed,
-            "tags_added": tags_added
-        }
+        logger.info(
+            f"Tag rule application complete: {files_processed} files processed, {tags_added} tags added"
+        )
+        return {"files_processed": files_processed, "tags_added": tags_added}

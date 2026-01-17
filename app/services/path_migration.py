@@ -1,4 +1,5 @@
 """Service for handling cold storage path migrations."""
+
 import logging
 import shutil
 from pathlib import Path
@@ -28,40 +29,48 @@ class PathMigrationService:
             Dictionary with file counts and paths
         """
         # Check database records
-        file_records = db.query(FileRecord).filter(
-            FileRecord.path_id == path_id,
-            FileRecord.cold_storage_path.like(f"{old_path}%")
-        ).all()
+        file_records = (
+            db.query(FileRecord)
+            .filter(
+                FileRecord.path_id == path_id, FileRecord.cold_storage_path.like(f"{old_path}%")
+            )
+            .all()
+        )
 
-        file_inventory = db.query(FileInventory).filter(
-            FileInventory.path_id == path_id,
-            FileInventory.file_path.like(f"{old_path}%"),
-            FileInventory.storage_type == "cold"
-        ).all()
+        file_inventory = (
+            db.query(FileInventory)
+            .filter(
+                FileInventory.path_id == path_id,
+                FileInventory.file_path.like(f"{old_path}%"),
+                FileInventory.storage_type == "cold",
+            )
+            .all()
+        )
 
         # Check actual filesystem
         old_path_obj = Path(old_path)
         filesystem_files = []
         if old_path_obj.exists():
             filesystem_files = list(old_path_obj.rglob("*"))
-            filesystem_files = [f for f in filesystem_files if f.is_file() and not f.name.startswith(".")]
+            filesystem_files = [
+                f for f in filesystem_files if f.is_file() and not f.name.startswith(".")
+            ]
 
         return {
             "file_records_count": len(file_records),
             "inventory_count": len(file_inventory),
             "filesystem_count": len(filesystem_files),
-            "has_files": len(file_records) > 0 or len(file_inventory) > 0 or len(filesystem_files) > 0,
+            "has_files": len(file_records) > 0
+            or len(file_inventory) > 0
+            or len(filesystem_files) > 0,
             "file_records": file_records,
             "file_inventory": file_inventory,
-            "filesystem_files": filesystem_files
+            "filesystem_files": filesystem_files,
         }
 
     @staticmethod
     def migrate_files(
-        old_path: str,
-        new_path: str,
-        path_id: int,
-        db: Session
+        old_path: str, new_path: str, path_id: int, db: Session
     ) -> Tuple[bool, str, Dict]:
         """
         Migrate all files from old cold storage path to new path.
@@ -77,12 +86,7 @@ class PathMigrationService:
         """
         logger.info(f"Starting migration from {old_path} to {new_path} for path {path_id}")
 
-        stats = {
-            "files_moved": 0,
-            "files_failed": 0,
-            "records_updated": 0,
-            "errors": []
-        }
+        stats = {"files_moved": 0, "files_failed": 0, "records_updated": 0, "errors": []}
 
         old_path_obj = Path(old_path)
         new_path_obj = Path(new_path)
@@ -93,7 +97,7 @@ class PathMigrationService:
             logger.info(f"Created new cold storage directory: {new_path}")
         except Exception as e:
             error_msg = f"Failed to create new cold storage directory: {e}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             return False, error_msg, stats
 
         # Get all files that need to be migrated
@@ -126,7 +130,7 @@ class PathMigrationService:
 
                 except Exception as e:
                     error_msg = f"Failed to move {old_file}: {e}"
-                    logger.error(error_msg)
+                    logger.exception(error_msg)
                     stats["errors"].append(error_msg)
                     stats["files_failed"] += 1
 
@@ -155,7 +159,7 @@ class PathMigrationService:
         except Exception as e:
             db.rollback()
             error_msg = f"Failed to update database records: {e}"
-            logger.error(error_msg)
+            logger.exception(error_msg)
             stats["errors"].append(error_msg)
             return False, error_msg, stats
 
@@ -168,7 +172,9 @@ class PathMigrationService:
             logger.warning(f"Could not remove old directory {old_path}: {e}")
 
         success = stats["files_failed"] == 0
-        error_msg = None if success else f"Migration completed with {stats['files_failed']} failures"
+        error_msg = (
+            None if success else f"Migration completed with {stats['files_failed']} failures"
+        )
 
         logger.info(
             f"Migration complete: {stats['files_moved']} files moved, "
@@ -199,4 +205,7 @@ class PathMigrationService:
         # For now, we'll just log the action and leave records as-is
         # The next scan will clean them up as "missing"
 
-        return True, f"Files in {old_path} have been left in place. They will be marked as missing on next scan."
+        return (
+            True,
+            f"Files in {old_path} have been left in place. They will be marked as missing on next scan.",
+        )

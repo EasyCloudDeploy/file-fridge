@@ -1,4 +1,5 @@
 """SQLAlchemy database models."""
+
 import enum
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Table, Text
@@ -11,6 +12,7 @@ from app.database import Base
 
 class OperationType(str, enum.Enum):
     """File operation types."""
+
     MOVE = "move"
     COPY = "copy"
     SYMLINK = "symlink"
@@ -18,6 +20,7 @@ class OperationType(str, enum.Enum):
 
 class CriterionType(str, enum.Enum):
     """Criteria types for file matching."""
+
     MTIME = "mtime"  # Modification time
     ATIME = "atime"  # Access time
     CTIME = "ctime"  # Change time
@@ -32,6 +35,7 @@ class CriterionType(str, enum.Enum):
 
 class Operator(str, enum.Enum):
     """Comparison operators."""
+
     GT = ">"
     LT = "<"
     EQ = "="
@@ -47,12 +51,15 @@ path_storage_location_association = Table(
     "path_storage_location_association",
     Base.metadata,
     Column("path_id", Integer, ForeignKey("monitored_paths.id"), primary_key=True),
-    Column("storage_location_id", Integer, ForeignKey("cold_storage_locations.id"), primary_key=True)
+    Column(
+        "storage_location_id", Integer, ForeignKey("cold_storage_locations.id"), primary_key=True
+    ),
 )
 
 
 class ColdStorageLocation(Base):
     """Cold storage location configuration."""
+
     __tablename__ = "cold_storage_locations"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -62,11 +69,16 @@ class ColdStorageLocation(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationship to monitored paths
-    paths = relationship("MonitoredPath", secondary=path_storage_location_association, back_populates="storage_locations")
+    paths = relationship(
+        "MonitoredPath",
+        secondary=path_storage_location_association,
+        back_populates="storage_locations",
+    )
 
 
 class MonitoredPath(Base):
     """Monitored path configuration."""
+
     __tablename__ = "monitored_paths"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -75,15 +87,23 @@ class MonitoredPath(Base):
     operation_type = Column(SQLEnum(OperationType), default=OperationType.MOVE)
     check_interval_seconds = Column(Integer, default=3600)
     enabled = Column(Boolean, default=True)
-    prevent_indexing = Column(Boolean, default=True, nullable=False)  # Create .noindex file to prevent macOS Spotlight from corrupting timestamps
-    error_message = Column(Text, nullable=True)  # Error state message (e.g., atime unavailable on network mount)
+    prevent_indexing = Column(
+        Boolean, default=True, nullable=False
+    )  # Create .noindex file to prevent macOS Spotlight from corrupting timestamps
+    error_message = Column(
+        Text, nullable=True
+    )  # Error state message (e.g., atime unavailable on network mount)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     criteria = relationship("Criteria", back_populates="path", cascade="all, delete-orphan")
     file_records = relationship("FileRecord", back_populates="path", cascade="all, delete-orphan")
-    file_inventory = relationship("FileInventory", back_populates="path", cascade="all, delete-orphan")
-    storage_locations = relationship("ColdStorageLocation", secondary=path_storage_location_association, back_populates="paths")
+    file_inventory = relationship(
+        "FileInventory", back_populates="path", cascade="all, delete-orphan"
+    )
+    storage_locations = relationship(
+        "ColdStorageLocation", secondary=path_storage_location_association, back_populates="paths"
+    )
 
     @property
     def cold_storage_path(self) -> str:
@@ -99,11 +119,13 @@ class MonitoredPath(Base):
         """
         if self.storage_locations:
             return self.storage_locations[0].path
-        raise ValueError(f"Path '{self.name}' has no storage locations configured")
+        msg = f"Path '{self.name}' has no storage locations configured"
+        raise ValueError(msg)
 
 
 class Criteria(Base):
     """File matching criteria."""
+
     __tablename__ = "criteria"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -119,13 +141,16 @@ class Criteria(Base):
 
 class FileRecord(Base):
     """Record of moved files."""
+
     __tablename__ = "file_records"
 
     id = Column(Integer, primary_key=True, index=True)
     path_id = Column(Integer, ForeignKey("monitored_paths.id"), nullable=True)
     original_path = Column(String, nullable=False)
     cold_storage_path = Column(String, nullable=False)
-    cold_storage_location_id = Column(Integer, ForeignKey("cold_storage_locations.id"), nullable=True, index=True)
+    cold_storage_location_id = Column(
+        Integer, ForeignKey("cold_storage_locations.id"), nullable=True, index=True
+    )
     file_size = Column(Integer, nullable=False)
     moved_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     operation_type = Column(SQLEnum(OperationType), nullable=False)
@@ -138,21 +163,24 @@ class FileRecord(Base):
 
 class StorageType(str, enum.Enum):
     """Storage location types."""
+
     HOT = "hot"
     COLD = "cold"
 
 
 class FileStatus(str, enum.Enum):
     """File status in inventory."""
-    ACTIVE = "active"      # File exists and is accessible
-    MOVED = "moved"        # File has been moved to cold storage
-    DELETED = "deleted"    # File was deleted
-    MISSING = "missing"    # File should exist but is not found
+
+    ACTIVE = "active"  # File exists and is accessible
+    MOVED = "moved"  # File has been moved to cold storage
+    DELETED = "deleted"  # File was deleted
+    MISSING = "missing"  # File should exist but is not found
     MIGRATING = "migrating"  # File is being relocated between cold storage locations
 
 
 class FileInventory(Base):
     """Inventory of all files in both hot and cold storage."""
+
     __tablename__ = "file_inventory"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -163,13 +191,19 @@ class FileInventory(Base):
     file_mtime = Column(DateTime(timezone=True), nullable=False, index=True)  # Indexed for sorting
     file_atime = Column(DateTime(timezone=True), nullable=True, index=True)  # Indexed for sorting
     file_ctime = Column(DateTime(timezone=True), nullable=True)  # File change/creation time
-    checksum = Column(String, nullable=True, index=True)  # SHA256 hash for deduplication and verification
+    checksum = Column(
+        String, nullable=True, index=True
+    )  # SHA256 hash for deduplication and verification
     file_extension = Column(String, nullable=True, index=True)  # File extension (e.g., .pdf, .jpg)
     mime_type = Column(String, nullable=True)  # MIME type (e.g., application/pdf)
     status = Column(SQLEnum(FileStatus), default=FileStatus.ACTIVE, index=True)
-    last_seen = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True)
+    last_seen = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), index=True
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    cold_storage_location_id = Column(Integer, ForeignKey("cold_storage_locations.id"), nullable=True, index=True)
+    cold_storage_location_id = Column(
+        Integer, ForeignKey("cold_storage_locations.id"), nullable=True, index=True
+    )
 
     # Composite indexes for common query patterns
     __table_args__ = (
@@ -194,6 +228,7 @@ class FileInventory(Base):
 
 class PinnedFile(Base):
     """Files that are pinned (excluded from future scans)."""
+
     __tablename__ = "pinned_files"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -207,6 +242,7 @@ class PinnedFile(Base):
 
 class Tag(Base):
     """User-defined tags for organizing files."""
+
     __tablename__ = "tags"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -221,6 +257,7 @@ class Tag(Base):
 
 class FileTag(Base):
     """Association table linking files to tags."""
+
     __tablename__ = "file_tags"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -242,6 +279,7 @@ class FileTag(Base):
 
 class TagRuleCriterionType(str, enum.Enum):
     """Criteria types for automatic tag rules."""
+
     EXTENSION = "extension"  # File extension (e.g., .pdf, .jpg)
     PATH_PATTERN = "path_pattern"  # Path pattern matching (glob or regex)
     MIME_TYPE = "mime_type"  # MIME type (e.g., image/*, application/pdf)
@@ -251,6 +289,7 @@ class TagRuleCriterionType(str, enum.Enum):
 
 class TagRule(Base):
     """Automated rules for applying tags to files based on criteria."""
+
     __tablename__ = "tag_rules"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -269,12 +308,14 @@ class TagRule(Base):
 
 class NotifierType(str, enum.Enum):
     """Notification destination types."""
+
     EMAIL = "email"
     GENERIC_WEBHOOK = "generic_webhook"
 
 
 class NotificationLevel(str, enum.Enum):
     """Notification severity levels."""
+
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
@@ -282,12 +323,14 @@ class NotificationLevel(str, enum.Enum):
 
 class DispatchStatus(str, enum.Enum):
     """Notification dispatch status."""
+
     SUCCESS = "success"
     FAILED = "failed"
 
 
 class Notifier(Base):
     """Configured notification destination."""
+
     __tablename__ = "notifiers"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -295,7 +338,9 @@ class Notifier(Base):
     type = Column(SQLEnum(NotifierType), nullable=False)
     address = Column(String, nullable=False)  # Email address or webhook URL
     enabled = Column(Boolean, default=True, nullable=False)
-    filter_level = Column(SQLEnum(NotificationLevel), default=NotificationLevel.INFO, nullable=False)
+    filter_level = Column(
+        SQLEnum(NotificationLevel), default=NotificationLevel.INFO, nullable=False
+    )
 
     # SMTP settings (for email notifiers only)
     smtp_host = Column(String, nullable=True)  # SMTP server hostname
@@ -309,11 +354,14 @@ class Notifier(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    dispatches = relationship("NotificationDispatch", back_populates="notifier", cascade="all, delete-orphan")
+    dispatches = relationship(
+        "NotificationDispatch", back_populates="notifier", cascade="all, delete-orphan"
+    )
 
 
 class Notification(Base):
     """Notification event record."""
+
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -322,11 +370,14 @@ class Notification(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
 
     # Relationships
-    dispatches = relationship("NotificationDispatch", back_populates="notification", cascade="all, delete-orphan")
+    dispatches = relationship(
+        "NotificationDispatch", back_populates="notification", cascade="all, delete-orphan"
+    )
 
 
 class NotificationDispatch(Base):
     """Log of notification dispatch attempts."""
+
     __tablename__ = "notification_dispatches"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -339,4 +390,3 @@ class NotificationDispatch(Base):
     # Relationships
     notification = relationship("Notification", back_populates="dispatches")
     notifier = relationship("Notifier", back_populates="dispatches")
-

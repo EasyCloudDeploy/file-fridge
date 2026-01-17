@@ -1,5 +1,7 @@
 """API routes for statistics."""
+
 from datetime import datetime, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
@@ -23,34 +25,27 @@ def get_statistics(db: Session = Depends(get_db)):
     files_by_path = {}
     paths = db.query(MonitoredPath).all()
     for path in paths:
-        count = db.query(func.count(FileRecord.id)).filter(
-            FileRecord.path_id == path.id
-        ).scalar() or 0
-        size = db.query(func.sum(FileRecord.file_size)).filter(
-            FileRecord.path_id == path.id
-        ).scalar() or 0
-        files_by_path[path.name] = {
-            "count": count,
-            "size": size or 0
-        }
+        count = (
+            db.query(func.count(FileRecord.id)).filter(FileRecord.path_id == path.id).scalar() or 0
+        )
+        size = (
+            db.query(func.sum(FileRecord.file_size)).filter(FileRecord.path_id == path.id).scalar()
+            or 0
+        )
+        files_by_path[path.name] = {"count": count, "size": size or 0}
 
-    recent_activity = db.query(FileRecord).order_by(
-        FileRecord.moved_at.desc()
-    ).limit(50).all()
+    recent_activity = db.query(FileRecord).order_by(FileRecord.moved_at.desc()).limit(50).all()
 
     return Statistics(
         total_files_moved=total_files,
         total_size_moved=total_size,
         files_by_path=files_by_path,
-        recent_activity=recent_activity
+        recent_activity=recent_activity,
     )
 
 
 @router.get("/detailed", response_model=DetailedStatistics)
-def get_detailed_statistics(
-    days: int = None,
-    db: Session = Depends(get_db)
-):
+def get_detailed_statistics(days: Optional[int] = None, db: Session = Depends(get_db)):
     """Get comprehensive statistics with detailed metrics and trends."""
     if days is None:
         days = settings.stats_retention_days
@@ -65,21 +60,33 @@ def get_detailed_statistics(
     total_size_moved = db.query(func.sum(FileRecord.file_size)).scalar() or 0
 
     # Hot/Cold storage from inventory
-    total_files_hot = db.query(func.count(FileInventory.id)).filter(
-        FileInventory.storage_type == StorageType.HOT
-    ).scalar() or 0
+    total_files_hot = (
+        db.query(func.count(FileInventory.id))
+        .filter(FileInventory.storage_type == StorageType.HOT)
+        .scalar()
+        or 0
+    )
 
-    total_files_cold = db.query(func.count(FileInventory.id)).filter(
-        FileInventory.storage_type == StorageType.COLD
-    ).scalar() or 0
+    total_files_cold = (
+        db.query(func.count(FileInventory.id))
+        .filter(FileInventory.storage_type == StorageType.COLD)
+        .scalar()
+        or 0
+    )
 
-    total_size_hot = db.query(func.sum(FileInventory.file_size)).filter(
-        FileInventory.storage_type == StorageType.HOT
-    ).scalar() or 0
+    total_size_hot = (
+        db.query(func.sum(FileInventory.file_size))
+        .filter(FileInventory.storage_type == StorageType.HOT)
+        .scalar()
+        or 0
+    )
 
-    total_size_cold = db.query(func.sum(FileInventory.file_size)).filter(
-        FileInventory.storage_type == StorageType.COLD
-    ).scalar() or 0
+    total_size_cold = (
+        db.query(func.sum(FileInventory.file_size))
+        .filter(FileInventory.storage_type == StorageType.COLD)
+        .scalar()
+        or 0
+    )
 
     # Space saved (total moved to cold storage)
     space_saved = total_size_moved
@@ -88,120 +95,127 @@ def get_detailed_statistics(
     average_file_size = int(total_size_moved / total_files_moved) if total_files_moved > 0 else 0
 
     # Performance metrics - Last 24 hours
-    files_moved_24h = db.query(func.count(FileRecord.id)).filter(
-        FileRecord.moved_at >= cutoff_24h
-    ).scalar() or 0
+    files_moved_24h = (
+        db.query(func.count(FileRecord.id)).filter(FileRecord.moved_at >= cutoff_24h).scalar() or 0
+    )
 
-    size_moved_24h = db.query(func.sum(FileRecord.file_size)).filter(
-        FileRecord.moved_at >= cutoff_24h
-    ).scalar() or 0
+    size_moved_24h = (
+        db.query(func.sum(FileRecord.file_size)).filter(FileRecord.moved_at >= cutoff_24h).scalar()
+        or 0
+    )
 
     # Performance metrics - Last 7 days
-    files_moved_7d = db.query(func.count(FileRecord.id)).filter(
-        FileRecord.moved_at >= cutoff_7d
-    ).scalar() or 0
+    files_moved_7d = (
+        db.query(func.count(FileRecord.id)).filter(FileRecord.moved_at >= cutoff_7d).scalar() or 0
+    )
 
-    size_moved_7d = db.query(func.sum(FileRecord.file_size)).filter(
-        FileRecord.moved_at >= cutoff_7d
-    ).scalar() or 0
+    size_moved_7d = (
+        db.query(func.sum(FileRecord.file_size)).filter(FileRecord.moved_at >= cutoff_7d).scalar()
+        or 0
+    )
 
     # Calculate averages
-    total_days_with_data = db.query(
-        func.count(func.distinct(func.date(FileRecord.moved_at)))
-    ).filter(FileRecord.moved_at >= cutoff_period).scalar() or 1
+    total_days_with_data = (
+        db.query(func.count(func.distinct(func.date(FileRecord.moved_at))))
+        .filter(FileRecord.moved_at >= cutoff_period)
+        .scalar()
+        or 1
+    )
 
     average_files_per_day = float(
-        db.query(func.count(FileRecord.id)).filter(
-            FileRecord.moved_at >= cutoff_period
-        ).scalar() or 0
+        db.query(func.count(FileRecord.id)).filter(FileRecord.moved_at >= cutoff_period).scalar()
+        or 0
     ) / max(total_days_with_data, 1)
 
     average_size_per_day = float(
-        db.query(func.sum(FileRecord.file_size)).filter(
-            FileRecord.moved_at >= cutoff_period
-        ).scalar() or 0
+        db.query(func.sum(FileRecord.file_size))
+        .filter(FileRecord.moved_at >= cutoff_period)
+        .scalar()
+        or 0
     ) / max(total_days_with_data, 1)
 
     # Operational metrics
     total_paths = db.query(func.count(MonitoredPath.id)).scalar() or 0
-    active_paths = db.query(func.count(MonitoredPath.id)).filter(
-        MonitoredPath.enabled == True
-    ).scalar() or 0
+    active_paths = (
+        db.query(func.count(MonitoredPath.id)).filter(MonitoredPath.enabled).scalar() or 0
+    )
     total_criteria = db.query(func.count(Criteria.id)).scalar() or 0
     pinned_files = db.query(func.count(PinnedFile.id)).scalar() or 0
 
     # Daily activity trend (last N days)
     daily_activity = []
-    daily_stats = db.query(
-        func.date(FileRecord.moved_at).label("date"),
-        func.count(FileRecord.id).label("files_moved"),
-        func.sum(FileRecord.file_size).label("size_moved")
-    ).filter(
-        FileRecord.moved_at >= cutoff_period
-    ).group_by(
-        func.date(FileRecord.moved_at)
-    ).order_by(
-        func.date(FileRecord.moved_at)
-    ).all()
+    daily_stats = (
+        db.query(
+            func.date(FileRecord.moved_at).label("date"),
+            func.count(FileRecord.id).label("files_moved"),
+            func.sum(FileRecord.file_size).label("size_moved"),
+        )
+        .filter(FileRecord.moved_at >= cutoff_period)
+        .group_by(func.date(FileRecord.moved_at))
+        .order_by(func.date(FileRecord.moved_at))
+        .all()
+    )
 
     for stat in daily_stats:
-        daily_activity.append({
-            "date": str(stat.date),
-            "files_moved": stat.files_moved or 0,
-            "size_moved": stat.size_moved or 0
-        })
+        daily_activity.append(
+            {
+                "date": str(stat.date),
+                "files_moved": stat.files_moved or 0,
+                "size_moved": stat.size_moved or 0,
+            }
+        )
 
     # Storage trend - current snapshot
-    storage_trend = [{
-        "date": str(now.date()),
-        "hot_storage": total_size_hot,
-        "cold_storage": total_size_cold
-    }]
+    storage_trend = [
+        {"date": str(now.date()), "hot_storage": total_size_hot, "cold_storage": total_size_cold}
+    ]
 
     # Top paths by file count
-    top_paths_files = db.query(
-        MonitoredPath.name,
-        MonitoredPath.id,
-        func.count(FileRecord.id).label("file_count"),
-        func.sum(FileRecord.file_size).label("total_size")
-    ).join(
-        FileRecord, FileRecord.path_id == MonitoredPath.id
-    ).group_by(
-        MonitoredPath.id, MonitoredPath.name
-    ).order_by(
-        func.count(FileRecord.id).desc()
-    ).limit(5).all()
+    top_paths_files = (
+        db.query(
+            MonitoredPath.name,
+            MonitoredPath.id,
+            func.count(FileRecord.id).label("file_count"),
+            func.sum(FileRecord.file_size).label("total_size"),
+        )
+        .join(FileRecord, FileRecord.path_id == MonitoredPath.id)
+        .group_by(MonitoredPath.id, MonitoredPath.name)
+        .order_by(func.count(FileRecord.id).desc())
+        .limit(5)
+        .all()
+    )
 
     top_paths_by_files = [
         {
             "path_name": p.name,
             "path_id": p.id,
             "file_count": p.file_count,
-            "total_size": p.total_size or 0
+            "total_size": p.total_size or 0,
         }
         for p in top_paths_files
     ]
 
     # Top paths by size
-    top_paths_size = db.query(
-        MonitoredPath.name,
-        MonitoredPath.id,
-        func.count(FileRecord.id).label("file_count"),
-        func.sum(FileRecord.file_size).label("total_size")
-    ).join(
-        FileRecord, FileRecord.path_id == MonitoredPath.id
-    ).group_by(
-        MonitoredPath.id, MonitoredPath.name
-    ).order_by(
-        func.sum(FileRecord.file_size).desc()
-    ).limit(5).all()
+    top_paths_size = (
+        db.query(
+            MonitoredPath.name,
+            MonitoredPath.id,
+            func.count(FileRecord.id).label("file_count"),
+            func.sum(FileRecord.file_size).label("total_size"),
+        )
+        .join(FileRecord, FileRecord.path_id == MonitoredPath.id)
+        .group_by(MonitoredPath.id, MonitoredPath.name)
+        .order_by(func.sum(FileRecord.file_size).desc())
+        .limit(5)
+        .all()
+    )
 
     top_paths_by_size = [
         {
             "path_name": p.name,
             "path_id": p.id,
             "file_count": p.file_count,
-            "total_size": p.total_size or 0
+            "total_size": p.total_size or 0,
         }
         for p in top_paths_size
     ]
@@ -233,7 +247,7 @@ def get_detailed_statistics(
         storage_trend=storage_trend,
         # Top paths
         top_paths_by_files=top_paths_by_files,
-        top_paths_by_size=top_paths_by_size
+        top_paths_by_size=top_paths_by_size,
     )
 
 
@@ -245,9 +259,7 @@ def cleanup_old_stats(db: Session = Depends(get_db)):
 
 @router.get("/aggregated")
 def get_aggregated_stats(
-    period: str = "daily",  # daily, weekly, monthly
-    days: int = 30,
-    db: Session = Depends(get_db)
+    period: str = "daily", days: int = 30, db: Session = Depends(get_db)  # daily, weekly, monthly
 ):
     """Get time-based aggregated statistics."""
     end_date = datetime.now()
@@ -263,26 +275,21 @@ def get_aggregated_stats(
     else:
         group_by = func.date(FileRecord.moved_at)
 
-    results = db.query(
-        group_by.label("period"),
-        func.count(FileRecord.id).label("count"),
-        func.sum(FileRecord.file_size).label("size")
-    ).filter(
-        FileRecord.moved_at >= start_date
-    ).group_by(
-        group_by
-    ).order_by(
-        group_by
-    ).all()
+    results = (
+        db.query(
+            group_by.label("period"),
+            func.count(FileRecord.id).label("count"),
+            func.sum(FileRecord.file_size).label("size"),
+        )
+        .filter(FileRecord.moved_at >= start_date)
+        .group_by(group_by)
+        .order_by(group_by)
+        .all()
+    )
 
     return {
         "period": period,
         "data": [
-            {
-                "period": str(r.period),
-                "count": r.count or 0,
-                "size": r.size or 0
-            }
-            for r in results
-        ]
+            {"period": str(r.period), "count": r.count or 0, "size": r.size or 0} for r in results
+        ],
     }

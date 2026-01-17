@@ -1,4 +1,5 @@
 """Database setup and session management."""
+
 import logging
 from pathlib import Path
 
@@ -30,7 +31,7 @@ def ensure_database_directory():
             db_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Ensured database directory exists: {db_dir}")
         except Exception as e:
-            logger.exception("Failed to create database directory", exc_info=e) # Fixed TRY400
+            logger.exception("Failed to create database directory", exc_info=e)  # Fixed TRY400
             raise
 
 
@@ -38,10 +39,7 @@ def ensure_database_directory():
 ensure_database_directory()
 
 # SQLite-specific configuration
-engine = create_engine(
-    settings.database_url,
-    connect_args={"check_same_thread": False}
-)
+engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
