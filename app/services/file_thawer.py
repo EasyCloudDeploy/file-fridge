@@ -1,4 +1,5 @@
 """File thawing service - move files back from cold storage."""
+
 import logging
 import os
 import shutil
@@ -17,9 +18,7 @@ class FileThawer:
 
     @staticmethod
     def thaw_file(
-        file_record: FileRecord,
-        pin: bool = False,
-        db: Optional[Session] = None
+        file_record: FileRecord, pin: bool = False, db: Optional[Session] = None
     ) -> Tuple[bool, Optional[str]]:
         """
         Move a file back from cold storage to hot storage while preserving timestamps.
@@ -78,15 +77,12 @@ class FileThawer:
             # If pinning, add to pinned files
             if pin and db:
                 # Check if already pinned
-                existing = db.query(PinnedFile).filter(
-                    PinnedFile.file_path == str(original_path)
-                ).first()
+                existing = (
+                    db.query(PinnedFile).filter(PinnedFile.file_path == str(original_path)).first()
+                )
 
                 if not existing:
-                    pinned = PinnedFile(
-                        path_id=file_record.path_id,
-                        file_path=str(original_path)
-                    )
+                    pinned = PinnedFile(path_id=file_record.path_id, file_path=str(original_path))
                     db.add(pinned)
                     db.commit()
                     logger.info(f"Pinned file: {original_path}")
@@ -95,7 +91,7 @@ class FileThawer:
             return True, None
 
         except Exception as e:
-            logger.error(f"Error thawing file: {e!s}")
+            logger.exception(f"Error thawing file: {e!s}")
             return False, str(e)
 
     @staticmethod
@@ -118,4 +114,3 @@ class FileThawer:
 
             # Remove original file
             source.unlink()
-

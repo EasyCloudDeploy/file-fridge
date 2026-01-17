@@ -1,4 +1,5 @@
 """Utility functions for detecting network mounts and filesystem characteristics."""
+
 import logging
 import os
 import platform
@@ -9,17 +10,18 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+
 # TODO: We should use the statfs API to check if a path is on a network mount
 def is_network_mount(path: str) -> bool:
     """
     Detect if a path is on a network mount.
-    
+
     On macOS, checks if the path is under /Volumes (which includes network mounts)
     and excludes the local boot disk.
-    
+
     Args:
         path: The path to check
-        
+
     Returns:
         True if the path is on a network mount, False otherwise
     """
@@ -73,15 +75,15 @@ def is_network_mount(path: str) -> bool:
 def check_atime_availability(cold_storage_path: str) -> tuple[bool, Optional[str]]:
     """
     Check if atime (access time) is reliable for the given cold storage path.
-    
+
     On macOS, atime is unreliable on network mounts because:
     - macOS system services (Spotlight, Finder) update symlink atime
     - Network protocols (SMB/NFS) may not preserve atime correctly
     - Clock drift and precision differences cause oscillation
-    
+
     Args:
         cold_storage_path: The cold storage path to check
-        
+
     Returns:
         (is_available: bool, error_message: Optional[str])
         If atime is unavailable, error_message explains why
@@ -105,4 +107,3 @@ def check_atime_availability(cold_storage_path: str) -> tuple[bool, Optional[str
         )
 
     return True, None
-

@@ -1,4 +1,5 @@
 """Main FastAPI application entry point."""
+
 import logging
 from contextlib import asynccontextmanager
 
@@ -31,7 +32,7 @@ if settings.log_file_path:
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=handlers
+    handlers=handlers,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,11 +60,7 @@ async def lifespan(app: FastAPI):
 
 
 # Create FastAPI app
-app = FastAPI(
-    title=settings.app_name,
-    version=settings.app_version,
-    lifespan=lifespan
-)
+app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
 # Configure Jinja2 templates
 templates = Jinja2Templates(directory="templates")
@@ -89,24 +86,15 @@ app.include_router(web_router)
 @app.get("/health")
 def health_check():
     """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "version": settings.app_version,
-        "app_name": settings.app_name
-    }
+    return {"status": "healthy", "version": settings.app_version, "app_name": settings.app_name}
 
 
 def main():
     """Main entry point for the application."""
     import uvicorn
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
 
 
 if __name__ == "__main__":
     main()
-

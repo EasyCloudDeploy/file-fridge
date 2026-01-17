@@ -1,4 +1,5 @@
 """Real-time scan progress tracking for UI feedback."""
+
 import logging
 import threading
 import time
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class FileOperation:
     """Represents a file operation in progress."""
+
     file_name: str
     operation: str  # "move_to_cold", "move_to_hot", "copy"
     bytes_total: int
@@ -29,6 +31,7 @@ class FileOperation:
 @dataclass
 class ScanProgress:
     """Represents the progress of a scan operation."""
+
     scan_id: str
     path_id: int
     status: str  # "running", "completed", "failed"
@@ -52,7 +55,7 @@ class ScanProgress:
                 "operation": op.operation,
                 "bytes_total": op.bytes_total,
                 "bytes_transferred": op.bytes_transferred,
-                "percent": op.percent
+                "percent": op.percent,
             }
             for op in self.current_operations
         ]
@@ -63,7 +66,7 @@ class ScanProgress:
             "files_moved_to_cold": self.files_moved_to_cold,
             "files_moved_to_hot": self.files_moved_to_hot,
             "files_skipped": self.files_skipped,
-            "percent": self.percent_complete
+            "percent": self.percent_complete,
         }
         return data
 
@@ -94,13 +97,14 @@ class ScanProgressManager:
 
     def _start_cleanup_thread(self):
         """Start background thread to cleanup old completed scans."""
+
         def cleanup_worker():
             while True:
                 try:
                     time.sleep(self._cleanup_interval)
                     self._cleanup_old_scans()
                 except Exception as e:
-                    logger.error(f"Error in cleanup thread: {e}")
+                    logger.exception(f"Error in cleanup thread: {e}")
 
         self._cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True)
         self._cleanup_thread.start()
@@ -165,7 +169,7 @@ class ScanProgressManager:
                 path_id=path_id,
                 status="running",
                 started_at=datetime.now().isoformat(),
-                total_files=total_files
+                total_files=total_files,
             )
 
             self._scans[path_id] = progress
@@ -199,10 +203,7 @@ class ScanProgressManager:
 
             # Add to current operations (limit to 5 most recent)
             file_op = FileOperation(
-                file_name=file_name,
-                operation=operation,
-                bytes_total=file_size,
-                bytes_transferred=0
+                file_name=file_name, operation=operation, bytes_total=file_size, bytes_transferred=0
             )
             progress.current_operations.append(file_op)
             if len(progress.current_operations) > 5:
@@ -229,7 +230,14 @@ class ScanProgressManager:
                     op.bytes_transferred = bytes_transferred
                     break
 
-    def complete_file_operation(self, path_id: int, file_name: str, operation: str, success: bool = True, error: Optional[str] = None):
+    def complete_file_operation(
+        self,
+        path_id: int,
+        file_name: str,
+        operation: str,
+        success: bool = True,
+        error: Optional[str] = None,
+    ):
         """
         Mark a file operation as complete.
 
@@ -248,8 +256,7 @@ class ScanProgressManager:
 
             # Remove from current operations
             progress.current_operations = [
-                op for op in progress.current_operations
-                if op.file_name != file_name
+                op for op in progress.current_operations if op.file_name != file_name
             ]
 
             # Update counters

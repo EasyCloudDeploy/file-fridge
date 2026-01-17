@@ -1,4 +1,5 @@
 """Flash message utilities for session-based messaging."""
+
 from typing import Optional
 
 from starlette.requests import Request
@@ -25,4 +26,3 @@ def set_flash(request: Request, message: str, key: str = "message"):
 def set_error(request: Request, error: str):
     """Set an error flash message."""
     set_flash(request, error, "error")
-

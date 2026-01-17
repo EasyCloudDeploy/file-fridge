@@ -1,4 +1,5 @@
 """Background relocation task management for moving files between cold storage locations."""
+
 import logging
 import threading
 import time
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RelocationTask:
     """Represents a file relocation task."""
+
     task_id: str
     inventory_id: int
     file_path: str
@@ -78,6 +80,7 @@ class RelocationTaskManager:
 
     def _start_worker_thread(self):
         """Start background thread to process relocation tasks."""
+
         def worker():
             from app.database import SessionLocal
 
@@ -101,7 +104,7 @@ class RelocationTaskManager:
                         time.sleep(1)
 
                 except Exception as e:
-                    logger.error(f"Error in relocation worker thread: {e}")
+                    logger.exception(f"Error in relocation worker thread: {e}")
                     if task_id:
                         with self._lock:
                             if task_id in self._tasks:
@@ -115,15 +118,18 @@ class RelocationTaskManager:
 
     def _start_cleanup_thread(self):
         """Start background thread to cleanup old completed tasks."""
+
         def cleanup_worker():
             while not self._shutdown:
                 try:
                     time.sleep(self._cleanup_interval)
                     self._cleanup_old_tasks()
                 except Exception as e:
-                    logger.error(f"Error in relocation cleanup thread: {e}")
+                    logger.exception(f"Error in relocation cleanup thread: {e}")
 
-        cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True, name="relocation-cleanup")
+        cleanup_thread = threading.Thread(
+            target=cleanup_worker, daemon=True, name="relocation-cleanup"
+        )
         cleanup_thread.start()
         logger.info("Relocation cleanup thread started")
 
@@ -156,12 +162,13 @@ class RelocationTaskManager:
 
         try:
             # Get the inventory entry
-            inventory_entry = db.query(FileInventory).filter(
-                FileInventory.id == task.inventory_id
-            ).first()
+            inventory_entry = (
+                db.query(FileInventory).filter(FileInventory.id == task.inventory_id).first()
+            )
 
             if not inventory_entry:
-                raise Exception(f"Inventory entry {task.inventory_id} not found")
+                msg = f"Inventory entry {task.inventory_id} not found"
+                raise Exception(msg)
 
             # Status should already be MIGRATING (set when task was created)
             # But ensure it's set in case of restart or other edge cases
@@ -171,20 +178,24 @@ class RelocationTaskManager:
                 logger.info(f"Set file {task.inventory_id} status to MIGRATING")
 
             # Get monitored path
-            monitored_path = db.query(MonitoredPath).filter(
-                MonitoredPath.id == inventory_entry.path_id
-            ).first()
+            monitored_path = (
+                db.query(MonitoredPath).filter(MonitoredPath.id == inventory_entry.path_id).first()
+            )
 
             if not monitored_path:
-                raise Exception(f"Monitored path not found for inventory {task.inventory_id}")
+                msg = f"Monitored path not found for inventory {task.inventory_id}"
+                raise Exception(msg)
 
             # Get target storage location
-            target_location = db.query(ColdStorageLocation).filter(
-                ColdStorageLocation.id == task.target_location_id
-            ).first()
+            target_location = (
+                db.query(ColdStorageLocation)
+                .filter(ColdStorageLocation.id == task.target_location_id)
+                .first()
+            )
 
             if not target_location:
-                raise Exception(f"Target storage location {task.target_location_id} not found")
+                msg = f"Target storage location {task.target_location_id} not found"
+                raise Exception(msg)
 
             # Find current storage location
             current_location = None
@@ -194,12 +205,14 @@ class RelocationTaskManager:
                     break
 
             if not current_location:
-                raise Exception("Could not determine current storage location")
+                msg = "Could not determine current storage location"
+                raise Exception(msg)
 
             # Calculate paths
             current_file_path = Path(inventory_entry.file_path)
             if not current_file_path.exists():
-                raise Exception(f"Source file does not exist: {inventory_entry.file_path}")
+                msg = f"Source file does not exist: {inventory_entry.file_path}"
+                raise Exception(msg)
 
             # Get file size for progress tracking
             file_size = current_file_path.stat().st_size
@@ -227,11 +240,12 @@ class RelocationTaskManager:
                 current_file_path,
                 new_file_path,
                 OperationType.MOVE,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
             )
 
             if not success:
-                raise Exception(f"File move failed: {error}")
+                msg = f"File move failed: {error}"
+                raise Exception(msg)
 
             # Update the inventory entry
             old_path = inventory_entry.file_path
@@ -245,14 +259,14 @@ class RelocationTaskManager:
                 cold_storage_path=str(new_file_path),
                 file_size=file_size,
                 operation_type=OperationType.MOVE,
-                criteria_matched=None
+                criteria_matched=None,
             )
             db.add(file_record)
 
             # Update any existing file records that point to the old location
-            existing_record = db.query(FileRecord).filter(
-                FileRecord.cold_storage_path == old_path
-            ).first()
+            existing_record = (
+                db.query(FileRecord).filter(FileRecord.cold_storage_path == old_path).first()
+            )
             if existing_record:
                 existing_record.cold_storage_path = str(new_file_path)
 
@@ -269,19 +283,21 @@ class RelocationTaskManager:
             logger.info(f"Relocation task {task_id} completed successfully")
 
         except Exception as e:
-            logger.error(f"Relocation task {task_id} failed: {e}")
+            logger.exception(f"Relocation task {task_id} failed: {e}")
 
             # Reset status back to ACTIVE on failure
             try:
-                inventory_entry = db.query(FileInventory).filter(
-                    FileInventory.id == task.inventory_id
-                ).first()
+                inventory_entry = (
+                    db.query(FileInventory).filter(FileInventory.id == task.inventory_id).first()
+                )
                 if inventory_entry and inventory_entry.status == FileStatus.MIGRATING:
                     inventory_entry.status = FileStatus.ACTIVE
                     db.commit()
-                    logger.info(f"Reset file {task.inventory_id} status to ACTIVE after failed migration")
+                    logger.info(
+                        f"Reset file {task.inventory_id} status to ACTIVE after failed migration"
+                    )
             except Exception as db_error:
-                logger.error(f"Failed to reset file status: {db_error}")
+                logger.exception(f"Failed to reset file status: {db_error}")
 
             with self._lock:
                 if task_id in self._tasks:
@@ -298,7 +314,7 @@ class RelocationTaskManager:
         source_location_id: int,
         source_location_name: str,
         target_location_id: int,
-        target_location_name: str
+        target_location_name: str,
     ) -> str:
         """
         Create a new relocation task.
@@ -321,7 +337,8 @@ class RelocationTaskManager:
                 existing_task_id = self._tasks_by_inventory[inventory_id]
                 existing_task = self._tasks.get(existing_task_id)
                 if existing_task and existing_task.status in ["pending", "running"]:
-                    raise ValueError("A relocation task is already in progress for this file")
+                    msg = "A relocation task is already in progress for this file"
+                    raise ValueError(msg)
 
             task_id = str(uuid.uuid4())
             task = RelocationTask(
@@ -334,7 +351,7 @@ class RelocationTaskManager:
                 target_location_name=target_location_name,
                 status="pending",
                 created_at=datetime.now().isoformat(),
-                bytes_total=file_size
+                bytes_total=file_size,
             )
 
             self._tasks[task_id] = task
@@ -400,11 +417,7 @@ class RelocationTaskManager:
             List of task dictionaries, sorted by creation time (newest first)
         """
         with self._lock:
-            tasks = sorted(
-                self._tasks.values(),
-                key=lambda t: t.created_at,
-                reverse=True
-            )[:limit]
+            tasks = sorted(self._tasks.values(), key=lambda t: t.created_at, reverse=True)[:limit]
             return [task.to_dict() for task in tasks]
 
 

@@ -1,4 +1,5 @@
 """API routes for tag rule management."""
+
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,10 +17,11 @@ router = APIRouter(prefix="/api/v1/tag-rules", tags=["tag-rules"])
 @router.get("", response_model=List[TagRuleSchema])
 def list_tag_rules(db: Session = Depends(get_db)):
     """List all tag rules."""
-    return db.query(TagRuleModel).order_by(
-        TagRuleModel.priority.desc(),
-        TagRuleModel.created_at.asc()
-    ).all()
+    return (
+        db.query(TagRuleModel)
+        .order_by(TagRuleModel.priority.desc(), TagRuleModel.created_at.asc())
+        .all()
+    )
 
 
 @router.post("", response_model=TagRuleSchema, status_code=status.HTTP_201_CREATED)
@@ -28,8 +30,7 @@ def create_tag_rule(rule: TagRuleCreate, db: Session = Depends(get_db)):
     tag = db.query(Tag).filter(Tag.id == rule.tag_id).first()
     if not tag:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tag with ID {rule.tag_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag with ID {rule.tag_id} not found"
         )
 
     new_rule = TagRuleModel(
@@ -38,7 +39,7 @@ def create_tag_rule(rule: TagRuleCreate, db: Session = Depends(get_db)):
         operator=rule.operator,
         value=rule.value,
         enabled=rule.enabled,
-        priority=rule.priority
+        priority=rule.priority,
     )
     db.add(new_rule)
     db.commit()
@@ -52,8 +53,7 @@ def get_tag_rule(rule_id: int, db: Session = Depends(get_db)):
     rule = db.query(TagRuleModel).filter(TagRuleModel.id == rule_id).first()
     if not rule:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tag rule with ID {rule_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag rule with ID {rule_id} not found"
         )
     return rule
 
@@ -64,8 +64,7 @@ def update_tag_rule(rule_id: int, rule_update: TagRuleUpdate, db: Session = Depe
     rule = db.query(TagRuleModel).filter(TagRuleModel.id == rule_id).first()
     if not rule:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tag rule with ID {rule_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag rule with ID {rule_id} not found"
         )
 
     update_data = rule_update.model_dump(exclude_unset=True)
@@ -83,8 +82,7 @@ def delete_tag_rule(rule_id: int, db: Session = Depends(get_db)):
     rule = db.query(TagRuleModel).filter(TagRuleModel.id == rule_id).first()
     if not rule:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tag rule with ID {rule_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Tag rule with ID {rule_id} not found"
         )
 
     db.delete(rule)

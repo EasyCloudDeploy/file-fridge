@@ -1,9 +1,10 @@
 """API routes for path management."""
+
 import logging
 import os
 import shutil
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -22,6 +23,49 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/paths", tags=["paths"])
 
 
+def validate_path_access(path: str, path_id: Optional[int] = None) -> Tuple[bool, str]:
+    """
+    Validate that a path exists, is a directory, and has read/write/execute permissions.
+
+    Args:
+        path: The path to validate
+        path_id: Optional path ID for better error messages
+
+    Returns:
+        Tuple of (is_valid: bool, error_message: str)
+    """
+    path_obj = Path(path)
+
+    # Check existence
+    if not path_obj.exists():
+        context = f" (path_id={path_id})" if path_id else ""
+        return False, f"Path does not exist{context}: {path}"
+
+    # Check if directory
+    if not path_obj.is_dir():
+        context = f" (path_id={path_id})" if path_id else ""
+        return False, f"Path is not a directory{context}: {path}"
+
+    # Check permissions (read, write, execute)
+    # Execute permission is needed to list directory contents
+    if not os.access(path, os.R_OK):
+        context = f" (path_id={path_id})" if path_id else ""
+        return False, f"Path is not readable - check permissions{context}: {path}"
+
+    if not os.access(path, os.W_OK):
+        context = f" (path_id={path_id})" if path_id else ""
+        return False, f"Path is not writable - check permissions{context}: {path}"
+
+    if not os.access(path, os.X_OK):
+        context = f" (path_id={path_id})" if path_id else ""
+        return (
+            False,
+            f"Path is not executable (cannot list contents) - check permissions{context}: {path}",
+        )
+
+    return True, ""
+
+
 def validate_path_configuration(path: MonitoredPath, db: Session) -> None:
     """
     Validate path configuration and check for incompatible settings.
@@ -34,28 +78,32 @@ def validate_path_configuration(path: MonitoredPath, db: Session) -> None:
     """
     # Check if any enabled criteria use ATIME
     atime_criteria = [
-        c for c in path.criteria
-        if c.enabled and c.criterion_type == CriterionType.ATIME
+        c for c in path.criteria if c.enabled and c.criterion_type == CriterionType.ATIME
     ]
 
     if atime_criteria:
-        # Check cold storage locations for network mount incompatibility
         error_locations = []
 
+        # Check source path for ATIME availability (critical for scanning)
+        atime_available, error_msg = check_atime_availability(path.source_path)
+        if not atime_available:
+            error_locations.append(f"Source path ({path.source_path}): {error_msg}")
+
+        # Check cold storage locations for network mount incompatibility
         for location in path.storage_locations:
             atime_available, error_msg = check_atime_availability(location.path)
             if not atime_available:
                 error_locations.append(f"{location.name} ({location.path}): {error_msg}")
 
         if error_locations:
-            # At least one storage location has atime issues
-            combined_error = "ATIME criteria configured but not available on storage location(s): " + "; ".join(error_locations)
+            # At least one location has atime issues
+            combined_error = (
+                f"ATIME criteria configured but not available on path (path_id={path.id}). "
+                f"Issues: {'; '.join(error_locations)}"
+            )
             path.error_message = combined_error
             db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=combined_error
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=combined_error)
 
     # Clear error message if validation passes
     if path.error_message:
@@ -102,6 +150,20 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
     for path in paths:
         path_str = path.source_path
         try:
+            # Validate path is a directory before attempting to stat
+            path_obj = Path(path_str)
+            if not path_obj.exists():
+                if "not_found" not in unique_volumes:
+                    unique_volumes["not_found"] = []
+                unique_volumes["not_found"].append(path_str)
+                continue
+
+            if not path_obj.is_dir():
+                if "error" not in unique_volumes:
+                    unique_volumes["error"] = []
+                unique_volumes["error"].append((path_str, "Not a directory"))
+                continue
+
             # Get the device ID for the path
             device_id = os.stat(path_str).st_dev
             if device_id not in unique_volumes:
@@ -111,43 +173,61 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
             if "not_found" not in unique_volumes:
                 unique_volumes["not_found"] = []
             unique_volumes["not_found"].append(path_str)
-        except Exception as e:
-            # Handle other potential errors
-            logger.error(f"Error stating path {path_str}: {e}")
+        except PermissionError as e:
+            logger.exception(f"Permission denied accessing path {path_str}: {e}")
             if "error" not in unique_volumes:
                 unique_volumes["error"] = []
-            unique_volumes["error"].append(path_str)
+            unique_volumes["error"].append((path_str, f"Permission denied: {e}"))
+        except Exception as e:
+            # Handle other potential errors
+            logger.exception(f"Error stating path {path_str}: {e}")
+            if "error" not in unique_volumes:
+                unique_volumes["error"] = []
+            unique_volumes["error"].append((path_str, str(e)))
 
     stats_list = []
-    for device_id, path_str in unique_volumes.items():
-        if device_id == "not_found" or device_id == "error":
-            for p in path_str:
-                stats_list.append(schemas.StorageStats(
-                    path=p,
+    for device_id, path_info in unique_volumes.items():
+        if device_id == "not_found":
+            for p in path_info:
+                stats_list.append(
+                    schemas.StorageStats(
+                        path=p, total_bytes=0, used_bytes=0, free_bytes=0, error="Path not found"
+                    )
+                )
+            continue
+
+        if device_id == "error":
+            for p, err_msg in path_info:
+                stats_list.append(
+                    schemas.StorageStats(
+                        path=p, total_bytes=0, used_bytes=0, free_bytes=0, error=err_msg
+                    )
+                )
+            continue
+
+        # path_info is a string for valid device_ids
+        path_str = path_info
+        try:
+            total, used, free = shutil.disk_usage(path_str)
+            stats_list.append(
+                schemas.StorageStats(
+                    path=path_str,
+                    total_bytes=total,
+                    used_bytes=used,
+                    free_bytes=free,
+                )
+            )
+        except Exception as e:
+            logger.exception(f"Error getting disk usage for {path_str}: {e}")
+            stats_list.append(
+                schemas.StorageStats(
+                    path=path_str,
                     total_bytes=0,
                     used_bytes=0,
                     free_bytes=0,
-                    error="Path not found or error stating path."
-                ))
-            continue
-
-        try:
-            total, used, free = shutil.disk_usage(path_str)
-            stats_list.append(schemas.StorageStats(
-                path=path_str,
-                total_bytes=total,
-                used_bytes=used,
-                free_bytes=free,
-            ))
-        except Exception as e:
-            logger.error(f"Error getting disk usage for {path_str}: {e}")
-            stats_list.append(schemas.StorageStats(
-                path=path_str,
-                total_bytes=0,
-                used_bytes=0,
-                free_bytes=0,
-                error=str(e),
-            ))
+                    error=f"Disk usage error: {e}",
+                )
+            )
 
     return stats_list
 
@@ -155,33 +235,32 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
 @router.post("", response_model=schemas.MonitoredPath, status_code=status.HTTP_201_CREATED)
 def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)):
     """Create a new monitored path."""
-    # Validate source path exists
-    source = Path(path.source_path)
-    if not source.exists() or not source.is_dir():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Source path does not exist or is not a directory: {path.source_path}"
-        )
+    # Validate source path exists and has proper permissions
+    is_valid, error_msg = validate_path_access(path.source_path)
+    if not is_valid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
     # Check for duplicate name
     existing = db.query(MonitoredPath).filter(MonitoredPath.name == path.name).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Path with name '{path.name}' already exists"
+            detail=f"Path with name '{path.name}' already exists",
         )
 
     # Fetch and associate storage locations
-    storage_locations = db.query(ColdStorageLocation).filter(
-        ColdStorageLocation.id.in_(path.storage_location_ids)
-    ).all()
+    storage_locations = (
+        db.query(ColdStorageLocation)
+        .filter(ColdStorageLocation.id.in_(path.storage_location_ids))
+        .all()
+    )
 
     if len(storage_locations) != len(path.storage_location_ids):
         found_ids = {loc.id for loc in storage_locations}
         missing_ids = set(path.storage_location_ids) - found_ids
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Storage location IDs not found: {missing_ids}"
+            detail=f"Storage location IDs not found: {missing_ids}",
         )
 
     # Create path without storage_location_ids (not a DB column)
@@ -205,9 +284,7 @@ def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)
     # Manage .noindex files based on prevent_indexing setting
     for location in db_path.storage_locations:
         IndexingManager.manage_noindex_files(
-            db_path.source_path,
-            location.path,
-            db_path.prevent_indexing
+            db_path.source_path, location.path, db_path.prevent_indexing
         )
 
     # Add to scheduler
@@ -229,7 +306,9 @@ def get_path(path_id: int, db: Session = Depends(get_db)):
     if db_path is None:
         raise HTTPException(status_code=404, detail="Path not found")
 
-    file_count = db.query(func.count(FileInventory.id)).filter(FileInventory.path_id == path_id).scalar()
+    file_count = (
+        db.query(func.count(FileInventory.id)).filter(FileInventory.path_id == path_id).scalar()
+    )
 
     return schemas.MonitoredPathSummary(
         **{k: v for k, v in db_path.__dict__.items() if not k.startswith("_")},
@@ -242,54 +321,55 @@ def get_path(path_id: int, db: Session = Depends(get_db)):
 def update_path(
     path_id: int,
     path_update: schemas.MonitoredPathUpdate,
-    confirm_cold_storage_change: bool = Query(False, description="Confirm cold storage path change"),
+    confirm_cold_storage_change: bool = Query(
+        False, description="Confirm cold storage path change"
+    ),
     migration_action: str = Query(None, description="Migration action: 'move' or 'abandon'"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Update a monitored path."""
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
     if not path:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Path with id {path_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Path with id {path_id} not found"
         )
 
     # Validate paths if being updated
     update_data = path_update.model_dump(exclude_unset=True)
 
     if "source_path" in update_data:
-        source = Path(update_data["source_path"])
-        if not source.exists() or not source.is_dir():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Source path does not exist or is not a directory: {update_data['source_path']}"
-            )
+        is_valid, error_msg = validate_path_access(update_data["source_path"], path_id)
+        if not is_valid:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
     # Check for duplicate name if name is being updated
     if "name" in update_data:
-        existing = db.query(MonitoredPath).filter(
-            MonitoredPath.name == update_data["name"],
-            MonitoredPath.id != path_id
-        ).first()
+        existing = (
+            db.query(MonitoredPath)
+            .filter(MonitoredPath.name == update_data["name"], MonitoredPath.id != path_id)
+            .first()
+        )
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path with name '{update_data['name']}' already exists"
+                detail=f"Path with name '{update_data['name']}' already exists",
             )
 
     # Handle storage_location_ids update if provided
     storage_location_ids = update_data.pop("storage_location_ids", None)
     if storage_location_ids is not None:
-        storage_locations = db.query(ColdStorageLocation).filter(
-            ColdStorageLocation.id.in_(storage_location_ids)
-        ).all()
+        storage_locations = (
+            db.query(ColdStorageLocation)
+            .filter(ColdStorageLocation.id.in_(storage_location_ids))
+            .all()
+        )
 
         if len(storage_locations) != len(storage_location_ids):
             found_ids = {loc.id for loc in storage_locations}
             missing_ids = set(storage_location_ids) - found_ids
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Storage location IDs not found: {missing_ids}"
+                detail=f"Storage location IDs not found: {missing_ids}",
             )
 
         path.storage_locations = storage_locations
@@ -305,12 +385,14 @@ def update_path(
     validate_path_configuration(path, db)
 
     # Manage .noindex files if prevent_indexing or paths were updated
-    if "prevent_indexing" in update_data or "source_path" in update_data or storage_location_ids is not None:
+    if (
+        "prevent_indexing" in update_data
+        or "source_path" in update_data
+        or storage_location_ids is not None
+    ):
         for location in path.storage_locations:
             IndexingManager.manage_noindex_files(
-                path.source_path,
-                location.path,
-                path.prevent_indexing
+                path.source_path, location.path, path.prevent_indexing
             )
 
     # Update scheduler job
@@ -324,12 +406,14 @@ def update_path(
 @router.delete("/{path_id}", status_code=status.HTTP_200_OK)
 def delete_path(
     path_id: int,
-    undo_operations: bool = Query(False, description="If True, move all files back from cold storage before deleting"),
-    db: Session = Depends(get_db)
+    undo_operations: bool = Query(
+        False, description="If True, move all files back from cold storage before deleting"
+    ),
+    db: Session = Depends(get_db),
 ):
     """
     Delete a monitored path.
-    
+
     Args:
         path_id: The path ID to delete
         undo_operations: If True, move all files back from cold storage before deleting
@@ -338,20 +422,20 @@ def delete_path(
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
     if not path:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Path with id {path_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Path with id {path_id} not found"
         )
 
     results = {
         "path_id": path_id,
         "undo_operations": undo_operations,
         "files_reversed": 0,
-        "errors": []
+        "errors": [],
     }
 
     # If undo_operations is True, reverse all file operations first
     if undo_operations:
         from app.services.path_reverser import PathReverser
+
         logger.info(f"Undoing operations for path {path_id} before deletion")
         reverse_results = PathReverser.reverse_path_operations(path_id, db)
         results["files_reversed"] = reverse_results["files_reversed"]
@@ -369,25 +453,45 @@ def delete_path(
 
 @router.post("/{path_id}/scan", status_code=status.HTTP_202_ACCEPTED)
 def trigger_scan(path_id: int, db: Session = Depends(get_db)):
-    """Manually trigger a scan for a path."""
+    """
+    Manually trigger a scan for a path.
+
+    Note: If a scan is already running, this will return 409 Conflict.
+    The scan process itself has built-in protection against concurrent scans.
+    """
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
     if not path:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Path with id {path_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Path with id {path_id} not found"
+        )
+
+    # Validate path accessibility before triggering scan
+    is_valid, error_msg = validate_path_access(path.source_path, path_id)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot scan path: {error_msg}"
         )
 
     # Check if a scan is already running
+    # Note: This is a best-effort check; the scan_progress_manager.start_scan()
+    # method provides atomic protection against concurrent scans
     if scan_progress_manager.is_scan_running(path_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"A scan is already running for path {path_id}"
+            detail=f"A scan is already running for path_id={path_id} ({path.name}). "
+            f"Use GET /api/v1/paths/{path_id}/scan/progress to monitor progress.",
         )
 
     # Trigger scan asynchronously
+    # The scheduler service will call scan_progress_manager.start_scan() which
+    # provides atomic protection against race conditions
     scheduler_service.trigger_scan(path_id)
 
-    return {"message": f"Scan triggered for path {path_id}"}
+    return {
+        "message": f"Scan triggered for path_id={path_id} ({path.name})",
+        "path_id": path_id,
+        "path_name": path.name,
+    }
 
 
 @router.get("/{path_id}/scan/progress")
@@ -399,36 +503,40 @@ def get_scan_progress(path_id: int, db: Session = Depends(get_db)):
     - Overall progress (files processed / total files)
     - Current file operations in progress
     - Errors encountered
-    - Scan status (running, completed, failed)
+    - Scan status (running, completed, failed, idle)
     """
     # Verify path exists
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
     if not path:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Path with id {path_id} not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Path with id {path_id} not found"
         )
 
     # Get progress from manager
     progress = scan_progress_manager.get_progress(path_id)
 
     if progress is None:
-        # No active or recent scan
+        # No active or recent scan - return idle state with path context
         return {
             "scan_id": None,
             "path_id": path_id,
+            "path_name": path.name,
             "status": "idle",
+            "message": f"No active or recent scan for path_id={path_id} ({path.name})",
             "progress": {
                 "total_files": 0,
                 "files_processed": 0,
                 "files_moved_to_cold": 0,
                 "files_moved_to_hot": 0,
                 "files_skipped": 0,
-                "percent": 0
+                "percent": 0,
             },
             "current_operations": [],
-            "errors": []
+            "errors": [],
         }
 
-    return progress
+    # Add path name to progress response for better UX
+    if isinstance(progress, dict):
+        progress["path_name"] = path.name
 
+    return progress

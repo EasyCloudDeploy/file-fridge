@@ -48,8 +48,8 @@ class SchedulerService:
             job_defaults={
                 "coalesce": True,  # Skip overlapping jobs
                 "max_instances": 1,  # Only one instance per job
-                "misfire_grace_time": 30  # Allow 30 seconds grace time for missed jobs
-            }
+                "misfire_grace_time": 30,  # Allow 30 seconds grace time for missed jobs
+            },
         )
 
     def start(self):
@@ -60,11 +60,12 @@ class SchedulerService:
                 logger.info("Scheduler started")
                 # Small delay to ensure scheduler is fully started
                 import time
+
                 time.sleep(0.1)
                 self._load_existing_jobs()
                 self._add_stats_cleanup_job()
             except Exception as e:
-                logger.error(f"Error starting scheduler: {e}")
+                logger.exception(f"Error starting scheduler: {e}")
                 # Try to clean up
                 try:
                     if self.scheduler.running:
@@ -87,7 +88,7 @@ class SchedulerService:
                     self.scheduler.shutdown(wait=False)
                     logger.info("Scheduler force-stopped")
                 except Exception as e2:
-                    logger.error(f"Error during forced scheduler shutdown: {e2}")
+                    logger.exception(f"Error during forced scheduler shutdown: {e2}")
 
     def _load_existing_jobs(self):
         """Load existing monitored paths as scheduled jobs."""
@@ -97,15 +98,15 @@ class SchedulerService:
 
         db = SchedulerSessionLocal()
         try:
-            paths = db.query(MonitoredPath).filter(MonitoredPath.enabled == True).all()
+            paths = db.query(MonitoredPath).filter(MonitoredPath.enabled).all()
             logger.info(f"Loading {len(paths)} enabled paths as scheduled jobs")
             for path in paths:
                 try:
                     self.add_path_job(path)
                 except Exception as e:
-                    logger.error(f"Error loading job for path {path.id}: {e}")
+                    logger.exception(f"Error loading job for path {path.id}: {e}")
         except Exception as e:
-            logger.error(f"Error loading existing jobs: {e}")
+            logger.exception(f"Error loading existing jobs: {e}")
         finally:
             db.close()
 
@@ -130,11 +131,11 @@ class SchedulerService:
                     seconds=path.check_interval_seconds,
                     id=job_id,
                     args=[path.id],
-                    replace_existing=True
+                    replace_existing=True,
                 )
                 logger.info(f"Added scheduled job for path {path.id} ({path.name})")
         except Exception as e:
-            logger.error(f"Error adding job for path {path.id}: {e}")
+            logger.exception(f"Error adding job for path {path.id}: {e}")
 
     def remove_path_job(self, path_id: int):
         """Remove scheduled job for a path."""
@@ -170,11 +171,11 @@ class SchedulerService:
                 hour=2,
                 minute=0,
                 id=job_id,
-                replace_existing=True
+                replace_existing=True,
             )
             logger.info("Added scheduled job for daily stats cleanup (runs at 2 AM)")
         except Exception as e:
-            logger.error(f"Error adding stats cleanup job: {e}")
+            logger.exception(f"Error adding stats cleanup job: {e}")
 
 
 def check_disk_space_and_notify(path: MonitoredPath, db: Session):
@@ -201,9 +202,11 @@ def check_disk_space_and_notify(path: MonitoredPath, db: Session):
                     data=payload,
                 )
         except FileNotFoundError:
-            logger.warning(f"Could not check disk space for {location.name}: path not found at {location.path}")
+            logger.warning(
+                f"Could not check disk space for {location.name}: path not found at {location.path}"
+            )
         except Exception as e:
-            logger.error(f"Error checking disk space for {location.name}: {e}")
+            logger.exception(f"Error checking disk space for {location.name}: {e}")
 
 
 def scan_path_job_func(path_id: int):
@@ -228,10 +231,7 @@ def scan_path_job_func(path_id: int):
         # Send notifications for individual errors during the scan
         if result["errors"]:
             for error_msg in result["errors"]:
-                error_payload = SyncErrorData(
-                    path_name=path.name,
-                    error_message=error_msg
-                )
+                error_payload = SyncErrorData(path_name=path.name, error_message=error_msg)
                 notification_service.dispatch_event(
                     db=db,
                     event_type=NotificationEvent.SYNC_ERROR,
@@ -255,13 +255,15 @@ def scan_path_job_func(path_id: int):
         # Check disk space after a successful scan
         check_disk_space_and_notify(path, db)
 
-        logger.info(f"Completed scan for path {path_id}: {result['files_moved']} files moved, {len(result['errors'])} errors in {duration:.2f}s")
+        logger.info(
+            f"Completed scan for path {path_id}: {result['files_moved']} files moved, {len(result['errors'])} errors in {duration:.2f}s"
+        )
 
     except Exception as e:
         duration = time.time() - start_time
         tb_str = traceback.format_exc()
-        logger.error(f"Fatal error scanning path {path_id} after {duration:.2f}s: {e!s}")
-        logger.error(f"Traceback: {tb_str}")
+        logger.exception(f"Fatal error scanning path {path_id} after {duration:.2f}s: {e!s}")
+        logger.exception(f"Traceback: {tb_str}")
 
         # Send fatal error notification
         error_payload = SyncErrorData(
@@ -283,4 +285,3 @@ def scan_path_job_func(path_id: int):
 
 # Global scheduler instance
 scheduler_service = SchedulerService()
-

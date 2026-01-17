@@ -1,4 +1,5 @@
 """File metadata extraction utilities."""
+
 import hashlib
 import logging
 import mimetypes
@@ -34,7 +35,7 @@ class FileMetadataExtractor:
 
             return sha256_hash.hexdigest()
         except Exception as e:
-            logger.error(f"Error computing hash for {file_path}: {e}")
+            logger.exception(f"Error computing hash for {file_path}: {e}")
             return None
 
     @staticmethod
@@ -67,7 +68,7 @@ class FileMetadataExtractor:
             return (file_extension, mime_type, checksum)
 
         except Exception as e:
-            logger.error(f"Error extracting metadata for {file_path}: {e}")
+            logger.exception(f"Error extracting metadata for {file_path}: {e}")
             return (None, None, None)
 
     @staticmethod
