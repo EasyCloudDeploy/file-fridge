@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => {
  */
 async function loadLocation() {
     try {
-        const response = await fetch(`/api/v1/storage/locations/${locationId}`);
+        const response = await authenticatedFetch(`/api/v1/storage/locations/${locationId}`);
         if (!response.ok) {
             throw new Error(`Failed to load storage location: ${response.statusText}`);
         }
@@ -71,7 +71,7 @@ async function handleSubmit(event) {
 
         const method = isEditMode ? 'PUT' : 'POST';
 
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
             method: method,
             headers: {
                 'Content-Type': 'application/json'

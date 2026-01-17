@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', async () => {
  */
 async function loadAppInfo() {
     try {
-        const response = await fetch('/health');
+        const response = await authenticatedFetch('/health');
         if (response.ok) {
             const data = await response.json();
             document.getElementById('app-name-navbar').textContent = data.app_name || 'File Fridge';
@@ -100,7 +100,7 @@ async function loadNotifiers() {
         loadingEl.style.display = 'block';
         contentEl.style.display = 'none';
 
-        const response = await fetch('/api/v1/notifiers');
+        const response = await authenticatedFetch('/api/v1/notifiers');
         if (!response.ok) {
             throw new Error(`Failed to load notifiers: ${response.statusText}`);
         }
@@ -307,14 +307,14 @@ async function saveNotifier() {
         let response;
         if (notifierId) {
             // Update existing notifier
-            response = await fetch(`/api/v1/notifiers/${notifierId}`, {
+            response = await authenticatedFetch(`/api/v1/notifiers/${notifierId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
         } else {
             // Create new notifier
-            response = await fetch('/api/v1/notifiers', {
+            response = await authenticatedFetch('/api/v1/notifiers', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
@@ -365,7 +365,7 @@ async function confirmDelete() {
     deleteBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Deleting...';
 
     try {
-        const response = await fetch(`/api/v1/notifiers/${currentEditingNotifierId}`, {
+        const response = await authenticatedFetch(`/api/v1/notifiers/${currentEditingNotifierId}`, {
             method: 'DELETE'
         });
 
@@ -396,7 +396,7 @@ async function testNotifier(id) {
     showAlert(`Sending test notification to ${notifier.name}...`, 'info');
 
     try {
-        const response = await fetch(`/api/v1/notifiers/${id}/test`, {
+        const response = await authenticatedFetch(`/api/v1/notifiers/${id}/test`, {
             method: 'POST'
         });
 

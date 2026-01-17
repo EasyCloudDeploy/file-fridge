@@ -207,7 +207,9 @@ class TagRuleService:
         self.db.add(file_tag)
         return True
 
-    def apply_rules_to_file(self, file: FileInventory, rules: Optional[list[TagRule]] = None) -> int:
+    def apply_rules_to_file(
+        self, file: FileInventory, rules: Optional[list[TagRule]] = None
+    ) -> int:
         """
         Apply rules to a single file.
 

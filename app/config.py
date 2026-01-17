@@ -1,6 +1,7 @@
 """Application configuration."""
 
 import logging
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -79,6 +80,19 @@ class Settings(BaseSettings):
     # FileRecord entries older than this will be automatically deleted
     stats_retention_days: int = 30
 
+    # Authentication
+    # Override via SECRET_KEY environment variable
+    # Secret key for JWT signing - required for production
+    # IMPORTANT: This must be set for the application to start
+    secret_key: Optional[str] = None
+
+    # Override via ACCESS_TOKEN_EXPIRE_DAYS environment variable
+    # Default token expiration in days
+    access_token_expire_days: int = 30
+
+    # JWT algorithm (HS256 is HMAC with SHA-256)
+    algorithm: str = "HS256"
+
     @model_validator(mode="after")
     def read_version_file(self):
         """Read version from VERSION file if app_version is still default and file exists."""
@@ -89,6 +103,25 @@ class Settings(BaseSettings):
                     self.app_version = f.read().strip()
             except Exception as e:
                 logger.exception("Error reading VERSION file", exc_info=e)
+        return self
+
+    @model_validator(mode="after")
+    def validate_secret_key(self):
+        """Validate that SECRET_KEY is set."""
+        if not self.secret_key or self.secret_key.strip() == "":
+            print("\nERROR: SECRET_KEY environment variable is required but not set.")  # noqa: T201
+            print("\nThe File Fridge application requires a SECRET_KEY to start.")  # noqa: T201
+            print("This key is used for authentication and session security.")  # noqa: T201
+            print(  # noqa: T201
+                "\nPlease set the SECRET_KEY environment variable before starting the application:"
+            )
+            print("  - Export: export SECRET_KEY='your-secret-key-here'")  # noqa: T201
+            print("  - Docker: -e SECRET_KEY='your-secret-key-here'")  # noqa: T201
+            print("  - .env file: SECRET_KEY=your-secret-key-here")  # noqa: T201
+            print("\nFor example:")  # noqa: T201
+            print("  export SECRET_KEY='$(openssl rand -hex 32)'")  # noqa: T201
+            print("  or use a UUID: export SECRET_KEY='$(uuidgen)'")  # noqa: T201
+            sys.exit(1)
         return self
 
     class Config:

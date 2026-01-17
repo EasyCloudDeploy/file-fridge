@@ -27,7 +27,7 @@ async function loadStorageLocations() {
         contentEl.style.display = 'none';
         noLocationsEl.style.display = 'none';
 
-        const response = await fetch(`/api/v1/storage/locations`);
+        const response = await authenticatedFetch(`/api/v1/storage/locations`);
         if (!response.ok) {
             throw new Error(`Failed to load storage locations: ${response.statusText}`);
         }
@@ -109,7 +109,7 @@ async function deleteLocation(id, name, isForced) {
     }
 
     try {
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
             method: 'DELETE'
         });
 

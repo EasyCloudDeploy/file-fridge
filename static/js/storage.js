@@ -69,7 +69,7 @@ async function loadHotStorageStats() {
     if (!listEl) return;
 
     try {
-        const response = await fetch('/api/v1/paths/stats');
+        const response = await authenticatedFetch('/api/v1/paths/stats');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -86,7 +86,7 @@ async function loadColdStorageStats() {
     if (!listEl) return;
 
     try {
-        const response = await fetch('/api/v1/storage/stats');
+        const response = await authenticatedFetch('/api/v1/storage/stats');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }

@@ -403,3 +403,15 @@ class NotificationDispatch(Base):
     # Relationships
     notification = relationship("Notification", back_populates="dispatches")
     notifier = relationship("Notifier", back_populates="dispatches")
+
+
+class User(Base):
+    """User account for authentication."""
+
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_active = Column(Boolean, default=True, nullable=False)

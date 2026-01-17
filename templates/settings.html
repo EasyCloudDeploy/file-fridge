@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - File Fridge{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">
+            <i class="bi bi-gear me-2"></i>Settings
+        </h1>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Settings Navigation -->
+    <div class="col-md-3 mb-4">
+        <div class="list-group">
+            <a href="#accounts" class="list-group-item list-group-item-action active">
+                <i class="bi bi-person-circle me-2"></i>Accounts
+            </a>
+        </div>
+    </div>
+
+    <!-- Settings Content -->
+    <div class="col-md-9">
+        <!-- Accounts Section -->
+        <div id="accounts" class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-person-circle me-2"></i>Account Settings
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-4">
+                    <h6 class="text-muted">Change Password</h6>
+                    <p class="text-muted small">
+                        Change your password by entering your current password and a new one below.
+                    </p>
+
+                    <form id="change-password-form">
+                        <div class="mb-3">
+                            <label for="old-password" class="form-label">Current Password</label>
+                            <div class="input-group">
+                                <span class="input-group-text">
+                                    <i class="bi bi-lock"></i>
+                                </span>
+                                <input type="password" class="form-control" id="old-password"
+                                       name="old_password" required minlength="1"
+                                       placeholder="Enter your current password"
+                                       autocomplete="current-password">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="new-password" class="form-label">New Password</label>
+                            <div class="input-group">
+                                <span class="input-group-text">
+                                    <i class="bi bi-key"></i>
+                                </span>
+                                <input type="password" class="form-control" id="new-password"
+                                       name="new_password" required minlength="8"
+                                       placeholder="Enter your new password (minimum 8 characters)"
+                                       autocomplete="new-password">
+                                <button class="btn btn-outline-secondary" type="button" id="toggle-password">
+                                    <i class="bi bi-eye" id="toggle-icon"></i>
+                                </button>
+                            </div>
+                            <div class="form-text">Password must be at least 8 characters long.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="confirm-password" class="form-label">Confirm New Password</label>
+                            <div class="input-group">
+                                <span class="input-group-text">
+                                    <i class="bi bi-key-fill"></i>
+                                </span>
+                                <input type="password" class="form-control" id="confirm-password"
+                                       name="confirm_password" required minlength="8"
+                                       placeholder="Confirm your new password"
+                                       autocomplete="new-password">
+                            </div>
+                        </div>
+
+                        <div class="alert alert-info d-none" id="password-strength" role="alert">
+                            <i class="bi bi-info-circle me-2"></i>
+                            <span id="password-strength-text"></span>
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                            <button type="submit" class="btn btn-primary" id="submit-btn">
+                                <span id="submit-text">
+                                    <i class="bi bi-check-circle me-2"></i>Change Password
+                                </span>
+                                <span id="submit-spinner" class="d-none">
+                                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                    Changing...
+                                </span>
+                            </button>
+                        </div>
+                    </form>
+
+                    <div id="error-message" class="alert alert-danger mt-3 d-none" role="alert">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <span id="error-text"></span>
+                    </div>
+
+                    <div id="success-message" class="alert alert-success mt-3 d-none" role="alert">
+                        <i class="bi bi-check-circle me-2"></i>
+                        <span id="success-text"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/settings.js"></script>
+{% endblock %}

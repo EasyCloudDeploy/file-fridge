@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function loadStats() {
     // Load detailed stats (includes all comprehensive metrics)
-    fetch('/api/v1/stats/detailed')
+    authenticatedFetch('/api/v1/stats/detailed')
         .then(r => r.json())
         .then(stats => {
             updateStats(stats);

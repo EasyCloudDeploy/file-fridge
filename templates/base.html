@@ -78,11 +78,19 @@
                             <i class="bi bi-graph-up"></i> Statistics
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if active_page == 'settings' %}active{% endif %}" href="/settings">
+                            <i class="bi bi-gear"></i> Settings
+                        </a>
+                    </li>
                 </ul>
-                <div class="d-flex align-items-center">
+                <div class="d-flex align-items-center gap-2">
                     <span class="badge bg-light text-dark" id="version-badge">
                         <i class="bi bi-thermometer-snow"></i> <span id="app-version">Loading...</span>
                     </span>
+                    <button class="btn btn-outline-light btn-sm" id="logout-btn" onclick="handleLogout()">
+                        <i class="bi bi-box-arrow-right"></i> Logout
+                    </button>
                 </div>
             </div>
         </div>
