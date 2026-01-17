@@ -89,6 +89,20 @@
                 <div class="col-6 col-md-3 col-lg-4">
                     <div class="card mb-3">
                         <div class="card-header py-2">
+                            <h6 class="mb-0"><i class="bi bi-clock-history"></i> Last Scan</h6>
+                        </div>
+                        <div class="card-body" id="last-scan-status-card">
+                            <div class="text-center">
+                                <div class="spinner-border spinner-border-sm" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3 col-lg-4">
+                    <div class="card mb-3">
+                        <div class="card-header py-2">
                             <h6 class="mb-0"><i class="bi bi-thermometer-sun"></i> Hot<span class="d-none d-sm-inline"> Storage</span></h6>
                         </div>
                         <div class="card-body" id="hot-storage-status-card">
@@ -160,7 +174,52 @@
                 </div>
             </div>
         </div>
-{% endblock %}
+
+        <!-- Scan Errors Modal -->
+        <div class="modal fade" id="scanErrorsModal" tabindex="-1" aria-labelledby="scanErrorsModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header bg-danger text-white">
+                        <h5 class="modal-title" id="scanErrorsModalLabel">
+                            <i class="bi bi-exclamation-triangle-fill"></i> Scan Errors
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="scan-errors-loading" class="text-center py-4">
+                            <div class="spinner-border text-danger" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <p class="text-muted mt-2">Loading error details...</p>
+                        </div>
+                        <div id="scan-errors-content" style="display: none;">
+                            <div class="mb-3">
+                                <strong>Path:</strong> <span id="scan-errors-path-name"></span>
+                            </div>
+                            <div class="mb-3">
+                                <strong>Last Scan:</strong> <span id="scan-errors-last-scan"></span>
+                            </div>
+                            <div class="mb-3">
+                                <strong>Status:</strong> <span id="scan-errors-status" class="badge"></span>
+                            </div>
+                            <hr>
+                            <div class="mb-3">
+                                <strong>Error Log:</strong>
+                                <pre id="scan-errors-log" class="bg-dark text-light p-3 rounded mt-2" style="max-height: 400px; overflow-y: auto; white-space: pre-wrap; word-wrap: break-word;"></pre>
+                            </div>
+                        </div>
+                        <div id="scan-errors-empty" style="display: none;" class="text-center py-4">
+                            <i class="bi bi-check-circle text-success display-4"></i>
+                            <p class="text-muted mt-2">No errors recorded for the last scan.</p>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endblock %}
 
 {% block extra_scripts %}
     <script src="/static/js/paths.js"></script>
