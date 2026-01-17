@@ -246,6 +246,59 @@ class DatabaseMigration:
                     else:
                         logger.debug(f"Index {index_name} already exists")
 
+                # Migration 10: Add scan tracking columns to monitored_paths
+                if not DatabaseMigration.column_exists("monitored_paths", "last_scan_at"):
+                    logger.info("Adding last_scan_at column to monitored_paths table...")
+                    conn.execute(
+                        text("ALTER TABLE monitored_paths ADD COLUMN last_scan_at TIMESTAMP")
+                    )
+                    conn.commit()
+                    logger.info("✓ Added last_scan_at column")
+                else:
+                    logger.debug("last_scan_at column already exists")
+
+                if not DatabaseMigration.column_exists("monitored_paths", "last_scan_status"):
+                    logger.info("Adding last_scan_status column to monitored_paths table...")
+                    conn.execute(
+                        text("ALTER TABLE monitored_paths ADD COLUMN last_scan_status TEXT")
+                    )
+                    conn.commit()
+                    logger.info("✓ Added last_scan_status column")
+                else:
+                    logger.debug("last_scan_status column already exists")
+
+                if not DatabaseMigration.column_exists("monitored_paths", "last_scan_error_log"):
+                    logger.info("Adding last_scan_error_log column to monitored_paths table...")
+                    conn.execute(
+                        text("ALTER TABLE monitored_paths ADD COLUMN last_scan_error_log TEXT")
+                    )
+                    conn.commit()
+                    logger.info("✓ Added last_scan_error_log column")
+                else:
+                    logger.debug("last_scan_error_log column already exists")
+
+                if not DatabaseMigration.column_exists("monitored_paths", "created_at"):
+                    logger.info("Adding created_at column to monitored_paths table...")
+                    conn.execute(
+                        text(
+                            "ALTER TABLE monitored_paths ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                        )
+                    )
+                    conn.commit()
+                    logger.info("✓ Added created_at column")
+                else:
+                    logger.debug("created_at column already exists")
+
+                if not DatabaseMigration.column_exists("monitored_paths", "updated_at"):
+                    logger.info("Adding updated_at column to monitored_paths table...")
+                    conn.execute(
+                        text("ALTER TABLE monitored_paths ADD COLUMN updated_at TIMESTAMP")
+                    )
+                    conn.commit()
+                    logger.info("✓ Added updated_at column")
+                else:
+                    logger.debug("updated_at column already exists")
+
                 logger.info("✓ All database migrations completed successfully")
 
         except OperationalError as e:
