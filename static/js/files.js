@@ -533,7 +533,7 @@ async function loadMoreFiles() {
         params.append('cursor', nextCursor);
 
         const url = `${API_BASE_URL}/files?${params.toString()}`;
-        const response = await fetch(url);
+        const response = await authenticatedFetch(url);
 
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -624,7 +624,7 @@ async function loadFilesList() {
         const params = buildQueryParams();
         const url = `${API_BASE_URL}/files?${params.toString()}`;
 
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
             signal: currentAbortController.signal
         });
 
@@ -674,7 +674,7 @@ function clearSearch() {
 // Load paths for filter dropdown
 async function loadPathsForFilter() {
     try {
-        const response = await fetch(`${API_BASE_URL}/paths`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/paths`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const paths = await response.json();
 
@@ -744,7 +744,7 @@ function updateFilters() {
 // Load tags for filter dropdown
 async function loadTagsForFilter() {
     try {
-        const response = await fetch(`${API_BASE_URL}/tags`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/tags`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const tags = await response.json();
 
@@ -797,7 +797,7 @@ async function thawFile() {
     const pin = pinCheckbox ? pinCheckbox.checked : false;
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/thaw/${inventoryId}?pin=${pin}`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/thaw/${inventoryId}?pin=${pin}`, {
             method: 'POST'
         });
 
@@ -825,7 +825,7 @@ async function togglePin(inventoryId, currentlyPinned) {
     const action = currentlyPinned ? 'unpin' : 'pin';
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/${inventoryId}/pin`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/${inventoryId}/pin`, {
             method: method
         });
 
@@ -882,7 +882,7 @@ async function loadFreezeOptions(inventoryId) {
     const confirmBtn = document.getElementById('confirmFreezeBtn');
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/freeze/${inventoryId}/options`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/freeze/${inventoryId}/options`);
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || 'Failed to load options');
@@ -967,7 +967,7 @@ async function freezeFile() {
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/freeze/${currentFreezeInventoryId}?storage_location_id=${storageLocationId}&pin=${pin}`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/freeze/${currentFreezeInventoryId}?storage_location_id=${storageLocationId}&pin=${pin}`, {
             method: 'POST'
         });
 
@@ -1005,7 +1005,7 @@ async function cleanupMissingFiles() {
             url += `?path_id=${currentPathId}`;
         }
 
-        const response = await fetch(url, { method: 'POST' });
+        const response = await authenticatedFetch(url, { method: 'POST' });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         const data = await response.json();
@@ -1026,7 +1026,7 @@ async function cleanupDuplicates() {
             url += `?path_id=${currentPathId}`;
         }
 
-        const response = await fetch(url, { method: 'POST' });
+        const response = await authenticatedFetch(url, { method: 'POST' });
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         const data = await response.json();
@@ -1052,7 +1052,7 @@ let currentRelocateInventoryId = null;
 // Load all available tags
 async function loadAvailableTags() {
     try {
-        const response = await fetch(`${API_BASE_URL}/tags`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/tags`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         allAvailableTags = await response.json();
         return allAvailableTags;
@@ -1098,7 +1098,7 @@ async function loadFileTags(fileId) {
     currentTagsEl.innerHTML = '<span class="text-muted">Loading...</span>';
 
     try {
-        const response = await fetch(`${API_BASE_URL}/tags/files/${fileId}/tags`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/tags/files/${fileId}/tags`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         const fileTags = await response.json();
@@ -1146,7 +1146,7 @@ async function addTagToFile() {
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/tags/files/${currentFileId}/tags`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/tags/files/${currentFileId}/tags`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1196,7 +1196,7 @@ async function removeTag(fileId, tagId) {
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/tags/files/${fileId}/tags/${tagId}`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/tags/files/${fileId}/tags/${tagId}`, {
             method: 'DELETE'
         });
 
@@ -1264,7 +1264,7 @@ async function loadRelocateOptions(inventoryId) {
     const confirmBtn = document.getElementById('confirmRelocateBtn');
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/relocate/${inventoryId}/options`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/relocate/${inventoryId}/options`);
         if (!response.ok) {
             const error = await response.json();
             throw new Error(error.detail || 'Failed to load options');
@@ -1336,7 +1336,7 @@ async function relocateFile() {
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/relocate/${currentRelocateInventoryId}`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/relocate/${currentRelocateInventoryId}`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -1467,7 +1467,7 @@ async function executeBulkThaw() {
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/bulk/thaw?pin=${pin}`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/bulk/thaw?pin=${pin}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ file_ids: fileIds })
@@ -1520,7 +1520,7 @@ async function showBulkFreezeModal() {
 
     // Load storage locations
     try {
-        const response = await fetch(`${API_BASE_URL}/storage/locations`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/storage/locations`);
         if (!response.ok) throw new Error('Failed to load storage locations');
 
         const locations = await response.json();
@@ -1567,7 +1567,7 @@ async function executeBulkFreeze() {
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/bulk/freeze`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/bulk/freeze`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1654,7 +1654,7 @@ async function executeBulkAddTag() {
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/tags/bulk/add`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/tags/bulk/add`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ file_ids: fileIds, tag_id: tagId })
@@ -1737,7 +1737,7 @@ async function executeBulkRemoveTag() {
     }
 
     try {
-        const response = await fetch(`${API_BASE_URL}/tags/bulk/remove`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/tags/bulk/remove`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ file_ids: fileIds, tag_id: tagId })
@@ -1771,7 +1771,7 @@ async function executeBulkPin() {
     const fileIds = getSelectedFileIds();
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/bulk/pin`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/bulk/pin`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ file_ids: fileIds })
@@ -1799,7 +1799,7 @@ async function executeBulkUnpin() {
     const fileIds = getSelectedFileIds();
 
     try {
-        const response = await fetch(`${API_BASE_URL}/files/bulk/unpin`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/bulk/unpin`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ file_ids: fileIds })

@@ -3,13 +3,14 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
 from app.database import init_db
 from app.database_migrations import run_startup_migrations
+from app.routers.api import auth as api_auth
 from app.routers.api import cleanup as api_cleanup
 from app.routers.api import criteria as api_criteria
 from app.routers.api import files as api_files
@@ -20,6 +21,7 @@ from app.routers.api import storage as api_storage
 from app.routers.api import tag_rules as api_tag_rules
 from app.routers.api import tags as api_tags
 from app.routers.web.views import router as web_router
+from app.security import get_current_user
 from app.services.scheduler import scheduler_service
 
 # Configure logging
@@ -68,18 +70,22 @@ templates = Jinja2Templates(directory="templates")
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Include API routers
-app.include_router(api_paths.router)
-app.include_router(api_criteria.router)
-app.include_router(api_files.router)
-app.include_router(api_stats.router)
-app.include_router(api_cleanup.router)
-app.include_router(api_tags.router)
-app.include_router(api_tag_rules.router)
-app.include_router(api_storage.router)
-app.include_router(api_notifiers.router)
+# Include authentication router (public - no authentication required)
+app.include_router(api_auth.router)
 
-# Include consolidated web router
+# Protected API routers - require authentication
+api_dependencies = [Depends(get_current_user)]
+app.include_router(api_paths.router, dependencies=api_dependencies)
+app.include_router(api_criteria.router, dependencies=api_dependencies)
+app.include_router(api_files.router, dependencies=api_dependencies)
+app.include_router(api_stats.router, dependencies=api_dependencies)
+app.include_router(api_cleanup.router, dependencies=api_dependencies)
+app.include_router(api_tags.router, dependencies=api_dependencies)
+app.include_router(api_tag_rules.router, dependencies=api_dependencies)
+app.include_router(api_storage.router, dependencies=api_dependencies)
+app.include_router(api_notifiers.router, dependencies=api_dependencies)
+
+# Include consolidated web router (public - frontend handles auth)
 app.include_router(web_router)
 
 

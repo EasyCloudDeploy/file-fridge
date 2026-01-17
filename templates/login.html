@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="File Fridge - Login">
+    <title>Login - File Fridge</title>
+
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Bootstrap Icons -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="/static/css/style.css" rel="stylesheet">
+
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-container {
+            max-width: 450px;
+            width: 100%;
+            padding: 15px;
+        }
+        .login-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+        .login-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .login-header i {
+            font-size: 3rem;
+            margin-bottom: 10px;
+        }
+        .login-body {
+            padding: 30px;
+        }
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        .btn-login {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 12px;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        .form-floating label {
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <i class="bi bi-snow"></i>
+                <h2 class="mb-0">File Fridge</h2>
+                <p class="mb-0 mt-2"><small id="login-subtitle">Intelligent Cold Storage Management</small></p>
+            </div>
+            <div class="login-body">
+                <div id="setup-mode-alert" class="alert alert-info d-none" role="alert">
+                    <i class="bi bi-info-circle me-2"></i>
+                    <strong>First-Time Setup</strong><br>
+                    Create your administrator account to get started.
+                </div>
+
+                <form id="login-form">
+                    <div class="form-floating mb-3">
+                        <input type="text" class="form-control" id="username" name="username"
+                               placeholder="Username" required minlength="3" maxlength="50" autocomplete="username">
+                        <label for="username"><i class="bi bi-person me-2"></i>Username</label>
+                    </div>
+
+                    <div class="form-floating mb-3">
+                        <input type="password" class="form-control" id="password" name="password"
+                               placeholder="Password" required minlength="8" autocomplete="current-password">
+                        <label for="password"><i class="bi bi-lock me-2"></i>Password</label>
+                    </div>
+
+                    <div id="password-hint" class="text-muted small mb-3 d-none">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Password must be at least 8 characters long
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary btn-login" id="submit-btn">
+                            <span id="submit-text">
+                                <i class="bi bi-box-arrow-in-right me-2"></i>Login
+                            </span>
+                            <span id="submit-spinner" class="d-none">
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                Logging in...
+                            </span>
+                        </button>
+                    </div>
+                </form>
+
+                <div id="error-message" class="alert alert-danger mt-3 d-none" role="alert">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <span id="error-text"></span>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center mt-3">
+            <small class="text-white">
+                <i class="bi bi-shield-lock me-1"></i>
+                Secure authentication powered by JWT
+            </small>
+        </div>
+    </div>
+
+    <!-- Bootstrap Bundle with Popper -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <!-- Login JavaScript -->
+    <script>
+        let isSetupMode = false;
+
+        // Check authentication status on page load
+        async function checkAuthStatus() {
+            try {
+                const response = await fetch('/api/v1/auth/check');
+                const data = await response.json();
+
+                isSetupMode = data.setup_required;
+
+                if (isSetupMode) {
+                    // Show setup mode UI
+                    document.getElementById('setup-mode-alert').classList.remove('d-none');
+                    document.getElementById('password-hint').classList.remove('d-none');
+                    document.getElementById('submit-text').innerHTML = '<i class="bi bi-person-plus me-2"></i>Create Account';
+                    document.getElementById('login-subtitle').textContent = 'First-Time Setup';
+                    document.querySelector('input[name="password"]').setAttribute('autocomplete', 'new-password');
+                } else {
+                    // Show login mode UI
+                    document.getElementById('submit-text').innerHTML = '<i class="bi bi-box-arrow-in-right me-2"></i>Login';
+                    document.getElementById('login-subtitle').textContent = 'Intelligent Cold Storage Management';
+                }
+            } catch (error) {
+                console.error('Failed to check auth status:', error);
+                showError('Failed to connect to server. Please try again.');
+            }
+        }
+
+        // Handle form submission
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const username = document.getElementById('username').value.trim();
+            const password = document.getElementById('password').value;
+
+            // Validate inputs
+            if (username.length < 3) {
+                showError('Username must be at least 3 characters long');
+                return;
+            }
+
+            if (password.length < 8) {
+                showError('Password must be at least 8 characters long');
+                return;
+            }
+
+            // Hide error message
+            hideError();
+
+            // Show loading state
+            const submitBtn = document.getElementById('submit-btn');
+            const submitText = document.getElementById('submit-text');
+            const submitSpinner = document.getElementById('submit-spinner');
+
+            submitBtn.disabled = true;
+            submitText.classList.add('d-none');
+            submitSpinner.classList.remove('d-none');
+
+            try {
+                // Determine endpoint based on mode
+                const endpoint = isSetupMode ? '/api/v1/auth/setup' : '/api/v1/auth/login';
+
+                // Submit credentials
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: username,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Store token in sessionStorage
+                    sessionStorage.setItem('auth_token', data.access_token);
+
+                    // Redirect to dashboard
+                    window.location.href = '/';
+                } else {
+                    // Show error message
+                    showError(data.detail || 'Authentication failed. Please try again.');
+
+                    // Reset button
+                    submitBtn.disabled = false;
+                    submitText.classList.remove('d-none');
+                    submitSpinner.classList.add('d-none');
+                }
+            } catch (error) {
+                console.error('Login error:', error);
+                showError('Failed to connect to server. Please try again.');
+
+                // Reset button
+                submitBtn.disabled = false;
+                submitText.classList.remove('d-none');
+                submitSpinner.classList.add('d-none');
+            }
+        });
+
+        // Show error message
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            const errorText = document.getElementById('error-text');
+            errorText.textContent = message;
+            errorDiv.classList.remove('d-none');
+        }
+
+        // Hide error message
+        function hideError() {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.classList.add('d-none');
+        }
+
+        // Check auth status on page load
+        document.addEventListener('DOMContentLoaded', checkAuthStatus);
+    </script>
+</body>
+</html>

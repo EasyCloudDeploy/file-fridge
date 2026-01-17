@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function loadDashboardData() {
     // Load overall stats
-    fetch('/api/v1/stats')
+    authenticatedFetch('/api/v1/stats')
         .then(response => response.json())
         .then(data => {
             updateStats(data);
@@ -54,7 +54,7 @@ function updatePathsCount(count) {
 }
 
 function loadPaths() {
-    fetch('/api/v1/paths')
+    authenticatedFetch('/api/v1/paths')
         .then(response => response.json())
         .then(paths => {
             updatePaths(paths);

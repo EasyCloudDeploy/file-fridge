@@ -75,7 +75,7 @@ async function loadTags() {
         loadingEl.style.display = 'block';
         contentEl.style.display = 'none';
 
-        const response = await fetch(`/api/v1/tags`);
+        const response = await authenticatedFetch(`/api/v1/tags`);
         if (!response.ok) {
             throw new Error(`Failed to load tags: ${response.statusText}`);
         }
@@ -231,7 +231,7 @@ async function saveTag() {
 
         if (tagId) {
             // Update existing tag
-            response = await fetch(`/api/v1/tags/${tagId}`, {
+            response = await authenticatedFetch(`/api/v1/tags/${tagId}`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json'
@@ -240,7 +240,7 @@ async function saveTag() {
             });
         } else {
             // Create new tag
-            response = await fetch(`/api/v1/tags`, {
+            response = await authenticatedFetch(`/api/v1/tags`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -312,7 +312,7 @@ async function confirmDeleteTag() {
     deleteText.textContent = 'Deleting...';
 
     try {
-        const response = await fetch(`/api/v1/tags/${currentEditingTagId}`, {
+        const response = await authenticatedFetch(`/api/v1/tags/${currentEditingTagId}`, {
             method: 'DELETE'
         });
 
@@ -374,7 +374,7 @@ async function loadTagRules() {
         loadingEl.style.display = 'block';
         contentEl.style.display = 'none';
 
-        const response = await fetch('/api/v1/tag-rules');
+        const response = await authenticatedFetch('/api/v1/tag-rules');
         if (!response.ok) {
             throw new Error(`Failed to load tag rules: ${response.statusText}`);
         }
@@ -534,7 +534,7 @@ async function saveTagRule() {
 
         if (ruleId) {
             // Update existing rule
-            response = await fetch(`/api/v1/tag-rules/${ruleId}`, {
+            response = await authenticatedFetch(`/api/v1/tag-rules/${ruleId}`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json'
@@ -543,7 +543,7 @@ async function saveTagRule() {
             });
         } else {
             // Create new rule
-            response = await fetch('/api/v1/tag-rules', {
+            response = await authenticatedFetch('/api/v1/tag-rules', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -611,7 +611,7 @@ async function confirmDeleteTagRule() {
     deleteText.textContent = 'Deleting...';
 
     try {
-        const response = await fetch(`/api/v1/tag-rules/${currentEditingRuleId}`, {
+        const response = await authenticatedFetch(`/api/v1/tag-rules/${currentEditingRuleId}`, {
             method: 'DELETE'
         });
 
@@ -651,7 +651,7 @@ async function applyAllTagRules() {
     applyBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Applying...';
 
     try {
-        const response = await fetch('/api/v1/tag-rules/apply', {
+        const response = await authenticatedFetch('/api/v1/tag-rules/apply', {
             method: 'POST'
         });
 

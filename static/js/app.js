@@ -1,5 +1,87 @@
 // File Fridge - Modern UI JavaScript
-// Toast Notification System & Modal Utilities
+// Authentication, Toast Notification System & Modal Utilities
+
+// ========================================
+// Authentication
+// ========================================
+
+/**
+ * Handle logout - clear session and redirect to login
+ */
+function handleLogout() {
+    clearAuthToken();
+    showToast('You have been logged out', 'info', 3000);
+    setTimeout(() => {
+        window.location.href = '/login';
+    }, 500);
+}
+
+/**
+ * Get authentication token from sessionStorage
+ */
+function getAuthToken() {
+    return sessionStorage.getItem('auth_token');
+}
+
+/**
+ * Set authentication token in sessionStorage
+ */
+function setAuthToken(token) {
+    sessionStorage.setItem('auth_token', token);
+}
+
+/**
+ * Clear authentication token
+ */
+function clearAuthToken() {
+    sessionStorage.removeItem('auth_token');
+}
+
+/**
+ * Check if user is authenticated
+ */
+function isAuthenticated() {
+    return !!getAuthToken();
+}
+
+/**
+ * Redirect to login page
+ */
+function redirectToLogin() {
+    window.location.href = '/login';
+}
+
+/**
+ * Add authentication header to fetch options
+ */
+function addAuthHeader(options = {}) {
+    const token = getAuthToken();
+    if (token) {
+        options.headers = options.headers || {};
+        options.headers['Authorization'] = `Bearer ${token}`;
+    }
+    return options;
+}
+
+/**
+ * Enhanced fetch with automatic auth header injection and 401 handling
+ */
+async function authenticatedFetch(url, options = {}) {
+    // Add auth header
+    options = addAuthHeader(options);
+
+    // Make request
+    const response = await fetch(url, options);
+
+    // Handle 401 Unauthorized
+    if (response.status === 401) {
+        clearAuthToken();
+        redirectToLogin();
+        throw new Error('Authentication required');
+    }
+
+    return response;
+}
 
 // ========================================
 // Toast Notification System
@@ -298,6 +380,14 @@ function debounce(func, wait) {
 // ========================================
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Check authentication (skip on login page)
+    if (window.location.pathname !== '/login') {
+        if (!isAuthenticated()) {
+            redirectToLogin();
+            return;  // Stop execution if redirecting
+        }
+    }
+
     // Legacy: Auto-dismiss old-style alerts (for backward compatibility)
     const alerts = document.querySelectorAll('.alert:not(.toast)');
     alerts.forEach(function(alert) {
@@ -393,3 +483,5 @@ window.formatRelativeTime = formatRelativeTime;
 window.debounce = debounce;
 window.escapeHtml = escapeHtml;
 window.loadAppInfo = loadAppInfo;
+window.handleLogout = handleLogout;
+window.clearAuthToken = clearAuthToken;

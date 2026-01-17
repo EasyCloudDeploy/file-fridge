@@ -604,6 +604,52 @@ class BulkActionResponse(BaseModel):
     results: List[BulkActionResult]
 
 
+# Authentication Schemas
+
+
+class UserCreate(BaseModel):
+    """Schema for creating a new user."""
+
+    username: str = Field(..., min_length=3, max_length=50, description="Username")
+    password: str = Field(..., min_length=8, description="Password (minimum 8 characters)")
+
+
+class UserLogin(BaseModel):
+    """Schema for user login."""
+
+    username: str = Field(..., description="Username")
+    password: str = Field(..., description="Password")
+
+
+class Token(BaseModel):
+    """JWT token response."""
+
+    access_token: str = Field(..., description="JWT access token")
+    token_type: str = Field(default="bearer", description="Token type")
+
+
+class TokenCreate(BaseModel):
+    """Schema for creating a manual API token."""
+
+    expires_days: Optional[int] = Field(
+        None, description="Token expiration in days (None = default, 0 = no expiration)"
+    )
+
+
+class AuthCheckResponse(BaseModel):
+    """Response for authentication status check."""
+
+    setup_required: bool = Field(..., description="Whether initial setup is required")
+    user_count: int = Field(..., description="Number of users in the system")
+
+
+class PasswordChange(BaseModel):
+    """Schema for password change request."""
+
+    old_password: str = Field(..., min_length=1, description="Current password")
+    new_password: str = Field(..., min_length=8, description="New password (minimum 8 characters)")
+
+
 # Rebuild models to resolve forward references
 MonitoredPath.model_rebuild()
 FileInventory.model_rebuild()

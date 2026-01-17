@@ -39,7 +39,7 @@ async function loadPathsList() {
     if (tableBody) tableBody.innerHTML = '';
     
     try {
-        const response = await fetch(`${API_BASE_URL}/paths`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/paths`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const paths = await response.json();
         
@@ -143,7 +143,7 @@ async function showScanErrors(pathId) {
     modal.show();
 
     try {
-        const response = await fetch(`${API_BASE_URL}/paths/${pathId}/scan-errors`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/paths/${pathId}/scan-errors`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
 
@@ -188,10 +188,10 @@ async function loadPathDetail(pathId) {
     
     try {
         const [pathResponse, criteriaResponse, storageResponse, hotStorageResponse] = await Promise.all([
-            fetch(`${API_BASE_URL}/paths/${pathId}`),
-            fetch(`${API_BASE_URL}/criteria/path/${pathId}`),
-            fetch(`${API_BASE_URL}/storage/stats`),
-            fetch(`${API_BASE_URL}/paths/stats`)
+            authenticatedFetch(`${API_BASE_URL}/paths/${pathId}`),
+            authenticatedFetch(`${API_BASE_URL}/criteria/path/${pathId}`),
+            authenticatedFetch(`${API_BASE_URL}/storage/stats`),
+            authenticatedFetch(`${API_BASE_URL}/paths/stats`)
         ]);
         
         if (!pathResponse.ok) {
@@ -498,7 +498,7 @@ async function deletePath(pathId) {
     const undoOps = result.checked;
     
     try {
-        const response = await fetch(`${API_BASE_URL}/paths/${pathId}?undo_operations=${undoOps}`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/paths/${pathId}?undo_operations=${undoOps}`, {
             method: 'DELETE'
         });
         
@@ -539,7 +539,7 @@ async function triggerScan(pathId, buttonElement = null) {
             buttonElement.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Scanning...';
         }
 
-        const response = await fetch(`${API_BASE_URL}/paths/${pathId}/scan`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/paths/${pathId}/scan`, {
             method: 'POST'
         });
 
@@ -600,7 +600,7 @@ function stopProgressPolling() {
 
 async function pollProgress(pathId) {
     try {
-        const response = await fetch(`${API_BASE_URL}/paths/${pathId}/scan/progress`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/paths/${pathId}/scan/progress`);
         if (!response.ok) {
             console.error('Failed to fetch progress');
             return;
@@ -725,7 +725,7 @@ async function deleteCriteria(criteriaId, pathId) {
     if (!confirmed) return;
 
     try {
-        const response = await fetch(`${API_BASE_URL}/criteria/${criteriaId}`, {
+        const response = await authenticatedFetch(`${API_BASE_URL}/criteria/${criteriaId}`, {
             method: 'DELETE'
         });
         
@@ -854,7 +854,7 @@ async function retryPathUpdate(pathId, pathData, migrationAction) {
     try {
         showNotification(`${migrationAction === 'move' ? 'Moving' : 'Abandoning'} files... This may take a moment.`, 'info');
 
-        const response = await fetch(url, {
+        const response = await authenticatedFetch(url, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json'
@@ -904,7 +904,7 @@ function setupPathForm() {
         const method = pathId ? 'PUT' : 'POST';
         
         try {
-            const response = await fetch(url, {
+            const response = await authenticatedFetch(url, {
                 method: method,
                 headers: {
                     'Content-Type': 'application/json'
@@ -962,7 +962,7 @@ function setupCriteriaForm() {
         const method = criteriaId ? 'PUT' : 'POST';
         
         try {
-            const response = await fetch(url, {
+            const response = await authenticatedFetch(url, {
                 method: method,
                 headers: {
                     'Content-Type': 'application/json'
@@ -1024,7 +1024,7 @@ document.addEventListener('DOMContentLoaded', function() {
 // Load storage locations into checkboxes
 async function loadStorageLocationsCheckboxes() {
     try {
-        const response = await fetch(`${API_BASE_URL}/storage/locations`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/storage/locations`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const locations = await response.json();
 
@@ -1062,7 +1062,7 @@ async function loadPathForEdit(pathId) {
         // Load storage locations first
         await loadStorageLocationsCheckboxes();
 
-        const response = await fetch(`${API_BASE_URL}/paths/${pathId}`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/paths/${pathId}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const path = await response.json();
 
@@ -1097,7 +1097,7 @@ async function loadPathForEdit(pathId) {
 // Load path info for criteria form
 async function loadPathForCriteriaForm(pathId) {
     try {
-        const response = await fetch(`${API_BASE_URL}/paths/${pathId}`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/paths/${pathId}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const path = await response.json();
         
@@ -1125,7 +1125,7 @@ async function loadPathForCriteriaForm(pathId) {
 // Load criteria data for edit form
 async function loadCriteriaForEdit(criteriaId) {
     try {
-        const response = await fetch(`${API_BASE_URL}/criteria/${criteriaId}`);
+        const response = await authenticatedFetch(`${API_BASE_URL}/criteria/${criteriaId}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const criterion = await response.json();
         
@@ -1133,7 +1133,7 @@ async function loadCriteriaForEdit(criteriaId) {
         const pathId = criterion.path_id;
         
         // Load path info
-        const pathResponse = await fetch(`${API_BASE_URL}/paths/${pathId}`);
+        const pathResponse = await authenticatedFetch(`${API_BASE_URL}/paths/${pathId}`);
         if (pathResponse.ok) {
             const path = await pathResponse.json();
             document.getElementById('path-name').textContent = path.name;
