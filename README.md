@@ -1,6 +1,6 @@
-# 🧊 File Fridge
+# File Fridge
 
-### **⚠️ CAUTION: Active Development**
+### **CAUTION: Active Development**
 **File Fridge is currently under active development.** While we strive for stability, updates may occasionally introduce breaking changes. Please ensure you have backups of your data and database before updating. Use at your own risk in production environments.
 
 ---
@@ -15,11 +15,11 @@ Think of it as a smart assistant that keeps your desk (Hot Storage) clean by mov
 
 ## Why use File Fridge?
 
-*   **💰 Save Money**: Keep your expensive SSDs or high-speed drives free for the files you actually use.
-*   **🤖 Automation**: Set your rules once and let File Fridge handle the cleanup on a schedule.
-*   **🔗 Seamless Access**: Use the "Symlink" feature to move files while keeping them visible in their original location.
-*   **📊 Insights**: See exactly how much space you've saved and track your storage trends.
-*   **🛡️ Stay Organized**: Use tags and automated rules to categorize your data across all storage locations.
+*   **Save Money**: Keep your expensive SSDs or high-speed drives free for the files you actually use.
+*   **Automation**: Set your rules once and let File Fridge handle the cleanup on a schedule.
+*   **Seamless Access**: Use the "Symlink" feature to move files while keeping them visible in their original location.
+*   **Insights**: See exactly how much space you've saved and track your storage trends.
+*   **Stay Organized**: Use tags and automated rules to categorize your data across all storage locations.
 
 ## Getting Started
 
