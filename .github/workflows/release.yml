@@ -1,4 +1,4 @@
-name: File Fridge Build and Push
+name: File Fridge Build, Push, and Release
 
 on:
   push:
@@ -13,10 +13,14 @@ env:
 
 jobs:
   build-and-push:
+    name: Build and Push Docker Image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout code
@@ -83,3 +87,36 @@ jobs:
 
       - name: Image digest
         run: echo "Image pushed with digest ${{ steps.build.outputs.digest }}"
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ github.ref_name }}
+          body: |
+            ## File Fridge Release ${{ github.ref_name }}
+            
+            This release contains the Docker image for File Fridge.
+            
+            ### Docker Image
+            - Tag: `${{ needs.build-and-push.outputs.version }}`
+            - Pull command: `docker pull ${{ env.DOCKER_REPO }}:${{ github.ref_name }}`
+            
+            ### Changes
+            - Build from commit: ${{ github.sha }}
+            
+            [View full comparison](https://github.com/${{ github.repository }}/compare/${{ github.event.before }}...${{ github.ref_name }})
+          draft: false
+          prerelease: false
+          generate_release_notes: true
