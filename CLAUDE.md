@@ -7,6 +7,7 @@
 **License:** Apache License 2.0
 **Tech Stack:** FastAPI + SQLAlchemy + SQLite + Bootstrap 5 + Vanilla JS
 **Python:** 3.8 - 3.12
+**Package Manager:** UV (REQUIRED - do not use pip)
 **API Endpoints:** 65+
 **Database:** SQLite (embedded, no external DB needed)
 
@@ -111,7 +112,7 @@ file-fridge/
 
 ### DevOps
 - **Container:** Docker (multi-stage, Python 3.12-slim-bookworm)
-- **Package Manager:** uv (fast Python package installer)
+- **Package Manager:** uv (REQUIRED - do not use pip)
 - **CI/CD:** GitHub Actions (multi-platform: linux/amd64, linux/arm64)
 - **Formatting:** Black (100-char line length)
 - **Linting:** Ruff (extensive rule set)
@@ -508,9 +509,10 @@ settings = Settings()
 
 ### Setup Development Environment
 
-**Using uv (recommended):**
+**This project uses UV as the package manager. Do not use pip.**
+
 ```bash
-# Install uv
+# Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Clone and setup
@@ -520,14 +522,6 @@ uv sync
 
 # Run development server
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-**Using pip:**
-```bash
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### Add a New API Endpoint
@@ -625,14 +619,12 @@ alembic downgrade -1
 ### Run Tests
 
 ```bash
-# Install dev dependencies
-pip install pytest pytest-asyncio
-
-# Run tests
-pytest
+# Dev dependencies are already included in uv sync
+# Run tests with uv
+uv run pytest
 
 # Run with coverage
-pytest --cov=app --cov-report=html
+uv run pytest --cov=app --cov-report=html
 ```
 
 ### Build and Run Docker Image
@@ -1090,31 +1082,31 @@ Tag v1.0.0:
 
 ```bash
 # Start dev server with auto-reload
-uvicorn app.main:app --reload
+uv run uvicorn app.main:app --reload
 
 # Format code
-black app/
+uv run black app/
 
 # Lint code
-ruff check app/
+uv run ruff check app/
 
 # Fix linting issues
-ruff check app/ --fix
+uv run ruff check app/ --fix
 
 # Run tests
-pytest
+uv run pytest
 
 # Run tests with coverage
-pytest --cov=app
+uv run pytest --cov=app
 
 # Create migration
-alembic revision --autogenerate -m "description"
+uv run alembic revision --autogenerate -m "description"
 
 # Apply migrations
-alembic upgrade head
+uv run alembic upgrade head
 
 # Rollback migration
-alembic downgrade -1
+uv run alembic downgrade -1
 ```
 
 ### Docker
