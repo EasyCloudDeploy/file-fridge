@@ -4,7 +4,7 @@ import fnmatch
 import logging
 import re
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
@@ -207,7 +207,7 @@ class TagRuleService:
         self.db.add(file_tag)
         return True
 
-    def apply_rules_to_file(self, file: FileInventory, rules: list[TagRule] = None) -> int:
+    def apply_rules_to_file(self, file: FileInventory, rules: Optional[list[TagRule]] = None) -> int:
         """
         Apply rules to a single file.
 

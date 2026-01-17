@@ -58,7 +58,9 @@ def _get_storage_location_for_file(file_path: str, monitored_path: MonitoredPath
     return None
 
 
-def _serialize_file(file: FileInventory, paths_map: dict, pinned_paths_set: Optional[set] = None) -> dict:
+def _serialize_file(
+    file: FileInventory, paths_map: dict, pinned_paths_set: Optional[set] = None
+) -> dict:
     """Serialize a FileInventory object to a dictionary for JSON output."""
     file_dict = {
         "id": file.id,

@@ -96,9 +96,7 @@ class NotificationService:
             notification_level = NotificationLevel(level.lower())
         except ValueError:
             msg = f"Invalid notification level: {level}. Must be INFO, WARNING, or ERROR."
-            raise ValueError(
-                msg
-            )
+            raise ValueError(msg)
 
         # Create notification record
         notification = Notification(level=notification_level, message=message)
