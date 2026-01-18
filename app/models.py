@@ -9,6 +9,9 @@ from sqlalchemy.sql import func
 
 from app.database import Base
 
+# Foreign key reference constants
+FILE_INVENTORY_ID_FK = "file_inventory.id"
+
 
 class OperationType(str, enum.Enum):
     """File operation types."""
@@ -264,7 +267,7 @@ class FileTransactionHistory(Base):
     __tablename__ = "file_transaction_history"
 
     id = Column(Integer, primary_key=True, index=True)
-    file_id = Column(Integer, ForeignKey("file_inventory.id"), nullable=False, index=True)
+    file_id = Column(Integer, ForeignKey(FILE_INVENTORY_ID_FK), nullable=False, index=True)
     transaction_type = Column(SQLEnum(TransactionType), nullable=False, index=True)
     old_storage_type = Column(SQLEnum(StorageType), nullable=True)
     new_storage_type = Column(SQLEnum(StorageType), nullable=True)
@@ -339,7 +342,7 @@ class FileTag(Base):
     __tablename__ = "file_tags"
 
     id = Column(Integer, primary_key=True, index=True)
-    file_id = Column(Integer, ForeignKey("file_inventory.id"), nullable=False, index=True)
+    file_id = Column(Integer, ForeignKey(FILE_INVENTORY_ID_FK), nullable=False, index=True)
     tag_id = Column(Integer, ForeignKey("tags.id"), nullable=False, index=True)
     tagged_at = Column(DateTime(timezone=True), server_default=func.now())
     tagged_by = Column(String, nullable=True)  # Optional: who added the tag
@@ -515,7 +518,7 @@ class RemoteTransferJob(Base):
     __tablename__ = "remote_transfer_jobs"
 
     id = Column(Integer, primary_key=True, index=True)
-    file_inventory_id = Column(Integer, ForeignKey("file_inventory.id"), nullable=False)
+    file_inventory_id = Column(Integer, ForeignKey(FILE_INVENTORY_ID_FK), nullable=False)
     remote_connection_id = Column(Integer, ForeignKey("remote_connections.id"), nullable=False)
     remote_monitored_path_id = Column(Integer, nullable=False)  # ID on the remote server
     status = Column(SQLEnum(TransferStatus), default=TransferStatus.PENDING, index=True)

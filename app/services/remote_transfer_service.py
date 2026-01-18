@@ -87,16 +87,51 @@ class RemoteTransferService:
         finally:
             db.close()
 
-    async def _send_chunks(self, job, conn, db, client):
-        """Internal helper to send file chunks."""
-        my_url = settings.ff_instance_url or "http://localhost:8000"
+    def _prepare_encryption(self, conn):
+        """Prepare encryption components if needed."""
         use_encryption = not conn.url.startswith("https://")
-        cctx = zstd.ZstdCompressor()
         aesgcm = None
         if use_encryption:
             key = bytes.fromhex(conn.shared_secret)[:32]
             aesgcm = AESGCM(key)
+        return use_encryption, aesgcm
 
+    def _compress_and_encrypt_chunk(self, chunk, cctx, use_encryption, aesgcm):
+        """Compress and optionally encrypt a chunk."""
+        final_chunk = cctx.compress(chunk)
+        nonce = b""
+        if use_encryption:
+            nonce = os.urandom(12)
+            final_chunk = aesgcm.encrypt(nonce, final_chunk, None)
+        return final_chunk, nonce
+
+    def _build_chunk_headers(self, conn, job, chunk_idx, is_final, nonce):
+        """Build headers for chunk transmission."""
+        my_url = settings.ff_instance_url or "http://localhost:8000"
+        use_encryption = bool(nonce)
+        return {
+            "X-Remote-ID": my_url,
+            "X-Shared-Secret": conn.shared_secret,
+            "X-Job-ID": str(job.id),
+            "X-Chunk-Index": str(chunk_idx),
+            "X-Is-Final": "true" if is_final else "false",
+            "X-Relative-Path": job.relative_path,
+            "X-Remote-Path-ID": str(job.remote_monitored_path_id),
+            "X-Storage-Type": job.storage_type.value,
+            "X-Nonce": nonce.hex() if use_encryption else "",
+        }
+
+    def _update_job_progress(self, job, chunk_size, start_time_ts, db):
+        """Update job progress metrics."""
+        job.current_size += chunk_size
+        job.progress = int((job.current_size / job.total_size) * 100)
+        self._update_speed_eta(job, start_time_ts)
+        db.commit()
+
+    async def _send_chunks(self, job, conn, db, client):
+        """Internal helper to send file chunks."""
+        use_encryption, aesgcm = self._prepare_encryption(conn)
+        cctx = zstd.ZstdCompressor()
         start_time_ts = time.time()
         source_path = Path(job.source_path)
 
@@ -108,26 +143,11 @@ class RemoteTransferService:
                     break
 
                 is_final = await self._is_final_chunk(f)
+                final_chunk, nonce = self._compress_and_encrypt_chunk(
+                    chunk, cctx, use_encryption, aesgcm
+                )
+                headers = self._build_chunk_headers(conn, job, chunk_idx, is_final, nonce)
 
-                # Compress and optionally Encrypt
-                final_chunk = cctx.compress(chunk)
-                nonce = b""
-                if use_encryption:
-                    nonce = os.urandom(12)
-                    final_chunk = aesgcm.encrypt(nonce, final_chunk, None)
-
-                # Send
-                headers = {
-                    "X-Remote-ID": my_url,
-                    "X-Shared-Secret": conn.shared_secret,
-                    "X-Job-ID": str(job.id),
-                    "X-Chunk-Index": str(chunk_idx),
-                    "X-Is-Final": "true" if is_final else "false",
-                    "X-Relative-Path": job.relative_path,
-                    "X-Remote-Path-ID": str(job.remote_monitored_path_id),
-                    "X-Storage-Type": job.storage_type.value,
-                    "X-Nonce": nonce.hex() if use_encryption else "",
-                }
                 response = await client.post(
                     f"{conn.url.rstrip('/')}/api/remote/receive",
                     headers=headers,
@@ -136,12 +156,8 @@ class RemoteTransferService:
                 )
                 response.raise_for_status()
 
-                # Update progress
                 chunk_idx += 1
-                job.current_size += len(chunk)
-                job.progress = int((job.current_size / job.total_size) * 100)
-                self._update_speed_eta(job, start_time_ts)
-                db.commit()
+                self._update_job_progress(job, len(chunk), start_time_ts, db)
 
     async def _is_final_chunk(self, f):
         """Check if we are at the end of the file."""

@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', function() {
     navLinks.forEach(link => {
         link.addEventListener('click', function(e) {
             e.preventDefault();
-            const sectionId = this.getAttribute('data-section');
+            const sectionId = this.dataset.section;
 
             // Update nav
             navLinks.forEach(l => l.classList.remove('active'));
@@ -189,16 +189,21 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const copyCodeBtn = document.getElementById('copy-code-btn');
     if (copyCodeBtn) {
-        copyCodeBtn.addEventListener('click', function() {
+        copyCodeBtn.addEventListener('click', async function() {
             const codeInput = document.getElementById('my-connection-code');
-            codeInput.select();
-            document.execCommand('copy');
+            try {
+                await navigator.clipboard.writeText(codeInput.value);
 
-            const originalIcon = this.innerHTML;
-            this.innerHTML = '<i class="bi bi-check"></i>';
-            setTimeout(() => {
-                this.innerHTML = originalIcon;
-            }, 2000);
+                const originalIcon = this.innerHTML;
+                this.innerHTML = '<i class="bi bi-check"></i>';
+                setTimeout(() => {
+                    this.innerHTML = originalIcon;
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy:', err);
+                // Fallback: select text for manual copy
+                codeInput.select();
+            }
         });
     }
 
@@ -235,8 +240,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 // Add delete event listeners
                 document.querySelectorAll('.delete-conn-btn').forEach(btn => {
                     btn.addEventListener('click', function() {
-                        const id = this.getAttribute('data-id');
-                        const name = this.getAttribute('data-name');
+                        const id = this.dataset.id;
+                        const name = this.dataset.name;
                         showDeleteModal(id, name);
                     });
                 });
@@ -326,9 +331,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 list.innerHTML = '';
                 transfers.forEach(job => {
                     const fileName = job.source_path.split('/').pop();
-                    const statusClass = job.status === 'completed' ? 'success' :
-                                      job.status === 'failed' ? 'danger' :
-                                      job.status === 'in_progress' ? 'primary' : 'secondary';
+                    let statusClass = 'secondary';
+                    if (job.status === 'completed') {
+                        statusClass = 'success';
+                    } else if (job.status === 'failed') {
+                        statusClass = 'danger';
+                    } else if (job.status === 'in_progress') {
+                        statusClass = 'primary';
+                    }
 
                     const tr = document.createElement('tr');
                     tr.innerHTML = `

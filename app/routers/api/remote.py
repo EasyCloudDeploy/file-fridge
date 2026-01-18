@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/remote", tags=["Remote Connections"])
 
 
-async def verify_remote_secret(
+def verify_remote_secret(
     x_remote_id: str = Header(..., alias="X-Remote-ID"),
     x_shared_secret: str = Header(..., alias="X-Shared-Secret"),
     db: Session = Depends(get_db),
@@ -188,38 +188,29 @@ class ReceiveHeader:
         self.is_final = x_is_final
 
 
-@router.post("/receive")
-async def receive_chunk(
-    request: Request,
-    headers: ReceiveHeader = Depends(ReceiveHeader),
-    db: Session = Depends(get_db),
-    remote_conn: RemoteConnection = Depends(verify_remote_secret),
-):
-    """Inter-instance endpoint to receive file chunks."""
-    _ = remote_conn
-    # 1. Get MonitoredPath
-    path = db.query(MonitoredPath).filter(MonitoredPath.id == headers.remote_path_id).first()
-    if not path:
-        raise HTTPException(status_code=404, detail="MonitoredPath not found")
+def _get_base_directory(path: MonitoredPath, storage_type: str) -> str:
+    """Determine base directory for file storage."""
+    if storage_type == "hot":
+        return path.source_path
+    # For cold, use the first storage location
+    if not path.storage_locations:
+        raise HTTPException(status_code=400, detail="No cold storage locations configured")
+    return path.storage_locations[0].path
 
-    # 2. Determine base directory
-    if headers.storage_type == "hot":
-        base_dir = path.source_path
-    else:
-        # For cold, use the first storage location
-        if not path.storage_locations:
-            raise HTTPException(status_code=400, detail="No cold storage locations configured")
-        base_dir = path.storage_locations[0].path
 
-    # 3. Build full path
+INVALID_PATH_MSG = "Invalid relative path"
+
+
+async def _validate_and_build_path(base_dir: str, relative_path: str) -> Path:
+    """Validate and build safe file path, preventing directory traversal."""
     # Normalize relative path to prevent directory traversal
-    safe_rel_path = Path(headers.relative_path)
+    safe_rel_path = Path(relative_path)
     if safe_rel_path.is_absolute():
         safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
 
     # Explicitly prevent upward directory traversal
     if ".." in safe_rel_path.parts:
-        raise HTTPException(status_code=400, detail="Invalid relative path")
+        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG)
 
     tmp_path = (Path(base_dir) / safe_rel_path).absolute()
 
@@ -229,39 +220,66 @@ async def receive_chunk(
             lambda: tmp_path.resolve().is_relative_to(Path(base_dir).resolve())
         )
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid relative path") from None
+        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG) from None
 
     if not is_safe:
         raise HTTPException(status_code=400, detail="Path traversal detected")
 
-    tmp_path = tmp_path.with_suffix(tmp_path.suffix + ".fftmp")
+    return tmp_path.with_suffix(tmp_path.suffix + ".fftmp")
 
-    # Ensure directory exists
-    await anyio.to_thread.run_sync(lambda: tmp_path.parent.mkdir(parents=True, exist_ok=True))
 
-    # 4. Get body
-    body = await request.body()
+async def _decrypt_chunk(chunk: bytes, nonce: str, shared_secret: str) -> bytes:
+    """Decrypt chunk if nonce is provided."""
+    if not nonce:
+        return chunk
 
-    # 5. Decrypt if needed
-    decrypted_chunk = body
-    if headers.nonce:
-        try:
-            key = bytes.fromhex(remote_conn.shared_secret)[:32]
-            aesgcm = AESGCM(key)
-            decrypted_chunk = aesgcm.decrypt(bytes.fromhex(headers.nonce), body, None)
-        except Exception:
-            logger.exception("Decryption failed")
-            raise HTTPException(status_code=400, detail="Decryption failed") from None
+    try:
+        key = bytes.fromhex(shared_secret)[:32]
+        aesgcm = AESGCM(key)
+        return aesgcm.decrypt(bytes.fromhex(nonce), chunk, None)
+    except Exception:
+        logger.exception("Decryption failed")
+        raise HTTPException(status_code=400, detail="Decryption failed") from None
 
-    # 6. Decompress
+
+async def _decompress_chunk(chunk: bytes) -> bytes:
+    """Decompress chunk using zstandard."""
     try:
         dctx = zstd.ZstdDecompressor()
-        decompressed_chunk = dctx.decompress(decrypted_chunk)
+        return dctx.decompress(chunk)
     except Exception:
         logger.exception("Decompression failed")
         raise HTTPException(status_code=400, detail="Decompression failed") from None
 
-    # 7. Write chunk
+
+@router.post("/receive")
+async def receive_chunk(
+    request: Request,
+    headers: ReceiveHeader = Depends(ReceiveHeader),
+    db: Session = Depends(get_db),
+    remote_conn: RemoteConnection = Depends(verify_remote_secret),
+):
+    """Inter-instance endpoint to receive file chunks."""
+    _ = remote_conn
+
+    # 1. Get MonitoredPath
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == headers.remote_path_id).first()
+    if not path:
+        raise HTTPException(status_code=404, detail="MonitoredPath not found")
+
+    # 2. Determine base directory and build safe path
+    base_dir = _get_base_directory(path, headers.storage_type)
+    tmp_path = await _validate_and_build_path(base_dir, headers.relative_path)
+
+    # 3. Ensure directory exists
+    await anyio.to_thread.run_sync(lambda: tmp_path.parent.mkdir(parents=True, exist_ok=True))
+
+    # 4. Get, decrypt, and decompress body
+    body = await request.body()
+    decrypted_chunk = await _decrypt_chunk(body, headers.nonce, remote_conn.shared_secret)
+    decompressed_chunk = await _decompress_chunk(decrypted_chunk)
+
+    # 5. Write chunk
     mode = "ab" if headers.chunk_index > 0 else "wb"
     async with aiofiles.open(tmp_path, mode) as f:
         await f.write(decompressed_chunk)
@@ -283,7 +301,7 @@ async def _get_found_tmp(db: Session, remote_path_id: int, relative_path: str) -
         safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
 
     if ".." in safe_rel_path.parts:
-        raise HTTPException(status_code=400, detail="Invalid relative path")
+        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG)
 
     for d in possible_dirs:
         p = (Path(d) / safe_rel_path).absolute()
