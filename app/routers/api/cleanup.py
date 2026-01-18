@@ -21,3 +21,17 @@ def cleanup_missing_files(path_id: Optional[int] = Query(None), db: Session = De
 def cleanup_duplicates(path_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
     """Clean up duplicate FileRecord entries."""
     return FileCleanup.cleanup_duplicates(db, path_id=path_id)
+
+
+@router.post("/symlinks")
+def cleanup_symlinks(path_id: Optional[int] = Query(None), db: Session = Depends(get_db)):
+    """
+    Clean up symlink entries from FileInventory.
+
+    Symlinks should not be tracked in the inventory. This endpoint removes any
+    symlink entries that may have been added before this fix was implemented.
+
+    Returns:
+        dict with cleanup results including checked, removed, and errors counts
+    """
+    return FileCleanup.cleanup_symlink_inventory_entries(db, path_id=path_id)

@@ -121,6 +121,12 @@ class FileWorkflowService:
                 results["files_cleaned"] += duplicate_results["removed"]
                 if duplicate_results["errors"]:
                     results["errors"].extend(duplicate_results["errors"])
+
+                # Clean up symlink entries from inventory
+                symlink_results = FileCleanup.cleanup_symlink_inventory_entries(db, path_id=path.id)
+                results["files_cleaned"] += symlink_results["removed"]
+                if symlink_results["errors"]:
+                    results["errors"].extend(symlink_results["errors"])
             except Exception as e:
                 logger.warning(f"Error during cleanup for path {path.id}: {e!s}")
 
@@ -739,15 +745,24 @@ class FileWorkflowService:
         return updated_count + missing
 
     def _scan_flat_list(self, directory_path: str) -> List[Dict]:
-        """Get metadata for inventory updates."""
+        """Get metadata for inventory updates.
+
+        Note: Symlinks are excluded from results to prevent them from appearing
+        in the file inventory. Symlinks to cold storage are handled separately
+        during the scan phase.
+        """
         results = []
         if not os.path.exists(directory_path):
             return results
 
         for entry in self._recursive_scandir(Path(directory_path)):
             try:
-                stat = entry.stat(follow_symlinks=False)
+                # Skip symlinks - they should not be added to inventory
                 is_symlink = Path(entry.path).is_symlink()
+                if is_symlink:
+                    continue
+
+                stat = entry.stat(follow_symlinks=False)
 
                 results.append(
                     {
@@ -756,7 +771,6 @@ class FileWorkflowService:
                         "mtime": datetime.fromtimestamp(stat.st_mtime),
                         "atime": datetime.fromtimestamp(stat.st_atime),
                         "ctime": datetime.fromtimestamp(stat.st_ctime),
-                        "is_symlink": is_symlink,
                     }
                 )
             except OSError:

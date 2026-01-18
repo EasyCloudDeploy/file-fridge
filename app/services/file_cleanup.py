@@ -6,13 +6,16 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import FileRecord, OperationType
+from app.models import FileInventory, FileRecord, OperationType
 
 logger = logging.getLogger(__name__)
 
 
 class FileCleanup:
     """Handles cleanup of file records for files that no longer exist."""
+
+    # Maximum file size for suspected symlinks (symlinks are typically path strings)
+    MAX_SYMLINK_SIZE = 200
 
     @staticmethod
     def cleanup_missing_files(db: Session, path_id: Optional[int] = None) -> dict:
@@ -187,6 +190,89 @@ class FileCleanup:
 
         except Exception as e:
             error_msg = f"Error during duplicate cleanup: {e!s}"
+            results["errors"].append(error_msg)
+            logger.exception(error_msg)
+            db.rollback()
+
+        return results
+
+    @staticmethod
+    def cleanup_symlink_inventory_entries(db: Session, path_id: Optional[int] = None) -> dict:
+        """
+        Clean up FileInventory entries that are symlinks.
+
+        Symlinks should not be tracked in the inventory - they're managed separately
+        during the scan phase. This cleanup removes any symlink entries that may have
+        been added before this fix was implemented.
+
+        Args:
+            db: Database session
+            path_id: Optional path ID to limit cleanup to a specific path
+
+        Returns:
+            dict with cleanup results including:
+            - checked: Number of inventory entries checked
+            - removed: Number of symlink entries removed
+            - errors: List of error messages
+        """
+        results = {"checked": 0, "removed": 0, "errors": []}
+
+        try:
+            # Query all file inventory entries
+            query = db.query(FileInventory)
+            if path_id:
+                query = query.filter(FileInventory.path_id == path_id)
+
+            inventory_entries = query.all()
+            results["checked"] = len(inventory_entries)
+
+            for entry in inventory_entries:
+                try:
+                    file_path = Path(entry.file_path)
+
+                    # Check if the file exists and is a symlink
+                    if file_path.exists():
+                        try:
+                            # Check if it's a symlink
+                            if file_path.is_symlink():
+                                db.delete(entry)
+                                results["removed"] += 1
+                                logger.info(
+                                    f"Removed symlink from inventory: {entry.id} - {entry.file_path}"
+                                )
+                                continue
+                        except OSError as e:
+                            logger.debug(f"Error checking if {file_path} is symlink: {e}")
+
+                    # Also remove entries with suspiciously small file sizes that might be symlinks
+                    # Symlinks are typically < MAX_SYMLINK_SIZE bytes (path string length)
+                    # AND marked as missing (since they're no longer being scanned)
+                    if (
+                        entry.file_size < FileCleanup.MAX_SYMLINK_SIZE
+                        and entry.status.value == "missing"
+                        and entry.checksum is not None
+                    ):
+                        # This heuristic catches symlinks that existed before but are now missing
+                        # The checksum indicates it was scanned at some point
+                        # Small size + missing status suggests it might be a stale symlink entry
+                        logger.info(
+                            f"Removing suspected symlink entry (small size + missing): {entry.id} - {entry.file_path}"
+                        )
+                        db.delete(entry)
+                        results["removed"] += 1
+
+                except Exception as e:
+                    error_msg = f"Error checking inventory entry {entry.id}: {e!s}"
+                    results["errors"].append(error_msg)
+                    logger.debug(error_msg)
+
+            db.commit()
+            logger.info(
+                f"Symlink cleanup complete: checked {results['checked']}, removed {results['removed']}"
+            )
+
+        except Exception as e:
+            error_msg = f"Error during symlink cleanup: {e!s}"
             results["errors"].append(error_msg)
             logger.exception(error_msg)
             db.rollback()
