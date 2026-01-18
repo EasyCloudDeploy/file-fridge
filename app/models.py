@@ -4,13 +4,13 @@ import enum
 
 from cryptography.fernet import Fernet
 from sqlalchemy import (
+    JSON,
     Boolean,
     Column,
     DateTime,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
     Table,
     Text,

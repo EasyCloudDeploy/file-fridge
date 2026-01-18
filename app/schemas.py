@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, EmailStr, Field, HttpUrl, validator
 
 from app.models import (
     CriterionType,
@@ -57,8 +57,12 @@ class ColdStorageLocationBase(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255)
     path: str = Field(..., min_length=1)
-    caution_threshold_percent: int = Field(20, ge=0, le=100, description="Warn at this % free space")
-    critical_threshold_percent: int = Field(10, ge=0, le=100, description="Critical at this % free space")
+    caution_threshold_percent: int = Field(
+        20, ge=0, le=100, description="Warn at this % free space"
+    )
+    critical_threshold_percent: int = Field(
+        10, ge=0, le=100, description="Critical at this % free space"
+    )
 
     @validator("critical_threshold_percent")
     @classmethod
@@ -460,7 +464,7 @@ class NotifierBase(BaseModel):
     enabled: bool = Field(True, description="Whether this notifier is active")
     subscribed_events: List[str] = Field(
         default_factory=list,
-        description="List of event types to subscribe to (SCAN_COMPLETED, PATH_CREATED, etc.)"
+        description="List of event types to subscribe to (SCAN_COMPLETED, PATH_CREATED, etc.)",
     )
 
     # SMTP settings (required for email notifiers, ignored for webhooks)
@@ -475,6 +479,25 @@ class NotifierBase(BaseModel):
     )
     smtp_use_tls: Optional[bool] = Field(True, description="Use TLS encryption (default: True)")
 
+    @validator("address")
+    @classmethod
+    def validate_address(cls, v, values):
+        """Validate address based on notifier type."""
+        notifier_type = values.get("type")
+        if notifier_type == NotifierType.EMAIL:
+            try:
+                EmailStr.validate(v)
+            except Exception as e:
+                raise ValueError(f"Invalid email address: {e}")
+        elif notifier_type == NotifierType.GENERIC_WEBHOOK:
+            try:
+                url = HttpUrl(v)
+                if url.scheme != "https":
+                    raise ValueError("Webhook URLs must use HTTPS for security")
+            except Exception as e:
+                raise ValueError(f"Invalid webhook URL: {e}")
+        return v
+
     @validator("subscribed_events")
     @classmethod
     def validate_event_types(cls, v):
@@ -485,8 +508,7 @@ class NotifierBase(BaseModel):
         invalid = set(v) - valid_events
         if invalid:
             raise ValueError(
-                f"Invalid event types: {invalid}. "
-                f"Valid events: {', '.join(sorted(valid_events))}"
+                f"Invalid event types: {invalid}. Valid events: {', '.join(sorted(valid_events))}"
             )
         return v
 
@@ -510,6 +532,17 @@ class NotifierCreate(NotifierBase):
         if values.get("type") == NotifierType.EMAIL and not v:
             msg = "smtp_sender is required for EMAIL notifiers"
             raise ValueError(msg)
+        return v
+
+    @validator("smtp_sender")
+    @classmethod
+    def validate_smtp_sender_format(cls, v, values):
+        """Validate smtp_sender is a valid email address."""
+        if v and values.get("type") == NotifierType.EMAIL:
+            try:
+                EmailStr.validate(v)
+            except Exception as e:
+                raise ValueError(f"Invalid sender email address: {e}")
         return v
 
 
@@ -543,8 +576,7 @@ class NotifierUpdate(BaseModel):
         invalid = set(v) - valid_events
         if invalid:
             raise ValueError(
-                f"Invalid event types: {invalid}. "
-                f"Valid events: {', '.join(sorted(valid_events))}"
+                f"Invalid event types: {invalid}. Valid events: {', '.join(sorted(valid_events))}"
             )
         return v
 

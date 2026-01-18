@@ -292,21 +292,25 @@ def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)
         scheduler_service.add_path_job(db_path)
 
     # Dispatch PATH_CREATED event
-    from app.services.notification_service import NotificationService
-    from app.services.notification_events import NotificationEventType, PathCreatedData
+    try:
+        from app.services.notification_events import NotificationEventType, PathCreatedData
+        from app.services.notification_service import NotificationService
 
-    notification_service = NotificationService()
-    notification_service.dispatch_event_sync(
-        db=db,
-        event_type=NotificationEventType.PATH_CREATED,
-        event_data=PathCreatedData(
-            path_id=db_path.id,
-            path_name=db_path.name,
-            source_path=db_path.source_path,
-            operation_type=db_path.operation_type.value,
-            created_by=None  # TODO: Add auth context when implemented
+        notification_service = NotificationService()
+        notification_service.dispatch_event_sync(
+            db=db,
+            event_type=NotificationEventType.PATH_CREATED,
+            event_data=PathCreatedData(
+                path_id=db_path.id,
+                path_name=db_path.name,
+                source_path=db_path.source_path,
+                operation_type=db_path.operation_type.value,
+                created_by=None,  # TODO: Add auth context when implemented
+            ),
         )
-    )
+    except Exception as e:
+        logger.error(f"Failed to dispatch PATH_CREATED event: {e}")
+        # Don't fail the request - notification is non-critical
 
     return db_path
 
@@ -426,20 +430,24 @@ def update_path(
 
     # Dispatch PATH_UPDATED event (only if changes occurred)
     if changes:
-        from app.services.notification_service import NotificationService
-        from app.services.notification_events import NotificationEventType, PathUpdatedData
+        try:
+            from app.services.notification_events import NotificationEventType, PathUpdatedData
+            from app.services.notification_service import NotificationService
 
-        notification_service = NotificationService()
-        notification_service.dispatch_event_sync(
-            db=db,
-            event_type=NotificationEventType.PATH_UPDATED,
-            event_data=PathUpdatedData(
-                path_id=path.id,
-                path_name=path.name,
-                changes=changes,
-                updated_by=None  # TODO: Add auth context
+            notification_service = NotificationService()
+            notification_service.dispatch_event_sync(
+                db=db,
+                event_type=NotificationEventType.PATH_UPDATED,
+                event_data=PathUpdatedData(
+                    path_id=path.id,
+                    path_name=path.name,
+                    changes=changes,
+                    updated_by=None,  # TODO: Add auth context
+                ),
             )
-        )
+        except Exception as e:
+            logger.error(f"Failed to dispatch PATH_UPDATED event: {e}")
+            # Don't fail the request - notification is non-critical
 
     return path
 
@@ -494,20 +502,24 @@ def delete_path(
     db.commit()
 
     # Dispatch PATH_DELETED event
-    from app.services.notification_service import NotificationService
-    from app.services.notification_events import NotificationEventType, PathDeletedData
+    try:
+        from app.services.notification_events import NotificationEventType, PathDeletedData
+        from app.services.notification_service import NotificationService
 
-    notification_service = NotificationService()
-    notification_service.dispatch_event_sync(
-        db=db,
-        event_type=NotificationEventType.PATH_DELETED,
-        event_data=PathDeletedData(
-            path_id=path_id,
-            path_name=path_name,
-            source_path=source_path,
-            deleted_by=None  # TODO: Add auth context
+        notification_service = NotificationService()
+        notification_service.dispatch_event_sync(
+            db=db,
+            event_type=NotificationEventType.PATH_DELETED,
+            event_data=PathDeletedData(
+                path_id=path_id,
+                path_name=path_name,
+                source_path=source_path,
+                deleted_by=None,  # TODO: Add auth context
+            ),
         )
-    )
+    except Exception as e:
+        logger.error(f"Failed to dispatch PATH_DELETED event: {e}")
+        # Don't fail the request - notification is non-critical
 
     return results
 

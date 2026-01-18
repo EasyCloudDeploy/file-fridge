@@ -5,10 +5,10 @@ import logging
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from functools import wraps
 from html import escape as html_escape
 from threading import Lock
-from typing import Any, Dict, List, Optional
-from weakref import WeakKeyDictionary
+from typing import Any, Callable, Dict, List, Optional
 
 import aiosmtplib
 import httpx
@@ -36,6 +36,38 @@ from app.services.notification_events import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def async_retry(max_retries: int = 3, delay_seconds: float = 1.0):
+    """Decorator for async retry logic with exponential backoff."""
+
+    def decorator(func: Callable):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except (
+                    aiosmtplib.SMTPException,
+                    httpx.TimeoutException,
+                    httpx.RequestError,
+                ) as e:
+                    last_exception = e
+                    if attempt < max_retries - 1:
+                        wait_time = delay_seconds * (2**attempt)
+                        logger.warning(
+                            f"Attempt {attempt + 1}/{max_retries} failed: {e}. "
+                            f"Retrying in {wait_time:.1f}s..."
+                        )
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"All {max_retries} attempts failed. Last error: {e}")
+            raise last_exception
+
+        return wrapper
+
+    return decorator
 
 
 class RateLimiter:
@@ -116,7 +148,7 @@ class NotificationService:
 
         if not notifiers:
             logger.debug(f"No notifiers subscribed to event: {event_type.value}")
-            return
+            return None
 
         # Format message based on event type
         message = self._format_event(event_type, event_data)
@@ -166,31 +198,31 @@ class NotificationService:
                 f"Errors: {event_data.errors}"
             )
 
-        elif isinstance(event_data, ScanErrorData):
+        if isinstance(event_data, ScanErrorData):
             return (
                 f"Scan FAILED for path '{event_data.path_name}'\n"
                 f"Error: {event_data.error_message}\n"
                 f"{event_data.error_details or ''}"
             )
 
-        elif isinstance(event_data, PathCreatedData):
+        if isinstance(event_data, PathCreatedData):
             return (
                 f"New monitored path created: '{event_data.path_name}'\n"
                 f"Source: {event_data.source_path}\n"
                 f"Operation: {event_data.operation_type}"
             )
 
-        elif isinstance(event_data, PathUpdatedData):
+        if isinstance(event_data, PathUpdatedData):
             changes_str = "\n".join(f"  - {k}: {v}" for k, v in event_data.changes.items())
             return f"Monitored path updated: '{event_data.path_name}'\nChanges:\n{changes_str}"
 
-        elif isinstance(event_data, PathDeletedData):
+        if isinstance(event_data, PathDeletedData):
             return (
                 f"Monitored path deleted: '{event_data.path_name}'\n"
                 f"Source: {event_data.source_path}"
             )
 
-        elif isinstance(event_data, DiskSpaceCautionData):
+        if isinstance(event_data, DiskSpaceCautionData):
             return (
                 f"CAUTION: Low disk space on '{event_data.location_name}'\n"
                 f"Path: {event_data.location_path}\n"
@@ -199,7 +231,7 @@ class NotificationService:
                 f"Threshold: {event_data.threshold_percent}%"
             )
 
-        elif isinstance(event_data, DiskSpaceCriticalData):
+        if isinstance(event_data, DiskSpaceCriticalData):
             return (
                 f"CRITICAL: Very low disk space on '{event_data.location_name}'\n"
                 f"Path: {event_data.location_path}\n"
@@ -209,8 +241,7 @@ class NotificationService:
                 f"IMMEDIATE ACTION REQUIRED!"
             )
 
-        else:
-            return f"Event: {event_type.value}"
+        return f"Event: {event_type.value}"
 
     def _get_legacy_level_for_event(self, event_type: NotificationEventType) -> str:
         """
@@ -385,6 +416,7 @@ class NotificationService:
                 db, notification, notifier, DispatchStatus.FAILED, f"Unexpected error: {e!s}"
             )
 
+    @async_retry(max_retries=3, delay_seconds=1.0)
     async def _send_email(
         self,
         address: str,
@@ -409,67 +441,54 @@ class NotificationService:
         if not smtp_sender:
             return False, "SMTP sender is not configured"
 
-        try:
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = f"File Fridge Notification - {level.upper()}"
-            msg["From"] = smtp_sender
-            msg["To"] = address
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"File Fridge Notification - {level.upper()}"
+        msg["From"] = smtp_sender
+        msg["To"] = address
 
-            # Plain text
-            body = self._format_text_message(level, message, metadata)
-            msg.attach(MIMEText(body, "plain"))
+        # Plain text
+        body = self._format_text_message(level, message, metadata)
+        msg.attach(MIMEText(body, "plain"))
 
-            # HTML
-            html_body = self._format_html_message(level, message, metadata)
-            msg.attach(MIMEText(html_body, "html"))
+        # HTML
+        html_body = self._format_html_message(level, message, metadata)
+        msg.attach(MIMEText(html_body, "html"))
 
-            logger.info(f"Sending email to {address} via {smtp_host}")
+        logger.info(f"Sending email to {address} via {smtp_host}")
 
-            await aiosmtplib.send(
-                msg,
-                hostname=smtp_host,
-                port=smtp_port,
-                username=smtp_user,
-                password=smtp_password,
-                use_tls=smtp_use_tls,
-            )
+        await aiosmtplib.send(
+            msg,
+            hostname=smtp_host,
+            port=smtp_port,
+            username=smtp_user,
+            password=smtp_password,
+            use_tls=smtp_use_tls,
+        )
 
-            return True, f"Email sent successfully to {address}"
+        return True, f"Email sent successfully to {address}"
 
-        except aiosmtplib.SMTPException as e:
-            return False, f"SMTP error: {e!s}"
-        except Exception as e:
-            return False, f"Error sending email: {e!s}"
-
+    @async_retry(max_retries=3, delay_seconds=1.0)
     async def _send_webhook(
         self, url: str, level: str, message: str, metadata: Optional[Dict[str, Any]] = None
     ) -> tuple:
         """Send a webhook notification."""
-        try:
-            payload = {
-                "level": level.upper(),
-                "message": message,
-                "timestamp": datetime.utcnow().isoformat(),
-                "source": "File Fridge",
-            }
-            if metadata:
-                payload["metadata"] = metadata
+        payload = {
+            "level": level.upper(),
+            "message": message,
+            "timestamp": datetime.utcnow().isoformat(),
+            "source": "File Fridge",
+        }
+        if metadata:
+            payload["metadata"] = metadata
 
-            logger.info(f"Sending webhook to {url}")
+        logger.info(f"Sending webhook to {url}")
 
-            async with httpx.AsyncClient(timeout=self.WEBHOOK_TIMEOUT) as client:
-                response = await client.post(url, json=payload)
+        async with httpx.AsyncClient(timeout=self.WEBHOOK_TIMEOUT) as client:
+            response = await client.post(url, json=payload)
 
-                if 200 <= response.status_code < 300:
-                    return True, f"Webhook sent (Status: {response.status_code})"
-                return False, f"Webhook returned status {response.status_code}"
-
-        except httpx.TimeoutException:
-            return False, f"Webhook timed out after {self.WEBHOOK_TIMEOUT}s"
-        except httpx.RequestError as e:
-            return False, f"Webhook request failed: {e!s}"
-        except Exception as e:
-            return False, f"Error sending webhook: {e!s}"
+            if 200 <= response.status_code < 300:
+                return True, f"Webhook sent (Status: {response.status_code})"
+            return False, f"Webhook returned status {response.status_code}"
 
     def _log_dispatch(
         self,
