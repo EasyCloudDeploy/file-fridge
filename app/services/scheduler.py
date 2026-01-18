@@ -18,7 +18,9 @@ from app.services.notification_events import (
     SyncSuccessData,
 )
 from app.services.notification_service import notification_service
+from app.services.remote_transfer_service import remote_transfer_service
 from app.services.stats_cleanup import cleanup_old_stats_job_func
+from app.utils.remote_auth import remote_auth
 
 logger = logging.getLogger(__name__)
 
@@ -64,13 +66,15 @@ class SchedulerService:
                 time.sleep(0.1)
                 self._load_existing_jobs()
                 self._add_stats_cleanup_job()
-            except Exception as e:
-                logger.exception(f"Error starting scheduler: {e}")
+                self._add_remote_code_rotation_job()
+                self._add_remote_transfer_job()
+            except Exception:
+                logger.exception("Error starting scheduler")
                 # Try to clean up
                 try:
                     if self.scheduler.running:
                         self.scheduler.shutdown(wait=False)
-                except:
+                except Exception:
                     pass
                 raise
 
@@ -177,6 +181,54 @@ class SchedulerService:
         except Exception as e:
             logger.exception(f"Error adding stats cleanup job: {e}")
 
+    def _add_remote_transfer_job(self):
+        """Add scheduled job for processing remote transfers."""
+        if not self.scheduler.running:
+            logger.warning("Scheduler not running, skipping remote transfer job addition")
+            return
+
+        job_id = "remote_transfer_processing"
+        try:
+            # Remove existing job if present
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            # Schedule to run every minute
+            self.scheduler.add_job(
+                process_remote_transfers_job_func,
+                "interval",
+                minutes=1,
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info("Added scheduled job for processing remote transfers (runs every minute)")
+        except Exception:
+            logger.exception("Error adding remote transfer job")
+
+    def _add_remote_code_rotation_job(self):
+        """Add scheduled job for rotating remote connection code hourly."""
+        if not self.scheduler.running:
+            logger.warning("Scheduler not running, skipping remote code rotation job addition")
+            return
+
+        job_id = "remote_code_rotation"
+        try:
+            # Remove existing job if present
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            # Schedule to run every hour
+            self.scheduler.add_job(
+                rotate_remote_code_job_func,
+                "interval",
+                hours=1,
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info("Added scheduled job for hourly remote code rotation")
+        except Exception:
+            logger.exception("Error adding remote code rotation job")
+
 
 def check_disk_space_and_notify(path: MonitoredPath, db: Session):
     """Check disk space for all cold storage locations and send notifications if low."""
@@ -207,6 +259,29 @@ def check_disk_space_and_notify(path: MonitoredPath, db: Session):
             )
         except Exception as e:
             logger.exception(f"Error checking disk space for {location.name}: {e}")
+
+
+def process_remote_transfers_job_func():
+    """Job function to process pending remote transfers."""
+    import asyncio
+
+    try:
+        # Create a new event loop for this thread if needed
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        loop.run_until_complete(remote_transfer_service.process_pending_transfers())
+    except Exception:
+        logger.exception("Error in remote transfer job")
+
+
+def rotate_remote_code_job_func():
+    """Job function to rotate the remote connection code."""
+    remote_auth.rotate_code()
+    logger.info("Rotated remote connection code")
 
 
 def scan_path_job_func(path_id: int):

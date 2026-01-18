@@ -2,13 +2,13 @@
 
 import logging
 from pathlib import Path
-from typing import Dict, Set
+from typing import Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import FileInventory, StorageType
+from app.models import FileInventory
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
 

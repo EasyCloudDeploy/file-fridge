@@ -9,6 +9,9 @@ from sqlalchemy.sql import func
 
 from app.database import Base
 
+# Foreign key reference constants
+FILE_INVENTORY_ID_FK = "file_inventory.id"
+
 
 class OperationType(str, enum.Enum):
     """File operation types."""
@@ -201,6 +204,8 @@ class TransactionType(str, enum.Enum):
     COPY = "copy"  # File copy
     RESTORE = "restore"  # File restore
     CLEANUP = "cleanup"  # Cleanup of orphaned records
+    REMOTE_MIGRATE = "remote_migrate"  # Migrated to remote instance
+    REMOTE_RECEIVE = "remote_receive"  # Received from remote instance
 
 
 class FileInventory(Base):
@@ -262,7 +267,7 @@ class FileTransactionHistory(Base):
     __tablename__ = "file_transaction_history"
 
     id = Column(Integer, primary_key=True, index=True)
-    file_id = Column(Integer, ForeignKey("file_inventory.id"), nullable=False, index=True)
+    file_id = Column(Integer, ForeignKey(FILE_INVENTORY_ID_FK), nullable=False, index=True)
     transaction_type = Column(SQLEnum(TransactionType), nullable=False, index=True)
     old_storage_type = Column(SQLEnum(StorageType), nullable=True)
     new_storage_type = Column(SQLEnum(StorageType), nullable=True)
@@ -337,7 +342,7 @@ class FileTag(Base):
     __tablename__ = "file_tags"
 
     id = Column(Integer, primary_key=True, index=True)
-    file_id = Column(Integer, ForeignKey("file_inventory.id"), nullable=False, index=True)
+    file_id = Column(Integer, ForeignKey(FILE_INVENTORY_ID_FK), nullable=False, index=True)
     tag_id = Column(Integer, ForeignKey("tags.id"), nullable=False, index=True)
     tagged_at = Column(DateTime(timezone=True), server_default=func.now())
     tagged_by = Column(String, nullable=True)  # Optional: who added the tag
@@ -478,3 +483,60 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True, nullable=False)
+
+
+class RemoteConnection(Base):
+    """Remote File Fridge instance connection."""
+
+    __tablename__ = "remote_connections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    url = Column(String, nullable=False)
+    shared_secret = Column(String, nullable=False)  # Shared 32-byte secret
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    transfers = relationship(
+        "RemoteTransferJob", back_populates="remote_connection", cascade="all, delete-orphan"
+    )
+
+
+class TransferStatus(str, enum.Enum):
+    """Status of remote file transfer."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class RemoteTransferJob(Base):
+    """Background job for remote file migration."""
+
+    __tablename__ = "remote_transfer_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    file_inventory_id = Column(Integer, ForeignKey(FILE_INVENTORY_ID_FK), nullable=False)
+    remote_connection_id = Column(Integer, ForeignKey("remote_connections.id"), nullable=False)
+    remote_monitored_path_id = Column(Integer, nullable=False)  # ID on the remote server
+    status = Column(SQLEnum(TransferStatus), default=TransferStatus.PENDING, index=True)
+    progress = Column(Integer, default=0)  # 0-100
+    current_size = Column(Integer, default=0)
+    total_size = Column(Integer, nullable=False)
+    start_time = Column(DateTime(timezone=True), nullable=True)
+    end_time = Column(DateTime(timezone=True), nullable=True)
+    error_message = Column(Text, nullable=True)
+    retry_count = Column(Integer, default=0)
+
+    # Metadata for the transfer
+    source_path = Column(String, nullable=False)
+    relative_path = Column(String, nullable=False)  # Path relative to MonitoredPath
+    storage_type = Column(SQLEnum(StorageType), nullable=False)  # HOT or COLD
+    checksum = Column(String, nullable=True)
+    current_speed = Column(Integer, default=0)  # bytes per second
+    eta = Column(Integer, nullable=True)  # seconds remaining
+
+    file = relationship("FileInventory")
+    remote_connection = relationship("RemoteConnection", back_populates="transfers")

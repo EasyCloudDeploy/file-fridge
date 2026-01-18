@@ -71,6 +71,10 @@ class Settings(BaseSettings):
     # Override via APP_NAME environment variable
     app_name: str = "File Fridge"
 
+    # Friendly name for this instance (e.g., "Homelab-Server-1")
+    # Override via INSTANCE_NAME environment variable
+    instance_name: Optional[str] = None
+
     # Override via APP_VERSION environment variable
     # If not set, will read from VERSION file if it exists
     app_version: str = "0.0.0"
@@ -79,6 +83,10 @@ class Settings(BaseSettings):
     # Override via STATS_RETENTION_DAYS environment variable
     # FileRecord entries older than this will be automatically deleted
     stats_retention_days: int = 30
+
+    # Remote Instance URL (for inter-instance communication)
+    # Override via FF_INSTANCE_URL environment variable
+    ff_instance_url: Optional[str] = None
 
     # Authentication
     # Override via SECRET_KEY environment variable

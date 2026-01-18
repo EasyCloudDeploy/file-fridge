@@ -1,6 +1,47 @@
 // Settings page JavaScript
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Tab switching
+    const navLinks = document.querySelectorAll('#settings-nav .list-group-item');
+    const sections = document.querySelectorAll('.settings-section');
+
+    navLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const sectionId = this.dataset.section;
+
+            // Update nav
+            navLinks.forEach(l => l.classList.remove('active'));
+            this.classList.add('active');
+
+            // Update sections
+            sections.forEach(s => s.classList.add('d-none'));
+            const targetSection = document.getElementById(`${sectionId}-section`);
+            if (targetSection) {
+                targetSection.classList.remove('d-none');
+            }
+
+            // Initial load for remote connections if clicked
+            if (sectionId === 'remote-connections') {
+                loadRemoteConnections();
+                fetchConnectionCode();
+                loadRemoteTransfers();
+            }
+
+            // Update URL hash without jumping
+            history.pushState(null, null, '#' + sectionId);
+        });
+    });
+
+    // Handle initial hash in URL
+    const hash = window.location.hash.substring(1);
+    if (hash) {
+        const activeLink = document.querySelector(`#settings-nav [data-section="${hash}"]`);
+        if (activeLink) {
+            activeLink.click();
+        }
+    }
+
     // Toggle password visibility
     const togglePasswordBtn = document.getElementById('toggle-password');
     const newPasswordInput = document.getElementById('new-password');
@@ -125,6 +166,251 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // --- Remote Connections ---
+
+    // Fetch and display connection code
+    async function fetchConnectionCode() {
+        try {
+            const response = await authenticatedFetch('/api/remote/connection-code');
+            if (response.ok) {
+                const data = await response.json();
+                document.getElementById('my-connection-code').value = data.code;
+            }
+        } catch (error) {
+            console.error('Error fetching connection code:', error);
+        }
+    }
+
+    const refreshCodeBtn = document.getElementById('refresh-code-btn');
+    if (refreshCodeBtn) {
+        refreshCodeBtn.addEventListener('click', fetchConnectionCode);
+    }
+
+    const copyCodeBtn = document.getElementById('copy-code-btn');
+    if (copyCodeBtn) {
+        copyCodeBtn.addEventListener('click', async function() {
+            const codeInput = document.getElementById('my-connection-code');
+            try {
+                await navigator.clipboard.writeText(codeInput.value);
+
+                const originalIcon = this.innerHTML;
+                this.innerHTML = '<i class="bi bi-check"></i>';
+                setTimeout(() => {
+                    this.innerHTML = originalIcon;
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy:', err);
+                // Fallback: select text for manual copy
+                codeInput.select();
+            }
+        });
+    }
+
+    // Load remote connections
+    async function loadRemoteConnections() {
+        const list = document.getElementById('remote-connections-list');
+        try {
+            const response = await authenticatedFetch('/api/remote/connections');
+            if (response.ok) {
+                const connections = await response.json();
+                list.innerHTML = '';
+
+                if (connections.length === 0) {
+                    list.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No remote connections found.</td></tr>';
+                    return;
+                }
+
+                connections.forEach(conn => {
+                    const date = new Date(conn.created_at).toLocaleString();
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${conn.name}</td>
+                        <td>${conn.url}</td>
+                        <td>${date}</td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-danger delete-conn-btn" data-id="${conn.id}" data-name="${conn.name}">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    `;
+                    list.appendChild(tr);
+                });
+
+                // Add delete event listeners
+                document.querySelectorAll('.delete-conn-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const id = this.dataset.id;
+                        const name = this.dataset.name;
+                        showDeleteModal(id, name);
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('Error loading connections:', error);
+            list.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-4">Failed to load connections.</td></tr>';
+        }
+    }
+
+    // Add connection form
+    const addConnectionForm = document.getElementById('add-connection-form');
+    if (addConnectionForm) {
+        addConnectionForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const submitBtn = document.getElementById('save-connection-btn');
+            const submitText = document.getElementById('save-connection-text');
+            const submitSpinner = document.getElementById('save-connection-spinner');
+
+            submitBtn.disabled = true;
+            submitText.classList.add('d-none');
+            submitSpinner.classList.remove('d-none');
+
+            const formData = new FormData(this);
+            const data = Object.fromEntries(formData.entries());
+
+            try {
+                const response = await authenticatedFetch('/api/remote/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    bootstrap.Modal.getInstance(document.getElementById('addConnectionModal')).hide();
+                    addConnectionForm.reset();
+                    loadRemoteConnections();
+                } else {
+                    const errorData = await response.json();
+                    alert('Error: ' + (errorData.detail || 'Failed to add connection'));
+                }
+            } catch (error) {
+                console.error('Error adding connection:', error);
+                alert('Failed to connect to server.');
+            } finally {
+                submitBtn.disabled = false;
+                submitText.classList.remove('d-none');
+                submitSpinner.classList.add('d-none');
+            }
+        });
+    }
+
+    // Delete connection logic
+    let connectionToDelete = null;
+    const deleteModal = new bootstrap.Modal(document.getElementById('deleteConnectionModal'));
+
+    function showDeleteModal(id, name) {
+        connectionToDelete = id;
+        document.getElementById('delete-conn-name').textContent = name;
+        document.getElementById('force-delete-check').checked = false;
+        document.getElementById('force-delete-warning').classList.add('d-none');
+        deleteModal.show();
+    }
+
+    document.getElementById('force-delete-check').addEventListener('change', function() {
+        const warning = document.getElementById('force-delete-warning');
+        if (this.checked) {
+            warning.classList.remove('d-none');
+        } else {
+            warning.classList.add('d-none');
+        }
+    });
+
+    // Load remote transfers
+    async function loadRemoteTransfers() {
+        const list = document.getElementById('remote-transfers-list');
+        try {
+            const response = await authenticatedFetch('/api/remote/transfers');
+            if (response.ok) {
+                const transfers = await response.json();
+                if (transfers.length === 0) {
+                    list.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No active transfers.</td></tr>';
+                    return;
+                }
+
+                list.innerHTML = '';
+                transfers.forEach(job => {
+                    const fileName = job.source_path.split('/').pop();
+                    let statusClass = 'secondary';
+                    if (job.status === 'completed') {
+                        statusClass = 'success';
+                    } else if (job.status === 'failed') {
+                        statusClass = 'danger';
+                    } else if (job.status === 'in_progress') {
+                        statusClass = 'primary';
+                    }
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td title="${job.source_path}">${fileName}</td>
+                        <td><span class="badge bg-${statusClass}">${job.status}</span></td>
+                        <td>
+                            <div class="progress" style="height: 10px; width: 100px;">
+                                <div class="progress-bar" role="progressbar" style="width: ${job.progress}%"></div>
+                            </div>
+                            <small>${job.progress}%</small>
+                        </td>
+                        <td>${formatETA(job.eta)}</td>
+                        <td>
+                            ${job.error_message ? `<i class="bi bi-exclamation-circle text-danger" title="${job.error_message}"></i>` : ''}
+                        </td>
+                    `;
+                    list.appendChild(tr);
+                });
+            }
+        } catch (error) {
+            console.error('Error loading transfers:', error);
+        }
+    }
+
+    function formatETA(seconds) {
+        if (!seconds || seconds < 0) return '-';
+        if (seconds < 60) return Math.round(seconds) + 's';
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.round(seconds % 60);
+        return mins + 'm ' + secs + 's';
+    }
+
+    const refreshTransfersBtn = document.getElementById('refresh-transfers-btn');
+    if (refreshTransfersBtn) {
+        refreshTransfersBtn.addEventListener('click', loadRemoteTransfers);
+    }
+
+    // Auto-refresh transfers if visible
+    setInterval(() => {
+        const section = document.getElementById('remote-connections-section');
+        if (section && !section.classList.contains('d-none')) {
+            loadRemoteTransfers();
+        }
+    }, 5000);
+
+    document.getElementById('confirm-delete-conn-btn').addEventListener('click', async function() {
+        if (!connectionToDelete) return;
+
+        const force = document.getElementById('force-delete-check').checked;
+        this.disabled = true;
+        this.textContent = 'Deleting...';
+
+        try {
+            const response = await authenticatedFetch(`/api/remote/connections/${connectionToDelete}?force=${force}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                deleteModal.hide();
+                loadRemoteConnections();
+            } else {
+                const errorData = await response.json();
+                alert('Error: ' + (errorData.detail || 'Failed to delete connection'));
+            }
+        } catch (error) {
+            console.error('Error deleting connection:', error);
+            alert('Failed to connect to server.');
+        } finally {
+            this.disabled = false;
+            this.textContent = 'Delete';
+        }
+    });
 });
 
 // Password strength calculator
@@ -162,23 +448,23 @@ function getStrengthMessage(strength) {
 function showError(message) {
     const errorDiv = document.getElementById('error-message');
     const errorText = document.getElementById('error-text');
-    errorText.textContent = message;
-    errorDiv.classList.remove('d-none');
+    if (errorText) errorText.textContent = message;
+    if (errorDiv) errorDiv.classList.remove('d-none');
 }
 
 function hideError() {
     const errorDiv = document.getElementById('error-message');
-    errorDiv.classList.add('d-none');
+    if (errorDiv) errorDiv.classList.add('d-none');
 }
 
 function showSuccess(message) {
     const successDiv = document.getElementById('success-message');
     const successText = document.getElementById('success-text');
-    successText.textContent = message;
-    successDiv.classList.remove('d-none');
+    if (successText) successText.textContent = message;
+    if (successDiv) successDiv.classList.remove('d-none');
 }
 
 function hideSuccess() {
     const successDiv = document.getElementById('success-message');
-    successDiv.classList.add('d-none');
+    if (successDiv) successDiv.classList.add('d-none');
 }

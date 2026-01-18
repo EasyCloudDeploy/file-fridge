@@ -431,6 +431,45 @@
             </div>
         </div>
 
+        <!-- Remote Migration Modal -->
+        <div class="modal fade" id="remoteMigrationModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-hdd-network"></i> Migrate to Remote</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Migrate this file to a remote File Fridge instance?</p>
+                        <p><strong>File:</strong> <code id="remoteMigrationFileName"></code></p>
+
+                        <div class="mb-3">
+                            <label for="remoteConnectionSelect" class="form-label">Remote Instance</label>
+                            <select class="form-select" id="remoteConnectionSelect">
+                                <option value="">Select a connection...</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3 d-none" id="remotePathContainer">
+                            <label for="remotePathSelect" class="form-label">Remote Monitored Path</label>
+                            <select class="form-select" id="remotePathSelect">
+                                <option value="">Select a path...</option>
+                            </select>
+                            <div class="form-text">The file will be placed in the corresponding tier (Hot/Cold) on the remote server.</div>
+                        </div>
+
+                        <div id="remoteMigrationError" class="alert alert-danger d-none mt-3"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="confirmRemoteMigrationBtn" disabled>
+                            <i class="bi bi-send"></i> Start Migration
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Bulk Remove Tag Modal -->
         <div class="modal fade" id="bulkRemoveTagModal" tabindex="-1" aria-labelledby="bulkRemoveTagModalLabel" aria-hidden="true">
             <div class="modal-dialog">

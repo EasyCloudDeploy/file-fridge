@@ -142,6 +142,10 @@ function actionsCellRenderer(params) {
         </span>`;
     }
 
+    const migrateBtn = `<button type="button" class="btn btn-outline-info" data-action="migrate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Migrate to remote instance">
+        <i class="bi bi-hdd-network"></i>
+    </button>`;
+
     if (file.storage_type === 'cold') {
         return `<div class="btn-group btn-group-sm" role="group">
             <button type="button" class="btn btn-warning" data-action="thaw" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Move file back to hot storage">
@@ -150,13 +154,17 @@ function actionsCellRenderer(params) {
             <button type="button" class="btn btn-outline-primary" data-action="relocate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Move to another cold storage location">
                 <i class="bi bi-arrow-right-circle"></i><span class="d-none d-xl-inline"> Relocate</span>
             </button>
+            ${migrateBtn}
         </div>`;
     }
 
     // Hot storage files - show freeze button
-    return `<button type="button" class="btn btn-sm btn-info" data-action="freeze" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Send to cold storage">
-        <i class="bi bi-snow"></i><span class="d-none d-lg-inline"> Fridge</span>
-    </button>`;
+    return `<div class="btn-group btn-group-sm" role="group">
+        <button type="button" class="btn btn-sm btn-info" data-action="freeze" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Send to cold storage">
+            <i class="bi bi-snow"></i><span class="d-none d-lg-inline"> Fridge</span>
+        </button>
+        ${migrateBtn}
+    </div>`;
 }
 
 // AG Grid Column Definitions
@@ -358,6 +366,9 @@ function handleActionClick(event) {
             break;
         case 'relocate':
             showRelocateModal(fileId, filePath);
+            break;
+        case 'migrate':
+            showRemoteMigrationModal(fileId, filePath);
             break;
         case 'manageTags':
             showManageTagsModal(fileId, filePath);
@@ -1049,6 +1060,10 @@ let manageTagsModal = null;
 let relocateModal = null;
 let currentRelocateInventoryId = null;
 
+// Remote Migration Modal Management
+let remoteMigrationModal = null;
+let currentMigrationFileId = null;
+
 // Load all available tags
 async function loadAvailableTags() {
     try {
@@ -1370,6 +1385,115 @@ async function relocateFile() {
             confirmBtn.disabled = false;
             confirmBtn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> Relocate File';
         }
+    }
+}
+
+// Remote Migration Functions
+
+async function showRemoteMigrationModal(fileId, filePath) {
+    currentMigrationFileId = fileId;
+    const modal = document.getElementById('remoteMigrationModal');
+    if (!modal) return;
+
+    document.getElementById('remoteMigrationFileName').textContent = filePath;
+    const connSelect = document.getElementById('remoteConnectionSelect');
+    connSelect.innerHTML = '<option value="">Loading connections...</option>';
+    document.getElementById('remotePathContainer').classList.add('d-none');
+    document.getElementById('confirmRemoteMigrationBtn').disabled = true;
+
+    if (!remoteMigrationModal) {
+        remoteMigrationModal = new bootstrap.Modal(modal);
+    }
+    remoteMigrationModal.show();
+
+    try {
+        const response = await authenticatedFetch('/api/remote/connections');
+        if (response.ok) {
+            const connections = await response.json();
+            if (connections.length === 0) {
+                connSelect.innerHTML = '<option value="">No remote connections configured</option>';
+            } else {
+                connSelect.innerHTML = '<option value="">Select a connection...</option>' +
+                    connections.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${c.url})</option>`).join('');
+            }
+        }
+    } catch (error) {
+        console.error('Error loading connections:', error);
+    }
+}
+
+async function onRemoteConnectionChange() {
+    const connId = document.getElementById('remoteConnectionSelect').value;
+    const pathContainer = document.getElementById('remotePathContainer');
+    const pathSelect = document.getElementById('remotePathSelect');
+    const confirmBtn = document.getElementById('confirmRemoteMigrationBtn');
+
+    if (!connId) {
+        pathContainer.classList.add('d-none');
+        confirmBtn.disabled = true;
+        return;
+    }
+
+    pathContainer.classList.remove('d-none');
+    pathSelect.innerHTML = '<option value="">Loading paths...</option>';
+    confirmBtn.disabled = true;
+
+    try {
+        const response = await authenticatedFetch(`/api/remote/connections/${connId}/paths`);
+        if (response.ok) {
+            const paths = await response.json();
+            if (paths.length === 0) {
+                pathSelect.innerHTML = '<option value="">No monitored paths found on remote</option>';
+            } else {
+                pathSelect.innerHTML = '<option value="">Select a path...</option>' +
+                    paths.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+            }
+        }
+    } catch (error) {
+        console.error('Error loading remote paths:', error);
+        pathSelect.innerHTML = '<option value="">Error loading paths</option>';
+    }
+}
+
+async function startRemoteMigration() {
+    const connId = document.getElementById('remoteConnectionSelect').value;
+    const pathId = document.getElementById('remotePathSelect').value;
+    const confirmBtn = document.getElementById('confirmRemoteMigrationBtn');
+    const errorEl = document.getElementById('remoteMigrationError');
+
+    if (!connId || !pathId || !currentMigrationFileId) return;
+
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Starting...';
+    errorEl.classList.add('d-none');
+
+    try {
+        const response = await authenticatedFetch('/api/remote/migrate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_inventory_id: currentMigrationFileId,
+                remote_connection_id: parseInt(connId),
+                remote_monitored_path_id: parseInt(pathId)
+            })
+        });
+
+        if (response.ok) {
+            showNotification('Migration job created successfully. Check Settings > Remote Connections for progress.');
+            remoteMigrationModal.hide();
+            loadFilesList();
+        } else {
+            const data = await response.json();
+            errorEl.textContent = data.detail || 'Failed to start migration';
+            errorEl.classList.remove('d-none');
+        }
+    } catch (error) {
+        console.error('Error starting migration:', error);
+        errorEl.textContent = 'Failed to connect to server';
+        errorEl.classList.remove('d-none');
+    } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = '<i class="bi bi-send"></i> Start Migration';
     }
 }
 
@@ -1908,6 +2032,24 @@ document.addEventListener('DOMContentLoaded', function() {
     const confirmFreezeBtn = document.getElementById('confirmFreezeBtn');
     if (confirmFreezeBtn) {
         confirmFreezeBtn.addEventListener('click', freezeFile);
+    }
+
+    const remoteConnectionSelect = document.getElementById('remoteConnectionSelect');
+    if (remoteConnectionSelect) {
+        remoteConnectionSelect.addEventListener('change', onRemoteConnectionChange);
+    }
+
+    const remotePathSelect = document.getElementById('remotePathSelect');
+    if (remotePathSelect) {
+        remotePathSelect.addEventListener('change', function() {
+            const confirmBtn = document.getElementById('confirmRemoteMigrationBtn');
+            if (confirmBtn) confirmBtn.disabled = !this.value;
+        });
+    }
+
+    const confirmRemoteMigrationBtn = document.getElementById('confirmRemoteMigrationBtn');
+    if (confirmRemoteMigrationBtn) {
+        confirmRemoteMigrationBtn.addEventListener('click', startRemoteMigration);
     }
 
     const thawModal = document.getElementById('thawModal');
