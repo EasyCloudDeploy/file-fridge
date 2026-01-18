@@ -1,7 +1,8 @@
 import hashlib
 import logging
+import secrets
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import httpx
 import zstandard as zstd
@@ -10,13 +11,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob
+from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob, StorageType
 from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import RemoteConnectionCreate, RemoteTransferJobBase
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
 from app.security import get_current_user
 from app.services.remote_connection_service import remote_connection_service
 from app.services.remote_transfer_service import remote_transfer_service
+from app.services.scheduler import scheduler_service
 from app.utils.remote_auth import remote_auth
 
 logger = logging.getLogger(__name__)
@@ -25,13 +27,20 @@ router = APIRouter(prefix="/api/remote", tags=["Remote Connections"])
 
 
 async def verify_remote_secret(
-    x_shared_secret: str = Header(..., alias="X-Shared-Secret"), db: Session = Depends(get_db)
+    x_remote_id: str = Header(..., alias="X-Remote-ID"),
+    x_shared_secret: str = Header(..., alias="X-Shared-Secret"),
+    db: Session = Depends(get_db),
 ):
     """Verify the shared secret for inter-instance communication."""
-    conn = (
-        db.query(RemoteConnection).filter(RemoteConnection.shared_secret == x_shared_secret).first()
-    )
-    if not conn:
+    try:
+        remote_id = int(x_remote_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Remote ID"
+        ) from None
+
+    conn = db.query(RemoteConnection).filter(RemoteConnection.id == remote_id).first()
+    if not conn or not secrets.compare_digest(conn.shared_secret, x_shared_secret):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid shared secret"
         )
@@ -41,6 +50,7 @@ async def verify_remote_secret(
 @router.get("/connection-code")
 def get_connection_code(current_user: dict = Depends(get_current_user)):
     """Get the current rotating connection code."""
+    _ = current_user
     return {"code": remote_auth.get_code()}
 
 
@@ -50,6 +60,7 @@ async def connect(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
+    _ = current_user
     """Initiate connection to another instance."""
     try:
         return await remote_connection_service.connect_to_remote(db, connection_data)
@@ -70,6 +81,7 @@ async def handshake(handshake_data: dict, db: Session = Depends(get_db)):
 @router.get("/connections", response_model=List[RemoteConnectionSchema])
 def list_connections(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """List all remote connections."""
+    _ = current_user
     return remote_connection_service.list_connections(db)
 
 
@@ -80,12 +92,13 @@ async def delete_connection(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
+    _ = current_user
     """Delete a remote connection."""
     try:
         await remote_connection_service.delete_connection(db, connection_id, force)
-        return {"status": "success"}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"status": "success"}
 
 
 @router.post("/terminate-connection")
@@ -95,6 +108,7 @@ async def terminate_connection(
     remote_conn: RemoteConnection = Depends(verify_remote_secret),
 ):
     """Handle an incoming termination request."""
+    _ = remote_conn
     remote_connection_service.handle_terminate_connection(db, data["url"])
     return {"status": "success"}
 
@@ -105,6 +119,7 @@ async def get_remote_paths(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
+    _ = current_user
     """Fetch available MonitoredPaths from a remote instance."""
     conn = remote_connection_service.get_connection(db, connection_id)
     if not conn:
@@ -155,19 +170,20 @@ def list_transfers(db: Session = Depends(get_db), current_user: dict = Depends(g
 @router.post("/receive")
 async def receive_chunk(
     request: Request,
-    x_job_id: str = Header(..., alias="X-Job-ID"),
     x_chunk_index: int = Header(..., alias="X-Chunk-Index"),
-    x_is_final: bool = Header(..., alias="X-Is-Final"),
     x_relative_path: str = Header(..., alias="X-Relative-Path"),
     x_remote_path_id: int = Header(..., alias="X-Remote-Path-ID"),
     x_storage_type: str = Header(..., alias="X-Storage-Type"),
     x_nonce: str = Header("", alias="X-Nonce"),
     db: Session = Depends(get_db),
     remote_conn: RemoteConnection = Depends(verify_remote_secret),
+    x_job_id: str = Header(..., alias="X-Job-ID"),
+    x_is_final: bool = Header(..., alias="X-Is-Final"),
 ):
     """Inter-instance endpoint to receive file chunks."""
     _ = x_job_id
     _ = x_is_final
+    _ = remote_conn
     # 1. Get MonitoredPath
     path = db.query(MonitoredPath).filter(MonitoredPath.id == x_remote_path_id).first()
     if not path:
@@ -192,7 +208,17 @@ async def receive_chunk(
     if ".." in safe_rel_path.parts:
         raise HTTPException(status_code=400, detail="Invalid relative path")
 
-    tmp_path = Path(base_dir) / safe_rel_path
+    tmp_path = (Path(base_dir) / safe_rel_path).absolute()
+
+    # SECURITY: Ensure the resolved path is within the base directory
+    try:
+        is_safe = tmp_path.resolve().is_relative_to(Path(base_dir).resolve())
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid relative path") from None
+
+    if not is_safe:
+        raise HTTPException(status_code=400, detail="Path traversal detected")
+
     tmp_path = tmp_path.with_suffix(tmp_path.suffix + ".fftmp")
 
     # Ensure directory exists
@@ -260,11 +286,16 @@ async def verify_transfer(
 
     found_tmp = None
     for d in possible_dirs:
-        p = Path(d) / safe_rel_path
-        p = p.with_suffix(p.suffix + ".fftmp")
-        if p.exists():
-            found_tmp = p
-            break
+        p = (Path(d) / safe_rel_path).absolute()
+        # SECURITY: Ensure it's within one of the allowed bases
+        try:
+            if p.resolve().is_relative_to(Path(d).resolve()):
+                p_tmp = p.with_suffix(p.suffix + ".fftmp")
+                if p_tmp.exists():
+                    found_tmp = p_tmp
+                    break
+        except Exception:
+            continue
 
     if not found_tmp:
         raise HTTPException(status_code=404, detail="Temporary file not found")
@@ -284,8 +315,6 @@ async def verify_transfer(
     found_tmp.rename(final_path)
 
     # Trigger a scan for this path in the background
-    from app.services.scheduler import scheduler_service
-
     background_tasks.add_task(scheduler_service.trigger_scan, path.id)
 
     return {"status": "success"}
@@ -293,7 +322,8 @@ async def verify_transfer(
 
 @router.get("/exposed-paths")
 def get_exposed_paths(
-    db: Session = Depends(get_db), remote_conn: RemoteConnection = Depends(verify_remote_secret)
+    db: Session = Depends(get_db),
+    remote_conn: RemoteConnection = Depends(verify_remote_secret),
 ):
     """Return MonitoredPaths for inter-instance selection."""
     _ = remote_conn  # Unused, but required for authentication

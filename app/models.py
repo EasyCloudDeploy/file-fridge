@@ -201,6 +201,8 @@ class TransactionType(str, enum.Enum):
     COPY = "copy"  # File copy
     RESTORE = "restore"  # File restore
     CLEANUP = "cleanup"  # Cleanup of orphaned records
+    REMOTE_MIGRATE = "remote_migrate"  # Migrated to remote instance
+    REMOTE_RECEIVE = "remote_receive"  # Received from remote instance
 
 
 class FileInventory(Base):

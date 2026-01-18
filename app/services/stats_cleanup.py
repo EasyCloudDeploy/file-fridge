@@ -1,12 +1,13 @@
 """Statistics cleanup service for data retention management."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import FileInventory, FileRecord, FileStatus
+from app.database import SessionLocal
+from app.models import FileInventory, FileRecord, FileStatus, RemoteTransferJob, TransferStatus
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class StatsCleanupService:
         """
         try:
             # Calculate cutoff date
-            cutoff_date = datetime.now() - timedelta(days=settings.stats_retention_days)
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=settings.stats_retention_days)
 
             logger.info(
                 f"Starting stats cleanup: deleting records older than {cutoff_date} "
@@ -51,18 +52,37 @@ class StatsCleanupService:
                 .delete(synchronize_session=False)
             )
 
+            # 3. Clean up old RemoteTransferJob entries
+            # Delete completed/failed/cancelled jobs older than the retention period
+            transfers_deleted = (
+                db.query(RemoteTransferJob)
+                .filter(
+                    RemoteTransferJob.status.in_(
+                        [
+                            TransferStatus.COMPLETED,
+                            TransferStatus.FAILED,
+                            TransferStatus.CANCELLED,
+                        ]
+                    ),
+                    RemoteTransferJob.end_time < cutoff_date,
+                )
+                .delete(synchronize_session=False)
+            )
+
             db.commit()
 
             logger.info(
-                f"Deleted {records_deleted} old FileRecord entries and {inventory_deleted} missing inventory entries"
+                f"Deleted {records_deleted} old FileRecord entries, {inventory_deleted} missing inventory entries, "
+                f"and {transfers_deleted} remote transfer jobs"
             )
 
             return {
                 "success": True,
                 "records_deleted": records_deleted,
                 "inventory_deleted": inventory_deleted,
+                "transfers_deleted": transfers_deleted,
                 "cutoff_date": cutoff_date.isoformat(),
-                "message": f"Successfully deleted {records_deleted + inventory_deleted} records",
+                "message": f"Successfully deleted {records_deleted + inventory_deleted + transfers_deleted} records",
             }
 
         except Exception as e:
@@ -81,8 +101,6 @@ def cleanup_old_stats_job_func():
     Module-level function for scheduled stats cleanup.
     This is used by APScheduler to avoid serialization issues.
     """
-    from app.database import SessionLocal
-
     db = SessionLocal()
     try:
         service = StatsCleanupService()

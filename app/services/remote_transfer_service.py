@@ -16,6 +16,7 @@ from app.models import (
     RemoteTransferJob,
     TransferStatus,
 )
+from app.services.audit_trail_service import audit_trail_service
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,7 @@ class RemoteTransferService:
                         response = await client.post(
                             f"{conn.url.rstrip('/')}/api/remote/receive",
                             headers={
+                                "X-Remote-ID": str(conn.id),
                                 "X-Shared-Secret": conn.shared_secret,
                                 "X-Job-ID": str(job.id),
                                 "X-Chunk-Index": str(chunk_idx),
@@ -179,7 +181,10 @@ class RemoteTransferService:
                 # Finalize transfer - verify on remote
                 verify_response = await client.post(
                     f"{conn.url.rstrip('/')}/api/remote/verify-transfer",
-                    headers={"X-Shared-Secret": conn.shared_secret},
+                    headers={
+                        "X-Remote-ID": str(conn.id),
+                        "X-Shared-Secret": conn.shared_secret,
+                    },
                     json={
                         "job_id": job.id,
                         "checksum": job.checksum,
@@ -207,6 +212,15 @@ class RemoteTransferService:
                     if file_item:
                         file_item.status = FileStatus.DELETED
                         db.commit()
+
+                        # Audit Trail
+                        audit_trail_service.log_remote_migration(
+                            db=db,
+                            file=file_item,
+                            remote_url=conn.url,
+                            success=True,
+                            initiated_by="system",
+                        )
                 except Exception as e:
                     logger.exception(f"Failed to remove source file after transfer: {e}")
 

@@ -108,7 +108,10 @@ class RemoteConnectionService:
                     # For now, let's assume an endpoint exists
                     await client.post(
                         f"{conn.url.rstrip('/')}/api/remote/terminate-connection",
-                        headers={"X-Shared-Secret": conn.shared_secret},
+                        headers={
+                            "X-Remote-ID": str(conn.id),
+                            "X-Shared-Secret": conn.shared_secret,
+                        },
                         json={"url": settings.ff_instance_url or "http://localhost:8000"},
                         timeout=5.0,
                     )
