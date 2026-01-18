@@ -188,7 +188,19 @@ class FileStatus(str, enum.Enum):
     MOVED = "moved"  # File has been moved to cold storage
     DELETED = "deleted"  # File was deleted
     MISSING = "missing"  # File should exist but is not found
-    MIGRATING = "migrating"  # File is being relocated between cold storage locations
+    MIGRATING = "migrating"  # File is being relocated between storage tiers
+
+
+class TransactionType(str, enum.Enum):
+    """Types of file operations for audit trail."""
+
+    FREEZE = "freeze"  # Move from hot to cold storage
+    THAW = "thaw"  # Move from cold to hot storage
+    MOVE_COLD = "move_cold"  # Move between cold storage locations
+    DELETE = "delete"  # File deletion
+    COPY = "copy"  # File copy
+    RESTORE = "restore"  # File restore
+    CLEANUP = "cleanup"  # Cleanup of orphaned records
 
 
 class FileInventory(Base):
@@ -237,6 +249,57 @@ class FileInventory(Base):
 
     # Relationship to tags
     tags = relationship("FileTag", back_populates="file", cascade="all, delete-orphan")
+
+    # Relationship to transaction history
+    transactions = relationship(
+        "FileTransactionHistory", back_populates="file", cascade="all, delete-orphan"
+    )
+
+
+class FileTransactionHistory(Base):
+    """Audit trail for file state transitions and operations."""
+
+    __tablename__ = "file_transaction_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    file_id = Column(Integer, ForeignKey("file_inventory.id"), nullable=False, index=True)
+    transaction_type = Column(SQLEnum(TransactionType), nullable=False, index=True)
+    old_storage_type = Column(SQLEnum(StorageType), nullable=True)
+    new_storage_type = Column(SQLEnum(StorageType), nullable=True)
+    old_status = Column(SQLEnum(FileStatus), nullable=True)
+    new_status = Column(SQLEnum(FileStatus), nullable=True)
+    old_path = Column(String, nullable=True)
+    new_path = Column(String, nullable=True)
+    old_storage_location_id = Column(
+        Integer, ForeignKey("cold_storage_locations.id"), nullable=True
+    )
+    new_storage_location_id = Column(
+        Integer, ForeignKey("cold_storage_locations.id"), nullable=True
+    )
+    file_size = Column(Integer, nullable=True)
+    checksum_before = Column(String, nullable=True)
+    checksum_after = Column(String, nullable=True)
+    operation_metadata = Column(Text, nullable=True)  # JSON string for additional context
+    success = Column(Boolean, nullable=False, default=True)
+    error_message = Column(Text, nullable=True)
+    initiated_by = Column(String, nullable=True)  # Who initiated the operation
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    # Relationships
+    file = relationship("FileInventory", back_populates="transactions")
+    old_storage_location = relationship(
+        "ColdStorageLocation", foreign_keys=[old_storage_location_id]
+    )
+    new_storage_location = relationship(
+        "ColdStorageLocation", foreign_keys=[new_storage_location_id]
+    )
+
+    # Composite indexes for common query patterns
+    __table_args__ = (
+        Index("idx_history_file_type", "file_id", "transaction_type"),
+        Index("idx_history_time_range", "created_at", "success"),
+        {"sqlite_autoincrement": True},
+    )
 
 
 class PinnedFile(Base):
