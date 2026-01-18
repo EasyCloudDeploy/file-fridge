@@ -181,6 +181,70 @@ def _copy_with_progress(
     os.utime(str(destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
 
 
+def move_with_rollback(
+    source: Path,
+    destination: Path,
+    operation_type,
+    verify_checksum: bool = True,
+    progress_callback: Optional[Callable[[int], None]] = None,
+) -> tuple[bool, Optional[str], Optional[str]]:
+    """
+    Move/copy file with rollback on failure.
+
+    This ensures atomic-like behavior: if verification fails, the destination
+    is deleted to avoid leaving files in an inconsistent state.
+
+    Args:
+        source: Source file path
+        destination: Destination file path
+        operation_type: Type of operation (MOVE, COPY, SYMLINK)
+        verify_checksum: Whether to verify checksum after move
+        progress_callback: Optional progress callback
+
+    Returns:
+        (success, error_message, checksum) tuple
+    """
+    from app.services.checksum_verifier import checksum_verifier
+
+    # Calculate source checksum for verification
+    source_checksum = None
+    if verify_checksum:
+        source_checksum = checksum_verifier.calculate_checksum(source)
+
+    # Perform the move operation
+    if operation_type == OperationType.MOVE:
+        success, error = _move(source, destination, progress_callback)
+    elif operation_type == OperationType.COPY:
+        success, error = _copy(source, destination, progress_callback)
+    elif operation_type == OperationType.SYMLINK:
+        success, error = _move_and_symlink(source, destination, progress_callback)
+    else:
+        return False, f"Unknown operation type: {operation_type}", None
+
+    if not success:
+        return False, error, None
+
+    # Verify checksum if requested and source checksum was calculated
+    if verify_checksum and source_checksum:
+        dest_checksum = checksum_verifier.calculate_checksum(destination)
+
+        if dest_checksum != source_checksum:
+            logger.error(
+                f"Checksum mismatch after move: {source_checksum[:16]}... != {dest_checksum[:16]}..."
+            )
+            # Rollback: delete destination to avoid inconsistent state
+            try:
+                if destination.exists():
+                    destination.unlink()
+                logger.info(f"Rolled back move by deleting destination: {destination}")
+            except Exception as e:
+                logger.error(f"Failed to rollback: {e}")
+
+            return False, "Checksum verification failed", source_checksum
+
+    return True, None, source_checksum
+
+
 def _move_and_symlink(
     source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None
 ) -> tuple[bool, Optional[str]]:
@@ -244,3 +308,4 @@ class FileMover:
     _move = staticmethod(_move)
     _copy = staticmethod(_copy)
     _move_and_symlink = staticmethod(_move_and_symlink)
+    move_with_rollback = staticmethod(move_with_rollback)

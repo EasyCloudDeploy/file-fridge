@@ -8,7 +8,10 @@ from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models import FileRecord, PinnedFile
+from app.models import FileRecord, FileStatus, PinnedFile, StorageType
+from app.services.audit_trail_service import audit_trail_service
+from app.services.checksum_verifier import checksum_verifier
+from app.services.file_mover import FileMover
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +21,10 @@ class FileThawer:
 
     @staticmethod
     def thaw_file(
-        file_record: FileRecord, pin: bool = False, db: Optional[Session] = None
+        file_record: FileRecord,
+        pin: bool = False,
+        db: Optional[Session] = None,
+        initiated_by: Optional[str] = None,
     ) -> Tuple[bool, Optional[str]]:
         """
         Move a file back from cold storage to hot storage while preserving timestamps.
@@ -27,10 +33,14 @@ class FileThawer:
             file_record: The FileRecord of the file to thaw
             pin: If True, pin the file to exclude from future scans
             db: Database session (required if pin=True)
+            initiated_by: User or system component that initiated the operation
 
         Returns:
             (success: bool, error_message: Optional[str])
         """
+        if not db:
+            return False, "Database session required"
+
         try:
             cold_path = Path(file_record.cold_storage_path)
             original_path = Path(file_record.original_path)
@@ -38,6 +48,9 @@ class FileThawer:
             # Check if file exists in cold storage
             if not cold_path.exists():
                 return False, f"File not found in cold storage: {cold_path}"
+
+            # Calculate checksum before move for verification
+            checksum_before = checksum_verifier.calculate_checksum(cold_path)
 
             # If original was a symlink, we need to handle it differently
             if file_record.operation_type.value == "symlink":
@@ -74,8 +87,21 @@ class FileThawer:
                 except Exception as e:
                     return False, f"Failed to move file back: {e!s}"
 
+            # Verify checksum after move
+            checksum_after = None
+            if original_path.exists():
+                checksum_after = checksum_verifier.calculate_checksum(original_path)
+                if checksum_before and checksum_after != checksum_before:
+                    logger.error(
+                        f"Checksum mismatch after thaw: {checksum_before[:16]}... != {checksum_after[:16]}..."
+                    )
+                    return False, "Checksum verification failed after thaw"
+
+            # Delete FileRecord entry
+            db.delete(file_record)
+
             # If pinning, add to pinned files
-            if pin and db:
+            if pin:
                 # Check if already pinned
                 existing = (
                     db.query(PinnedFile).filter(PinnedFile.file_path == str(original_path)).first()
@@ -84,14 +110,44 @@ class FileThawer:
                 if not existing:
                     pinned = PinnedFile(path_id=file_record.path_id, file_path=str(original_path))
                     db.add(pinned)
-                    db.commit()
                     logger.info(f"Pinned file: {original_path}")
+
+            db.commit()
+
+            # Get file inventory record for audit logging
+            from app.models import FileInventory
+
+            file_inventory = (
+                db.query(FileInventory)
+                .filter(FileInventory.file_path == str(original_path))
+                .first()
+            )
+
+            if file_inventory:
+                # Log to audit trail
+                audit_trail_service.log_thaw_operation(
+                    db=db,
+                    file=file_inventory,
+                    source_path=cold_path,
+                    dest_path=original_path,
+                    checksum_before=checksum_before,
+                    checksum_after=checksum_after,
+                    success=True,
+                    initiated_by=initiated_by or "manual",
+                )
+
+                # Update inventory status
+                file_inventory.storage_type = StorageType.HOT
+                file_inventory.status = FileStatus.ACTIVE
+                db.commit()
 
             logger.info(f"Thawed file: {cold_path} -> {original_path} (pinned: {pin})")
             return True, None
 
         except Exception as e:
             logger.exception(f"Error thawing file: {e!s}")
+            if db:
+                db.rollback()
             return False, str(e)
 
     @staticmethod
