@@ -2,12 +2,67 @@
 
 import enum
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Table, Text
+from cryptography.fernet import Fernet
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Table,
+    Text,
+)
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from app.database import Base
+
+
+class EncryptionManager:
+    """Manages encryption for sensitive fields like SMTP passwords."""
+
+    _instance = None
+    _cipher = None
+
+    @classmethod
+    def get_instance(cls) -> "EncryptionManager":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def __init__(self):
+        self._load_or_create_key()
+
+    def _load_or_create_key(self):
+        from app.config import settings
+
+        key_file = settings.encryption_key_file
+        try:
+            with open(key_file, "rb") as f:
+                key = f.read()
+            self._cipher = Fernet(key)
+        except FileNotFoundError:
+            key = Fernet.generate_key()
+            with open(key_file, "wb") as f:
+                f.write(key)
+            self._cipher = Fernet(key)
+
+    def encrypt(self, plaintext: str) -> str:
+        if not plaintext:
+            return plaintext
+        return self._cipher.encrypt(plaintext.encode()).decode()
+
+    def decrypt(self, ciphertext: str) -> str:
+        if not ciphertext:
+            return ciphertext
+        return self._cipher.decrypt(ciphertext.encode()).decode()
+
+
+encryption_manager = EncryptionManager.get_instance()
 
 
 class OperationType(str, enum.Enum):
@@ -73,6 +128,8 @@ class ColdStorageLocation(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True, index=True)
     path = Column(String, nullable=False, unique=True)
+    caution_threshold_percent = Column(Integer, nullable=False, default=20)  # Warn at 20% free
+    critical_threshold_percent = Column(Integer, nullable=False, default=10)  # Critical at 10% free
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -414,15 +471,17 @@ class Notifier(Base):
     type = Column(SQLEnum(NotifierType), nullable=False)
     address = Column(String, nullable=False)  # Email address or webhook URL
     enabled = Column(Boolean, default=True, nullable=False)
-    filter_level = Column(
-        SQLEnum(NotificationLevel), default=NotificationLevel.INFO, nullable=False
-    )
+    subscribed_events = Column(
+        JSON, nullable=False, server_default="[]"
+    )  # Event-based subscriptions
 
     # SMTP settings (for email notifiers only)
     smtp_host = Column(String, nullable=True)  # SMTP server hostname
     smtp_port = Column(Integer, nullable=True)  # SMTP server port (default 587)
     smtp_user = Column(String, nullable=True)  # SMTP username
-    smtp_password = Column(String, nullable=True)  # SMTP password (stored encrypted in production)
+    smtp_password_encrypted = Column(
+        String, nullable=True, name="smtp_password"
+    )  # SMTP password (encrypted at rest)
     smtp_sender = Column(String, nullable=True)  # From address
     smtp_use_tls = Column(Boolean, default=True, nullable=True)  # Use TLS encryption
 
@@ -433,6 +492,24 @@ class Notifier(Base):
     dispatches = relationship(
         "NotificationDispatch", back_populates="notifier", cascade="all, delete-orphan"
     )
+
+    @property
+    def smtp_password(self) -> str | None:
+        """Decrypt and return SMTP password."""
+        if self.smtp_password_encrypted:
+            try:
+                return encryption_manager.decrypt(self.smtp_password_encrypted)
+            except Exception:
+                return self.smtp_password_encrypted  # Fallback for non-encrypted data
+        return None
+
+    @smtp_password.setter
+    def smtp_password(self, value: str | None):
+        """Encrypt and store SMTP password."""
+        if value:
+            self.smtp_password_encrypted = encryption_manager.encrypt(value)
+        else:
+            self.smtp_password_encrypted = None
 
 
 class Notification(Base):

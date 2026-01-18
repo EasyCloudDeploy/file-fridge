@@ -83,8 +83,12 @@ class Settings(BaseSettings):
     # Authentication
     # Override via SECRET_KEY environment variable
     # Secret key for JWT signing - required for production
-    # IMPORTANT: This must be set for the application to start
+    # IMPORTANT: This must be set for application to start
     secret_key: Optional[str] = None
+
+    # Encryption key file path for sensitive data (SMTP passwords, etc.)
+    # Override via ENCRYPTION_KEY_FILE environment variable
+    encryption_key_file: str = "./data/encryption.key"
 
     # Override via ACCESS_TOKEN_EXPIRE_DAYS environment variable
     # Default token expiration in days

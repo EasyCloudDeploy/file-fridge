@@ -291,6 +291,23 @@ def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)
     if db_path.enabled:
         scheduler_service.add_path_job(db_path)
 
+    # Dispatch PATH_CREATED event
+    from app.services.notification_service import NotificationService
+    from app.services.notification_events import NotificationEventType, PathCreatedData
+
+    notification_service = NotificationService()
+    notification_service.dispatch_event_sync(
+        db=db,
+        event_type=NotificationEventType.PATH_CREATED,
+        event_data=PathCreatedData(
+            path_id=db_path.id,
+            path_name=db_path.name,
+            source_path=db_path.source_path,
+            operation_type=db_path.operation_type.value,
+            created_by=None  # TODO: Add auth context when implemented
+        )
+    )
+
     return db_path
 
 
@@ -355,6 +372,9 @@ def update_path(
                 detail=f"Path with name '{update_data['name']}' already exists",
             )
 
+    # Track changes for event notification
+    changes = {}
+
     # Handle storage_location_ids update if provided
     storage_location_ids = update_data.pop("storage_location_ids", None)
     if storage_location_ids is not None:
@@ -373,9 +393,13 @@ def update_path(
             )
 
         path.storage_locations = storage_locations
+        changes["storage_location_ids"] = storage_location_ids
 
     # Update fields
     for field, value in update_data.items():
+        old_value = getattr(path, field)
+        if old_value != value:
+            changes[field] = value
         setattr(path, field, value)
 
     db.commit()
@@ -399,6 +423,23 @@ def update_path(
     scheduler_service.remove_path_job(path_id)
     if path.enabled:
         scheduler_service.add_path_job(path)
+
+    # Dispatch PATH_UPDATED event (only if changes occurred)
+    if changes:
+        from app.services.notification_service import NotificationService
+        from app.services.notification_events import NotificationEventType, PathUpdatedData
+
+        notification_service = NotificationService()
+        notification_service.dispatch_event_sync(
+            db=db,
+            event_type=NotificationEventType.PATH_UPDATED,
+            event_data=PathUpdatedData(
+                path_id=path.id,
+                path_name=path.name,
+                changes=changes,
+                updated_by=None  # TODO: Add auth context
+            )
+        )
 
     return path
 
@@ -441,12 +482,32 @@ def delete_path(
         results["files_reversed"] = reverse_results["files_reversed"]
         results["errors"] = reverse_results["errors"]
 
+    # Store data for event before deletion
+    path_name = path.name
+    source_path = path.source_path
+
     # Remove from scheduler
     scheduler_service.remove_path_job(path_id)
 
     # Delete the path
     db.delete(path)
     db.commit()
+
+    # Dispatch PATH_DELETED event
+    from app.services.notification_service import NotificationService
+    from app.services.notification_events import NotificationEventType, PathDeletedData
+
+    notification_service = NotificationService()
+    notification_service.dispatch_event_sync(
+        db=db,
+        event_type=NotificationEventType.PATH_DELETED,
+        event_data=PathDeletedData(
+            path_id=path_id,
+            path_name=path_name,
+            source_path=source_path,
+            deleted_by=None  # TODO: Add auth context
+        )
+    )
 
     return results
 

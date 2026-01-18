@@ -1,10 +1,14 @@
 """Notification service for creating and dispatching notifications."""
 
+import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from html import escape as html_escape
+from threading import Lock
 from typing import Any, Dict, List, Optional
+from weakref import WeakKeyDictionary
 
 import aiosmtplib
 import httpx
@@ -20,13 +24,48 @@ from app.models import (
     NotifierType,
 )
 from app.services.notification_events import (
-    LowDiskSpaceData,
-    NotificationEvent,
-    SyncErrorData,
-    SyncSuccessData,
+    DiskSpaceCautionData,
+    DiskSpaceCriticalData,
+    EventData,
+    NotificationEventType,
+    PathCreatedData,
+    PathDeletedData,
+    PathUpdatedData,
+    ScanCompletedData,
+    ScanErrorData,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class RateLimiter:
+    """Simple rate limiter for notification dispatch."""
+
+    def __init__(self, cooldown_minutes: int = 240):
+        self.cooldown = timedelta(minutes=cooldown_minutes)
+        self.last_notification: Dict[str, datetime] = {}
+        self.lock = Lock()
+
+    def should_notify(self, notifier_id: int, event_type: NotificationEventType) -> bool:
+        """Check if notification should be sent based on rate limit."""
+        key = f"{notifier_id}:{event_type.value}"
+
+        with self.lock:
+            last_time = self.last_notification.get(key)
+            if last_time is None or datetime.utcnow() - last_time >= self.cooldown:
+                self.last_notification[key] = datetime.utcnow()
+                return True
+            return False
+
+    def reset(self, notifier_id: int, event_type: NotificationEventType):
+        """Reset rate limit for specific notifier/event (for testing)."""
+        key = f"{notifier_id}:{event_type.value}"
+        with self.lock:
+            if key in self.last_notification:
+                del self.last_notification[key]
+
+
+rate_limiter = RateLimiter(cooldown_minutes=240)  # 4 hour cooldown
 
 
 class NotificationService:
@@ -34,53 +73,166 @@ class NotificationService:
 
     WEBHOOK_TIMEOUT = 30
 
+    def dispatch_event_sync(
+        self,
+        db: Session,
+        event_type: NotificationEventType,
+        event_data: EventData,
+    ):
+        """
+        Synchronous wrapper for dispatch_event().
+        Dispatches notification in background without blocking.
+
+        Use this from synchronous routers/endpoints.
+        """
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # No event loop in current thread (sync context)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        # Fire and forget - don't block router response
+        loop.create_task(self.dispatch_event(db, event_type, event_data))
+
     async def dispatch_event(
         self,
         db: Session,
-        event_type: NotificationEvent,
-        data: Any,
+        event_type: NotificationEventType,
+        event_data: EventData,
         background_tasks: Optional[BackgroundTasks] = None,
     ):
         """
-        Dispatch a structured notification event.
+        Dispatch a structured notification event to all subscribed notifiers.
 
-        This is the preferred method for sending notifications.
+        Args:
+            db: Database session
+            event_type: Type of event (SCAN_COMPLETED, PATH_CREATED, etc.)
+            event_data: Pydantic model with event-specific data
+            background_tasks: Optional FastAPI background tasks
         """
-        level, message, metadata = self._format_event(event_type, data)
+        # Get notifiers subscribed to this event type
+        notifiers = self._get_notifiers_for_event(db, event_type)
 
-        await self.create_and_dispatch_notification(
-            db=db,
-            level=level,
-            message=message,
-            metadata=metadata,
-            background_tasks=background_tasks,
-        )
+        if not notifiers:
+            logger.debug(f"No notifiers subscribed to event: {event_type.value}")
+            return
 
-    def _format_event(
-        self, event_type: NotificationEvent, data: Any
-    ) -> tuple[str, str, Dict[str, Any]]:
-        """Format a notification event into a message and metadata."""
-        if event_type == NotificationEvent.SYNC_SUCCESS:
-            data: SyncSuccessData
-            level = "INFO"
-            message = f"Successfully completed sync for path: {data.path_name}"
-            metadata = data.dict()
-        elif event_type == NotificationEvent.SYNC_ERROR:
-            data: SyncErrorData
-            level = "ERROR"
-            message = f"Error during sync for path: {data.path_name}"
-            metadata = data.dict()
-        elif event_type == NotificationEvent.LOW_DISK_SPACE:
-            data: LowDiskSpaceData
-            level = "WARNING"
-            message = f"Low disk space detected for storage location: {data.storage_name}"
-            metadata = data.dict()
+        # Format message based on event type
+        message = self._format_event(event_type, event_data)
+
+        # Get legacy level for Notification.level column (backward compatibility)
+        level = self._get_legacy_level_for_event(event_type)
+
+        # Create notification record
+        notification_level = NotificationLevel(level.lower())
+        notification = Notification(level=notification_level, message=message)
+        db.add(notification)
+        db.commit()
+        db.refresh(notification)
+
+        logger.info(f"Created notification #{notification.id} for event {event_type.value}")
+
+        # Dispatch to all subscribed notifiers
+        metadata = event_data.dict()  # Convert Pydantic model to dict for metadata
+
+        if background_tasks:
+            background_tasks.add_task(
+                self._dispatch_to_notifiers, db, notification, notifiers, metadata
+            )
+            logger.info(f"Scheduled background dispatch to {len(notifiers)} notifier(s)")
         else:
-            level = "ERROR"
-            message = f"Unknown notification event type: {event_type}"
-            metadata = {"event_type": event_type, "data": str(data)}
+            await self._dispatch_to_notifiers(db, notification, notifiers, metadata)
 
-        return level, message, metadata
+        return notification
+
+    def _format_event(self, event_type: NotificationEventType, event_data: EventData) -> str:
+        """
+        Format event data into human-readable message.
+
+        Args:
+            event_type: Type of notification event
+            event_data: Pydantic model with event-specific data
+
+        Returns:
+            Formatted message string
+        """
+        if isinstance(event_data, ScanCompletedData):
+            return (
+                f"Scan completed for path '{event_data.path_name}'\n"
+                f"Files moved: {event_data.files_moved}\n"
+                f"Bytes saved: {event_data.bytes_saved:,}\n"
+                f"Duration: {event_data.scan_duration_seconds:.2f}s\n"
+                f"Errors: {event_data.errors}"
+            )
+
+        elif isinstance(event_data, ScanErrorData):
+            return (
+                f"Scan FAILED for path '{event_data.path_name}'\n"
+                f"Error: {event_data.error_message}\n"
+                f"{event_data.error_details or ''}"
+            )
+
+        elif isinstance(event_data, PathCreatedData):
+            return (
+                f"New monitored path created: '{event_data.path_name}'\n"
+                f"Source: {event_data.source_path}\n"
+                f"Operation: {event_data.operation_type}"
+            )
+
+        elif isinstance(event_data, PathUpdatedData):
+            changes_str = "\n".join(f"  - {k}: {v}" for k, v in event_data.changes.items())
+            return f"Monitored path updated: '{event_data.path_name}'\nChanges:\n{changes_str}"
+
+        elif isinstance(event_data, PathDeletedData):
+            return (
+                f"Monitored path deleted: '{event_data.path_name}'\n"
+                f"Source: {event_data.source_path}"
+            )
+
+        elif isinstance(event_data, DiskSpaceCautionData):
+            return (
+                f"CAUTION: Low disk space on '{event_data.location_name}'\n"
+                f"Path: {event_data.location_path}\n"
+                f"Free: {event_data.free_percent:.1f}% "
+                f"({event_data.free_bytes / (1024**3):.2f} GB)\n"
+                f"Threshold: {event_data.threshold_percent}%"
+            )
+
+        elif isinstance(event_data, DiskSpaceCriticalData):
+            return (
+                f"CRITICAL: Very low disk space on '{event_data.location_name}'\n"
+                f"Path: {event_data.location_path}\n"
+                f"Free: {event_data.free_percent:.1f}% "
+                f"({event_data.free_bytes / (1024**3):.2f} GB)\n"
+                f"Threshold: {event_data.threshold_percent}%\n"
+                f"IMMEDIATE ACTION REQUIRED!"
+            )
+
+        else:
+            return f"Event: {event_type.value}"
+
+    def _get_legacy_level_for_event(self, event_type: NotificationEventType) -> str:
+        """
+        Map event type to legacy notification level (for Notification.level column).
+        This maintains backward compatibility with existing notification queries.
+
+        Args:
+            event_type: Type of notification event
+
+        Returns:
+            Level string (INFO, WARNING, or ERROR)
+        """
+        level_mapping = {
+            NotificationEventType.SCAN_COMPLETED: "INFO",
+            NotificationEventType.PATH_CREATED: "INFO",
+            NotificationEventType.PATH_UPDATED: "INFO",
+            NotificationEventType.PATH_DELETED: "INFO",
+            NotificationEventType.DISK_SPACE_CAUTION: "WARNING",
+            NotificationEventType.SCAN_ERROR: "ERROR",
+            NotificationEventType.DISK_SPACE_CRITICAL: "ERROR",
+        }
+        return level_mapping.get(event_type, "INFO")
 
     async def create_and_dispatch_notification(
         self,
@@ -124,18 +276,32 @@ class NotificationService:
 
         return notification
 
-    def _get_notifiers_for_level(self, db: Session, level: NotificationLevel) -> List[Notifier]:
-        """Get all enabled notifiers that should receive notifications of this level."""
-        level_hierarchy = {
-            NotificationLevel.INFO: 0,
-            NotificationLevel.WARNING: 1,
-            NotificationLevel.ERROR: 2,
-        }
-        level_value = level_hierarchy[level]
+    def _get_notifiers_for_event(
+        self, db: Session, event_type: NotificationEventType
+    ) -> List[Notifier]:
+        """
+        Get all enabled notifiers subscribed to this event type.
 
-        notifiers = db.query(Notifier).filter(Notifier.enabled).all()
+        Uses JSON containment query to check if event_type is in subscribed_events array.
 
-        return [n for n in notifiers if level_value >= level_hierarchy[n.filter_level]]
+        Args:
+            db: Database session
+            event_type: Type of notification event
+
+        Returns:
+            List of enabled notifiers subscribed to this event
+        """
+        # For SQLite, we need to do JSON parsing manually
+        # Get all enabled notifiers and filter in Python
+        all_notifiers = db.query(Notifier).filter(Notifier.enabled == True).all()
+
+        subscribed_notifiers = []
+        for notifier in all_notifiers:
+            # subscribed_events is a Python list (thanks to SQLAlchemy JSON type)
+            if notifier.subscribed_events and event_type.value in notifier.subscribed_events:
+                subscribed_notifiers.append(notifier)
+
+        return subscribed_notifiers
 
     async def _dispatch_to_notifiers(
         self,
@@ -161,6 +327,28 @@ class NotificationService:
         logger.info(
             f"Dispatching to notifier '{notifier.name}' ({notifier.type}) at {notifier.address}"
         )
+
+        # Apply rate limiting for event-based notifications
+        # Only rate limit if we have metadata (indicates event-based dispatch)
+        if metadata:
+            event_type = metadata.get("event_type")
+            if event_type:
+                try:
+                    event_enum = NotificationEventType(event_type)
+                    if not rate_limiter.should_notify(notifier.id, event_enum):
+                        logger.info(
+                            f"Rate limited: Skipping notification to '{notifier.name}' for event {event_type.value}"
+                        )
+                        self._log_dispatch(
+                            db,
+                            notification,
+                            notifier,
+                            DispatchStatus.FAILED,
+                            "Rate limited: Too many notifications",
+                        )
+                        return
+                except ValueError:
+                    pass  # Invalid event type, skip rate limiting
 
         try:
             if notifier.type == NotifierType.EMAIL:
@@ -369,14 +557,14 @@ class NotificationService:
                     <h2 style="margin: 0;">File Fridge Notification</h2>
                 </div>
                 <div style="background-color: #f5f5f5; padding: 20px; border: 1px solid #ddd; border-top: none; border-radius: 0 0 5px 5px;">
-                    <p><strong>Level:</strong> <span style="color: {color};">{level.upper()}</span></p>
-                    <p><strong>Message:</strong> {message}</p>
+                    <p><strong>Level:</strong> <span style="color: {color};">{html_escape(level.upper())}</span></p>
+                    <p><strong>Message:</strong> {html_escape(message)}</p>
         """
 
         if metadata:
             html += "<p><strong>Additional Information:</strong></p><ul>"
             for key, value in metadata.items():
-                html += f"<li>{key}: {value}</li>"
+                html += f"<li>{html_escape(str(key))}: {html_escape(str(value))}</li>"
             html += "</ul>"
 
         html += """

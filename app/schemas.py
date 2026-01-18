@@ -57,6 +57,19 @@ class ColdStorageLocationBase(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255)
     path: str = Field(..., min_length=1)
+    caution_threshold_percent: int = Field(20, ge=0, le=100, description="Warn at this % free space")
+    critical_threshold_percent: int = Field(10, ge=0, le=100, description="Critical at this % free space")
+
+    @validator("critical_threshold_percent")
+    @classmethod
+    def validate_critical_less_than_caution(cls, v, values):
+        """Ensure critical threshold < caution threshold."""
+        if "caution_threshold_percent" in values:
+            if v >= values["caution_threshold_percent"]:
+                raise ValueError(
+                    "critical_threshold_percent must be less than caution_threshold_percent"
+                )
+        return v
 
 
 class ColdStorageLocationCreate(ColdStorageLocationBase):
@@ -68,6 +81,8 @@ class ColdStorageLocationUpdate(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     path: Optional[str] = Field(None, min_length=1)
+    caution_threshold_percent: Optional[int] = Field(None, ge=0, le=100)
+    critical_threshold_percent: Optional[int] = Field(None, ge=0, le=100)
 
 
 class ColdStorageLocation(ColdStorageLocationBase):
@@ -443,8 +458,9 @@ class NotifierBase(BaseModel):
     type: NotifierType = Field(..., description="Type of notifier (EMAIL or GENERIC_WEBHOOK)")
     address: str = Field(..., min_length=1, description="Email address or webhook URL")
     enabled: bool = Field(True, description="Whether this notifier is active")
-    filter_level: NotificationLevel = Field(
-        NotificationLevel.INFO, description="Minimum notification level to send"
+    subscribed_events: List[str] = Field(
+        default_factory=list,
+        description="List of event types to subscribe to (SCAN_COMPLETED, PATH_CREATED, etc.)"
     )
 
     # SMTP settings (required for email notifiers, ignored for webhooks)
@@ -458,6 +474,21 @@ class NotifierBase(BaseModel):
         None, description="From address for emails (required for EMAIL type)"
     )
     smtp_use_tls: Optional[bool] = Field(True, description="Use TLS encryption (default: True)")
+
+    @validator("subscribed_events")
+    @classmethod
+    def validate_event_types(cls, v):
+        """Ensure all subscribed events are valid event types."""
+        from app.services.notification_events import NotificationEventType
+
+        valid_events = {e.value for e in NotificationEventType}
+        invalid = set(v) - valid_events
+        if invalid:
+            raise ValueError(
+                f"Invalid event types: {invalid}. "
+                f"Valid events: {', '.join(sorted(valid_events))}"
+            )
+        return v
 
 
 class NotifierCreate(NotifierBase):
@@ -489,7 +520,7 @@ class NotifierUpdate(BaseModel):
     type: Optional[NotifierType] = None
     address: Optional[str] = Field(None, min_length=1)
     enabled: Optional[bool] = None
-    filter_level: Optional[NotificationLevel] = None
+    subscribed_events: Optional[List[str]] = None
 
     # SMTP settings (optional for updates)
     smtp_host: Optional[str] = None
@@ -498,6 +529,24 @@ class NotifierUpdate(BaseModel):
     smtp_password: Optional[str] = None
     smtp_sender: Optional[str] = None
     smtp_use_tls: Optional[bool] = None
+
+    @validator("subscribed_events")
+    @classmethod
+    def validate_event_types(cls, v):
+        """Ensure all subscribed events are valid event types."""
+        if v is None:
+            return v
+
+        from app.services.notification_events import NotificationEventType
+
+        valid_events = {e.value for e in NotificationEventType}
+        invalid = set(v) - valid_events
+        if invalid:
+            raise ValueError(
+                f"Invalid event types: {invalid}. "
+                f"Valid events: {', '.join(sorted(valid_events))}"
+            )
+        return v
 
 
 class Notifier(NotifierBase):
