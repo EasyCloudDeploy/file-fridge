@@ -726,23 +726,25 @@ class FileWorkflowService:
                 path, cold_files_list, StorageType.COLD, db
             )
 
-        # Mark missing files
-        # Use scan_start_time to avoid marking files as missing if they were just scanned
+        # Delete inventory entries for files that are no longer found
+        # Use scan_start_time to avoid deleting files that were just scanned
         # We give a 1-minute grace period for clock drift/duration
         cutoff = scan_start_time - timedelta(minutes=1)
 
-        missing = (
-            db.query(FileInventory)
-            .filter(
-                FileInventory.path_id == path.id,
-                FileInventory.last_seen < cutoff,
-                FileInventory.status == FileStatus.ACTIVE,
-            )
-            .update({"status": FileStatus.MISSING})
+        missing_query = db.query(FileInventory).filter(
+            FileInventory.path_id == path.id,
+            FileInventory.last_seen < cutoff,
+            FileInventory.status == FileStatus.ACTIVE,
         )
 
-        db.commit()
-        return updated_count + missing
+        # Get the count of records to be deleted before deleting them
+        missing_count = missing_query.count()
+
+        if missing_count > 0:
+            missing_query.delete(synchronize_session=False)
+            db.commit()
+
+        return updated_count + missing_count
 
     def _scan_flat_list(self, directory_path: str) -> List[Dict]:
         """Get metadata for inventory updates.
