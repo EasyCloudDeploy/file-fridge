@@ -80,6 +80,10 @@ class Settings(BaseSettings):
     # FileRecord entries older than this will be automatically deleted
     stats_retention_days: int = 30
 
+    # Remote Instance URL (for inter-instance communication)
+    # Override via FF_INSTANCE_URL environment variable
+    ff_instance_url: Optional[str] = None
+
     # Authentication
     # Override via SECRET_KEY environment variable
     # Secret key for JWT signing - required for production

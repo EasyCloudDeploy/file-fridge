@@ -17,6 +17,7 @@ from app.routers.api import criteria as api_criteria
 from app.routers.api import files as api_files
 from app.routers.api import notifiers as api_notifiers
 from app.routers.api import paths as api_paths
+from app.routers.api import remote as api_remote
 from app.routers.api import stats as api_stats
 from app.routers.api import storage as api_storage
 from app.routers.api import tag_rules as api_tag_rules
@@ -106,6 +107,7 @@ app.include_router(api_tags.router, dependencies=api_dependencies)
 app.include_router(api_tag_rules.router, dependencies=api_dependencies)
 app.include_router(api_storage.router, dependencies=api_dependencies)
 app.include_router(api_notifiers.router, dependencies=api_dependencies)
+app.include_router(api_remote.router)
 
 # Include consolidated web router (public - frontend handles auth)
 app.include_router(web_router)

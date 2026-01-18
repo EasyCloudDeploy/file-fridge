@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.models import FileRecord, FileStatus, PinnedFile, StorageType
 from app.services.audit_trail_service import audit_trail_service
 from app.services.checksum_verifier import checksum_verifier
-from app.services.file_mover import FileMover
 
 logger = logging.getLogger(__name__)
 

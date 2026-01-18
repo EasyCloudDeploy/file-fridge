@@ -299,6 +299,72 @@ class DatabaseMigration:
                 else:
                     logger.debug("updated_at column already exists")
 
+                # Migration 11: Create remote_connections table
+                if not DatabaseMigration.table_exists("remote_connections"):
+                    logger.info("Creating remote_connections table...")
+                    conn.execute(
+                        text(
+                            """
+                        CREATE TABLE remote_connections (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT NOT NULL,
+                            url TEXT NOT NULL,
+                            shared_secret TEXT NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP
+                        )
+                    """
+                        )
+                    )
+                    conn.execute(
+                        text("CREATE INDEX idx_remote_connections_name ON remote_connections(name)")
+                    )
+                    conn.commit()
+                    logger.info("✓ Created remote_connections table")
+                else:
+                    logger.debug("remote_connections table already exists")
+
+                # Migration 12: Create remote_transfer_jobs table
+                if not DatabaseMigration.table_exists("remote_transfer_jobs"):
+                    logger.info("Creating remote_transfer_jobs table...")
+                    conn.execute(
+                        text(
+                            """
+                        CREATE TABLE remote_transfer_jobs (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            file_inventory_id INTEGER NOT NULL,
+                            remote_connection_id INTEGER NOT NULL,
+                            remote_monitored_path_id INTEGER NOT NULL,
+                            status TEXT NOT NULL,
+                            progress INTEGER DEFAULT 0,
+                            current_size INTEGER DEFAULT 0,
+                            total_size INTEGER NOT NULL,
+                            start_time TIMESTAMP,
+                            end_time TIMESTAMP,
+                            error_message TEXT,
+                            retry_count INTEGER DEFAULT 0,
+                            source_path TEXT NOT NULL,
+                            relative_path TEXT NOT NULL,
+                            storage_type TEXT NOT NULL,
+                            checksum TEXT,
+                            current_speed INTEGER DEFAULT 0,
+                            eta INTEGER,
+                            FOREIGN KEY (file_inventory_id) REFERENCES file_inventory(id),
+                            FOREIGN KEY (remote_connection_id) REFERENCES remote_connections(id) ON DELETE CASCADE
+                        )
+                    """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX idx_remote_transfer_status ON remote_transfer_jobs(status)"
+                        )
+                    )
+                    conn.commit()
+                    logger.info("✓ Created remote_transfer_jobs table")
+                else:
+                    logger.debug("remote_transfer_jobs table already exists")
+
                 logger.info("✓ All database migrations completed successfully")
 
         except OperationalError as e:

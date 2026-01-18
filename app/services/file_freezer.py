@@ -18,7 +18,7 @@ from app.models import (
 )
 from app.services.audit_trail_service import audit_trail_service
 from app.services.checksum_verifier import checksum_verifier
-from app.services.file_mover import move_file, preserve_directory_structure
+from app.services.file_mover import preserve_directory_structure
 
 logger = logging.getLogger(__name__)
 
