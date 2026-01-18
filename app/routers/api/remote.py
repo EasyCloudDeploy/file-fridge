@@ -21,7 +21,7 @@ from app.utils.remote_auth import remote_auth
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/remote", tags=["Remote Connections"])
+router = APIRouter(prefix="/api/remote", tags=["Remote Connections"])
 
 
 async def verify_remote_secret(
