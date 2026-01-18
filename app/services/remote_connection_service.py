@@ -25,6 +25,7 @@ class RemoteConnectionService:
 
         # Get our own URL
         my_url = settings.ff_instance_url or "http://localhost:8000"  # Fallback if not set
+        my_name = settings.instance_name or settings.app_name
 
         # Call the remote instance's handshake endpoint
         async with httpx.AsyncClient() as client:
@@ -32,7 +33,7 @@ class RemoteConnectionService:
                 response = await client.post(
                     f"{connection_data.url.rstrip('/')}/api/remote/handshake",
                     json={
-                        "name": settings.app_name,
+                        "name": my_name,
                         "url": my_url,
                         "connection_code": connection_data.connection_code,
                         "shared_secret": shared_secret,
@@ -42,9 +43,7 @@ class RemoteConnectionService:
                 response.raise_for_status()
             except httpx.HTTPError as e:
                 msg = f"Could not connect to remote instance: {e}"
-                logger.exception(
-                    f"Failed to connect to remote instance at {connection_data.url}: {e}"
-                )
+                logger.exception("Failed to connect to remote instance at %s", connection_data.url)
                 raise ValueError(msg) from e
 
         # Store the connection locally
@@ -102,17 +101,16 @@ class RemoteConnectionService:
 
         if not force:
             # Try to notify the remote instance
+            my_url = settings.ff_instance_url or "http://localhost:8000"
             async with httpx.AsyncClient() as client:
                 try:
-                    # In a real scenario, we'd use the shared secret for auth
-                    # For now, let's assume an endpoint exists
                     await client.post(
                         f"{conn.url.rstrip('/')}/api/remote/terminate-connection",
                         headers={
-                            "X-Remote-ID": str(conn.id),
+                            "X-Remote-ID": my_url,
                             "X-Shared-Secret": conn.shared_secret,
                         },
-                        json={"url": settings.ff_instance_url or "http://localhost:8000"},
+                        json={"url": my_url},
                         timeout=5.0,
                     )
                 except Exception as e:

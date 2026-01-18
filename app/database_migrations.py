@@ -19,9 +19,7 @@ class DatabaseMigration:
         inspector = inspect(engine)
         try:
             columns = [col["name"] for col in inspector.get_columns(table_name)]
-            if column_name in columns:  # Fixed TRY300
-                return True
-            return False
+            return column_name in columns
         except Exception:
             return False
 

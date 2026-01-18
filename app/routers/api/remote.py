@@ -1,17 +1,21 @@
+# ruff: noqa: B008
 import hashlib
 import logging
 import secrets
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
+import aiofiles
+import anyio
 import httpx
 import zstandard as zstd
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
-from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob, StorageType
+from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob
 from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import RemoteConnectionCreate, RemoteTransferJobBase
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
@@ -31,18 +35,15 @@ async def verify_remote_secret(
     x_shared_secret: str = Header(..., alias="X-Shared-Secret"),
     db: Session = Depends(get_db),
 ):
-    """Verify the shared secret for inter-instance communication."""
-    try:
-        remote_id = int(x_remote_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Remote ID"
-        ) from None
+    """Verify the shared secret for inter-instance communication.
 
-    conn = db.query(RemoteConnection).filter(RemoteConnection.id == remote_id).first()
+    X-Remote-ID should be the base URL of the remote instance.
+    """
+    conn = db.query(RemoteConnection).filter(RemoteConnection.url == x_remote_id).first()
     if not conn or not secrets.compare_digest(conn.shared_secret, x_shared_secret):
+        logger.warning(f"Unauthorized remote access attempt from ID: {x_remote_id}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid shared secret"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid remote ID or shared secret"
         )
     return conn
 
@@ -65,7 +66,7 @@ async def connect(
     try:
         return await remote_connection_service.connect_to_remote(db, connection_data)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.post("/handshake")
@@ -73,9 +74,9 @@ async def handshake(handshake_data: dict, db: Session = Depends(get_db)):
     """Inter-instance handshake endpoint."""
     try:
         remote_connection_service.handle_handshake(db, handshake_data)
-        return {"status": "success"}
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return {"status": "success"}
 
 
 @router.get("/connections", response_model=List[RemoteConnectionSchema])
@@ -125,20 +126,20 @@ async def get_remote_paths(
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
+    my_url = settings.ff_instance_url or "http://localhost:8000"
+
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
                 f"{conn.url.rstrip('/')}/api/remote/exposed-paths",
-                headers={"X-Shared-Secret": conn.shared_secret},
+                headers={"X-Remote-ID": my_url, "X-Shared-Secret": conn.shared_secret},
                 timeout=10.0,
             )
             response.raise_for_status()
             return response.json()
-        except Exception:
+        except Exception as e:
             logger.exception("Failed to fetch paths from remote")
-            raise HTTPException(
-                status_code=500, detail="Failed to fetch paths from remote"
-            ) from None
+            raise HTTPException(status_code=500, detail="Failed to fetch paths from remote") from e
 
 
 @router.post("/migrate", response_model=RemoteTransferJobSchema)
@@ -167,30 +168,42 @@ def list_transfers(db: Session = Depends(get_db), current_user: dict = Depends(g
     return db.query(RemoteTransferJob).order_by(RemoteTransferJob.id.desc()).all()
 
 
+class ReceiveHeader:
+    def __init__(  # noqa: PLR0913
+        self,
+        x_chunk_index: int = Header(..., alias="X-Chunk-Index"),
+        x_relative_path: str = Header(..., alias="X-Relative-Path"),
+        x_remote_path_id: int = Header(..., alias="X-Remote-Path-ID"),
+        x_storage_type: str = Header(..., alias="X-Storage-Type"),
+        x_nonce: str = Header("", alias="X-Nonce"),
+        x_job_id: str = Header(..., alias="X-Job-ID"),
+        x_is_final: bool = Header(..., alias="X-Is-Final"),
+    ):
+        self.chunk_index = x_chunk_index
+        self.relative_path = x_relative_path
+        self.remote_path_id = x_remote_path_id
+        self.storage_type = x_storage_type
+        self.nonce = x_nonce
+        self.job_id = x_job_id
+        self.is_final = x_is_final
+
+
 @router.post("/receive")
 async def receive_chunk(
     request: Request,
-    x_chunk_index: int = Header(..., alias="X-Chunk-Index"),
-    x_relative_path: str = Header(..., alias="X-Relative-Path"),
-    x_remote_path_id: int = Header(..., alias="X-Remote-Path-ID"),
-    x_storage_type: str = Header(..., alias="X-Storage-Type"),
-    x_nonce: str = Header("", alias="X-Nonce"),
+    headers: ReceiveHeader = Depends(ReceiveHeader),
     db: Session = Depends(get_db),
     remote_conn: RemoteConnection = Depends(verify_remote_secret),
-    x_job_id: str = Header(..., alias="X-Job-ID"),
-    x_is_final: bool = Header(..., alias="X-Is-Final"),
 ):
     """Inter-instance endpoint to receive file chunks."""
-    _ = x_job_id
-    _ = x_is_final
     _ = remote_conn
     # 1. Get MonitoredPath
-    path = db.query(MonitoredPath).filter(MonitoredPath.id == x_remote_path_id).first()
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == headers.remote_path_id).first()
     if not path:
         raise HTTPException(status_code=404, detail="MonitoredPath not found")
 
     # 2. Determine base directory
-    if x_storage_type == "hot":
+    if headers.storage_type == "hot":
         base_dir = path.source_path
     else:
         # For cold, use the first storage location
@@ -200,7 +213,7 @@ async def receive_chunk(
 
     # 3. Build full path
     # Normalize relative path to prevent directory traversal
-    safe_rel_path = Path(x_relative_path)
+    safe_rel_path = Path(headers.relative_path)
     if safe_rel_path.is_absolute():
         safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
 
@@ -212,7 +225,9 @@ async def receive_chunk(
 
     # SECURITY: Ensure the resolved path is within the base directory
     try:
-        is_safe = tmp_path.resolve().is_relative_to(Path(base_dir).resolve())
+        is_safe = await anyio.to_thread.run_sync(
+            lambda: tmp_path.resolve().is_relative_to(Path(base_dir).resolve())
+        )
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid relative path") from None
 
@@ -222,18 +237,18 @@ async def receive_chunk(
     tmp_path = tmp_path.with_suffix(tmp_path.suffix + ".fftmp")
 
     # Ensure directory exists
-    tmp_path.parent.mkdir(parents=True, exist_ok=True)
+    await anyio.to_thread.run_sync(lambda: tmp_path.parent.mkdir(parents=True, exist_ok=True))
 
     # 4. Get body
     body = await request.body()
 
     # 5. Decrypt if needed
     decrypted_chunk = body
-    if x_nonce:
+    if headers.nonce:
         try:
             key = bytes.fromhex(remote_conn.shared_secret)[:32]
             aesgcm = AESGCM(key)
-            decrypted_chunk = aesgcm.decrypt(bytes.fromhex(x_nonce), body, None)
+            decrypted_chunk = aesgcm.decrypt(bytes.fromhex(headers.nonce), body, None)
         except Exception:
             logger.exception("Decryption failed")
             raise HTTPException(status_code=400, detail="Decryption failed") from None
@@ -247,11 +262,43 @@ async def receive_chunk(
         raise HTTPException(status_code=400, detail="Decompression failed") from None
 
     # 7. Write chunk
-    mode = "ab" if x_chunk_index > 0 else "wb"
-    with tmp_path.open(mode) as f:
-        f.write(decompressed_chunk)
+    mode = "ab" if headers.chunk_index > 0 else "wb"
+    async with aiofiles.open(tmp_path, mode) as f:
+        await f.write(decompressed_chunk)
 
-    return {"status": "success", "chunk": x_chunk_index}
+    return {"status": "success", "chunk": headers.chunk_index}
+
+
+async def _get_found_tmp(db: Session, remote_path_id: int, relative_path: str) -> Path:
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == remote_path_id).first()
+    if not path:
+        raise HTTPException(status_code=404, detail="MonitoredPath not found")
+
+    possible_dirs = [path.source_path]
+    for loc in path.storage_locations:
+        possible_dirs.append(loc.path)
+
+    safe_rel_path = Path(relative_path)
+    if safe_rel_path.is_absolute():
+        safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
+
+    if ".." in safe_rel_path.parts:
+        raise HTTPException(status_code=400, detail="Invalid relative path")
+
+    for d in possible_dirs:
+        p = (Path(d) / safe_rel_path).absolute()
+        try:
+            is_relative = await anyio.to_thread.run_sync(
+                lambda p=p, d=d: p.resolve().is_relative_to(Path(d).resolve())
+            )
+            if is_relative:
+                p_tmp = p.with_suffix(p.suffix + ".fftmp")
+                if await anyio.to_thread.run_sync(p_tmp.exists):
+                    return p_tmp
+        except Exception:
+            continue
+
+    raise HTTPException(status_code=404, detail="Temporary file not found")
 
 
 @router.post("/verify-transfer")
@@ -262,61 +309,29 @@ async def verify_transfer(
     remote_conn: RemoteConnection = Depends(verify_remote_secret),
 ):
     """Finalize and verify a file transfer."""
-    _ = remote_conn  # Unused, but required for authentication
+    _ = remote_conn
     relative_path = data["relative_path"]
     remote_path_id = data["remote_path_id"]
     checksum = data.get("checksum")
 
-    path = db.query(MonitoredPath).filter(MonitoredPath.id == remote_path_id).first()
-    if not path:
-        raise HTTPException(status_code=404, detail="MonitoredPath not found")
+    found_tmp = await _get_found_tmp(db, remote_path_id, relative_path)
 
-    # Search for the .fftmp file in possible locations
-    possible_dirs = [path.source_path]
-    for loc in path.storage_locations:
-        possible_dirs.append(loc.path)
-
-    safe_rel_path = Path(relative_path)
-    if safe_rel_path.is_absolute():
-        safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
-
-    # Explicitly prevent upward directory traversal
-    if ".." in safe_rel_path.parts:
-        raise HTTPException(status_code=400, detail="Invalid relative path")
-
-    found_tmp = None
-    for d in possible_dirs:
-        p = (Path(d) / safe_rel_path).absolute()
-        # SECURITY: Ensure it's within one of the allowed bases
-        try:
-            if p.resolve().is_relative_to(Path(d).resolve()):
-                p_tmp = p.with_suffix(p.suffix + ".fftmp")
-                if p_tmp.exists():
-                    found_tmp = p_tmp
-                    break
-        except Exception:
-            continue
-
-    if not found_tmp:
-        raise HTTPException(status_code=404, detail="Temporary file not found")
-
-    # Verify checksum if provided
     if checksum:
         sha256_hash = hashlib.sha256()
-        with found_tmp.open("rb") as f:
-            for byte_block in iter(lambda: f.read(4096), b""):
+        async with aiofiles.open(found_tmp, "rb") as f:
+            while True:
+                byte_block = await f.read(4096)
+                if not byte_block:
+                    break
                 sha256_hash.update(byte_block)
 
         if sha256_hash.hexdigest() != checksum:
             raise HTTPException(status_code=400, detail="Checksum verification failed")
 
-    # Move to final location
     final_path = found_tmp.with_suffix("")
-    found_tmp.rename(final_path)
+    await anyio.to_thread.run_sync(found_tmp.rename, final_path)
 
-    # Trigger a scan for this path in the background
-    background_tasks.add_task(scheduler_service.trigger_scan, path.id)
-
+    background_tasks.add_task(scheduler_service.trigger_scan, remote_path_id)
     return {"status": "success"}
 
 

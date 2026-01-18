@@ -86,7 +86,7 @@ class StatsCleanupService:
             }
 
         except Exception as e:
-            logger.exception(f"Error during stats cleanup: {e}")
+            logger.exception("Error during stats cleanup")
             db.rollback()
             return {
                 "success": False,
@@ -106,8 +106,8 @@ def cleanup_old_stats_job_func():
         service = StatsCleanupService()
         result = service.cleanup_old_records(db)
         logger.info(f"Stats cleanup completed: {result}")
-    except Exception as e:
-        logger.exception(f"Error in scheduled stats cleanup: {e}")
+    except Exception:
+        logger.exception("Error in scheduled stats cleanup")
     finally:
         try:
             db.close()

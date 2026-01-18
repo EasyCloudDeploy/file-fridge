@@ -68,13 +68,13 @@ class SchedulerService:
                 self._add_stats_cleanup_job()
                 self._add_remote_code_rotation_job()
                 self._add_remote_transfer_job()
-            except Exception as e:
-                logger.exception(f"Error starting scheduler: {e}")
+            except Exception:
+                logger.exception("Error starting scheduler")
                 # Try to clean up
                 try:
                     if self.scheduler.running:
                         self.scheduler.shutdown(wait=False)
-                except:
+                except Exception:
                     pass
                 raise
 
@@ -202,8 +202,8 @@ class SchedulerService:
                 replace_existing=True,
             )
             logger.info("Added scheduled job for processing remote transfers (runs every minute)")
-        except Exception as e:
-            logger.exception(f"Error adding remote transfer job: {e}")
+        except Exception:
+            logger.exception("Error adding remote transfer job")
 
     def _add_remote_code_rotation_job(self):
         """Add scheduled job for rotating remote connection code hourly."""
@@ -226,8 +226,8 @@ class SchedulerService:
                 replace_existing=True,
             )
             logger.info("Added scheduled job for hourly remote code rotation")
-        except Exception as e:
-            logger.exception(f"Error adding remote code rotation job: {e}")
+        except Exception:
+            logger.exception("Error adding remote code rotation job")
 
 
 def check_disk_space_and_notify(path: MonitoredPath, db: Session):
@@ -274,8 +274,8 @@ def process_remote_transfers_job_func():
             asyncio.set_event_loop(loop)
 
         loop.run_until_complete(remote_transfer_service.process_pending_transfers())
-    except Exception as e:
-        logger.exception(f"Error in remote transfer job: {e}")
+    except Exception:
+        logger.exception("Error in remote transfer job")
 
 
 def rotate_remote_code_job_func():

@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI):  # noqa: ARG001
     """Application lifespan manager."""
     # Startup
     logger.info("Initializing database...")
