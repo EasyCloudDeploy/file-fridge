@@ -114,7 +114,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_criteria_id"), "criteria", ["id"], unique=False)
-    
+
     op.create_table(
         "cold_storage_locations",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -451,7 +451,7 @@ def upgrade() -> None:
         ["timestamp"],
         unique=False,
     )
-    
+
     op.create_table(
         "path_storage_location_association",
         sa.Column("path_id", sa.Integer(), nullable=False),
@@ -553,7 +553,7 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_cold_storage_locations_name"), table_name="cold_storage_locations")
     op.drop_index(op.f("ix_cold_storage_locations_id"), table_name="cold_storage_locations")
     op.drop_table("cold_storage_locations")
-    
+
     op.drop_index(op.f("ix_criteria_id"), table_name="criteria")
     op.drop_table("criteria")
 
