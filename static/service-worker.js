@@ -1,9 +1,12 @@
 // File Fridge Service Worker
-// Provides basic caching for static assets
+// Provides basic caching for static assets and offline support
 
 const CACHE_NAME = 'file-fridge-v1';
+const OFFLINE_URL = '/static/html/offline.html';
+
 const STATIC_ASSETS = [
   '/',
+  '/static/html/offline.html',
   '/static/css/style.css',
   '/static/js/app.js',
   '/static/js/dashboard.js',
@@ -30,6 +33,15 @@ self.addEventListener('install', (event) => {
       .then(() => self.skipWaiting())
   );
 });
+
+// Helper to check if user is online
+function isOnline() {
+  return self.clients.matchAll()
+    .then(clients => {
+      if (clients.length === 0) return false;
+      return clients[0].navigator.onLine;
+    });
+}
 
 // Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
@@ -69,6 +81,33 @@ self.addEventListener('fetch', (event) => {
               headers: { 'Content-Type': 'application/json' }
             }
           );
+        })
+    );
+    return;
+  }
+
+  // For HTML pages, try network first, fall back to cache, then offline page
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          // Cache the fetched response
+          const responseToCache = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(request, responseToCache);
+          });
+          return response;
+        })
+        .catch(() => {
+          // Network failed, try cache
+          return caches.match(request)
+            .then((cachedResponse) => {
+              if (cachedResponse) {
+                return cachedResponse;
+              }
+              // Nothing in cache, show offline page
+              return caches.match(OFFLINE_URL);
+            });
         })
     );
     return;
