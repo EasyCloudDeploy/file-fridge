@@ -24,7 +24,6 @@ from app.services.remote_connection_service import remote_connection_service
 from app.services.remote_transfer_service import remote_transfer_service
 from app.services.scheduler import scheduler_service
 from app.utils.disk_validator import disk_space_validator
-from app.utils.rate_limiter import check_rate_limit
 from app.utils.remote_auth import remote_auth
 from app.utils.retry_strategy import retry_strategy
 
@@ -229,7 +228,6 @@ def bulk_retry_transfers(
     if not job_ids:
         raise HTTPException(status_code=400, detail="No job IDs provided")
 
-    from app.utils.retry_strategy import MAX_RETRIES
 
     # Get failed jobs and reset them to PENDING
     jobs = (
@@ -358,7 +356,7 @@ async def receive_chunk(
 ):
     """Inter-instance endpoint to receive file chunks."""
     _ = remote_conn
-    check_rate_limit(request)
+    # Rate limiting is disabled for inter-instance transfers to support high-speed migration
 
     # 1. Get MonitoredPath
     path = db.query(MonitoredPath).filter(MonitoredPath.id == headers.remote_path_id).first()
@@ -452,13 +450,12 @@ async def _verify_checksum_in_background(found_tmp: Path, checksum: str):
 async def verify_transfer(
     data: dict,
     background_tasks: BackgroundTasks,
-    request: Request,
     db: Session = Depends(get_db),
     remote_conn: RemoteConnection = Depends(verify_remote_secret),
 ):
     """Finalize and verify a file transfer."""
     _ = remote_conn
-    check_rate_limit(request)
+    # Rate limiting is disabled for inter-instance transfers to support high-speed migration
     relative_path = data["relative_path"]
     remote_path_id = data["remote_path_id"]
     checksum = data.get("checksum")
@@ -475,6 +472,57 @@ async def verify_transfer(
 
     background_tasks.add_task(scheduler_service.trigger_scan, remote_path_id)
     return {"status": "success"}
+
+
+@router.get("/transfer-status")
+async def get_transfer_status(
+    relative_path: str,
+    remote_path_id: int,
+    storage_type: str,
+    db: Session = Depends(get_db),
+    remote_conn: RemoteConnection = Depends(verify_remote_secret),
+):
+    """Check the status of a file transfer on the remote instance.
+    Returns the current size of the temporary file or final file if they exist.
+    """
+    _ = remote_conn
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == remote_path_id).first()
+    if not path:
+        raise HTTPException(status_code=404, detail="MonitoredPath not found")
+
+    base_dir = _get_base_directory(path, storage_type)
+
+    # Construct safe paths
+    safe_rel_path = Path(relative_path)
+    if safe_rel_path.is_absolute():
+        safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
+    if ".." in safe_rel_path.parts:
+        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG)
+
+    final_path = (Path(base_dir) / safe_rel_path).absolute()
+    # Security check: ensure path is within base directory
+    try:
+        is_safe = await anyio.to_thread.run_sync(
+            lambda: final_path.resolve().is_relative_to(Path(base_dir).resolve())
+        )
+    except Exception:
+        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG) from None
+
+    if not is_safe:
+        raise HTTPException(status_code=400, detail="Path traversal detected")
+
+    # 1. Check if file already exists (already completed)
+    if await anyio.to_thread.run_sync(final_path.exists):
+        stat = await anyio.to_thread.run_sync(final_path.stat)
+        return {"size": stat.st_size, "status": "completed"}
+
+    # 2. Check for temporary file
+    tmp_path = final_path.with_suffix(final_path.suffix + ".fftmp")
+    if await anyio.to_thread.run_sync(tmp_path.exists):
+        stat = await anyio.to_thread.run_sync(tmp_path.stat)
+        return {"size": stat.st_size, "status": "partial"}
+
+    return {"size": 0, "status": "not_found"}
 
 
 @router.get("/exposed-paths")
