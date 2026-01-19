@@ -3,7 +3,7 @@
 import base64
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
@@ -98,12 +98,13 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     to_encode = data.copy()
 
     # Set expiration
+    now = datetime.now(tz=timezone.utc)
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = now + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(days=settings.access_token_expire_days)
+        expire = now + timedelta(days=settings.access_token_expire_days)
 
-    to_encode.update({"exp": expire, "iat": datetime.utcnow()})
+    to_encode.update({"exp": expire, "iat": now})
 
     # Encode JWT
     encoded_jwt = jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)

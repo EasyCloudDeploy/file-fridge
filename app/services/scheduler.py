@@ -19,7 +19,9 @@ from app.services.notification_events import (
     ScanErrorData,
 )
 from app.services.notification_service import notification_service
+from app.services.remote_transfer_service import remote_transfer_service
 from app.services.stats_cleanup import cleanup_old_stats_job_func
+from app.utils.remote_auth import remote_auth
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +70,15 @@ class SchedulerService:
                 self._add_disk_space_monitoring_job()
             except Exception as e:
                 logger.exception(f"Error starting scheduler: {e}")
+                self._add_remote_code_rotation_job()
+                self._add_remote_transfer_job()
+            except Exception:
+                logger.exception("Error starting scheduler")
                 # Try to clean up
                 try:
                     if self.scheduler.running:
                         self.scheduler.shutdown(wait=False)
-                except:
+                except Exception:
                     pass
                 raise
 
@@ -83,8 +89,8 @@ class SchedulerService:
                 # Shutdown gracefully, waiting for running jobs to complete
                 self.scheduler.shutdown(wait=True)
                 logger.info("Scheduler stopped gracefully")
-            except Exception as e:
-                logger.warning(f"Error during scheduler shutdown: {e}")
+            except Exception:
+                logger.warning("Error during scheduler shutdown")
                 try:
                     # Force shutdown if graceful shutdown fails
                     self.scheduler.shutdown(wait=False)
@@ -105,10 +111,10 @@ class SchedulerService:
             for path in paths:
                 try:
                     self.add_path_job(path)
-                except Exception as e:
-                    logger.exception(f"Error loading job for path {path.id}: {e}")
-        except Exception as e:
-            logger.exception(f"Error loading existing jobs: {e}")
+                except Exception:
+                    logger.exception(f"Error loading job for path {path.id}")
+        except Exception:
+            logger.exception("Error loading existing jobs")
         finally:
             db.close()
 
@@ -136,8 +142,8 @@ class SchedulerService:
                     replace_existing=True,
                 )
                 logger.info(f"Added scheduled job for path {path.id} ({path.name})")
-        except Exception as e:
-            logger.exception(f"Error adding job for path {path.id}: {e}")
+        except Exception:
+            logger.exception(f"Error adding job for path {path.id}")
 
     def remove_path_job(self, path_id: int):
         """Remove scheduled job for a path."""
@@ -176,8 +182,56 @@ class SchedulerService:
                 replace_existing=True,
             )
             logger.info("Added scheduled job for daily stats cleanup (runs at 2 AM)")
-        except Exception as e:
-            logger.exception(f"Error adding stats cleanup job: {e}")
+        except Exception:
+            logger.exception("Error adding stats cleanup job")
+
+    def _add_remote_transfer_job(self):
+        """Add scheduled job for processing remote transfers."""
+        if not self.scheduler.running:
+            logger.warning("Scheduler not running, skipping remote transfer job addition")
+            return
+
+        job_id = "remote_transfer_processing"
+        try:
+            # Remove existing job if present
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            # Schedule to run every minute
+            self.scheduler.add_job(
+                process_remote_transfers_job_func,
+                "interval",
+                minutes=1,
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info("Added scheduled job for processing remote transfers (runs every minute)")
+        except Exception:
+            logger.exception("Error adding remote transfer job")
+
+    def _add_remote_code_rotation_job(self):
+        """Add scheduled job for rotating remote connection code hourly."""
+        if not self.scheduler.running:
+            logger.warning("Scheduler not running, skipping remote code rotation job addition")
+            return
+
+        job_id = "remote_code_rotation"
+        try:
+            # Remove existing job if present
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            # Schedule to run every hour
+            self.scheduler.add_job(
+                rotate_remote_code_job_func,
+                "interval",
+                hours=1,
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info("Added scheduled job for hourly remote code rotation")
+        except Exception:
+            logger.exception("Error adding remote code rotation job")
 
     def _add_disk_space_monitoring_job(self):
         """Add scheduled job for disk space monitoring (runs every 10 minutes)."""
@@ -255,8 +309,31 @@ def check_disk_space_and_notify(path: MonitoredPath, db: Session):
             logger.warning(
                 f"Could not check disk space for {location.name}: path not found at {location.path}"
             )
-        except Exception as e:
-            logger.exception(f"Error checking disk space for {location.name}: {e}")
+        except Exception:
+            logger.exception(f"Error checking disk space for {location.name}")
+
+
+def process_remote_transfers_job_func():
+    """Job function to process pending remote transfers."""
+    import asyncio
+
+    try:
+        # Create a new event loop for this thread if needed
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        loop.run_until_complete(remote_transfer_service.process_pending_transfers())
+    except Exception:
+        logger.exception("Error in remote transfer job")
+
+
+def rotate_remote_code_job_func():
+    """Job function to rotate the remote connection code."""
+    remote_auth.rotate_code()
+    logger.info("Rotated remote connection code")
 
 
 def disk_space_monitoring_job_func():
@@ -418,8 +495,8 @@ def scan_path_job_func(path_id: int):
     finally:
         try:
             db.close()
-        except Exception as e:
-            logger.warning(f"Error closing scheduler database session: {e}")
+        except Exception:
+            logger.warning("Error closing scheduler database session")
 
 
 # Global scheduler instance

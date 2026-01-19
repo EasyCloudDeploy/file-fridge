@@ -411,7 +411,7 @@ class NotificationService:
             self._log_dispatch(db, notification, notifier, status, details)
 
         except Exception as e:
-            logger.exception(f"Unexpected error dispatching to notifier '{notifier.name}': {e}")
+            logger.exception(f"Unexpected error dispatching to notifier '{notifier.name}'")
             self._log_dispatch(
                 db, notification, notifier, DispatchStatus.FAILED, f"Unexpected error: {e!s}"
             )
@@ -520,7 +520,7 @@ class NotificationService:
         test_metadata = {
             "notifier_name": notifier.name,
             "notifier_type": notifier.type.value,
-            "test_timestamp": datetime.utcnow().isoformat(),
+            "test_timestamp": datetime.now(tz=timezone.utc).isoformat(),
         }
 
         try:

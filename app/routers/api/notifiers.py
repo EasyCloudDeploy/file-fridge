@@ -1,3 +1,4 @@
+# ruff: noqa: B008
 """API endpoints for notifier management."""
 
 import logging

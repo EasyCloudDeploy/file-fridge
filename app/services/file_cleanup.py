@@ -20,7 +20,7 @@ class FileCleanup:
     @staticmethod
     def cleanup_missing_files(db: Session, path_id: Optional[int] = None) -> dict:
         """
-        Clean up FileRecord entries for files that no longer exist.
+        Clean up FileRecord and FileInventory entries for files that no longer exist.
 
         Args:
             db: Database session
@@ -29,6 +29,9 @@ class FileCleanup:
         Returns:
             dict with cleanup results
         """
+        # Cleanup missing FileInventory entries first
+        inventory_results = FileCleanup.cleanup_missing_inventory_files(db, path_id=path_id)
+
         results = {"checked": 0, "removed": 0, "errors": []}
 
         # Directory existence cache to avoid redundant filesystem calls
@@ -123,11 +126,61 @@ class FileCleanup:
 
             db.commit()
             logger.info(
-                f"Cleanup complete: checked {results['checked']}, removed {results['removed']}"
+                f"FileRecord cleanup complete: checked {results['checked']}, removed {results['removed']}"
             )
 
         except Exception as e:
-            error_msg = f"Error during cleanup: {e!s}"
+            error_msg = f"Error during FileRecord cleanup: {e!s}"
+            results["errors"].append(error_msg)
+            logger.exception(error_msg)
+            db.rollback()
+
+        # Combine results
+        return {
+            "checked": results["checked"] + inventory_results["checked"],
+            "removed": results["removed"] + inventory_results["removed"],
+            "errors": results["errors"] + inventory_results["errors"],
+        }
+
+    @staticmethod
+    def cleanup_missing_inventory_files(db: Session, path_id: Optional[int] = None) -> dict:
+        """
+        Clean up FileInventory entries for files that are marked as 'missing'.
+
+        Args:
+            db: Database session
+            path_id: Optional path ID to limit cleanup to a specific path
+
+        Returns:
+            dict with cleanup results
+        """
+        results = {"checked": 0, "removed": 0, "errors": []}
+        try:
+            # Query for missing FileInventory entries
+            query = db.query(FileInventory).filter(FileInventory.status == "missing")
+            if path_id:
+                query = query.filter(FileInventory.path_id == path_id)
+
+            missing_files = query.all()
+            results["checked"] = len(missing_files)
+
+            if not missing_files:
+                logger.info("No missing FileInventory entries to clean up.")
+                return results
+
+            logger.info(f"Found {results['checked']} missing FileInventory entries to remove.")
+
+            for file_entry in missing_files:
+                db.delete(file_entry)
+                results["removed"] += 1
+
+            db.commit()
+            logger.info(
+                f"FileInventory cleanup complete: checked {results['checked']}, removed {results['removed']}"
+            )
+
+        except Exception as e:
+            error_msg = f"Error during FileInventory cleanup: {e!s}"
             results["errors"].append(error_msg)
             logger.exception(error_msg)
             db.rollback()

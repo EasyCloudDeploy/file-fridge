@@ -8,7 +8,7 @@ import re
 import stat
 import subprocess
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -114,12 +114,12 @@ class CriteriaMatcher:
                         atime = last_open_time
                         used_source = "macOS Last Open"
                         logger.debug(
-                            f"File {file_path}: Using macOS Last Open time ({datetime.fromtimestamp(last_open_time)}) instead of atime ({datetime.fromtimestamp(original_atime)})"
+                            f"File {file_path}: Using macOS Last Open time ({datetime.fromtimestamp(last_open_time, tz=timezone.utc)}) instead of atime ({datetime.fromtimestamp(original_atime, tz=timezone.utc)})"
                         )
                     else:
                         used_source = "atime (newer than Last Open)"
                         logger.debug(
-                            f"File {file_path}: Using atime ({datetime.fromtimestamp(original_atime)}) instead of macOS Last Open ({datetime.fromtimestamp(last_open_time)})"
+                            f"File {file_path}: Using atime ({datetime.fromtimestamp(original_atime, tz=timezone.utc)}) instead of macOS Last Open ({datetime.fromtimestamp(last_open_time, tz=timezone.utc)})"
                         )
                 else:
                     # Last Open time is None - file has NEVER been opened by user
@@ -128,15 +128,15 @@ class CriteriaMatcher:
                     atime = 0.0  # Unix epoch (Jan 1, 1970)
                     used_source = "macOS Last Open (never opened - using epoch)"
                     logger.debug(
-                        f"File {file_path}: macOS Last Open time not available (never opened), treating as very old (epoch time) instead of using atime ({datetime.fromtimestamp(original_atime)})"
+                        f"File {file_path}: macOS Last Open time not available (never opened), treating as very old (epoch time) instead of using atime ({datetime.fromtimestamp(original_atime, tz=timezone.utc)})"
                     )
             else:
                 logger.debug(
-                    f"File {file_path}: Non-macOS system, using atime ({datetime.fromtimestamp(original_atime)})"
+                    f"File {file_path}: Non-macOS system, using atime ({datetime.fromtimestamp(original_atime, tz=timezone.utc)})"
                 )
 
             logger.debug(
-                f"File {file_path}: Final atime for criteria check: {datetime.fromtimestamp(atime)} (source: {used_source})"
+                f"File {file_path}: Final atime for criteria check: {datetime.fromtimestamp(atime, tz=timezone.utc)} (source: {used_source})"
             )
             return CriteriaMatcher._match_time(atime, operator, value, "atime")
         if criterion_type == CriterionType.CTIME:
@@ -357,7 +357,7 @@ class CriteriaMatcher:
                                         # timestamp() will correctly convert from any timezone to Unix time
                                         timestamp = dt.timestamp()
                                         logger.debug(
-                                            f"File {file_path}: Got Last Open from mdls: {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp)})"
+                                            f"File {file_path}: Got Last Open from mdls: {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp, tz=timezone.utc)})"
                                         )
                                         return timestamp
                                     except ValueError:
@@ -372,7 +372,7 @@ class CriteriaMatcher:
                                             dt_utc = dt_naive.replace(tzinfo=timezone.utc)
                                             timestamp = dt_utc.timestamp()
                                             logger.debug(
-                                                f"File {file_path}: Got Last Open from mdls (manual UTC): {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp)})"
+                                                f"File {file_path}: Got Last Open from mdls (manual UTC): {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp, tz=timezone.utc)})"
                                             )
                                             return timestamp
                                 else:
@@ -382,7 +382,7 @@ class CriteriaMatcher:
                                     dt_utc = dt_naive.replace(tzinfo=timezone.utc)
                                     timestamp = dt_utc.timestamp()
                                     logger.debug(
-                                        f"File {file_path}: Got Last Open from mdls (assumed UTC): {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp)})"
+                                        f"File {file_path}: Got Last Open from mdls (assumed UTC): {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp, tz=timezone.utc)})"
                                     )
                                     return timestamp
                             except ValueError as e:

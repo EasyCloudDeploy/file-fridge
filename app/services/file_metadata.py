@@ -34,8 +34,8 @@ class FileMetadataExtractor:
                     sha256_hash.update(chunk)
 
             return sha256_hash.hexdigest()
-        except Exception as e:
-            logger.exception(f"Error computing hash for {file_path}: {e}")
+        except Exception:
+            logger.exception(f"Error computing hash for {file_path}")
             return None
 
     @staticmethod
@@ -67,8 +67,8 @@ class FileMetadataExtractor:
 
             return (file_extension, mime_type, checksum)
 
-        except Exception as e:
-            logger.exception(f"Error extracting metadata for {file_path}: {e}")
+        except Exception:
+            logger.exception(f"Error extracting metadata for {file_path}")
             return (None, None, None)
 
     @staticmethod

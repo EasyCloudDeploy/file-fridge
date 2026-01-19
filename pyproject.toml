@@ -1,6 +1,6 @@
 [project]
 name = "file-fridge"
-version = "1.0.0"
+version = "0.0.35"
 description = "File cold storage management application for Linux server administrators"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -39,6 +39,8 @@ dependencies = [
     "pyjwt>=2.8.0",
     "passlib[bcrypt]>=1.7.4",
     "python-jose[cryptography]>=3.3.0",
+    "zstandard>=0.23.0",
+    "cryptography>=46.0.3",
 ]
 
 [project.optional-dependencies]

@@ -1,6 +1,7 @@
 """Automatic database migrations on application startup."""
 
 import logging
+import uuid
 
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import OperationalError
@@ -19,9 +20,7 @@ class DatabaseMigration:
         inspector = inspect(engine)
         try:
             columns = [col["name"] for col in inspector.get_columns(table_name)]
-            if column_name in columns:  # Fixed TRY300
-                return True
-            return False
+            return column_name in columns
         except Exception:
             return False
 
@@ -298,6 +297,118 @@ class DatabaseMigration:
                     logger.info("✓ Added updated_at column")
                 else:
                     logger.debug("updated_at column already exists")
+
+                # Migration 11: Create remote_connections table
+                if not DatabaseMigration.table_exists("remote_connections"):
+                    logger.info("Creating remote_connections table...")
+                    conn.execute(
+                        text(
+                            """
+                        CREATE TABLE remote_connections (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT NOT NULL,
+                            url TEXT NOT NULL,
+                            shared_secret TEXT NOT NULL,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP
+                        )
+                    """
+                        )
+                    )
+                    conn.execute(
+                        text("CREATE INDEX idx_remote_connections_name ON remote_connections(name)")
+                    )
+                    conn.commit()
+                    logger.info("✓ Created remote_connections table")
+                else:
+                    logger.debug("remote_connections table already exists")
+
+                # Migration 12: Create remote_transfer_jobs table
+                if not DatabaseMigration.table_exists("remote_transfer_jobs"):
+                    logger.info("Creating remote_transfer_jobs table...")
+                    conn.execute(
+                        text(
+                            """
+                        CREATE TABLE remote_transfer_jobs (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            file_inventory_id INTEGER NOT NULL,
+                            remote_connection_id INTEGER NOT NULL,
+                            remote_monitored_path_id INTEGER NOT NULL,
+                            status TEXT NOT NULL,
+                            progress INTEGER DEFAULT 0,
+                            current_size INTEGER DEFAULT 0,
+                            total_size INTEGER NOT NULL,
+                            start_time TIMESTAMP,
+                            end_time TIMESTAMP,
+                            error_message TEXT,
+                            retry_count INTEGER DEFAULT 0,
+                            source_path TEXT NOT NULL,
+                            relative_path TEXT NOT NULL,
+                            storage_type TEXT NOT NULL,
+                            checksum TEXT,
+                            current_speed INTEGER DEFAULT 0,
+                            eta INTEGER,
+                            FOREIGN KEY (file_inventory_id) REFERENCES file_inventory(id),
+                            FOREIGN KEY (remote_connection_id) REFERENCES remote_connections(id) ON DELETE CASCADE
+                        )
+                    """
+                        )
+                    )
+                    conn.execute(
+                        text(
+                            "CREATE INDEX idx_remote_transfer_status ON remote_transfer_jobs(status)"
+                        )
+                    )
+                    conn.commit()
+                    logger.info("✓ Created remote_transfer_jobs table")
+                else:
+                    logger.debug("remote_transfer_jobs table already exists")
+
+                # Migration 13: Create instance_metadata table
+                if not DatabaseMigration.table_exists("instance_metadata"):
+                    logger.info("Creating instance_metadata table...")
+                    conn.execute(
+                        text(
+                            """
+                        CREATE TABLE instance_metadata (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            instance_uuid TEXT NOT NULL UNIQUE,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """
+                        )
+                    )
+                    # Generate and insert a UUID
+                    new_uuid = str(uuid.uuid4())
+                    conn.execute(
+                        text("INSERT INTO instance_metadata (instance_uuid) VALUES (:uuid)"),
+                        {"uuid": new_uuid},
+                    )
+                    conn.commit()
+                    logger.info(f"✓ Created instance_metadata table and generated UUID: {new_uuid}")
+                else:
+                    logger.debug("instance_metadata table already exists")
+
+                # Migration 14: Add remote_instance_uuid to remote_connections
+                if not DatabaseMigration.column_exists(
+                    "remote_connections", "remote_instance_uuid"
+                ):
+                    logger.info("Adding remote_instance_uuid column to remote_connections table...")
+                    conn.execute(
+                        text("ALTER TABLE remote_connections ADD COLUMN remote_instance_uuid TEXT")
+                    )
+                    if not DatabaseMigration.index_exists(
+                        "idx_remote_connections_remote_instance_uuid"
+                    ):
+                        conn.execute(
+                            text(
+                                "CREATE UNIQUE INDEX idx_remote_connections_remote_instance_uuid ON remote_connections(remote_instance_uuid)"
+                            )
+                        )
+                    conn.commit()
+                    logger.info("✓ Added remote_instance_uuid column to remote_connections")
+                else:
+                    logger.debug("remote_instance_uuid column already exists in remote_connections")
 
                 logger.info("✓ All database migrations completed successfully")
 

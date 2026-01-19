@@ -16,6 +16,7 @@ from app.models import (
     ScanStatus,
     StorageType,
     TagRuleCriterionType,
+    TransferStatus,
 )
 
 
@@ -729,6 +730,85 @@ class PasswordChange(BaseModel):
 
     old_password: str = Field(..., min_length=1, description="Current password")
     new_password: str = Field(..., min_length=8, description="New password (minimum 8 characters)")
+
+
+# ========================================
+# Remote Connection Schemas
+# ========================================
+
+
+class RemoteConnectionBase(BaseModel):
+    """Base remote connection schema."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+    url: str = Field(..., min_length=1)
+
+
+class RemoteConnectionCreate(RemoteConnectionBase):
+    """Schema for creating a remote connection."""
+
+    connection_code: str = Field(..., description="The rotating code from the remote instance")
+
+
+class RemoteConnectionUpdate(BaseModel):
+    """Schema for updating a remote connection."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    url: Optional[str] = Field(None, min_length=1)
+
+
+class RemoteConnection(RemoteConnectionBase):
+    """Schema for remote connection response."""
+
+    id: int
+    remote_instance_uuid: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class ChallengeRequest(BaseModel):
+    """Schema for initiating a challenge-response verification."""
+
+    initiator_uuid: str
+    challenge: str  # Encrypted random hex string
+
+
+class ChallengeResponse(BaseModel):
+    """Schema for challenge-response result."""
+
+    decrypted: str  # Decrypted random hex string
+
+
+class RemoteTransferJobBase(BaseModel):
+    """Base remote transfer job schema."""
+
+    file_inventory_id: int
+    remote_connection_id: int
+    remote_monitored_path_id: int
+
+
+class RemoteTransferJob(RemoteTransferJobBase):
+    """Schema for remote transfer job response."""
+
+    id: int
+    status: TransferStatus
+    progress: int
+    current_size: int
+    total_size: int
+    start_time: Optional[datetime]
+    end_time: Optional[datetime]
+    error_message: Optional[str]
+    source_path: str
+    relative_path: str
+    storage_type: StorageType
+    checksum: Optional[str]
+    eta: Optional[float] = None  # Seconds remaining, calculated at runtime
+
+    class Config:
+        from_attributes = True
 
 
 # ========================================

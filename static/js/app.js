@@ -379,6 +379,24 @@ function debounce(func, wait) {
 // Global Event Handlers
 // ========================================
 
+/**
+ * Handle online/offline status changes
+ */
+function handleOnlineStatus() {
+    if (navigator.onLine) {
+        showToast('You are back online', 'success', 3000);
+        // Reload the page to refresh data
+        setTimeout(() => {
+            window.location.reload();
+        }, 1000);
+    } else {
+        showToast('You are offline. Some features may not be available.', 'warning', 5000);
+    }
+}
+
+window.addEventListener('online', handleOnlineStatus);
+window.addEventListener('offline', handleOnlineStatus);
+
 document.addEventListener('DOMContentLoaded', function() {
     // Check authentication (skip on login page)
     if (window.location.pathname !== '/login') {
@@ -473,6 +491,71 @@ function loadAppInfo() {
 }
 
 // ========================================
+// PWA Install Handler
+// ========================================
+
+let deferredPrompt = null;
+
+/**
+ * Handle the beforeinstallprompt event
+ */
+window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+
+    // Show install button in navbar
+    const installBtn = document.getElementById('pwa-install-btn');
+    if (installBtn) {
+        installBtn.classList.remove('d-none');
+    }
+});
+
+/**
+ * Handle the appinstalled event
+ */
+window.addEventListener('appinstalled', () => {
+    // Hide install button
+    const installBtn = document.getElementById('pwa-install-btn');
+    if (installBtn) {
+        installBtn.classList.add('d-none');
+    }
+
+    deferredPrompt = null;
+
+    showToast('App installed successfully!', 'success', 3000);
+});
+
+/**
+ * Trigger PWA installation
+ */
+async function installPWA() {
+    if (!deferredPrompt) {
+        showToast('Installation is not available', 'warning', 3000);
+        return;
+    }
+
+    // Show the install prompt
+    deferredPrompt.prompt();
+
+    // Wait for the user to respond to the prompt
+    const { outcome } = await deferredPrompt.userChoice;
+
+    if (outcome === 'accepted') {
+        showToast('App installed successfully!', 'success', 3000);
+    } else {
+        showToast('App installation was cancelled', 'info', 3000);
+    }
+
+    deferredPrompt = null;
+
+    // Hide install button
+    const installBtn = document.getElementById('pwa-install-btn');
+    if (installBtn) {
+        installBtn.classList.add('d-none');
+    }
+}
+
+// ========================================
 // Export functions to global scope
 // ========================================
 window.showToast = showToast;
@@ -485,3 +568,4 @@ window.escapeHtml = escapeHtml;
 window.loadAppInfo = loadAppInfo;
 window.handleLogout = handleLogout;
 window.clearAuthToken = clearAuthToken;
+window.installPWA = installPWA;

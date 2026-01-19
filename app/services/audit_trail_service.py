@@ -97,8 +97,8 @@ class AuditTrailService:
             )
             return transaction
 
-        except Exception as e:
-            logger.error(f"Failed to log audit trail entry: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Failed to log audit trail entry")
             db.rollback()
             raise
 
@@ -170,6 +170,29 @@ class AuditTrailService:
         )
 
     @staticmethod
+    def log_remote_migration(
+        db: Session,
+        file: FileInventory,
+        remote_url: str,
+        success: bool = True,
+        error_message: Optional[str] = None,
+        initiated_by: Optional[str] = None,
+    ) -> FileTransactionHistory:
+        """Convenience method to log a remote migration."""
+        return AuditTrailService.log_transaction(
+            db=db,
+            file=file,
+            transaction_type=TransactionType.REMOTE_MIGRATE,
+            operation_metadata={
+                "remote_url": remote_url,
+                "action": "migrated_to_remote",
+            },
+            success=success,
+            error_message=error_message,
+            initiated_by=initiated_by,
+        )
+
+    @staticmethod
     def log_status_change(
         db: Session,
         file: FileInventory,
@@ -209,7 +232,7 @@ class AuditTrailService:
         query = db.query(FileTransactionHistory).filter(FileTransactionHistory.file_id == file_id)
 
         if not include_failures:
-            query = query.filter(FileTransactionHistory.success == True)
+            query = query.filter(FileTransactionHistory.success)
 
         return query.order_by(FileTransactionHistory.created_at.desc()).limit(limit).all()
 
@@ -228,7 +251,7 @@ class AuditTrailService:
         Returns:
             List of failed transaction records
         """
-        query = db.query(FileTransactionHistory).filter(FileTransactionHistory.success == False)
+        query = db.query(FileTransactionHistory).filter(not FileTransactionHistory.success)
 
         if since:
             query = query.filter(FileTransactionHistory.created_at >= since)

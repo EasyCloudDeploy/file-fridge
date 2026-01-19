@@ -1,3 +1,4 @@
+# ruff: noqa: B008
 """API routes for tag rule management."""
 
 from typing import List
