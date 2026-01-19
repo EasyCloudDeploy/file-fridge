@@ -78,8 +78,8 @@ class MetadataBackfillService:
                     else:
                         files_failed += 1
 
-                except Exception as e:
-                    logger.exception(f"Error processing file {file_entry.file_path}: {e}")
+                except Exception:
+                    logger.exception(f"Error processing file {file_entry.file_path}")
                     files_failed += 1
 
             # Commit after each batch
@@ -90,8 +90,8 @@ class MetadataBackfillService:
                     f"Processed {files_processed}/{total_files} files "
                     f"({files_skipped} skipped, {files_failed} failed)"
                 )
-            except Exception as e:
-                logger.exception(f"Error committing batch {batch_count}: {e}")
+            except Exception:
+                logger.exception(f"Error committing batch {batch_count}")
                 self.db.rollback()
                 files_failed += len(batch)
 
@@ -153,8 +153,8 @@ class MetadataBackfillService:
                 return "updated"
             return "skipped"
 
-        except Exception as e:
-            logger.exception(f"Failed to extract metadata for {file_path}: {e}")
+        except Exception:
+            logger.exception(f"Failed to extract metadata for {file_path}")
             return "failed"
 
     def backfill_path(
@@ -216,8 +216,8 @@ class MetadataBackfillService:
                     else:
                         files_failed += 1
 
-                except Exception as e:
-                    logger.exception(f"Error processing file {file_entry.file_path}: {e}")
+                except Exception:
+                    logger.exception(f"Error processing file {file_entry.file_path}")
                     files_failed += 1
 
             # Commit after each batch
@@ -227,8 +227,8 @@ class MetadataBackfillService:
                     f"Batch {batch_count} complete: "
                     f"Processed {files_processed}/{total_files} files"
                 )
-            except Exception as e:
-                logger.exception(f"Error committing batch {batch_count}: {e}")
+            except Exception:
+                logger.exception(f"Error committing batch {batch_count}")
                 self.db.rollback()
                 files_failed += len(batch)
 

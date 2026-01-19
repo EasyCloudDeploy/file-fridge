@@ -7,9 +7,9 @@ import os
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional
+from typing import ClassVar, Dict, Iterator, List, Optional, Set
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -44,7 +44,7 @@ class FileWorkflowService:
     """Unified service for file scanning, movement, and inventory management."""
 
     # Metadata files to ignore
-    IGNORED_PATTERNS = {
+    IGNORED_PATTERNS: ClassVar[Set[str]] = {
         ".DS_Store",
         "._*",
         ".Spotlight-V100",
@@ -91,7 +91,7 @@ class FileWorkflowService:
                 scan_progress_manager.finish_scan(path.id, status="failed")
                 # Update scan status in database
                 error_log = f"Path is in error state: {path.error_message}"
-                path.last_scan_at = datetime.now()
+                path.last_scan_at = datetime.now(tz=timezone.utc)
                 path.last_scan_status = ScanStatus.FAILURE
                 path.last_scan_error_log = error_log
                 db.commit()
@@ -210,7 +210,7 @@ class FileWorkflowService:
                 results["errors"].append(f"Error processing path {path.id}: {e!s}")
                 scan_progress_manager.finish_scan(path.id, status="failed")
                 # Update scan status in database
-                path.last_scan_at = datetime.now()
+                path.last_scan_at = datetime.now(tz=timezone.utc)
                 path.last_scan_status = ScanStatus.FAILURE
                 path.last_scan_error_log = "\n".join(results["errors"])
                 db.commit()
@@ -218,7 +218,7 @@ class FileWorkflowService:
 
             scan_progress_manager.finish_scan(path.id, status="completed")
             # Update scan status in database - success
-            path.last_scan_at = datetime.now()
+            path.last_scan_at = datetime.now(tz=timezone.utc)
             if results["errors"]:
                 # Partial success - completed but with some errors
                 path.last_scan_status = ScanStatus.FAILURE
@@ -237,7 +237,7 @@ class FileWorkflowService:
             # Update scan status in database
             error_log = f"Unexpected error: {e!s}"
             try:
-                path.last_scan_at = datetime.now()
+                path.last_scan_at = datetime.now(tz=timezone.utc)
                 path.last_scan_status = ScanStatus.FAILURE
                 path.last_scan_error_log = error_log
                 db.commit()
@@ -254,7 +254,7 @@ class FileWorkflowService:
 
     def _scan_path(self, path: MonitoredPath, db: Session) -> dict:
         """Scan a monitored path for files matching criteria."""
-        scan_start_time = datetime.now()
+        scan_start_time = datetime.now(tz=timezone.utc)
         matching_files = []
         files_to_thaw = []
         files_skipped_hot = 0
@@ -318,9 +318,9 @@ class FileWorkflowService:
                     {
                         "path": entry.path,
                         "size": stat_info.st_size,
-                        "mtime": datetime.fromtimestamp(stat_info.st_mtime),
-                        "atime": datetime.fromtimestamp(stat_info.st_atime),
-                        "ctime": datetime.fromtimestamp(stat_info.st_ctime),
+                        "mtime": datetime.fromtimestamp(stat_info.st_mtime, tz=timezone.utc),
+                        "atime": datetime.fromtimestamp(stat_info.st_atime, tz=timezone.utc),
+                        "ctime": datetime.fromtimestamp(stat_info.st_ctime, tz=timezone.utc),
                     }
                 )
 
@@ -378,9 +378,9 @@ class FileWorkflowService:
                         {
                             "path": entry.path,
                             "size": stat_info.st_size,
-                            "mtime": datetime.fromtimestamp(stat_info.st_mtime),
-                            "atime": datetime.fromtimestamp(stat_info.st_atime),
-                            "ctime": datetime.fromtimestamp(stat_info.st_ctime),
+                            "mtime": datetime.fromtimestamp(stat_info.st_mtime, tz=timezone.utc),
+                            "atime": datetime.fromtimestamp(stat_info.st_atime, tz=timezone.utc),
+                            "ctime": datetime.fromtimestamp(stat_info.st_ctime, tz=timezone.utc),
                         }
                     )
 
@@ -629,7 +629,7 @@ class FileWorkflowService:
 
         except Exception as e:
             result["error"] = f"Error processing {file_path}: {e!s}"
-            logger.error(f"Error processing {file_path}: {e!s}", exc_info=True)
+            logger.exception(f"Error processing {file_path}")
         finally:
             db.close()
 
@@ -872,7 +872,7 @@ class FileWorkflowService:
         """Update database inventory for both storage tiers using provided metadata."""
         updated_count = 0
         if scan_start_time is None:
-            scan_start_time = datetime.now()
+            scan_start_time = datetime.now(tz=timezone.utc)
 
         # Sync hot tier
         if hot_files is not None:
@@ -936,9 +936,9 @@ class FileWorkflowService:
                     {
                         "path": entry.path,
                         "size": stat.st_size,
-                        "mtime": datetime.fromtimestamp(stat.st_mtime),
-                        "atime": datetime.fromtimestamp(stat.st_atime),
-                        "ctime": datetime.fromtimestamp(stat.st_ctime),
+                        "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+                        "atime": datetime.fromtimestamp(stat.st_atime, tz=timezone.utc),
+                        "ctime": datetime.fromtimestamp(stat.st_ctime, tz=timezone.utc),
                     }
                 )
             except OSError:
@@ -955,7 +955,7 @@ class FileWorkflowService:
 
         count = 0
         tag_rule_service = TagRuleService(db)
-        scan_time = datetime.now()
+        scan_time = datetime.now(tz=timezone.utc)
 
         # Pre-fetch tag rules to avoid N+1 queries during rules application
         tag_rules = (

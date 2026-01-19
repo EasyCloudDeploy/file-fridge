@@ -1,3 +1,4 @@
+# ruff: noqa: B008
 """API routes for file cleanup."""
 
 from typing import Optional

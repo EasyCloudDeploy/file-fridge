@@ -1,7 +1,7 @@
+# ruff: noqa: B008
 """API routes for storage management."""
 
 import logging
-import os
 import shutil
 from pathlib import Path
 from typing import List
@@ -34,7 +34,7 @@ def get_storage_stats(db: Session = Depends(get_db)):
         path_str = location.path
         try:
             # Get the device ID for the path
-            device_id = os.stat(path_str).st_dev
+            device_id = Path(path_str).stat().st_dev
             if device_id not in unique_volumes:
                 unique_volumes[device_id] = path_str
         except FileNotFoundError:
@@ -42,9 +42,9 @@ def get_storage_stats(db: Session = Depends(get_db)):
             if "not_found" not in unique_volumes:
                 unique_volumes["not_found"] = []
             unique_volumes["not_found"].append(path_str)
-        except Exception as e:
+        except Exception:
             # Handle other potential errors
-            logger.exception(f"Error stating path {path_str}: {e}")
+            logger.exception(f"Error stating path {path_str}")
             if "error" not in unique_volumes:
                 unique_volumes["error"] = []
             unique_volumes["error"].append(path_str)
@@ -75,7 +75,7 @@ def get_storage_stats(db: Session = Depends(get_db)):
                 )
             )
         except Exception as e:
-            logger.exception(f"Error getting disk usage for {path_str}: {e}")
+            logger.exception(f"Error getting disk usage for {path_str}")
             stats_list.append(
                 StorageStats(
                     path=path_str,
@@ -293,7 +293,7 @@ def delete_storage_location(
 
         # 3. Attempt to delete the actual files and directory from the filesystem
         try:
-            if os.path.exists(location.path):
+            if Path(location.path).exists():
                 logger.info(f"Deleting files and directory: {location.path}")
                 shutil.rmtree(location.path)
         except FileNotFoundError:

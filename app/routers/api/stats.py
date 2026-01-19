@@ -1,6 +1,7 @@
+# ruff: noqa: B008
 """API routes for statistics."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -50,7 +51,7 @@ def get_detailed_statistics(days: Optional[int] = None, db: Session = Depends(ge
     if days is None:
         days = settings.stats_retention_days
 
-    now = datetime.now()
+    now = datetime.now(tz=timezone.utc)
     cutoff_24h = now - timedelta(hours=24)
     cutoff_7d = now - timedelta(days=7)
     cutoff_period = now - timedelta(days=days)
@@ -262,7 +263,7 @@ def get_aggregated_stats(
     period: str = "daily", days: int = 30, db: Session = Depends(get_db)  # daily, weekly, monthly
 ):
     """Get time-based aggregated statistics."""
-    end_date = datetime.now()
+    end_date = datetime.now(tz=timezone.utc)
     start_date = end_date - timedelta(days=days)
 
     # Group by time period

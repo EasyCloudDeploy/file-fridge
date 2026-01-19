@@ -228,7 +228,6 @@ def bulk_retry_transfers(
     if not job_ids:
         raise HTTPException(status_code=400, detail="No job IDs provided")
 
-
     # Get failed jobs and reset them to PENDING
     jobs = (
         db.query(RemoteTransferJob)

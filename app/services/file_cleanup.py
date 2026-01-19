@@ -136,12 +136,11 @@ class FileCleanup:
             db.rollback()
 
         # Combine results
-        combined_results = {
+        return {
             "checked": results["checked"] + inventory_results["checked"],
             "removed": results["removed"] + inventory_results["removed"],
             "errors": results["errors"] + inventory_results["errors"],
         }
-        return combined_results
 
     @staticmethod
     def cleanup_missing_inventory_files(db: Session, path_id: Optional[int] = None) -> dict:

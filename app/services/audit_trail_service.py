@@ -97,8 +97,8 @@ class AuditTrailService:
             )
             return transaction
 
-        except Exception as e:
-            logger.error(f"Failed to log audit trail entry: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Failed to log audit trail entry")
             db.rollback()
             raise
 

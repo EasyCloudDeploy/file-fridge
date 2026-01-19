@@ -5,7 +5,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -103,8 +103,8 @@ class ScanProgressManager:
                 try:
                     time.sleep(self._cleanup_interval)
                     self._cleanup_old_scans()
-                except Exception as e:
-                    logger.exception(f"Error in cleanup thread: {e}")
+                except Exception:
+                    logger.exception("Error in cleanup thread")
 
         self._cleanup_thread = threading.Thread(target=cleanup_worker, daemon=True)
         self._cleanup_thread.start()
@@ -168,7 +168,7 @@ class ScanProgressManager:
                 scan_id=scan_id,
                 path_id=path_id,
                 status="running",
-                started_at=datetime.now().isoformat(),
+                started_at=datetime.now(tz=timezone.utc).isoformat(),
                 total_files=total_files,
             )
 
@@ -286,7 +286,7 @@ class ScanProgressManager:
 
             progress = self._scans[path_id]
             progress.status = status
-            progress.completed_at = datetime.now().isoformat()
+            progress.completed_at = datetime.now(tz=timezone.utc).isoformat()
             progress.current_operations = []  # Clear any pending operations
 
             logger.info(f"Scan {progress.scan_id} finished with status: {status}")

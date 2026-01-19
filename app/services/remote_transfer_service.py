@@ -333,7 +333,9 @@ class RemoteTransferService:
                         job.end_time = datetime.now(timezone.utc)
                         job.retry_count = attempt + 1
                         db.commit()
-                        logger.error(f"Transfer {job_id} failed permanently: {job.error_message}")
+                        logger.exception(
+                            f"Transfer {job_id} failed permanently: {job.error_message}"
+                        )
                         return
 
                     # Transient error - wait before retry

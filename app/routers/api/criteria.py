@@ -1,3 +1,4 @@
+# ruff: noqa: B008
 """API routes for criteria management."""
 
 import logging
@@ -49,12 +50,12 @@ def create_criteria(path_id: int, criteria: CriteriaCreate, db: Session = Depend
     db.refresh(db_criteria)
 
     # Re-validate path configuration to update error state
+    from contextlib import suppress
+
     from app.routers.api.paths import validate_path_configuration
 
-    try:
+    with suppress(HTTPException):
         validate_path_configuration(path, db)
-    except HTTPException:
-        pass  # Error already set on path
 
     return db_criteria
 
@@ -107,12 +108,12 @@ def update_criteria(
     db.refresh(criteria)
 
     # Re-validate path configuration to update error state
+    from contextlib import suppress
+
     from app.routers.api.paths import validate_path_configuration
 
-    try:
+    with suppress(HTTPException):
         validate_path_configuration(path, db)
-    except HTTPException:
-        pass  # Error already set on path
 
     return criteria
 

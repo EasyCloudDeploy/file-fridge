@@ -1,3 +1,4 @@
+# ruff: noqa: B008
 """API routes for file management."""
 
 import base64
@@ -509,7 +510,7 @@ def browse_files(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error browsing directory: {e!s}",
-        )
+        ) from e
 
 
 @router.post("/thaw/{inventory_id}")
@@ -771,7 +772,7 @@ def relocate_file(inventory_id: int, request: FileRelocateRequest, db: Session =
     except ValueError as e:
         inventory_entry.status = FileStatus.ACTIVE
         db.commit()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
 
     return {
         "message": "Relocation task created",
@@ -828,7 +829,7 @@ def get_relocate_options(inventory_id: int, db: Session = Depends(get_db)):
         "file_path": inventory_entry.file_path,
         "current_location_id": current_location_id,
         "available_locations": available_locations,
-        "can_relocate": len([l for l in available_locations if not l["is_current"]]) > 0,
+        "can_relocate": len([loc for loc in available_locations if not loc["is_current"]]) > 0,
     }
 
 
