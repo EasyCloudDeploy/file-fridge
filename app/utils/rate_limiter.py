@@ -57,10 +57,10 @@ _remote_rate_limiter = RateLimiter(requests_per_minute=100)
 
 def get_rate_limit_key(request: Request) -> str:
     """Extract rate limit key from request."""
-    # Use remote instance ID for authenticated remote connections
-    x_remote_id = request.headers.get("X-Remote-ID")
-    if x_remote_id:
-        return f"remote:{x_remote_id}"
+    # Use remote instance UUID for authenticated remote connections
+    x_instance_uuid = request.headers.get("X-Instance-UUID")
+    if x_instance_uuid:
+        return f"remote:{x_instance_uuid}"
 
     # Use IP address for other requests
     forwarded = request.headers.get("X-Forwarded-For")
