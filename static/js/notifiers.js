@@ -154,7 +154,7 @@ function renderNotifiers() {
             : '<span class="badge bg-info"><i class="bi bi-webhook"></i><span class="d-none d-lg-inline"> Webhook</span></span>';
 
         const eventsBadges = (notifier.subscribed_events || []).map(event => {
-            const label = event.replace(/_/g, ' ').toLowerCase();
+            const label = event.replaceAll('_', ' ').toLowerCase();
             return `<span class="badge bg-light text-dark border me-1 small" style="font-size: 0.7rem;">${label}</span>`;
         }).join('');
 
