@@ -338,8 +338,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         statusClass = 'danger';
                     } else if (job.status === 'in_progress') {
                         statusClass = 'primary';
+                    } else if (job.status === 'cancelled') {
+                        statusClass = 'warning';
                     }
 
+                    const canCancel = ['pending', 'in_progress', 'failed'].includes(job.status);
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td title="${job.source_path}">${fileName}</td>
@@ -353,6 +356,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <td>${formatETA(job.eta)}</td>
                         <td>
                             ${job.error_message ? `<i class="bi bi-exclamation-circle text-danger" title="${job.error_message}"></i>` : ''}
+                            ${canCancel ? `<button class="btn btn-sm btn-outline-danger ms-2" onclick="cancelTransfer(${job.id})" title="Cancel transfer"><i class="bi bi-x-circle"></i></button>` : ''}
                         </td>
                     `;
                     list.appendChild(tr);
@@ -370,6 +374,88 @@ document.addEventListener('DOMContentLoaded', function() {
         const secs = Math.round(seconds % 60);
         return mins + 'm ' + secs + 's';
     }
+
+    window.cancelTransfer = async function(jobId) {
+        if (!confirm('Are you sure you want to cancel this transfer?')) return;
+
+        try {
+            const response = await authenticatedFetch(`/api/remote/transfers/${jobId}/cancel`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                await loadRemoteTransfers();
+            } else {
+                const errorData = await response.json();
+                alert('Error: ' + (errorData.detail || 'Failed to cancel transfer'));
+            }
+        } catch (error) {
+            console.error('Error cancelling transfer:', error);
+            alert('Failed to connect to server.');
+        }
+    };
+
+    window.bulkCancelTransfers = async function() {
+        const failedJobs = transfers.filter(t => ['failed', 'pending'].includes(t.status));
+        if (failedJobs.length === 0) {
+            alert('No failed or pending transfers to cancel.');
+            return;
+        }
+
+        if (!confirm(`Cancel ${failedJobs.length} transfers?`)) return;
+
+        try {
+            const jobIds = failedJobs.map(t => t.id);
+            const response = await authenticatedFetch('/api/remote/transfers/bulk/cancel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_ids: jobIds })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                await loadRemoteTransfers();
+                alert(`Cancelled ${data.cancelled_count} transfers. ${data.error_count > 0 ? data.error_count + ' errors occurred.' : ''}`);
+            } else {
+                const errorData = await response.json();
+                alert('Error: ' + (errorData.detail || 'Failed to cancel transfers'));
+            }
+        } catch (error) {
+            console.error('Error cancelling transfers:', error);
+            alert('Failed to connect to server.');
+        }
+    };
+
+    window.bulkRetryTransfers = async function() {
+        const failedJobs = transfers.filter(t => t.status === 'failed');
+        if (failedJobs.length === 0) {
+            alert('No failed transfers to retry.');
+            return;
+        }
+
+        if (!confirm(`Retry ${failedJobs.length} transfers?`)) return;
+
+        try {
+            const jobIds = failedJobs.map(t => t.id);
+            const response = await authenticatedFetch('/api/remote/transfers/bulk/retry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_ids: jobIds })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                await loadRemoteTransfers();
+                alert(`Retrying ${data.retried_count} transfers. ${data.skipped_count > 0 ? data.skipped_count + ' transfers skipped (max retries exceeded).' : ''}`);
+            } else {
+                const errorData = await response.json();
+                alert('Error: ' + (errorData.detail || 'Failed to retry transfers'));
+            }
+        } catch (error) {
+            console.error('Error retrying transfers:', error);
+            alert('Failed to connect to server.');
+        }
+    };
 
     const refreshTransfersBtn = document.getElementById('refresh-transfers-btn');
     if (refreshTransfersBtn) {

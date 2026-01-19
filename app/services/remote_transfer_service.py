@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -20,11 +21,14 @@ from app.models import (
     TransferStatus,
 )
 from app.services.audit_trail_service import audit_trail_service
+from app.utils.circuit_breaker import get_circuit_breaker, reset_circuit_breaker
+from app.utils.disk_validator import disk_space_validator
+from app.utils.retry_strategy import TransferErrorType, retry_strategy
 
 logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
-MAX_RETRIES = 3
+MAX_RETRIES = retry_strategy.max_retries
 
 
 class RemoteTransferService:
@@ -77,9 +81,14 @@ class RemoteTransferService:
                     RemoteTransferJob.status.in_([TransferStatus.PENDING, TransferStatus.FAILED])
                 )
                 .filter(RemoteTransferJob.retry_count < MAX_RETRIES)
+                .with_for_update()
                 .all()
             )
             for job in jobs:
+                # Refresh status in case it changed during lock acquisition
+                db.refresh(job)
+                if job.status == TransferStatus.CANCELLED:
+                    continue
                 try:
                     await self.run_transfer(job.id)
                 except Exception:
@@ -142,6 +151,11 @@ class RemoteTransferService:
                 if not chunk:
                     break
 
+                db.refresh(job)
+                if job.status == TransferStatus.CANCELLED:
+                    logger.info(f"Transfer {job.id} was cancelled, stopping")
+                    return
+
                 is_final = await self._is_final_chunk(f)
                 final_chunk, nonce = self._compress_and_encrypt_chunk(
                     chunk, cctx, use_encryption, aesgcm
@@ -182,8 +196,29 @@ class RemoteTransferService:
         my_url = settings.ff_instance_url or "http://localhost:8000"
         db = SessionLocal()
         try:
-            job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
+            job = (
+                db.query(RemoteTransferJob)
+                .filter(RemoteTransferJob.id == job_id)
+                .with_for_update()
+                .first()
+            )
             if not job:
+                return
+
+            # Double-check status after lock acquisition
+            if job.status not in [TransferStatus.PENDING, TransferStatus.FAILED]:
+                logger.info(f"Job {job_id} is {job.status.value}, skipping transfer")
+                return
+
+            # Validate source file exists and has disk space on remote (via header)
+            source_path = Path(job.source_path)
+            if not source_path.exists():
+                logger.error(f"Source file does not exist: {source_path}")
+                job.status = TransferStatus.FAILED
+                job.error_message = "Source file not found"
+                job.retry_count += 1
+                job.end_time = datetime.now(timezone.utc)
+                db.commit()
                 return
 
             job.status = TransferStatus.IN_PROGRESS
@@ -192,38 +227,114 @@ class RemoteTransferService:
             db.commit()
 
             conn = job.remote_connection
-            async with httpx.AsyncClient() as client:
-                await self._send_chunks(job, conn, db, client)
 
-                # Finalize
-                verify_response = await client.post(
-                    f"{conn.url.rstrip('/')}/api/remote/verify-transfer",
-                    headers={"X-Remote-ID": my_url, "X-Shared-Secret": conn.shared_secret},
-                    json={
-                        "job_id": job.id,
-                        "checksum": job.checksum,
-                        "relative_path": job.relative_path,
-                        "remote_path_id": job.remote_monitored_path_id,
-                    },
-                    timeout=30.0,
+            # Check circuit breaker
+            circuit_breaker = get_circuit_breaker(conn.id)
+            if not circuit_breaker.can_attempt():
+                msg = (
+                    f"Circuit breaker is open for connection {conn.id}, "
+                    f"skipping transfer to {conn.url}"
                 )
-                verify_response.raise_for_status()
-
-                job.status = TransferStatus.COMPLETED
+                logger.warning(msg)
+                job.status = TransferStatus.FAILED
+                job.error_message = (
+                    "Remote instance is temporarily unavailable (circuit breaker open)"
+                )
                 job.end_time = datetime.now(timezone.utc)
                 db.commit()
+                return
 
-                # Cleanup
-                await self._cleanup_after_transfer(db, job, conn)
+            last_error = None
 
-        except Exception as e:
-            logger.exception("Transfer failed for job %s", job_id)
+            # Retry loop with exponential backoff
+            for attempt in range(MAX_RETRIES):
+                try:
+                    async with httpx.AsyncClient() as client:
+                        await self._send_chunks(job, conn, db, client)
+
+                        # Finalize
+                        verify_response = await client.post(
+                            f"{conn.url.rstrip('/')}/api/remote/verify-transfer",
+                            headers={"X-Remote-ID": my_url, "X-Shared-Secret": conn.shared_secret},
+                            json={
+                                "job_id": job.id,
+                                "checksum": job.checksum,
+                                "relative_path": job.relative_path,
+                                "remote_path_id": job.remote_monitored_path_id,
+                            },
+                            timeout=300.0,
+                        )
+                        verify_response.raise_for_status()
+
+                        job.status = TransferStatus.COMPLETED
+                        job.end_time = datetime.now(timezone.utc)
+                        db.commit()
+
+                        # Cleanup
+                        await self._cleanup_after_transfer(db, job, conn)
+                        logger.info(f"Transfer {job_id} completed successfully")
+                        circuit_breaker.record_success()
+                        return
+
+                except Exception as e:
+                    circuit_breaker.record_failure()
+                    last_error = e
+                    error_type = retry_strategy.classify_error(e)
+                    should_retry, delay, reason = retry_strategy.should_retry(attempt, e)
+
+                    logger.warning(
+                        f"Transfer {job_id} attempt {attempt + 1} failed: {reason}. "
+                        f"Error type: {error_type.value}"
+                    )
+
+                    if not should_retry:
+                        # Permanent error or max retries reached
+                        job.status = TransferStatus.FAILED
+                        job.error_message = f"{str(e)} ({error_type.value})"
+                        job.end_time = datetime.now(timezone.utc)
+                        job.retry_count = attempt + 1
+                        db.commit()
+                        logger.error(f"Transfer {job_id} failed permanently: {job.error_message}")
+                        return
+
+                    # Transient error - wait before retry
+                    job.error_message = f"Attempt {attempt + 1}/{MAX_RETRIES} failed: {reason}"
+                    db.commit()
+                    logger.info(f"Waiting {delay:.1f}s before retry...")
+                    await asyncio.sleep(delay)
+
+            # Should not reach here, but just in case
+            logger.error(f"Transfer {job_id} failed after {MAX_RETRIES} retries")
             job.status = TransferStatus.FAILED
-            job.error_message = str(e)
-            job.retry_count += 1
+            job.error_message = f"Failed after {MAX_RETRIES} retries"
+            job.end_time = datetime.now(timezone.utc)
+            job.retry_count = MAX_RETRIES
             db.commit()
         finally:
             db.close()
+
+    def cancel_transfer(self, db: Session, job_id: int):
+        """Cancel a transfer job."""
+        job = (
+            db.query(RemoteTransferJob)
+            .filter(RemoteTransferJob.id == job_id)
+            .with_for_update()
+            .first()
+        )
+        if not job:
+            msg = f"Transfer job {job_id} not found"
+            raise ValueError(msg)
+
+        if job.status in [TransferStatus.COMPLETED, TransferStatus.CANCELLED]:
+            msg = f"Cannot cancel transfer with status {job.status.value}"
+            raise ValueError(msg)
+
+        job.status = TransferStatus.CANCELLED
+        job.end_time = datetime.now(timezone.utc)
+        job.error_message = "Cancelled by user"
+        db.commit()
+        db.refresh(job)
+        return job
 
     async def _cleanup_after_transfer(self, db, job, conn):
         """Remove original file and update inventory."""
