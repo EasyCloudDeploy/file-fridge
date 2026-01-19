@@ -788,7 +788,7 @@ wheels = [
 
 [[package]]
 name = "file-fridge"
-version = "1.0.0"
+version = "0.0.35"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles", version = "24.1.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },

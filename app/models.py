@@ -485,6 +485,16 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
 
 
+class InstanceMetadata(Base):
+    """Global metadata for this File Fridge instance."""
+
+    __tablename__ = "instance_metadata"
+
+    id = Column(Integer, primary_key=True, index=True)
+    instance_uuid = Column(String, nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class RemoteConnection(Base):
     """Remote File Fridge instance connection."""
 
@@ -493,6 +503,7 @@ class RemoteConnection(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, index=True)
     url = Column(String, nullable=False)
+    remote_instance_uuid = Column(String, nullable=True, unique=True, index=True)
     shared_secret = Column(String, nullable=False)  # Shared 32-byte secret
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

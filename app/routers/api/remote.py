@@ -13,11 +13,16 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.database import get_db
 from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob, TransferStatus
+from app.schemas import (
+    ChallengeRequest,
+    ChallengeResponse,
+    RemoteConnectionCreate,
+    RemoteConnectionUpdate,
+    RemoteTransferJobBase,
+)
 from app.schemas import RemoteConnection as RemoteConnectionSchema
-from app.schemas import RemoteConnectionCreate, RemoteTransferJobBase
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
 from app.security import get_current_user
 from app.services.remote_connection_service import remote_connection_service
@@ -33,19 +38,23 @@ router = APIRouter(prefix="/api/remote", tags=["Remote Connections"])
 
 
 def verify_remote_secret(
-    x_remote_id: str = Header(..., alias="X-Remote-ID"),
+    x_instance_uuid: str = Header(..., alias="X-Instance-UUID"),
     x_shared_secret: str = Header(..., alias="X-Shared-Secret"),
     db: Session = Depends(get_db),
 ):
     """Verify the shared secret for inter-instance communication.
 
-    X-Remote-ID should be the base URL of the remote instance.
+    X-Instance-UUID should be the global UUID of the remote instance.
     """
-    conn = db.query(RemoteConnection).filter(RemoteConnection.url == x_remote_id).first()
+    conn = (
+        db.query(RemoteConnection)
+        .filter(RemoteConnection.remote_instance_uuid == x_instance_uuid)
+        .first()
+    )
     if not conn or not secrets.compare_digest(conn.shared_secret, x_shared_secret):
-        logger.warning(f"Unauthorized remote access attempt from ID: {x_remote_id}")
+        logger.warning(f"Unauthorized remote access attempt from UUID: {x_instance_uuid}")
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid remote ID or shared secret"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid remote UUID or shared secret"
         )
     return conn
 
@@ -75,10 +84,9 @@ async def connect(
 async def handshake(handshake_data: dict, db: Session = Depends(get_db)):
     """Inter-instance handshake endpoint."""
     try:
-        remote_connection_service.handle_handshake(db, handshake_data)
+        return remote_connection_service.handle_handshake(db, handshake_data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"status": "success"}
 
 
 @router.get("/connections", response_model=List[RemoteConnectionSchema])
@@ -112,8 +120,38 @@ async def terminate_connection(
 ):
     """Handle an incoming termination request."""
     _ = remote_conn
-    remote_connection_service.handle_terminate_connection(db, data["url"])
+    remote_connection_service.handle_terminate_connection(db, data["instance_uuid"])
     return {"status": "success"}
+
+
+@router.patch("/connections/{connection_id}", response_model=RemoteConnectionSchema)
+async def update_connection(
+    connection_id: int,
+    update_data: RemoteConnectionUpdate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Update a remote connection."""
+    _ = current_user
+    try:
+        return await remote_connection_service.update_connection(db, connection_id, update_data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/challenge", response_model=ChallengeResponse)
+async def challenge(
+    challenge_data: ChallengeRequest,
+    db: Session = Depends(get_db),
+):
+    """Inter-instance challenge-response endpoint."""
+    try:
+        decrypted = remote_connection_service.handle_challenge(
+            db, challenge_data.initiator_uuid, challenge_data.challenge
+        )
+        return {"decrypted": decrypted}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @router.get("/connections/{connection_id}/paths")
@@ -128,13 +166,13 @@ async def get_remote_paths(
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    my_url = settings.ff_instance_url or "http://localhost:8000"
+    my_uuid = remote_connection_service.get_instance_uuid(db)
 
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(
                 f"{conn.url.rstrip('/')}/api/remote/exposed-paths",
-                headers={"X-Remote-ID": my_url, "X-Shared-Secret": conn.shared_secret},
+                headers={"X-Instance-UUID": my_uuid, "X-Shared-Secret": conn.shared_secret},
                 timeout=10.0,
             )
             response.raise_for_status()

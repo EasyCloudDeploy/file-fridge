@@ -12,7 +12,6 @@ import zstandard as zstd
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.database import SessionLocal
 from app.models import (
     FileInventory,
@@ -21,6 +20,7 @@ from app.models import (
     TransferStatus,
 )
 from app.services.audit_trail_service import audit_trail_service
+from app.services.remote_connection_service import remote_connection_service
 from app.utils.circuit_breaker import get_circuit_breaker
 from app.utils.retry_strategy import retry_strategy
 
@@ -113,12 +113,12 @@ class RemoteTransferService:
             final_chunk = aesgcm.encrypt(nonce, final_chunk, None)
         return final_chunk, nonce
 
-    def _build_chunk_headers(self, conn, job, chunk_idx, is_final, nonce):
+    def _build_chunk_headers(self, db: Session, conn, job, chunk_idx, is_final, nonce):
         """Build headers for chunk transmission."""
-        my_url = settings.ff_instance_url or "http://localhost:8000"
+        my_uuid = remote_connection_service.get_instance_uuid(db)
         use_encryption = bool(nonce)
         return {
-            "X-Remote-ID": my_url,
+            "X-Instance-UUID": my_uuid,
             "X-Shared-Secret": conn.shared_secret,
             "X-Job-ID": str(job.id),
             "X-Chunk-Index": str(chunk_idx),
@@ -130,9 +130,9 @@ class RemoteTransferService:
             "X-File-Size": str(job.total_size),
         }
 
-    async def _get_remote_status(self, client, conn, job):
+    async def _get_remote_status(self, db: Session, client, conn, job):
         """Check remote status for resumability."""
-        my_url = settings.ff_instance_url or "http://localhost:8000"
+        my_uuid = remote_connection_service.get_instance_uuid(db)
         try:
             response = await client.get(
                 f"{conn.url.rstrip('/')}/api/remote/transfer-status",
@@ -141,7 +141,7 @@ class RemoteTransferService:
                     "remote_path_id": job.remote_monitored_path_id,
                     "storage_type": job.storage_type.value,
                 },
-                headers={"X-Remote-ID": my_url, "X-Shared-Secret": conn.shared_secret},
+                headers={"X-Instance-UUID": my_uuid, "X-Shared-Secret": conn.shared_secret},
                 timeout=10.0,
             )
             response.raise_for_status()
@@ -164,7 +164,7 @@ class RemoteTransferService:
         start_time_ts = time.time()
         source_path = Path(job.source_path)
 
-        remote_status = await self._get_remote_status(client, conn, job)
+        remote_status = await self._get_remote_status(db, client, conn, job)
         remote_size = remote_status.get("size", 0)
 
         async with aiofiles.open(source_path, "rb") as f:
@@ -202,7 +202,7 @@ class RemoteTransferService:
                 final_chunk, nonce = self._compress_and_encrypt_chunk(
                     chunk, cctx, use_encryption, aesgcm
                 )
-                headers = self._build_chunk_headers(conn, job, chunk_idx, is_final, nonce)
+                headers = self._build_chunk_headers(db, conn, job, chunk_idx, is_final, nonce)
 
                 response = await client.post(
                     f"{conn.url.rstrip('/')}/api/remote/receive",
@@ -235,9 +235,9 @@ class RemoteTransferService:
 
     async def run_transfer(self, job_id: int):
         """Execute a transfer job."""
-        my_url = settings.ff_instance_url or "http://localhost:8000"
         db = SessionLocal()
         try:
+            my_uuid = remote_connection_service.get_instance_uuid(db)
             job = (
                 db.query(RemoteTransferJob)
                 .filter(RemoteTransferJob.id == job_id)
@@ -295,7 +295,10 @@ class RemoteTransferService:
                         # Finalize
                         verify_response = await client.post(
                             f"{conn.url.rstrip('/')}/api/remote/verify-transfer",
-                            headers={"X-Remote-ID": my_url, "X-Shared-Secret": conn.shared_secret},
+                            headers={
+                                "X-Instance-UUID": my_uuid,
+                                "X-Shared-Secret": conn.shared_secret,
+                            },
                             json={
                                 "job_id": job.id,
                                 "checksum": job.checksum,
