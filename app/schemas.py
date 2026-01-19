@@ -669,15 +669,36 @@ class RemoteConnectionCreate(RemoteConnectionBase):
     connection_code: str = Field(..., description="The rotating code from the remote instance")
 
 
+class RemoteConnectionUpdate(BaseModel):
+    """Schema for updating a remote connection."""
+
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    url: Optional[str] = Field(None, min_length=1)
+
+
 class RemoteConnection(RemoteConnectionBase):
     """Schema for remote connection response."""
 
     id: int
+    remote_instance_uuid: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime]
 
     class Config:
         from_attributes = True
+
+
+class ChallengeRequest(BaseModel):
+    """Schema for initiating a challenge-response verification."""
+
+    initiator_uuid: str
+    challenge: str  # Encrypted random hex string
+
+
+class ChallengeResponse(BaseModel):
+    """Schema for challenge-response result."""
+
+    decrypted: str  # Decrypted random hex string
 
 
 class RemoteTransferJobBase(BaseModel):
