@@ -1009,26 +1009,7 @@ async function freezeFile() {
 }
 
 // Cleanup actions
-async function cleanupMissingFiles() {
-    try {
-        let url = `${API_BASE_URL}/cleanup`;
-        if (currentPathId) {
-            url += `?path_id=${currentPathId}`;
-        }
 
-        const response = await authenticatedFetch(url, { method: 'POST' });
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-        const data = await response.json();
-        const message = `Cleanup complete: checked ${data.checked} files, removed ${data.removed} missing file records`;
-        showNotification(message);
-
-        loadFilesList();
-    } catch (error) {
-        console.error('Error cleaning up missing files:', error);
-        showNotification(`Failed to cleanup missing files: ${error.message}`, 'error');
-    }
-}
 
 async function cleanupDuplicates() {
     try {
