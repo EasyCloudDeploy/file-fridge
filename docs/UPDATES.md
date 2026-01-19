@@ -75,3 +75,40 @@ Before performing any update, it is highly recommended to back up your database:
    ```
 
 In case of an update failure, you can restore this file to return to your previous state.
+
+## Troubleshooting Schema Inconsistencies
+
+If you encounter database errors after updating (e.g., "no such column: filter_level"), your database may have schema inconsistencies from an earlier version.
+
+**Symptoms:**
+- 500 Internal Server Error on API endpoints
+- Error messages about missing columns
+- `alembic upgrade head` fails
+
+**Solution:**
+
+Run the schema fix script to reconcile your database with the current schema:
+
+```bash
+uv run python scripts/fix_database_schema.py
+```
+
+This script will:
+1. Fix the Alembic version tracking
+2. Add any missing database columns
+3. Remove legacy columns that are no longer needed
+
+After running the script, continue with the normal update process:
+
+```bash
+uv run alembic upgrade head
+```
+
+**Docker Users:**
+
+If you're using Docker, you may need to run the fix script from within the container:
+
+```bash
+docker-compose exec app python scripts/fix_database_schema.py
+docker-compose restart app
+```

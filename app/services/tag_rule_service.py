@@ -43,8 +43,8 @@ class TagRuleService:
                 return self._evaluate_name_pattern(rule, file)
             logger.warning(f"Unknown criterion type: {rule.criterion_type}")
             return False
-        except Exception as e:
-            logger.exception(f"Error evaluating rule {rule.id}: {e}")
+        except Exception:
+            logger.exception(f"Error evaluating rule {rule.id}")
             return False
 
     def _evaluate_extension(self, rule: TagRule, file: FileInventory) -> bool:
@@ -78,8 +78,8 @@ class TagRuleService:
             try:
                 pattern = re.compile(rule.value)
                 return bool(pattern.search(file.file_path))
-            except re.error as e:
-                logger.exception(f"Invalid regex pattern in rule {rule.id}: {e}")
+            except re.error:
+                logger.exception(f"Invalid regex pattern in rule {rule.id}")
                 return False
         elif rule.operator == Operator.CONTAINS:
             # Simple substring match
@@ -130,8 +130,8 @@ class TagRuleService:
             if rule.operator == Operator.LTE:
                 return file.file_size <= size_value
             return False
-        except ValueError as e:
-            logger.exception(f"Invalid size value in rule {rule.id}: {e}")
+        except ValueError:
+            logger.exception(f"Invalid size value in rule {rule.id}")
             return False
 
     def _evaluate_name_pattern(self, rule: TagRule, file: FileInventory) -> bool:
@@ -149,8 +149,8 @@ class TagRuleService:
             try:
                 pattern = re.compile(rule.value)
                 return bool(pattern.search(filename))
-            except re.error as e:
-                logger.exception(f"Invalid regex pattern in rule {rule.id}: {e}")
+            except re.error:
+                logger.exception(f"Invalid regex pattern in rule {rule.id}")
                 return False
         elif rule.operator == Operator.CONTAINS:
             # Simple substring match

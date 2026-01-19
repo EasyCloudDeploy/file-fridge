@@ -21,9 +21,8 @@ from app.models import (
     TransferStatus,
 )
 from app.services.audit_trail_service import audit_trail_service
-from app.utils.circuit_breaker import get_circuit_breaker, reset_circuit_breaker
-from app.utils.disk_validator import disk_space_validator
-from app.utils.retry_strategy import TransferErrorType, retry_strategy
+from app.utils.circuit_breaker import get_circuit_breaker
+from app.utils.retry_strategy import retry_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -128,7 +127,28 @@ class RemoteTransferService:
             "X-Remote-Path-ID": str(job.remote_monitored_path_id),
             "X-Storage-Type": job.storage_type.value,
             "X-Nonce": nonce.hex() if use_encryption else "",
+            "X-File-Size": str(job.total_size),
         }
+
+    async def _get_remote_status(self, client, conn, job):
+        """Check remote status for resumability."""
+        my_url = settings.ff_instance_url or "http://localhost:8000"
+        try:
+            response = await client.get(
+                f"{conn.url.rstrip('/')}/api/remote/transfer-status",
+                params={
+                    "relative_path": job.relative_path,
+                    "remote_path_id": job.remote_monitored_path_id,
+                    "storage_type": job.storage_type.value,
+                },
+                headers={"X-Remote-ID": my_url, "X-Shared-Secret": conn.shared_secret},
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception:
+            logger.debug(f"Failed to get remote status for job {job.id}, starting fresh")
+            return {"size": 0, "status": "not_found"}
 
     def _update_job_progress(self, job, chunk_size, start_time_ts, db):
         """Update job progress metrics."""
@@ -144,8 +164,30 @@ class RemoteTransferService:
         start_time_ts = time.time()
         source_path = Path(job.source_path)
 
+        remote_status = await self._get_remote_status(client, conn, job)
+        remote_size = remote_status.get("size", 0)
+
         async with aiofiles.open(source_path, "rb") as f:
-            chunk_idx = 0
+            if remote_size > 0:
+                if remote_size >= job.total_size:
+                    logger.info(f"Remote file already complete for job {job.id}")
+                    job.current_size = job.total_size
+                    job.progress = 100
+                    db.commit()
+                    return
+
+                await f.seek(remote_size)
+                logger.info(f"Resuming transfer for job {job.id} from byte {remote_size}")
+
+            # Calculate chunk_idx: if we have bytes, we are at least on chunk 1
+            # (or higher). chunk_idx=0 always triggers 'wb' (truncate).
+            chunk_idx = (remote_size // CHUNK_SIZE) if remote_size > 0 else 0
+            if remote_size > 0 and chunk_idx == 0:
+                chunk_idx = 1
+
+            job.current_size = remote_size
+            db.commit()
+
             while True:
                 chunk = await f.read(CHUNK_SIZE)
                 if not chunk:
@@ -287,11 +329,13 @@ class RemoteTransferService:
                     if not should_retry:
                         # Permanent error or max retries reached
                         job.status = TransferStatus.FAILED
-                        job.error_message = f"{str(e)} ({error_type.value})"
+                        job.error_message = f"{e!s} ({error_type.value})"
                         job.end_time = datetime.now(timezone.utc)
                         job.retry_count = attempt + 1
                         db.commit()
-                        logger.error(f"Transfer {job_id} failed permanently: {job.error_message}")
+                        logger.exception(
+                            f"Transfer {job_id} failed permanently: {job.error_message}"
+                        )
                         return
 
                     # Transient error - wait before retry

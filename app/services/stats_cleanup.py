@@ -24,9 +24,7 @@ logger = logging.getLogger(__name__)
 class StatsCleanupService:
     """Service for cleaning up old statistics data."""
 
-    def _cleanup_temp_files_in_dir(
-        self, directory: Path, cutoff_time: datetime
-    ) -> tuple[int, int]:
+    def _cleanup_temp_files_in_dir(self, directory: Path, cutoff_time: datetime) -> tuple[int, int]:
         """
         Scan a directory and clean up old .fftmp files.
 
@@ -75,9 +73,7 @@ class StatsCleanupService:
 
             for path in paths:
                 # Clean up source path
-                deleted, size = self._cleanup_temp_files_in_dir(
-                    Path(path.source_path), cutoff_time
-                )
+                deleted, size = self._cleanup_temp_files_in_dir(Path(path.source_path), cutoff_time)
                 total_deleted_count += deleted
                 total_size_freed += size
 

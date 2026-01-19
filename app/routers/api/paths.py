@@ -1,3 +1,4 @@
+# ruff: noqa: B008
 """API routes for path management."""
 
 import logging
@@ -135,7 +136,7 @@ def list_paths(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
         summary = schemas.MonitoredPathSummary(
             **{k: v for k, v in path.__dict__.items() if not k.startswith("_")},
             file_count=file_count,
-            is_path_present=os.path.exists(path.source_path),
+            is_path_present=Path(path.source_path).exists(),
         )
         result.append(summary)
     return result
@@ -165,7 +166,7 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
                 continue
 
             # Get the device ID for the path
-            device_id = os.stat(path_str).st_dev
+            device_id = Path(path_str).stat().st_dev
             if device_id not in unique_volumes:
                 unique_volumes[device_id] = path_str
         except FileNotFoundError:
@@ -173,14 +174,14 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
             if "not_found" not in unique_volumes:
                 unique_volumes["not_found"] = []
             unique_volumes["not_found"].append(path_str)
-        except PermissionError as e:
-            logger.exception(f"Permission denied accessing path {path_str}: {e}")
+        except PermissionError:
+            logger.exception(f"Permission denied accessing path {path_str}")
             if "error" not in unique_volumes:
                 unique_volumes["error"] = []
-            unique_volumes["error"].append((path_str, f"Permission denied: {e}"))
+            unique_volumes["error"].append((path_str, "Permission denied"))
         except Exception as e:
             # Handle other potential errors
-            logger.exception(f"Error stating path {path_str}: {e}")
+            logger.exception(f"Error stating path {path_str}")
             if "error" not in unique_volumes:
                 unique_volumes["error"] = []
             unique_volumes["error"].append((path_str, str(e)))
@@ -218,7 +219,7 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
                 )
             )
         except Exception as e:
-            logger.exception(f"Error getting disk usage for {path_str}: {e}")
+            logger.exception(f"Error getting disk usage for {path_str}")
             stats_list.append(
                 schemas.StorageStats(
                     path=path_str,
@@ -313,7 +314,7 @@ def get_path(path_id: int, db: Session = Depends(get_db)):
     return schemas.MonitoredPathSummary(
         **{k: v for k, v in db_path.__dict__.items() if not k.startswith("_")},
         file_count=file_count,
-        is_path_present=os.path.exists(db_path.source_path),
+        is_path_present=Path(db_path.source_path).exists(),
     )
 
 

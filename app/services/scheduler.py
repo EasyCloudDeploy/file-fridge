@@ -85,8 +85,8 @@ class SchedulerService:
                 # Shutdown gracefully, waiting for running jobs to complete
                 self.scheduler.shutdown(wait=True)
                 logger.info("Scheduler stopped gracefully")
-            except Exception as e:
-                logger.warning(f"Error during scheduler shutdown: {e}")
+            except Exception:
+                logger.warning("Error during scheduler shutdown")
                 try:
                     # Force shutdown if graceful shutdown fails
                     self.scheduler.shutdown(wait=False)
@@ -107,10 +107,10 @@ class SchedulerService:
             for path in paths:
                 try:
                     self.add_path_job(path)
-                except Exception as e:
-                    logger.exception(f"Error loading job for path {path.id}: {e}")
-        except Exception as e:
-            logger.exception(f"Error loading existing jobs: {e}")
+                except Exception:
+                    logger.exception(f"Error loading job for path {path.id}")
+        except Exception:
+            logger.exception("Error loading existing jobs")
         finally:
             db.close()
 
@@ -138,8 +138,8 @@ class SchedulerService:
                     replace_existing=True,
                 )
                 logger.info(f"Added scheduled job for path {path.id} ({path.name})")
-        except Exception as e:
-            logger.exception(f"Error adding job for path {path.id}: {e}")
+        except Exception:
+            logger.exception(f"Error adding job for path {path.id}")
 
     def remove_path_job(self, path_id: int):
         """Remove scheduled job for a path."""
@@ -178,8 +178,8 @@ class SchedulerService:
                 replace_existing=True,
             )
             logger.info("Added scheduled job for daily stats cleanup (runs at 2 AM)")
-        except Exception as e:
-            logger.exception(f"Error adding stats cleanup job: {e}")
+        except Exception:
+            logger.exception("Error adding stats cleanup job")
 
     def _add_remote_transfer_job(self):
         """Add scheduled job for processing remote transfers."""
@@ -257,8 +257,8 @@ def check_disk_space_and_notify(path: MonitoredPath, db: Session):
             logger.warning(
                 f"Could not check disk space for {location.name}: path not found at {location.path}"
             )
-        except Exception as e:
-            logger.exception(f"Error checking disk space for {location.name}: {e}")
+        except Exception:
+            logger.exception(f"Error checking disk space for {location.name}")
 
 
 def process_remote_transfers_job_func():
@@ -354,8 +354,8 @@ def scan_path_job_func(path_id: int):
     finally:
         try:
             db.close()
-        except Exception as e:
-            logger.warning(f"Error closing scheduler database session: {e}")
+        except Exception:
+            logger.warning("Error closing scheduler database session")
 
 
 # Global scheduler instance

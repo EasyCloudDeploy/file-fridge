@@ -1,3 +1,4 @@
+# ruff: noqa: B008
 """API routes for file system browsing."""
 
 import logging
@@ -47,7 +48,7 @@ def list_directory(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid directory path: {e!s}",
-            )
+            ) from e
 
         # Verify path exists and is a directory
         if not resolved_path.exists():
@@ -134,4 +135,4 @@ def list_directory(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error browsing directory: {e!s}",
-        )
+        ) from e

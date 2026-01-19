@@ -5,7 +5,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -104,13 +104,15 @@ class RelocationTaskManager:
                         time.sleep(1)
 
                 except Exception as e:
-                    logger.exception(f"Error in relocation worker thread: {e}")
+                    logger.exception("Error in relocation worker thread")
                     if task_id:
                         with self._lock:
                             if task_id in self._tasks:
                                 self._tasks[task_id].status = "failed"
                                 self._tasks[task_id].error_message = str(e)
-                                self._tasks[task_id].completed_at = datetime.now().isoformat()
+                                self._tasks[task_id].completed_at = datetime.now(
+                                    tz=timezone.utc
+                                ).isoformat()
 
         self._worker_thread = threading.Thread(target=worker, daemon=True, name="relocation-worker")
         self._worker_thread.start()
@@ -124,8 +126,8 @@ class RelocationTaskManager:
                 try:
                     time.sleep(self._cleanup_interval)
                     self._cleanup_old_tasks()
-                except Exception as e:
-                    logger.exception(f"Error in relocation cleanup thread: {e}")
+                except Exception:
+                    logger.exception("Error in relocation cleanup thread")
 
         cleanup_thread = threading.Thread(
             target=cleanup_worker, daemon=True, name="relocation-cleanup"
@@ -158,7 +160,7 @@ class RelocationTaskManager:
             if not task:
                 return
             task.status = "running"
-            task.started_at = datetime.now().isoformat()
+            task.started_at = datetime.now(tz=timezone.utc).isoformat()
 
         try:
             # Get the inventory entry
@@ -275,7 +277,7 @@ class RelocationTaskManager:
             # Mark task as completed
             with self._lock:
                 task.status = "completed"
-                task.completed_at = datetime.now().isoformat()
+                task.completed_at = datetime.now(tz=timezone.utc).isoformat()
                 task.new_file_path = str(new_file_path)
                 task.bytes_transferred = file_size
                 self._tasks_by_inventory.pop(task.inventory_id, None)
@@ -283,7 +285,7 @@ class RelocationTaskManager:
             logger.info(f"Relocation task {task_id} completed successfully")
 
         except Exception as e:
-            logger.exception(f"Relocation task {task_id} failed: {e}")
+            logger.exception(f"Relocation task {task_id} failed")
 
             # Reset status back to ACTIVE on failure
             try:
@@ -303,7 +305,7 @@ class RelocationTaskManager:
                 if task_id in self._tasks:
                     self._tasks[task_id].status = "failed"
                     self._tasks[task_id].error_message = str(e)
-                    self._tasks[task_id].completed_at = datetime.now().isoformat()
+                    self._tasks[task_id].completed_at = datetime.now(tz=timezone.utc).isoformat()
                     self._tasks_by_inventory.pop(self._tasks[task_id].inventory_id, None)
 
     def create_task(
@@ -350,7 +352,7 @@ class RelocationTaskManager:
                 target_location_id=target_location_id,
                 target_location_name=target_location_name,
                 status="pending",
-                created_at=datetime.now().isoformat(),
+                created_at=datetime.now(tz=timezone.utc).isoformat(),
                 bytes_total=file_size,
             )
 

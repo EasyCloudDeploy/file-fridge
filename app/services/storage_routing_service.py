@@ -3,13 +3,18 @@
 import logging
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import ColdStorageLocation, FileInventory, MonitoredPath
+from app.models import (
+    ColdStorageLocation,
+    FileInventory,
+    FileTransactionHistory,
+    MonitoredPath,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +102,7 @@ class StorageRoutingService:
             List of candidates that meet minimum requirements
         """
         candidates = []
-        now = datetime.now()
+        now = datetime.now(tz=timezone.utc)
         error_cutoff = now - timedelta(minutes=StorageRoutingService.ERROR_GRACE_PERIOD_MINUTES)
 
         for location in monitored_path.storage_locations:
@@ -140,13 +145,11 @@ class StorageRoutingService:
                 )
 
                 # Get recent error count for this location
-                from app.models import FileTransactionHistory
-
                 recent_errors = (
                     db.query(FileTransactionHistory)
                     .filter(
                         FileTransactionHistory.new_storage_location_id == location.id,
-                        FileTransactionHistory.success == False,
+                        not FileTransactionHistory.success,
                         FileTransactionHistory.created_at >= error_cutoff,
                     )
                     .count()
@@ -232,8 +235,8 @@ class StorageRoutingService:
 
             return stat.free >= max(min_space, required_space)
 
-        except Exception as e:
-            logger.error(f"Error checking space for {location.path}: {e}")
+        except Exception:
+            logger.exception(f"Error checking space for {location.path}")
             return False
 
     @staticmethod
@@ -275,16 +278,14 @@ class StorageRoutingService:
                 .count()
             )
 
-            from app.models import FileTransactionHistory
-
-            error_cutoff = datetime.now() - timedelta(
+            error_cutoff = datetime.now(tz=timezone.utc) - timedelta(
                 minutes=StorageRoutingService.ERROR_GRACE_PERIOD_MINUTES
             )
             recent_errors = (
                 db.query(FileTransactionHistory)
                 .filter(
                     FileTransactionHistory.new_storage_location_id == location.id,
-                    FileTransactionHistory.success == False,
+                    not FileTransactionHistory.success,
                     FileTransactionHistory.created_at >= error_cutoff,
                 )
                 .count()
@@ -309,7 +310,7 @@ class StorageRoutingService:
             }
 
         except Exception as e:
-            logger.error(f"Error getting health for {location.path}: {e}", exc_info=True)
+            logger.exception(f"Error getting health for {location.path}")
             return {
                 "healthy": False,
                 "reason": str(e),

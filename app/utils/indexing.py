@@ -40,8 +40,8 @@ class IndexingManager:
             logger.debug(f".noindex file already exists: {noindex_path}")
             return True
 
-        except Exception as e:
-            logger.exception(f"Failed to create .noindex file in {directory}: {e}")
+        except Exception:
+            logger.exception(f"Failed to create .noindex file in {directory}")
             return False
 
     @staticmethod
@@ -72,8 +72,8 @@ class IndexingManager:
             logger.debug(f".noindex file doesn't exist: {noindex_path}")
             return True
 
-        except Exception as e:
-            logger.exception(f"Failed to remove .noindex file from {directory}: {e}")
+        except Exception:
+            logger.exception(f"Failed to remove .noindex file from {directory}")
             return False
 
     @staticmethod

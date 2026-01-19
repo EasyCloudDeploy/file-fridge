@@ -1,3 +1,4 @@
+# ruff: noqa: B008
 """Authentication API routes."""
 
 import logging

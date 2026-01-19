@@ -1,7 +1,7 @@
 """Notification service for creating and dispatching notifications."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any, Dict, List, Optional
@@ -192,7 +192,7 @@ class NotificationService:
             self._log_dispatch(db, notification, notifier, status, details)
 
         except Exception as e:
-            logger.exception(f"Unexpected error dispatching to notifier '{notifier.name}': {e}")
+            logger.exception(f"Unexpected error dispatching to notifier '{notifier.name}'")
             self._log_dispatch(
                 db, notification, notifier, DispatchStatus.FAILED, f"Unexpected error: {e!s}"
             )
@@ -261,7 +261,7 @@ class NotificationService:
             payload = {
                 "level": level.upper(),
                 "message": message,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
                 "source": "File Fridge",
             }
             if metadata:
@@ -313,7 +313,7 @@ class NotificationService:
         test_metadata = {
             "notifier_name": notifier.name,
             "notifier_type": notifier.type.value,
-            "test_timestamp": datetime.utcnow().isoformat(),
+            "test_timestamp": datetime.now(tz=timezone.utc).isoformat(),
         }
 
         try:
