@@ -39,10 +39,15 @@ class RateLimiter:
     def _cleanup(self, now: float):
         """Remove stale records from all users."""
         cutoff = now - 60
-        for user_id in list(self.requests.keys()):
-            self.requests[user_id][:] = [t for t in self.requests[user_id] if t > cutoff]
-            if not self.requests[user_id]:
-                del self.requests[user_id]
+        stale_users = []
+        for user_id, timestamps in self.requests.items():
+            timestamps[:] = [t for t in timestamps if t > cutoff]
+            if not timestamps:
+                stale_users.append(user_id)
+
+        for user_id in stale_users:
+            del self.requests[user_id]
+
         self.last_cleanup = now
 
 

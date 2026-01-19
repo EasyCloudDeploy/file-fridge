@@ -375,7 +375,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return mins + 'm ' + secs + 's';
     }
 
-    window.cancelTransfer = async function(jobId) {
+    globalThis.cancelTransfer = async function(jobId) {
         if (!confirm('Are you sure you want to cancel this transfer?')) return;
 
         try {
@@ -395,7 +395,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    window.bulkCancelTransfers = async function() {
+    globalThis.bulkCancelTransfers = async function() {
         const failedJobs = transfers.filter(t => ['failed', 'pending'].includes(t.status));
         if (failedJobs.length === 0) {
             alert('No failed or pending transfers to cancel.');
@@ -426,7 +426,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    window.bulkRetryTransfers = async function() {
+    globalThis.bulkRetryTransfers = async function() {
         const failedJobs = transfers.filter(t => t.status === 'failed');
         if (failedJobs.length === 0) {
             alert('No failed transfers to retry.');

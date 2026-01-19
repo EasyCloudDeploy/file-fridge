@@ -24,6 +24,36 @@ logger = logging.getLogger(__name__)
 class StatsCleanupService:
     """Service for cleaning up old statistics data."""
 
+    def _cleanup_temp_files_in_dir(
+        self, directory: Path, cutoff_time: datetime
+    ) -> tuple[int, int]:
+        """
+        Scan a directory and clean up old .fftmp files.
+
+        Returns:
+            A tuple of (deleted_count, total_size_freed).
+        """
+        if not directory.exists():
+            return 0, 0
+
+        deleted_count = 0
+        total_size_freed = 0
+
+        for temp_file in directory.rglob("*.fftmp"):
+            try:
+                stat = temp_file.stat()
+                mtime = datetime.fromtimestamp(stat.st_mtime, timezone.utc)
+
+                if mtime < cutoff_time:
+                    total_size_freed += stat.st_size
+                    temp_file.unlink()
+                    deleted_count += 1
+                    logger.info(f"Deleted orphaned temp file: {temp_file}")
+            except Exception as e:
+                logger.warning(f"Failed to process temp file {temp_file}: {e}")
+
+        return deleted_count, total_size_freed
+
     def cleanup_orphaned_temp_files(self, db: Session) -> dict:
         """
         Clean up orphaned .fftmp files older than 24 hours.
@@ -38,61 +68,37 @@ class StatsCleanupService:
         """
         try:
             cutoff_time = datetime.now(timezone.utc) - timedelta(hours=24)
-            deleted_count = 0
+            total_deleted_count = 0
             total_size_freed = 0
 
-            # Get all monitored paths to scan
             paths = db.query(MonitoredPath).filter(MonitoredPath.enabled).all()
 
             for path in paths:
-                source_dir = Path(path.source_path)
-                if not source_dir.exists():
-                    continue
+                # Clean up source path
+                deleted, size = self._cleanup_temp_files_in_dir(
+                    Path(path.source_path), cutoff_time
+                )
+                total_deleted_count += deleted
+                total_size_freed += size
 
-                # Scan for .fftmp files
-                for temp_file in source_dir.rglob("*.fftmp"):
-                    try:
-                        stat = temp_file.stat()
-                        mtime = datetime.fromtimestamp(stat.st_mtime, timezone.utc)
-
-                        if mtime < cutoff_time:
-                            total_size_freed += stat.st_size
-                            temp_file.unlink()
-                            deleted_count += 1
-                            logger.info(f"Deleted orphaned temp file: {temp_file}")
-                    except Exception as e:
-                        logger.warning(f"Failed to process temp file {temp_file}: {e}")
-
-            # Also scan storage locations
-            for path in paths:
+                # Clean up storage locations
                 for location in path.storage_locations:
-                    storage_dir = Path(location.path)
-                    if not storage_dir.exists():
-                        continue
-
-                    for temp_file in storage_dir.rglob("*.fftmp"):
-                        try:
-                            stat = temp_file.stat()
-                            mtime = datetime.fromtimestamp(stat.st_mtime, timezone.utc)
-
-                            if mtime < cutoff_time:
-                                total_size_freed += stat.st_size
-                                temp_file.unlink()
-                                deleted_count += 1
-                                logger.info(f"Deleted orphaned temp file: {temp_file}")
-                        except Exception as e:
-                            logger.warning(f"Failed to process temp file {temp_file}: {e}")
+                    deleted, size = self._cleanup_temp_files_in_dir(
+                        Path(location.path), cutoff_time
+                    )
+                    total_deleted_count += deleted
+                    total_size_freed += size
 
             logger.info(
-                f"Orphaned temp file cleanup: {deleted_count} files, {total_size_freed} bytes freed"
+                f"Orphaned temp file cleanup: {total_deleted_count} files, {total_size_freed} bytes freed"
             )
 
             return {
                 "success": True,
-                "files_deleted": deleted_count,
+                "files_deleted": total_deleted_count,
                 "bytes_freed": total_size_freed,
                 "cutoff_time": cutoff_time.isoformat(),
-                "message": f"Deleted {deleted_count} orphaned temporary files ({total_size_freed / 1024 / 1024:.2f} MB)",
+                "message": f"Deleted {total_deleted_count} orphaned temporary files ({total_size_freed / 1024 / 1024:.2f} MB)",
             }
         except Exception as e:
             logger.exception("Error during orphaned temp file cleanup")

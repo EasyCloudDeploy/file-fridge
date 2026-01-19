@@ -244,8 +244,6 @@ class RemoteTransferService:
                 db.commit()
                 return
 
-            last_error = None
-
             # Retry loop with exponential backoff
             for attempt in range(MAX_RETRIES):
                 try:
@@ -278,7 +276,6 @@ class RemoteTransferService:
 
                 except Exception as e:
                     circuit_breaker.record_failure()
-                    last_error = e
                     error_type = retry_strategy.classify_error(e)
                     should_retry, delay, reason = retry_strategy.should_retry(attempt, e)
 
