@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob
+from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob, TransferStatus
 from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import RemoteConnectionCreate, RemoteTransferJobBase
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
@@ -23,7 +23,10 @@ from app.security import get_current_user
 from app.services.remote_connection_service import remote_connection_service
 from app.services.remote_transfer_service import remote_transfer_service
 from app.services.scheduler import scheduler_service
+from app.utils.disk_validator import disk_space_validator
+from app.utils.rate_limiter import check_rate_limit
 from app.utils.remote_auth import remote_auth
+from app.utils.retry_strategy import retry_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +171,100 @@ def list_transfers(db: Session = Depends(get_db), current_user: dict = Depends(g
     return db.query(RemoteTransferJob).order_by(RemoteTransferJob.id.desc()).all()
 
 
+@router.post("/transfers/{job_id}/cancel")
+def cancel_transfer(
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Cancel a transfer job."""
+    _ = current_user
+    try:
+        remote_transfer_service.cancel_transfer(db, job_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    else:
+        return {"status": "success"}
+
+
+@router.post("/transfers/bulk/cancel")
+def bulk_cancel_transfers(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Cancel multiple transfer jobs."""
+    _ = current_user
+    job_ids = data.get("job_ids", [])
+    if not job_ids:
+        raise HTTPException(status_code=400, detail="No job IDs provided")
+
+    cancelled_count = 0
+    errors = []
+
+    for job_id in job_ids:
+        try:
+            remote_transfer_service.cancel_transfer(db, job_id)
+            cancelled_count += 1
+        except ValueError as e:
+            errors.append({"job_id": job_id, "error": str(e)})
+
+    return {
+        "status": "success",
+        "cancelled_count": cancelled_count,
+        "error_count": len(errors),
+        "errors": errors,
+    }
+
+
+@router.post("/transfers/bulk/retry")
+def bulk_retry_transfers(
+    data: dict,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Retry failed transfers by resetting them to PENDING."""
+    _ = current_user
+    job_ids = data.get("job_ids", [])
+    if not job_ids:
+        raise HTTPException(status_code=400, detail="No job IDs provided")
+
+    from app.utils.retry_strategy import MAX_RETRIES
+
+    # Get failed jobs and reset them to PENDING
+    jobs = (
+        db.query(RemoteTransferJob)
+        .filter(RemoteTransferJob.id.in_(job_ids))
+        .filter(RemoteTransferJob.status == TransferStatus.FAILED)
+        .with_for_update()
+        .all()
+    )
+
+    retried_count = 0
+    skipped_count = 0
+
+    for job in jobs:
+        if job.retry_count >= retry_strategy.max_retries:
+            skipped_count += 1
+            logger.warning(f"Skipping transfer {job.id}: exceeded max retries")
+        else:
+            job.status = TransferStatus.PENDING
+            job.error_message = None
+            job.retry_count = 0
+            job.start_time = None
+            job.end_time = None
+            retried_count += 1
+            logger.info(f"Retrying failed transfer {job.id}")
+
+    db.commit()
+
+    return {
+        "status": "success",
+        "retried_count": retried_count,
+        "skipped_count": skipped_count,
+    }
+
+
 class ReceiveHeader:
     def __init__(  # noqa: PLR0913
         self,
@@ -261,6 +358,7 @@ async def receive_chunk(
 ):
     """Inter-instance endpoint to receive file chunks."""
     _ = remote_conn
+    check_rate_limit(request)
 
     # 1. Get MonitoredPath
     path = db.query(MonitoredPath).filter(MonitoredPath.id == headers.remote_path_id).first()
@@ -270,6 +368,18 @@ async def receive_chunk(
     # 2. Determine base directory and build safe path
     base_dir = _get_base_directory(path, headers.storage_type)
     tmp_path = await _validate_and_build_path(base_dir, headers.relative_path)
+
+    # 3. Validate disk space on first chunk
+    if headers.chunk_index == 0:
+        file_size = (
+            int(request.headers.get("X-File-Size", "0")) if "X-File-Size" in request.headers else 0
+        )
+        if file_size > 0:
+            try:
+                disk_space_validator.validate_disk_space_direct(file_size, Path(base_dir))
+            except ValueError as e:
+                logger.warning(f"Insufficient disk space for transfer: {e}")
+                raise HTTPException(status_code=507, detail=str(e)) from None
 
     # 3. Ensure directory exists
     await anyio.to_thread.run_sync(lambda: tmp_path.parent.mkdir(parents=True, exist_ok=True))
@@ -319,22 +429,9 @@ async def _get_found_tmp(db: Session, remote_path_id: int, relative_path: str) -
     raise HTTPException(status_code=404, detail="Temporary file not found")
 
 
-@router.post("/verify-transfer")
-async def verify_transfer(
-    data: dict,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    remote_conn: RemoteConnection = Depends(verify_remote_secret),
-):
-    """Finalize and verify a file transfer."""
-    _ = remote_conn
-    relative_path = data["relative_path"]
-    remote_path_id = data["remote_path_id"]
-    checksum = data.get("checksum")
-
-    found_tmp = await _get_found_tmp(db, remote_path_id, relative_path)
-
-    if checksum:
+async def _verify_checksum_in_background(found_tmp: Path, checksum: str):
+    """Verify checksum in background and delete file if mismatch."""
+    try:
         sha256_hash = hashlib.sha256()
         async with aiofiles.open(found_tmp, "rb") as f:
             while True:
@@ -344,10 +441,37 @@ async def verify_transfer(
                 sha256_hash.update(byte_block)
 
         if sha256_hash.hexdigest() != checksum:
-            raise HTTPException(status_code=400, detail="Checksum verification failed")
+            logger.error(f"Checksum verification failed for {found_tmp}, deleting file")
+            await anyio.to_thread.run_sync(found_tmp.unlink, missing_ok=True)
+    except Exception:
+        logger.exception(f"Error during checksum verification for {found_tmp}")
+        await anyio.to_thread.run_sync(found_tmp.unlink, missing_ok=True)
 
-    final_path = found_tmp.with_suffix("")
-    await anyio.to_thread.run_sync(found_tmp.rename, final_path)
+
+@router.post("/verify-transfer")
+async def verify_transfer(
+    data: dict,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: Session = Depends(get_db),
+    remote_conn: RemoteConnection = Depends(verify_remote_secret),
+):
+    """Finalize and verify a file transfer."""
+    _ = remote_conn
+    check_rate_limit(request)
+    relative_path = data["relative_path"]
+    remote_path_id = data["remote_path_id"]
+    checksum = data.get("checksum")
+
+    found_tmp = await _get_found_tmp(db, remote_path_id, relative_path)
+
+    if checksum:
+        final_path = found_tmp.with_suffix("")
+        await anyio.to_thread.run_sync(found_tmp.rename, final_path)
+        background_tasks.add_task(_verify_checksum_in_background, final_path, checksum)
+    else:
+        final_path = found_tmp.with_suffix("")
+        await anyio.to_thread.run_sync(found_tmp.rename, final_path)
 
     background_tasks.add_task(scheduler_service.trigger_scan, remote_path_id)
     return {"status": "success"}

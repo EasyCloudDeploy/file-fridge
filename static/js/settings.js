@@ -34,7 +34,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // Handle initial hash in URL
-    const hash = window.location.hash.substring(1);
+    const hash = globalThis.location.hash.substring(1);
     if (hash) {
         const activeLink = document.querySelector(`#settings-nav [data-section="${hash}"]`);
         if (activeLink) {
@@ -110,15 +110,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             hideError();
             hideSuccess();
-
-            // Show loading state
-            const submitBtn = document.getElementById('submit-btn');
-            const submitText = document.getElementById('submit-text');
-            const submitSpinner = document.getElementById('submit-spinner');
-
-            submitBtn.disabled = true;
-            submitText.classList.add('d-none');
-            submitSpinner.classList.remove('d-none');
+            setFormButtonLoading('submit', true);
 
             try {
                 // Submit password change request
@@ -135,34 +127,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 if (response.ok) {
                     const data = await response.json();
-
-                    // Show success message
                     showSuccess('Password changed successfully! Please login again.');
-
-                    // Clear form
                     changePasswordForm.reset();
-
-                    // Redirect to login after delay
                     setTimeout(() => {
                         handleLogout();
                     }, 2000);
                 } else {
                     const data = await response.json();
                     showError(data.detail || 'Failed to change password. Please try again.');
-
-                    // Reset button
-                    submitBtn.disabled = false;
-                    submitText.classList.remove('d-none');
-                    submitSpinner.classList.add('d-none');
+                    setFormButtonLoading('submit', false);
                 }
             } catch (error) {
                 console.error('Password change error:', error);
                 showError('Failed to connect to server. Please try again.');
-
-                // Reset button
-                submitBtn.disabled = false;
-                submitText.classList.remove('d-none');
-                submitSpinner.classList.add('d-none');
+                setFormButtonLoading('submit', false);
             }
         });
     }
@@ -257,14 +235,7 @@ document.addEventListener('DOMContentLoaded', function() {
     if (addConnectionForm) {
         addConnectionForm.addEventListener('submit', async function(e) {
             e.preventDefault();
-
-            const submitBtn = document.getElementById('save-connection-btn');
-            const submitText = document.getElementById('save-connection-text');
-            const submitSpinner = document.getElementById('save-connection-spinner');
-
-            submitBtn.disabled = true;
-            submitText.classList.add('d-none');
-            submitSpinner.classList.remove('d-none');
+            setFormButtonLoading('save-connection', true);
 
             const formData = new FormData(this);
             const data = Object.fromEntries(formData.entries());
@@ -288,9 +259,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.error('Error adding connection:', error);
                 alert('Failed to connect to server.');
             } finally {
-                submitBtn.disabled = false;
-                submitText.classList.remove('d-none');
-                submitSpinner.classList.add('d-none');
+                setFormButtonLoading('save-connection', false);
             }
         });
     }
@@ -338,8 +307,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         statusClass = 'danger';
                     } else if (job.status === 'in_progress') {
                         statusClass = 'primary';
+                    } else if (job.status === 'cancelled') {
+                        statusClass = 'warning';
                     }
 
+                    const canCancel = ['pending', 'in_progress', 'failed'].includes(job.status);
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td title="${job.source_path}">${fileName}</td>
@@ -353,6 +325,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <td>${formatETA(job.eta)}</td>
                         <td>
                             ${job.error_message ? `<i class="bi bi-exclamation-circle text-danger" title="${job.error_message}"></i>` : ''}
+                            ${canCancel ? `<button class="btn btn-sm btn-outline-danger ms-2" onclick="cancelTransfer(${job.id})" title="Cancel transfer"><i class="bi bi-x-circle"></i></button>` : ''}
                         </td>
                     `;
                     list.appendChild(tr);
@@ -371,6 +344,88 @@ document.addEventListener('DOMContentLoaded', function() {
         return mins + 'm ' + secs + 's';
     }
 
+    globalThis.cancelTransfer = async function(jobId) {
+        if (!confirm('Are you sure you want to cancel this transfer?')) return;
+
+        try {
+            const response = await authenticatedFetch(`/api/remote/transfers/${jobId}/cancel`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                await loadRemoteTransfers();
+            } else {
+                const errorData = await response.json();
+                alert('Error: ' + (errorData.detail || 'Failed to cancel transfer'));
+            }
+        } catch (error) {
+            console.error('Error cancelling transfer:', error);
+            alert('Failed to connect to server.');
+        }
+    };
+
+    globalThis.bulkCancelTransfers = async function() {
+        const failedJobs = transfers.filter(t => ['failed', 'pending'].includes(t.status));
+        if (failedJobs.length === 0) {
+            alert('No failed or pending transfers to cancel.');
+            return;
+        }
+
+        if (!confirm(`Cancel ${failedJobs.length} transfers?`)) return;
+
+        try {
+            const jobIds = failedJobs.map(t => t.id);
+            const response = await authenticatedFetch('/api/remote/transfers/bulk/cancel', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_ids: jobIds })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                await loadRemoteTransfers();
+                alert(`Cancelled ${data.cancelled_count} transfers. ${data.error_count > 0 ? data.error_count + ' errors occurred.' : ''}`);
+            } else {
+                const errorData = await response.json();
+                alert('Error: ' + (errorData.detail || 'Failed to cancel transfers'));
+            }
+        } catch (error) {
+            console.error('Error cancelling transfers:', error);
+            alert('Failed to connect to server.');
+        }
+    };
+
+    globalThis.bulkRetryTransfers = async function() {
+        const failedJobs = transfers.filter(t => t.status === 'failed');
+        if (failedJobs.length === 0) {
+            alert('No failed transfers to retry.');
+            return;
+        }
+
+        if (!confirm(`Retry ${failedJobs.length} transfers?`)) return;
+
+        try {
+            const jobIds = failedJobs.map(t => t.id);
+            const response = await authenticatedFetch('/api/remote/transfers/bulk/retry', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ job_ids: jobIds })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                await loadRemoteTransfers();
+                alert(`Retrying ${data.retried_count} transfers. ${data.skipped_count > 0 ? data.skipped_count + ' transfers skipped (max retries exceeded).' : ''}`);
+            } else {
+                const errorData = await response.json();
+                alert('Error: ' + (errorData.detail || 'Failed to retry transfers'));
+            }
+        } catch (error) {
+            console.error('Error retrying transfers:', error);
+            alert('Failed to connect to server.');
+        }
+    };
+
     const refreshTransfersBtn = document.getElementById('refresh-transfers-btn');
     if (refreshTransfersBtn) {
         refreshTransfersBtn.addEventListener('click', loadRemoteTransfers);
@@ -387,11 +442,11 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirm-delete-conn-btn').addEventListener('click', async function() {
         if (!connectionToDelete) return;
 
-        const force = document.getElementById('force-delete-check').checked;
-        this.disabled = true;
-        this.textContent = 'Deleting...';
+        const button = this;
+        setButtonTextLoading(button, true, 'Deleting...', 'Delete');
 
         try {
+            const force = document.getElementById('force-delete-check').checked;
             const response = await authenticatedFetch(`/api/remote/connections/${connectionToDelete}?force=${force}`, {
                 method: 'DELETE'
             });
@@ -407,11 +462,26 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error('Error deleting connection:', error);
             alert('Failed to connect to server.');
         } finally {
-            this.disabled = false;
-            this.textContent = 'Delete';
+            setButtonTextLoading(button, false, 'Deleting...', 'Delete');
         }
     });
 });
+
+function setFormButtonLoading(baseName, isLoading) {
+    const btn = document.getElementById(`${baseName}-btn`);
+    const text = document.getElementById(`${baseName}-text`);
+    const spinner = document.getElementById(`${baseName}-spinner`);
+
+    if (btn) btn.disabled = isLoading;
+    if (text) text.classList.toggle('d-none', isLoading);
+    if (spinner) spinner.classList.toggle('d-none', !isLoading);
+}
+
+function setButtonTextLoading(button, isLoading, loadingText, defaultText) {
+    if (!button) return;
+    button.disabled = isLoading;
+    button.textContent = isLoading ? loadingText : defaultText;
+}
 
 // Password strength calculator
 function calculatePasswordStrength(password) {
@@ -445,26 +515,30 @@ function getStrengthMessage(strength) {
 }
 
 // Error and success message handlers
+function showMessage(type, message) {
+    const div = document.getElementById(`${type}-message`);
+    const text = document.getElementById(`${type}-text`);
+    if (text) text.textContent = message;
+    if (div) div.classList.remove('d-none');
+}
+
+function hideMessage(type) {
+    const div = document.getElementById(`${type}-message`);
+    if (div) div.classList.add('d-none');
+}
+
 function showError(message) {
-    const errorDiv = document.getElementById('error-message');
-    const errorText = document.getElementById('error-text');
-    if (errorText) errorText.textContent = message;
-    if (errorDiv) errorDiv.classList.remove('d-none');
+    showMessage('error', message);
 }
 
 function hideError() {
-    const errorDiv = document.getElementById('error-message');
-    if (errorDiv) errorDiv.classList.add('d-none');
+    hideMessage('error');
 }
 
 function showSuccess(message) {
-    const successDiv = document.getElementById('success-message');
-    const successText = document.getElementById('success-text');
-    if (successText) successText.textContent = message;
-    if (successDiv) successDiv.classList.remove('d-none');
+    showMessage('success', message);
 }
 
 function hideSuccess() {
-    const successDiv = document.getElementById('success-message');
-    if (successDiv) successDiv.classList.add('d-none');
+    hideMessage('success');
 }
