@@ -55,14 +55,14 @@ def fix_database_schema(db_path: str = "data/file_fridge.db"):
         if version_num not in valid_versions:
             print(f"   ⚠️  Invalid version '{version_num}', stamping to latest...")
             cursor.execute("UPDATE alembic_version SET version_num = ?", ("1eab9db4e223",))
-            print(f"   ✅ Stamped as: 1eab9db4e223")
+            print("   ✅ Stamped as: 1eab9db4e223")
         elif version_num == "a_unified_migration" and has_file_transaction_history:
-            print(f"   ⚠️  Database has tables from a_unified_migration but version is old")
-            print(f"   ⚠️  Stamping to latest migration...")
+            print("   ⚠️  Database has tables from a_unified_migration but version is old")
+            print("   ⚠️  Stamping to latest migration...")
             cursor.execute("UPDATE alembic_version SET version_num = ?", ("1eab9db4e223",))
-            print(f"   ✅ Stamped as: 1eab9db4e223")
+            print("   ✅ Stamped as: 1eab9db4e223")
         else:
-            print(f"   ✅ Version is valid")
+            print("   ✅ Version is valid")
 
         # 2. Check notifiers table for missing columns
         cursor.execute("PRAGMA table_info(notifiers)")
@@ -116,10 +116,10 @@ def fix_database_schema(db_path: str = "data/file_fridge.db"):
                 print("   ⚠️  This column may not cause issues if it still exists")
 
         conn.commit()
-        print(f"\n✅ Database schema fixed successfully!")
-        print(f"\nNext steps:")
-        print(f"   1. Run migrations: uv run alembic upgrade head")
-        print(f"   2. Restart the application")
+        print("\n✅ Database schema fixed successfully!")
+        print("\nNext steps:")
+        print("   1. Run migrations: uv run alembic upgrade head")
+        print("   2. Restart the application")
         return True
 
     except Exception as e:
