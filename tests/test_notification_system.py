@@ -18,7 +18,8 @@ from app.services.notification_events import NotificationEventType, ScanComplete
 @pytest.fixture
 def db_session():
     """Create a test database session."""
-    from app.database import SessionLocal
+    from app.database import SessionLocal, init_db
+    init_db()
 
     session = SessionLocal()
     try:
@@ -30,7 +31,7 @@ def db_session():
 class TestNotifierEncryption:
     """Test SMTP password encryption/decryption."""
 
-    def test_smtp_password_encryption(db_session: Session):
+    def test_smtp_password_encryption(self, db_session: Session):
         """Test that SMTP passwords are encrypted and can be decrypted."""
         from app.models import encryption_manager
 
@@ -55,10 +56,7 @@ class TestNotifierEncryption:
 
         # Check encrypted value is stored
         assert notifier.smtp_password_encrypted != test_password
-        assert (
-            "gAAAA" in notifier.smtp_password_encrypted
-            or "gAAAA" in notifier.smtp_password_encrypted
-        )
+        assert "gAAAA" in notifier.smtp_password_encrypted
 
         # Check decrypted value matches original
         decrypted = notifier.smtp_password
@@ -71,7 +69,7 @@ class TestNotifierEncryption:
 class TestRateLimiter:
     """Test notification rate limiting."""
 
-    def test_rate_limiting(db_session: Session):
+    def test_rate_limiting(self, db_session: Session):
         """Test that rate limiting prevents duplicate notifications."""
         from app.services.notification_service import rate_limiter
 
@@ -80,10 +78,9 @@ class TestRateLimiter:
         # First notification should be allowed
         assert rate_limiter.should_notify(1, event_type) is True
 
-        # Simulate notification sent
-        rate_limiter.last_notification[f"1:{event_type.value}"] = rate_limiter.last_notification[
-            f"1:{event_type.value}"
-        ]
+        # Simulate notification sent (set to current time)
+        from datetime import datetime, timezone
+        rate_limiter.last_notification[f"1:{event_type.value}"] = datetime.now(timezone.utc)
 
         # Immediate second notification should be rate limited
         assert rate_limiter.should_notify(1, event_type) is False
@@ -96,7 +93,8 @@ class TestRateLimiter:
 class TestNotificationDispatch:
     """Test notification dispatch logic."""
 
-    async def test_dispatch_event(db_session: Session):
+    @pytest.mark.asyncio
+    async def test_dispatch_event(self, db_session: Session):
         """Test event dispatch creates notification and dispatches."""
         event_data = ScanCompletedData(
             path_id=1,
@@ -147,7 +145,7 @@ class TestNotificationDispatch:
 class TestNotificationValidation:
     """Test notification schema validation."""
 
-    def test_email_notifier_requires_smtp_host():
+    def test_email_notifier_requires_smtp_host(self):
         """Test that email notifiers require SMTP host."""
         from pydantic import ValidationError
 
@@ -161,7 +159,7 @@ class TestNotificationValidation:
                 subscribed_events=["SCAN_COMPLETED"],
             )
 
-    def test_email_notifier_requires_smtp_sender():
+    def test_email_notifier_requires_smtp_sender(self):
         """Test that email notifiers require SMTP sender."""
         from pydantic import ValidationError
 
@@ -175,7 +173,7 @@ class TestNotificationValidation:
                 subscribed_events=["SCAN_COMPLETED"],
             )
 
-    def test_webhook_requires_https():
+    def test_webhook_requires_https(self):
         """Test that webhook URLs must use HTTPS."""
         from pydantic import ValidationError
 
@@ -187,7 +185,7 @@ class TestNotificationValidation:
                 subscribed_events=["SCAN_COMPLETED"],
             )
 
-    def test_webhook_with_https_valid():
+    def test_webhook_with_https_valid(self):
         """Test that webhook with HTTPS is valid."""
         notifier = NotifierCreate(
             name="Test",
@@ -197,7 +195,7 @@ class TestNotificationValidation:
         )
         assert notifier.type == NotifierType.GENERIC_WEBHOOK
 
-    def test_valid_event_types():
+    def test_valid_event_types(self):
         """Test that valid event types pass validation."""
         from app.services.notification_events import NotificationEventType
 
@@ -217,7 +215,7 @@ class TestNotificationValidation:
         )
         assert len(notifier.subscribed_events) == 7
 
-    def test_invalid_event_types():
+    def test_invalid_event_types(self):
         """Test that invalid event types fail validation."""
         from pydantic import ValidationError
 
@@ -233,7 +231,7 @@ class TestNotificationValidation:
 class TestXSSPrevention:
     """Test XSS prevention in notification HTML."""
 
-    def test_html_message_escaping(db_session: Session):
+    def test_html_message_escaping(self, db_session: Session):
         """Test that HTML messages escape user-provided content."""
         from app.services.notification_service import NotificationService
 
@@ -248,4 +246,6 @@ class TestXSSPrevention:
         # Verify script tags are escaped
         assert "<script>" not in html
         assert "&lt;script&gt;" in html or "script" not in html
-        assert "onerror" not in html or "onerror" not in html
+        # Verify attributes are escaped (meaning the tag <img is not there)
+        assert "<img" not in html
+        assert "&lt;img" in html

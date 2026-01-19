@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
@@ -84,8 +84,8 @@ class RateLimiter:
 
         with self.lock:
             last_time = self.last_notification.get(key)
-            if last_time is None or datetime.utcnow() - last_time >= self.cooldown:
-                self.last_notification[key] = datetime.utcnow()
+            if last_time is None or datetime.now(timezone.utc) - last_time >= self.cooldown:
+                self.last_notification[key] = datetime.now(timezone.utc)
                 return True
             return False
 
@@ -475,7 +475,7 @@ class NotificationService:
         payload = {
             "level": level.upper(),
             "message": message,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "source": "File Fridge",
         }
         if metadata:

@@ -70,16 +70,14 @@ class SchedulerService:
                 self._add_disk_space_monitoring_job()
             except Exception as e:
                 logger.exception(f"Error starting scheduler: {e}")
-                self._add_remote_code_rotation_job()
-                self._add_remote_transfer_job()
-            except Exception:
-                logger.exception("Error starting scheduler")
                 # Try to clean up
                 try:
                     if self.scheduler.running:
                         self.scheduler.shutdown(wait=False)
                 except Exception:
                     pass
+                self._add_remote_code_rotation_job()
+                self._add_remote_transfer_job()
                 raise
 
     def stop(self):
@@ -262,7 +260,7 @@ def check_disk_space_and_notify(path: MonitoredPath, db: Session):
     """Check disk space for all cold storage locations and send notifications if low."""
     for location in path.storage_locations:
         try:
-            total, used, free = shutil.disk_usage(location.path)
+            total, _, free = shutil.disk_usage(location.path)
             free_percent = (free / total) * 100
 
             # Check critical threshold first (more severe)
@@ -347,7 +345,7 @@ def disk_space_monitoring_job_func():
 
         for location in locations:
             try:
-                total, used, free = shutil.disk_usage(location.path)
+                total, _, free = shutil.disk_usage(location.path)
                 free_percent = (free / total) * 100
 
                 # Check critical threshold first (more severe)

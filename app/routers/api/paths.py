@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session, selectinload
 
 from app import schemas
 from app.database import get_db
-from app.models import ColdStorageLocation, CriterionType, FileInventory, MonitoredPath
+from app.models import ColdStorageLocation, CriterionType, FileInventory, MonitoredPath, User
+from app.security import get_current_user
 from app.services.scan_progress import scan_progress_manager
 from app.services.scheduler import scheduler_service
 from app.utils.indexing import IndexingManager
@@ -234,7 +235,11 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=schemas.MonitoredPath, status_code=status.HTTP_201_CREATED)
-def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)):
+def create_path(
+    path: schemas.MonitoredPathCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Create a new monitored path."""
     # Validate source path exists and has proper permissions
     is_valid, error_msg = validate_path_access(path.source_path)
@@ -306,7 +311,7 @@ def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)
                 path_name=db_path.name,
                 source_path=db_path.source_path,
                 operation_type=db_path.operation_type.value,
-                created_by=None,  # TODO: Add auth context when implemented
+                created_by=current_user.username,
             ),
         )
     except Exception as e:
@@ -348,6 +353,7 @@ def update_path(
     ),
     migration_action: str = Query(None, description="Migration action: 'move' or 'abandon'"),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """Update a monitored path."""
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
@@ -443,7 +449,7 @@ def update_path(
                     path_id=path.id,
                     path_name=path.name,
                     changes=changes,
-                    updated_by=None,  # TODO: Add auth context
+                    updated_by=current_user.username,
                 ),
             )
         except Exception as e:
@@ -460,6 +466,7 @@ def delete_path(
         False, description="If True, move all files back from cold storage before deleting"
     ),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Delete a monitored path.
@@ -515,7 +522,7 @@ def delete_path(
                 path_id=path_id,
                 path_name=path_name,
                 source_path=source_path,
-                deleted_by=None,  # TODO: Add auth context
+                deleted_by=current_user.username,
             ),
         )
     except Exception as e:
