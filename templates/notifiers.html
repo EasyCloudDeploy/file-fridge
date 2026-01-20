@@ -3,242 +3,309 @@
 {% block title %}Notifiers - File Fridge{% endblock %}
 
 {% block content %}
-    <div class="container mt-4">
-        <div class="row mb-4">
-            <div class="col-12 col-md-8 mb-2 mb-md-0">
-                <h2><i class="bi bi-bell"></i> Notification Settings</h2>
-                <p class="text-muted d-none d-md-block">Configure email and webhook destinations for system alerts and notifications</p>
-            </div>
-            <div class="col-12 col-md-4 text-md-end">
-                <button class="btn btn-primary" id="create_notifier_btn">
-                    <i class="bi bi-plus-circle"></i> Add Notifier
-                </button>
-            </div>
+<div class="container mt-4">
+    <div class="row mb-4">
+        <div class="col-12 col-md-8 mb-2 mb-md-0">
+            <h2><i class="bi bi-bell"></i> Notification Settings</h2>
+            <p class="text-muted d-none d-md-block">Configure email and webhook destinations for system alerts and
+                notifications</p>
         </div>
-
-        <!-- Alert Container -->
-        <div id="alert_container"></div>
-
-        <!-- Notifiers Table -->
-        <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header">
-                        <h5 class="mb-0">Configured Notifiers</h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="notifiers_loading" class="text-center py-5">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading...</span>
-                            </div>
-                            <p class="mt-2 text-muted">Loading notifiers...</p>
-                        </div>
-                        <div id="notifiers_content" style="display: none;">
-                            <div id="notifiers_empty" class="text-center py-5" style="display: none;">
-                                <i class="bi bi-bell-slash text-muted" style="font-size: 3rem;"></i>
-                                <p class="text-muted mt-3">No notifiers configured yet</p>
-                                <p class="text-muted">Get started by adding an email address or webhook URL to receive notifications</p>
-                                <button class="btn btn-primary" onclick="document.getElementById('create_notifier_btn').click()">
-                                    <i class="bi bi-plus-circle"></i> Add Your First Notifier
-                                </button>
-                            </div>
-                            <div id="notifiers_table_container" style="display: none;">
-                                <div class="table-responsive">
-                                    <table class="table table-hover">
-                                        <thead>
-                                            <tr>
-                                                <th style="width: 50px;">Status</th>
-                                                <th>Name</th>
-                                                <th class="d-none d-md-table-cell">Type</th>
-                                                <th class="d-none d-lg-table-cell">Address</th>
-                                                <th class="d-none d-md-table-cell">Level</th>
-                                                <th class="d-none d-xl-table-cell" style="width: 150px;">Created</th>
-                                                <th style="width: 140px;">Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="notifiers_table_body">
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <div class="col-12 col-md-4 text-md-end">
+            <button class="btn btn-primary" id="create_notifier_btn">
+                <i class="bi bi-plus-circle"></i> Add Notifier
+            </button>
         </div>
-
     </div>
 
-    <!-- Create/Edit Notifier Modal -->
-    <div class="modal fade" id="notifier_modal" tabindex="-1">
-        <div class="modal-dialog modal-lg modal-fullscreen-md-down">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="notifier_modal_title">Add Notifier</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+    <!-- Alert Container -->
+    <div id="alert_container"></div>
+
+    <!-- Notifiers Table -->
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Configured Notifiers</h5>
                 </div>
-                <div class="modal-body">
-                    <form id="notifier_form">
-                        <input type="hidden" id="notifier_id">
-
-                        <!-- Basic Configuration -->
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="notifier_name" class="form-label">Name <span class="text-danger">*</span></label>
-                                    <input type="text" class="form-control" id="notifier_name" required
-                                           placeholder="e.g., Admin Email Alert">
-                                    <div class="form-text">A descriptive name for this notifier</div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="notifier_type" class="form-label">Type <span class="text-danger">*</span></label>
-                                    <select class="form-select" id="notifier_type" required>
-                                        <option value="">Select type...</option>
-                                        <option value="email">Email</option>
-                                        <option value="generic_webhook">Generic Webhook</option>
-                                    </select>
-                                    <div class="form-text">Type of notification destination</div>
-                                </div>
+                <div class="card-body">
+                    <div id="notifiers_loading" class="text-center py-5">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                        <p class="mt-2 text-muted">Loading notifiers...</p>
+                    </div>
+                    <div id="notifiers_content" style="display: none;">
+                        <div id="notifiers_empty" class="text-center py-5" style="display: none;">
+                            <i class="bi bi-bell-slash text-muted" style="font-size: 3rem;"></i>
+                            <p class="text-muted mt-3">No notifiers configured yet</p>
+                            <p class="text-muted">Get started by adding an email address or webhook URL to receive
+                                notifications</p>
+                            <button class="btn btn-primary"
+                                onclick="document.getElementById('create_notifier_btn').click()">
+                                <i class="bi bi-plus-circle"></i> Add Your First Notifier
+                            </button>
+                        </div>
+                        <div id="notifiers_table_container" style="display: none;">
+                            <div class="table-responsive">
+                                <table class="table table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 50px;">Status</th>
+                                            <th>Name</th>
+                                            <th class="d-none d-md-table-cell">Type</th>
+                                            <th class="d-none d-lg-table-cell">Address</th>
+                                            <th class="d-none d-md-table-cell">Subscribed Events</th>
+                                            <th class="d-none d-xl-table-cell" style="width: 150px;">Created</th>
+                                            <th style="width: 140px;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="notifiers_table_body">
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
 
-                        <div class="mb-3">
-                            <label for="notifier_address" class="form-label">Address <span class="text-danger">*</span></label>
-                            <input type="text" class="form-control" id="notifier_address" required
-                                   placeholder="Email address or webhook URL">
-                            <div class="form-text" id="address_help">Email address or webhook URL</div>
-                        </div>
+</div>
 
-                        <!-- SMTP Configuration (only for email notifiers) -->
-                        <div id="smtp_config_section" style="display: none;">
-                            <hr class="my-3">
-                            <h6 class="mb-3"><i class="bi bi-envelope-at"></i> SMTP Server Configuration</h6>
+<!-- Create/Edit Notifier Modal -->
+<div class="modal fade" id="notifier_modal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-fullscreen-md-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="notifier_modal_title">Add Notifier</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="notifier_form">
+                    <input type="hidden" id="notifier_id">
 
-                            <div class="row">
-                                <div class="col-md-8">
-                                    <div class="mb-3">
-                                        <label for="smtp_host" class="form-label">SMTP Host <span class="text-danger">*</span></label>
-                                        <input type="text" class="form-control" id="smtp_host"
-                                               placeholder="e.g., smtp.gmail.com">
-                                        <div class="form-text">SMTP server hostname</div>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="mb-3">
-                                        <label for="smtp_port" class="form-label">Port</label>
-                                        <input type="number" class="form-control" id="smtp_port" value="587"
-                                               placeholder="587">
-                                        <div class="form-text">Default: 587</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="mb-3">
-                                        <label for="smtp_user" class="form-label">Username</label>
-                                        <input type="text" class="form-control" id="smtp_user"
-                                               placeholder="Username for authentication">
-                                        <div class="form-text">Leave blank if not required</div>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="mb-3">
-                                        <label for="smtp_password" class="form-label">Password</label>
-                                        <input type="password" class="form-control" id="smtp_password"
-                                               placeholder="Password for authentication">
-                                        <div class="form-text">Leave blank if not required</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="row">
-                                <div class="col-md-8">
-                                    <div class="mb-3">
-                                        <label for="smtp_sender" class="form-label">From Address <span class="text-danger">*</span></label>
-                                        <input type="email" class="form-control" id="smtp_sender"
-                                               placeholder="e.g., notifications@example.com">
-                                        <div class="form-text">Email address to send from</div>
-                                    </div>
-                                </div>
-                                <div class="col-md-4">
-                                    <div class="mb-3">
-                                        <label class="form-label d-block">Encryption</label>
-                                        <div class="form-check mt-2">
-                                            <input type="checkbox" class="form-check-input" id="smtp_use_tls" checked>
-                                            <label class="form-check-label" for="smtp_use_tls">
-                                                Use TLS
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
+                    <!-- Basic Configuration -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="notifier_name" class="form-label">Name <span
+                                        class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="notifier_name" required
+                                    placeholder="e.g., Admin Email Alert">
+                                <div class="form-text">A descriptive name for this notifier</div>
                             </div>
                         </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="notifier_type" class="form-label">Type <span
+                                        class="text-danger">*</span></label>
+                                <select class="form-select" id="notifier_type" required>
+                                    <option value="">Select type...</option>
+                                    <option value="email">Email</option>
+                                    <option value="generic_webhook">Generic Webhook</option>
+                                </select>
+                                <div class="form-text">Type of notification destination</div>
+                            </div>
+                        </div>
+                    </div>
 
+                    <div class="mb-3">
+                        <label for="notifier_address" class="form-label">Address <span
+                                class="text-danger">*</span></label>
+                        <input type="text" class="form-control" id="notifier_address" required
+                            placeholder="Email address or webhook URL">
+                        <div class="form-text" id="address_help">Email address or webhook URL</div>
+                    </div>
+
+                    <!-- SMTP Configuration (only for email notifiers) -->
+                    <div id="smtp_config_section" style="display: none;">
                         <hr class="my-3">
+                        <h6 class="mb-3"><i class="bi bi-envelope-at"></i> SMTP Server Configuration</h6>
 
                         <div class="row">
                             <div class="col-md-8">
                                 <div class="mb-3">
-                                    <label for="notifier_filter_level" class="form-label">Minimum Level <span class="text-danger">*</span></label>
-                                    <select class="form-select" id="notifier_filter_level" required>
-                                        <option value="info">INFO - All notifications</option>
-                                        <option value="warning">WARNING - Warnings and errors only</option>
-                                        <option value="error">ERROR - Errors only</option>
-                                    </select>
-                                    <div class="form-text">Only send notifications at or above this level</div>
+                                    <label for="smtp_host" class="form-label">SMTP Host <span
+                                            class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="smtp_host"
+                                        placeholder="e.g., smtp.gmail.com">
+                                    <div class="form-text">SMTP server hostname</div>
                                 </div>
                             </div>
                             <div class="col-md-4">
                                 <div class="mb-3">
-                                    <label class="form-label d-block">Status</label>
-                                    <div class="form-check mt-2">
-                                        <input type="checkbox" class="form-check-input" id="notifier_enabled" checked>
-                                        <label class="form-check-label" for="notifier_enabled">
-                                            Enabled
-                                        </label>
-                                    </div>
-                                    <div class="form-text">Active status</div>
+                                    <label for="smtp_port" class="form-label">Port</label>
+                                    <input type="number" class="form-control" id="smtp_port" value="587"
+                                        placeholder="587">
+                                    <div class="form-text">Default: 587</div>
                                 </div>
                             </div>
                         </div>
-                    </form>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="save_notifier_btn">
-                        <i class="bi bi-check-circle"></i> Save
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Delete Confirmation Modal -->
-    <div class="modal fade" id="delete_modal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header bg-danger text-white">
-                    <h5 class="modal-title">Confirm Deletion</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <p>Are you sure you want to delete the notifier "<strong id="delete_notifier_name"></strong>"?</p>
-                    <p class="text-muted mb-0">This action cannot be undone.</p>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-danger" id="confirm_delete_btn">
-                        <i class="bi bi-trash"></i> Delete
-                    </button>
-                </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="smtp_user" class="form-label">Username</label>
+                                    <input type="text" class="form-control" id="smtp_user"
+                                        placeholder="Username for authentication">
+                                    <div class="form-text">Leave blank if not required</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="smtp_password" class="form-label">Password</label>
+                                    <input type="password" class="form-control" id="smtp_password"
+                                        placeholder="Password for authentication">
+                                    <div class="form-text">Leave blank if not required</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label for="smtp_sender" class="form-label">From Address <span
+                                            class="text-danger">*</span></label>
+                                    <input type="email" class="form-control" id="smtp_sender"
+                                        placeholder="e.g., notifications@example.com">
+                                    <div class="form-text">Email address to send from</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label d-block">Encryption</label>
+                                    <div class="form-check mt-2">
+                                        <input type="checkbox" class="form-check-input" id="smtp_use_tls" checked>
+                                        <label class="form-check-label" for="smtp_use_tls">
+                                            Use TLS
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <hr class="my-3">
+
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="mb-3">
+                                <label class="form-label d-flex justify-content-between align-items-center">
+                                    Subscribed Events <span class="text-danger">*</span>
+                                    <div class="btn-group btn-group-sm">
+                                        <button type="button" class="btn btn-outline-secondary py-0 px-2"
+                                            id="select_all_events">All</button>
+                                        <button type="button" class="btn btn-outline-secondary py-0 px-2"
+                                            id="select_no_events">None</button>
+                                    </div>
+                                </label>
+                                <div class="card bg-light">
+                                    <div class="card-body py-2">
+                                        <div class="row" id="events_checklist">
+                                            <div class="col-md-6">
+                                                <div class="form-check">
+                                                    <input class="form-check-input event-checkbox" type="checkbox"
+                                                        value="SCAN_COMPLETED" id="event_scan_completed">
+                                                    <label class="form-check-label" for="event_scan_completed">Scan
+                                                        Completed</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input event-checkbox" type="checkbox"
+                                                        value="SCAN_ERROR" id="event_scan_error">
+                                                    <label class="form-check-label" for="event_scan_error">Scan
+                                                        Error</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input event-checkbox" type="checkbox"
+                                                        value="DISK_SPACE_CAUTION" id="event_disk_caution">
+                                                    <label class="form-check-label" for="event_disk_caution">Disk Space
+                                                        Caution</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input event-checkbox" type="checkbox"
+                                                        value="DISK_SPACE_CRITICAL" id="event_disk_critical">
+                                                    <label class="form-check-label" for="event_disk_critical">Disk Space
+                                                        Critical</label>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="form-check">
+                                                    <input class="form-check-input event-checkbox" type="checkbox"
+                                                        value="PATH_CREATED" id="event_path_created">
+                                                    <label class="form-check-label" for="event_path_created">Path
+                                                        Created</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input event-checkbox" type="checkbox"
+                                                        value="PATH_UPDATED" id="event_path_updated">
+                                                    <label class="form-check-label" for="event_path_updated">Path
+                                                        Updated</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input event-checkbox" type="checkbox"
+                                                        value="PATH_DELETED" id="event_path_deleted">
+                                                    <label class="form-check-label" for="event_path_deleted">Path
+                                                        Deleted</label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="form-text">Choose which events will trigger this notification</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-12">
+                            <div class="mb-3">
+                                <label class="form-label d-block">Status</label>
+                                <div class="form-check mt-2">
+                                    <input type="checkbox" class="form-check-input" id="notifier_enabled" checked>
+                                    <label class="form-check-label" for="notifier_enabled">
+                                        Enabled
+                                    </label>
+                                </div>
+                                <div class="form-text">If disabled, no notifications will be sent to this destination
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="save_notifier_btn">
+                    <i class="bi bi-check-circle"></i> Save
+                </button>
             </div>
         </div>
     </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal fade" id="delete_modal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title">Confirm Deletion</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete the notifier "<strong id="delete_notifier_name"></strong>"?</p>
+                <p class="text-muted mb-0">This action cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm_delete_btn">
+                    <i class="bi bi-trash"></i> Delete
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
-    <script src="/static/js/notifiers.js"></script>
+<script src="/static/js/notifiers.js"></script>
 {% endblock %}

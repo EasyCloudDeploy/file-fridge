@@ -58,6 +58,15 @@ function setupEventListeners() {
         confirmDelete();
     });
 
+    // Select all/none events
+    document.getElementById('select_all_events').addEventListener('click', () => {
+        document.querySelectorAll('.event-checkbox').forEach(cb => cb.checked = true);
+    });
+
+    document.getElementById('select_no_events').addEventListener('click', () => {
+        document.querySelectorAll('.event-checkbox').forEach(cb => cb.checked = false);
+    });
+
     // Notifier type change - update placeholder and show/hide SMTP config
     document.getElementById('notifier_type').addEventListener('change', (e) => {
         const addressInput = document.getElementById('notifier_address');
@@ -144,7 +153,10 @@ function renderNotifiers() {
             ? '<span class="badge bg-primary"><i class="bi bi-envelope"></i><span class="d-none d-lg-inline"> Email</span></span>'
             : '<span class="badge bg-info"><i class="bi bi-webhook"></i><span class="d-none d-lg-inline"> Webhook</span></span>';
 
-        const levelBadge = getLevelBadge(notifier.filter_level);
+        const eventsBadges = (notifier.subscribed_events || []).map(event => {
+            const label = event.replace(/_/g, ' ').toLowerCase();
+            return `<span class="badge bg-light text-dark border me-1 small" style="font-size: 0.7rem;">${escapeHtml(label)}</span>`;
+        }).join('');
 
         const createdDate = new Date(notifier.created_at).toLocaleDateString();
 
@@ -159,7 +171,7 @@ function renderNotifiers() {
                 <td><strong>${escapeHtml(notifier.name)}</strong></td>
                 <td class="d-none d-md-table-cell">${typeBadge}</td>
                 <td class="d-none d-lg-table-cell"><code class="small">${escapeHtml(displayAddress)}</code></td>
-                <td class="d-none d-md-table-cell">${levelBadge}</td>
+                <td class="d-none d-md-table-cell">${eventsBadges || '<span class="text-muted small">None</span>'}</td>
                 <td class="d-none d-xl-table-cell"><small class="text-muted">${createdDate}</small></td>
                 <td>
                     <div class="btn-group btn-group-sm" role="group">
@@ -179,21 +191,7 @@ function renderNotifiers() {
     }).join('');
 }
 
-/**
- * Get badge HTML for notification level
- */
-function getLevelBadge(level) {
-    switch(level) {
-        case 'info':
-            return '<span class="badge bg-info">INFO+</span>';
-        case 'warning':
-            return '<span class="badge bg-warning">WARNING+</span>';
-        case 'error':
-            return '<span class="badge bg-danger">ERROR</span>';
-        default:
-            return '<span class="badge bg-secondary">' + level.toUpperCase() + '</span>';
-    }
-}
+
 
 /**
  * Open modal to create a new notifier
@@ -215,8 +213,13 @@ function openNotifierModal(notifier = null) {
         document.getElementById('notifier_name').value = notifier.name;
         document.getElementById('notifier_type').value = notifier.type;
         document.getElementById('notifier_address').value = notifier.address;
-        document.getElementById('notifier_filter_level').value = notifier.filter_level;
         document.getElementById('notifier_enabled').checked = notifier.enabled;
+
+        // Set event checkboxes
+        const subscribedEvents = notifier.subscribed_events || [];
+        document.querySelectorAll('.event-checkbox').forEach(cb => {
+            cb.checked = subscribedEvents.includes(cb.value);
+        });
 
         // Populate SMTP fields if email notifier
         if (notifier.type === 'email') {
@@ -233,7 +236,7 @@ function openNotifierModal(notifier = null) {
     } else {
         // Default values for new notifier
         document.getElementById('notifier_enabled').checked = true;
-        document.getElementById('notifier_filter_level').value = 'info';
+        document.querySelectorAll('.event-checkbox').forEach(cb => cb.checked = true); // All by default
         document.getElementById('smtp_port').value = 587;
         document.getElementById('smtp_use_tls').checked = true;
     }
@@ -265,11 +268,21 @@ async function saveNotifier() {
 
     const notifierType = document.getElementById('notifier_type').value;
     const notifierId = document.getElementById('notifier_id').value;
+
+    const selectedEvents = Array.from(document.querySelectorAll('.event-checkbox:checked'))
+        .map(cb => cb.value);
+
+    // Validate events selection
+    if (selectedEvents.length === 0) {
+        showAlert('Please select at least one event to subscribe to', 'warning');
+        return;
+    }
+
     const data = {
         name: document.getElementById('notifier_name').value,
         type: notifierType,
         address: document.getElementById('notifier_address').value,
-        filter_level: document.getElementById('notifier_filter_level').value,
+        subscribed_events: selectedEvents,
         enabled: document.getElementById('notifier_enabled').checked
     };
 
@@ -448,7 +461,17 @@ function showAlert(message, type = 'info') {
  * Escape HTML to prevent XSS
  */
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (text === null || typeof text === 'undefined') {
+        return '';
+    }
+    return String(text).replace(/[&<>"'/]/g, function (s) {
+        return {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+            '/': '&#x2F;'
+        }[s];
+    });
 }

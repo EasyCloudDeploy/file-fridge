@@ -91,8 +91,12 @@ class Settings(BaseSettings):
     # Authentication
     # Override via SECRET_KEY environment variable
     # Secret key for JWT signing - required for production
-    # IMPORTANT: This must be set for the application to start
+    # IMPORTANT: This must be set for application to start
     secret_key: Optional[str] = None
+
+    # Encryption key file path for sensitive data (SMTP passwords, etc.)
+    # Override via ENCRYPTION_KEY_FILE environment variable
+    encryption_key_file: str = "./data/encryption.key"
 
     # Override via ACCESS_TOKEN_EXPIRE_DAYS environment variable
     # Default token expiration in days
@@ -130,6 +134,54 @@ class Settings(BaseSettings):
             print("  export SECRET_KEY='$(openssl rand -hex 32)'")  # noqa: T201
             print("  or use a UUID: export SECRET_KEY='$(uuidgen)'")  # noqa: T201
             sys.exit(1)
+        return self
+
+    @model_validator(mode="after")
+    def validate_encryption_key_file(self):
+        """Validate encryption key file exists and has restrictive permissions."""
+        key_path = Path(self.encryption_key_file)
+
+        if not key_path.exists():
+            print("\nERROR: Encryption key file not found.")  # noqa: T201
+            print(f"\nExpected encryption key file at: {key_path}")  # noqa: T201
+            print("\nThis file contains sensitive data and is required for encryption operations.")  # noqa: T201
+            print("\nTo create an encryption key file:")  # noqa: T201
+            print(f"  mkdir -p {key_path.parent}")  # noqa: T201
+            print(f"  openssl rand -hex 32 > {key_path}")  # noqa: T201
+            print(f"  chmod 600 {key_path}")  # noqa: T201
+            print("\nOr set a different path via ENCRYPTION_KEY_FILE environment variable.")  # noqa: T201
+            sys.exit(1)
+
+        if not key_path.is_file():
+            print("\nERROR: Encryption key path exists but is not a file.")  # noqa: T201
+            print(f"Path: {key_path}")  # noqa: T201
+            sys.exit(1)
+
+        try:
+            with key_path.open("r"):
+                pass
+        except PermissionError:
+            print("\nERROR: Cannot read encryption key file.")  # noqa: T201
+            print(f"Path: {key_path}")  # noqa: T201
+            print("\nCheck that the file has appropriate read permissions.")  # noqa: T201
+            sys.exit(1)
+
+        if sys.platform != "win32":
+            import stat
+
+            mode = key_path.stat().st_mode
+            file_perms = stat.S_IMODE(mode)
+
+            expected_perms = 0o600
+            if file_perms & ~expected_perms:
+                print("\nERROR: Encryption key file has permissive permissions.")  # noqa: T201
+                print(f"Path: {key_path}")  # noqa: T201
+                print(f"Current permissions: {oct(file_perms)}")  # noqa: T201
+                print(f"Expected permissions: {oct(expected_perms)} (owner read/write only)")  # noqa: T201
+                print("\nTo fix permissions:")  # noqa: T201
+                print(f"  chmod 600 {key_path}")  # noqa: T201
+                sys.exit(1)
+
         return self
 
     class Config:

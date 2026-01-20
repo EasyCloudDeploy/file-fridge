@@ -1,6 +1,7 @@
 # ruff: noqa: B008
 """API endpoints for notifier management."""
 
+import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,6 +17,7 @@ from app.schemas import (
 )
 from app.services.notification_service import notification_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/notifiers", tags=["notifiers"])
 
 
@@ -71,10 +73,32 @@ def create_notifier(notifier: NotifierCreate, db: Session = Depends(get_db)):
     Returns:
         Created notifier object
     """
-    db_notifier = NotifierModel(**notifier.model_dump())
+    # Check for duplicate name
+    existing = db.query(NotifierModel).filter(NotifierModel.name == notifier.name).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Notifier with name '{notifier.name}' already exists",
+        )
+
+    # Create notifier (password will be encrypted via property setter)
+    db_notifier = NotifierModel(
+        name=notifier.name,
+        type=notifier.type,
+        address=notifier.address,
+        enabled=notifier.enabled,
+        subscribed_events=notifier.subscribed_events,
+        smtp_host=notifier.smtp_host,
+        smtp_port=notifier.smtp_port,
+        smtp_user=notifier.smtp_user,
+        smtp_password=notifier.smtp_password,  # Property setter handles encryption
+        smtp_sender=notifier.smtp_sender,
+        smtp_use_tls=notifier.smtp_use_tls,
+    )
     db.add(db_notifier)
     db.commit()
     db.refresh(db_notifier)
+    logger.info(f"Created notifier '{notifier.name}' ({notifier.type})")
     return db_notifier
 
 
@@ -103,13 +127,31 @@ def update_notifier(
             detail=f"Notifier with ID {notifier_id} not found",
         )
 
+    # Check for duplicate name (if name is being updated)
+    if notifier_update.name and notifier_update.name != db_notifier.name:
+        existing = (
+            db.query(NotifierModel)
+            .filter(NotifierModel.name == notifier_update.name, NotifierModel.id != notifier_id)
+            .first()
+        )
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Notifier with name '{notifier_update.name}' already exists",
+            )
+
     # Update only provided fields
     update_data = notifier_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
-        setattr(db_notifier, field, value)
+        if field == "smtp_password" and value is not None:
+            # Use property setter to encrypt password
+            db_notifier.smtp_password = value
+        else:
+            setattr(db_notifier, field, value)
 
     db.commit()
     db.refresh(db_notifier)
+    logger.info(f"Updated notifier '{db_notifier.name}'")
     return db_notifier
 
 
@@ -132,8 +174,10 @@ def delete_notifier(notifier_id: int, db: Session = Depends(get_db)):
             detail=f"Notifier with ID {notifier_id} not found",
         )
 
+    notifier_name = db_notifier.name
     db.delete(db_notifier)
     db.commit()
+    logger.info(f"Deleted notifier '{notifier_name}'")
 
 
 @router.post("/{notifier_id}/test", response_model=TestNotifierResponse)
