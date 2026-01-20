@@ -202,17 +202,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 connections.forEach(conn => {
                     const date = new Date(conn.created_at).toLocaleString();
                     const tr = document.createElement('tr');
+                    // Escape HTML for display
+                    const escapedName = escapeHtml(conn.name);
+                    const escapedUrl = escapeHtml(conn.url);
+                    // Escape quotes for data attributes (use original values, not HTML-escaped)
+                    const safeName = conn.name.replace(/"/g, '&quot;');
+                    const safeUrl = conn.url.replace(/"/g, '&quot;');
                     tr.innerHTML = `
-                        <td>${conn.name}</td>
-                        <td>${conn.url}</td>
+                        <td>${escapedName}</td>
+                        <td>${escapedUrl}</td>
                         <td>${date}</td>
                         <td>
-                            <button class="btn btn-sm btn-outline-danger delete-conn-btn" data-id="${conn.id}" data-name="${conn.name}">
+                            <button class="btn btn-sm btn-outline-primary edit-conn-btn me-2" data-id="${conn.id}" data-name="${safeName}" data-url="${safeUrl}">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger delete-conn-btn" data-id="${conn.id}" data-name="${safeName}">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </td>
                     `;
                     list.appendChild(tr);
+                });
+
+                // Add edit event listeners
+                document.querySelectorAll('.edit-conn-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const id = this.dataset.id;
+                        const name = this.dataset.name;
+                        const url = this.dataset.url;
+                        showEditModal(id, name, url);
+                    });
                 });
 
                 // Add delete event listeners
@@ -230,9 +249,65 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // Track if we're editing or adding
+    let editingConnectionId = null;
+
+    // Show edit modal
+    function showEditModal(id, name, url) {
+        editingConnectionId = id;
+        const modal = document.getElementById('addConnectionModal');
+        const modalTitle = document.getElementById('addConnectionModalLabel');
+        const nameInput = document.getElementById('remote-name');
+        const urlInput = document.getElementById('remote-url');
+        const codeInput = document.getElementById('connection-code');
+        const codeGroup = codeInput.closest('.mb-3');
+        const saveBtn = document.getElementById('save-connection-text');
+
+        // Update modal title
+        modalTitle.textContent = 'Edit Remote Connection';
+
+        // Populate form fields
+        nameInput.value = name;
+        urlInput.value = url;
+
+        // Hide connection code field for editing
+        codeGroup.classList.add('d-none');
+        codeInput.removeAttribute('required');
+
+        // Update button text
+        saveBtn.textContent = 'Update Connection';
+
+        // Show modal
+        const modalInstance = new bootstrap.Modal(modal);
+        modalInstance.show();
+    }
+
+    // Reset modal to add mode
+    function resetModalToAddMode() {
+        editingConnectionId = null;
+        const modalTitle = document.getElementById('addConnectionModalLabel');
+        const codeInput = document.getElementById('connection-code');
+        const codeGroup = codeInput.closest('.mb-3');
+        const saveBtn = document.getElementById('save-connection-text');
+
+        modalTitle.textContent = 'Add Remote Connection';
+        codeGroup.classList.remove('d-none');
+        codeInput.setAttribute('required', 'required');
+        saveBtn.textContent = 'Add Connection';
+    }
+
     // Add connection form
     const addConnectionForm = document.getElementById('add-connection-form');
     if (addConnectionForm) {
+        // Reset modal when it's hidden
+        const addConnectionModal = document.getElementById('addConnectionModal');
+        if (addConnectionModal) {
+            addConnectionModal.addEventListener('hidden.bs.modal', function() {
+                addConnectionForm.reset();
+                resetModalToAddMode();
+            });
+        }
+
         addConnectionForm.addEventListener('submit', async function(e) {
             e.preventDefault();
             setFormButtonLoading('save-connection', true);
@@ -241,22 +316,39 @@ document.addEventListener('DOMContentLoaded', function() {
             const data = Object.fromEntries(formData.entries());
 
             try {
-                const response = await authenticatedFetch('/api/remote/connect', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
+                let response;
+                if (editingConnectionId) {
+                    // Update existing connection
+                    // Only send name and url (connection code not needed for updates)
+                    const updateData = {
+                        name: data.name,
+                        url: data.url
+                    };
+                    response = await authenticatedFetch(`/api/remote/connections/${editingConnectionId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updateData)
+                    });
+                } else {
+                    // Create new connection
+                    response = await authenticatedFetch('/api/remote/connect', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                }
 
                 if (response.ok) {
                     bootstrap.Modal.getInstance(document.getElementById('addConnectionModal')).hide();
                     addConnectionForm.reset();
+                    resetModalToAddMode();
                     loadRemoteConnections();
                 } else {
                     const errorData = await response.json();
-                    alert('Error: ' + (errorData.detail || 'Failed to add connection'));
+                    alert('Error: ' + (errorData.detail || 'Failed to save connection'));
                 }
             } catch (error) {
-                console.error('Error adding connection:', error);
+                console.error('Error saving connection:', error);
                 alert('Failed to connect to server.');
             } finally {
                 setFormButtonLoading('save-connection', false);
