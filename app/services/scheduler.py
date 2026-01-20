@@ -258,53 +258,70 @@ class SchedulerService:
             logger.exception(f"Error adding disk space monitoring job: {e}")
 
 
+def _check_and_notify_disk_space(location, db: Session):
+    """
+    Check disk space for a cold storage location and send notifications if low.
+
+    Args:
+        location: ColdStorageLocation instance to check
+        db: Database session
+
+    Returns:
+        Tuple of (result_level, free_percent) where result_level is "critical", "caution", or None
+    """
+    total, _used, free = shutil.disk_usage(location.path)
+    free_percent = (free / total) * 100
+
+    # Check critical threshold first (more severe)
+    if free_percent <= location.critical_threshold_percent:
+        payload = DiskSpaceCriticalData(
+            location_id=location.id,
+            location_name=location.name,
+            location_path=location.path,
+            free_percent=round(free_percent, 2),
+            threshold_percent=location.critical_threshold_percent,
+            free_bytes=free,
+            total_bytes=total,
+        )
+        try:
+            notification_service.dispatch_event_sync(
+                db=db,
+                event_type=NotificationEventType.DISK_SPACE_CRITICAL,
+                event_data=payload,
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch DISK_SPACE_CRITICAL notification: {e}")
+        return ("critical", free_percent)
+
+    # Check caution threshold (only if not already critical)
+    elif free_percent <= location.caution_threshold_percent:
+        payload = DiskSpaceCautionData(
+            location_id=location.id,
+            location_name=location.name,
+            location_path=location.path,
+            free_percent=round(free_percent, 2),
+            threshold_percent=location.caution_threshold_percent,
+            free_bytes=free,
+            total_bytes=total,
+        )
+        try:
+            notification_service.dispatch_event_sync(
+                db=db,
+                event_type=NotificationEventType.DISK_SPACE_CAUTION,
+                event_data=payload,
+            )
+        except Exception as e:
+            logger.error(f"Failed to dispatch DISK_SPACE_CAUTION notification: {e}")
+        return ("caution", free_percent)
+
+    return (None, free_percent)
+
+
 def check_disk_space_and_notify(path: MonitoredPath, db: Session):
     """Check disk space for all cold storage locations and send notifications if low."""
     for location in path.storage_locations:
         try:
-            total, used, free = shutil.disk_usage(location.path)
-            free_percent = (free / total) * 100
-
-            # Check critical threshold first (more severe)
-            if free_percent <= location.critical_threshold_percent:
-                payload = DiskSpaceCriticalData(
-                    location_id=location.id,
-                    location_name=location.name,
-                    location_path=location.path,
-                    free_percent=round(free_percent, 2),
-                    threshold_percent=location.critical_threshold_percent,
-                    free_bytes=free,
-                    total_bytes=total,
-                )
-                try:
-                    notification_service.dispatch_event_sync(
-                        db=db,
-                        event_type=NotificationEventType.DISK_SPACE_CRITICAL,
-                        event_data=payload,
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to dispatch DISK_SPACE_CRITICAL notification: {e}")
-
-            # Check caution threshold (only if not already critical)
-            elif free_percent <= location.caution_threshold_percent:
-                payload = DiskSpaceCautionData(
-                    location_id=location.id,
-                    location_name=location.name,
-                    location_path=location.path,
-                    free_percent=round(free_percent, 2),
-                    threshold_percent=location.caution_threshold_percent,
-                    free_bytes=free,
-                    total_bytes=total,
-                )
-                try:
-                    notification_service.dispatch_event_sync(
-                        db=db,
-                        event_type=NotificationEventType.DISK_SPACE_CAUTION,
-                        event_data=payload,
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to dispatch DISK_SPACE_CAUTION notification: {e}")
-
+            _check_and_notify_disk_space(location, db)
         except FileNotFoundError:
             logger.warning(
                 f"Could not check disk space for {location.name}: path not found at {location.path}"
@@ -347,55 +364,15 @@ def disk_space_monitoring_job_func():
 
         for location in locations:
             try:
-                total, used, free = shutil.disk_usage(location.path)
-                free_percent = (free / total) * 100
-
-                # Check critical threshold first (more severe)
-                if free_percent <= location.critical_threshold_percent:
-                    payload = DiskSpaceCriticalData(
-                        location_id=location.id,
-                        location_name=location.name,
-                        location_path=location.path,
-                        free_percent=round(free_percent, 2),
-                        threshold_percent=location.critical_threshold_percent,
-                        free_bytes=free,
-                        total_bytes=total,
-                    )
-                    try:
-                        notification_service.dispatch_event_sync(
-                            db=db,
-                            event_type=NotificationEventType.DISK_SPACE_CRITICAL,
-                            event_data=payload,
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to dispatch DISK_SPACE_CRITICAL notification: {e}")
+                result_level, free_percent = _check_and_notify_disk_space(location, db)
+                if result_level == "critical":
                     logger.warning(
                         f"CRITICAL: Disk space on {location.name} at {free_percent:.1f}% free (threshold: {location.critical_threshold_percent}%)"
                     )
-
-                # Check caution threshold (only if not already critical)
-                elif free_percent <= location.caution_threshold_percent:
-                    payload = DiskSpaceCautionData(
-                        location_id=location.id,
-                        location_name=location.name,
-                        location_path=location.path,
-                        free_percent=round(free_percent, 2),
-                        threshold_percent=location.caution_threshold_percent,
-                        free_bytes=free,
-                        total_bytes=total,
-                    )
-                    try:
-                        notification_service.dispatch_event_sync(
-                            db=db,
-                            event_type=NotificationEventType.DISK_SPACE_CAUTION,
-                            event_data=payload,
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to dispatch DISK_SPACE_CAUTION notification: {e}")
+                elif result_level == "caution":
                     logger.warning(
                         f"CAUTION: Disk space on {location.name} at {free_percent:.1f}% free (threshold: {location.caution_threshold_percent}%)"
                     )
-
             except FileNotFoundError:
                 logger.warning(
                     f"Could not check disk space for {location.name}: path not found at {location.path}"

@@ -1,8 +1,10 @@
 """SQLAlchemy database models."""
 
 import enum
+import os
+import threading
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -30,11 +32,16 @@ class EncryptionManager:
 
     _instance = None
     _cipher = None
+    _instance_lock = threading.Lock()
 
     @classmethod
     def get_instance(cls) -> "EncryptionManager":
+        # Double-checked locking pattern for thread-safe singleton
         if cls._instance is None:
-            cls._instance = cls()
+            with cls._instance_lock:
+                # Re-check after acquiring lock in case another thread created it
+                if cls._instance is None:
+                    cls._instance = cls()
         return cls._instance
 
     def __init__(self):
@@ -50,8 +57,16 @@ class EncryptionManager:
             self._cipher = Fernet(key)
         except FileNotFoundError:
             key = Fernet.generate_key()
-            with open(key_file, "wb") as f:
-                f.write(key)
+            # Create file with secure permissions (0o600 - owner read/write only)
+            fd = os.open(
+                key_file,
+                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                0o600
+            )
+            try:
+                os.write(fd, key)
+            finally:
+                os.close(fd)
             self._cipher = Fernet(key)
 
     def encrypt(self, plaintext: str) -> str:
@@ -504,7 +519,7 @@ class Notifier(Base):
         if self.smtp_password_encrypted:
             try:
                 return encryption_manager.decrypt(self.smtp_password_encrypted)
-            except Exception:
+            except InvalidToken:
                 return self.smtp_password_encrypted  # Fallback for non-encrypted data
         return None
 

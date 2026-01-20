@@ -155,7 +155,7 @@ function renderNotifiers() {
 
         const eventsBadges = (notifier.subscribed_events || []).map(event => {
             const label = event.replace(/_/g, ' ').toLowerCase();
-            return `<span class="badge bg-light text-dark border me-1 small" style="font-size: 0.7rem;">${label}</span>`;
+            return `<span class="badge bg-light text-dark border me-1 small" style="font-size: 0.7rem;">${escapeHtml(label)}</span>`;
         }).join('');
 
         const createdDate = new Date(notifier.created_at).toLocaleDateString();
@@ -461,7 +461,17 @@ function showAlert(message, type = 'info') {
  * Escape HTML to prevent XSS
  */
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    if (text === null || typeof text === 'undefined') {
+        return '';
+    }
+    return String(text).replace(/[&<>"'/]/g, function (s) {
+        return {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;',
+            '/': '&#x2F;'
+        }[s];
+    });
 }

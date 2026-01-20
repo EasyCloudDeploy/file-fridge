@@ -309,8 +309,8 @@ def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)
                 created_by=None,  # TODO: Add auth context when implemented
             ),
         )
-    except Exception as e:
-        logger.error(f"Failed to dispatch PATH_CREATED event: {e}")
+    except Exception:
+        logger.exception("Failed to dispatch PATH_CREATED event")
         # Don't fail the request - notification is non-critical
 
     return db_path
@@ -446,8 +446,8 @@ def update_path(
                     updated_by=None,  # TODO: Add auth context
                 ),
             )
-        except Exception as e:
-            logger.error(f"Failed to dispatch PATH_UPDATED event: {e}")
+        except Exception:
+            logger.exception("Failed to dispatch PATH_UPDATED event")
             # Don't fail the request - notification is non-critical
 
     return path
@@ -518,8 +518,8 @@ def delete_path(
                 deleted_by=None,  # TODO: Add auth context
             ),
         )
-    except Exception as e:
-        logger.error(f"Failed to dispatch PATH_DELETED event: {e}")
+    except Exception:
+        logger.exception("Failed to dispatch PATH_DELETED event")
         # Don't fail the request - notification is non-critical
 
     return results

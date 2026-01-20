@@ -543,7 +543,7 @@ class NotifierCreate(NotifierBase):
             try:
                 EmailStr.validate(v)
             except Exception as e:
-                raise ValueError(f"Invalid sender email address: {e}")
+                raise ValueError(f"Invalid sender email address: {e}") from e
         return v
 
 

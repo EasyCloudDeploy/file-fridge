@@ -167,6 +167,7 @@ class NotificationService:
 
         # Dispatch to all subscribed notifiers
         metadata = event_data.dict()  # Convert Pydantic model to dict for metadata
+        metadata["event_type"] = event_type.value
 
         if background_tasks:
             background_tasks.add_task(
