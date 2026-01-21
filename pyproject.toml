@@ -1,6 +1,6 @@
 [project]
 name = "file-fridge"
-version = "0.0.37"
+version = "0.0.39"
 description = "File cold storage management application for Linux server administrators"
 readme = "README.md"
 requires-python = ">=3.8"
