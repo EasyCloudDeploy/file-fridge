@@ -28,6 +28,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 loadRemoteTransfers();
             }
 
+            // Initial load for encryption if clicked
+            if (sectionId === 'encryption') {
+                loadEncryptionKeys();
+            }
+
             // Update URL hash without jumping
             history.pushState(null, null, '#' + sectionId);
         });
@@ -557,6 +562,102 @@ document.addEventListener('DOMContentLoaded', function() {
             setButtonTextLoading(button, false, 'Deleting...', 'Delete');
         }
     });
+
+    // --- Encryption Management ---
+
+    async function loadEncryptionKeys() {
+        const list = document.getElementById('encryption-keys-list');
+        if (!list) return;
+
+        try {
+            const response = await authenticatedFetch('/api/encryption/keys');
+            if (response.ok) {
+                const keys = await response.json();
+                list.innerHTML = '';
+
+                if (keys.length === 0) {
+                    list.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No encryption keys found.</td></tr>';
+                    return;
+                }
+
+                keys.forEach(key => {
+                    const date = new Date(key.created_at).toLocaleString();
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${key.id}</td>
+                        <td class="font-monospace small text-break">${key.fingerprint}</td>
+                        <td>${date}</td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-danger btn-delete-key" data-id="${key.id}">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </td>
+                    `;
+                    list.appendChild(tr);
+                });
+
+                // Add delete event listeners
+                document.querySelectorAll('.btn-delete-key').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        deleteEncryptionKey(this.dataset.id);
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('Error loading encryption keys:', error);
+            list.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-4">Failed to load encryption keys.</td></tr>';
+        }
+    }
+
+    async function deleteEncryptionKey(keyId) {
+        if (!confirm('Are you sure you want to delete this encryption key? This cannot be undone. Any data encrypted EXCLUSIVELY with this key will become unreadable and its password field will be cleared.')) {
+            return;
+        }
+
+        try {
+            const response = await authenticatedFetch(`/api/encryption/keys/${keyId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                loadEncryptionKeys();
+            } else {
+                const errorData = await response.json();
+                alert('Error: ' + (errorData.detail || 'Failed to delete encryption key'));
+            }
+        } catch (error) {
+            console.error('Error deleting encryption key:', error);
+            alert('Failed to connect to server.');
+        }
+    }
+
+    const btnGenerateKey = document.getElementById('btn-generate-key');
+    if (btnGenerateKey) {
+        btnGenerateKey.addEventListener('click', async function() {
+            if (!confirm('Are you sure you want to generate a new encryption key? This will rotate the current active key. New data will use this key, while existing data remains readable using old keys.')) {
+                return;
+            }
+
+            this.disabled = true;
+            try {
+                const response = await authenticatedFetch('/api/encryption/keys', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    loadEncryptionKeys();
+                } else {
+                    const errorData = await response.json();
+                    alert('Error: ' + (errorData.detail || 'Failed to generate encryption key'));
+                }
+            } catch (error) {
+                console.error('Error generating encryption key:', error);
+                alert('Failed to connect to server.');
+            } finally {
+                this.disabled = false;
+            }
+        });
+    }
 });
 
 function setFormButtonLoading(baseName, isLoading) {

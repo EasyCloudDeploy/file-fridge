@@ -38,7 +38,7 @@ def reset_password(username: str, new_password: str):
         db.close()
 
 
-def create_user(username: str, password: str, is_admin: bool):
+def create_user(username: str, password: str):
     """Create a new user."""
     db = SessionLocal()
     try:
@@ -47,9 +47,7 @@ def create_user(username: str, password: str, is_admin: bool):
             logger.error(f"User '{username}' already exists.")
             return
 
-        new_user = User(
-            username=username, password_hash=hash_password(password), is_admin=is_admin
-        )
+        new_user = User(username=username, password_hash=hash_password(password))
         db.add(new_user)
         db.commit()
         logger.info(f"User '{username}' created successfully.")
@@ -71,14 +69,13 @@ def main():
     create_parser = subparsers.add_parser("create-user", help="Create a new user.")
     create_parser.add_argument("username", help="The username of the user.")
     create_parser.add_argument("password", help="The password for the user.")
-    create_parser.add_argument("--admin", action="store_true", help="Set as admin.")
 
     args = parser.parse_args()
 
     if args.command == "reset-password":
         reset_password(args.username, args.new_password)
     elif args.command == "create-user":
-        create_user(args.username, args.password, args.admin)
+        create_user(args.username, args.password)
 
 
 if __name__ == "__main__":
