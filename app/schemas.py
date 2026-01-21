@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr, Field, HttpUrl, validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, TypeAdapter, validator
 
 from app.models import (
     CriterionType,
@@ -487,7 +487,7 @@ class NotifierBase(BaseModel):
         notifier_type = values.get("type")
         if notifier_type == NotifierType.EMAIL:
             try:
-                EmailStr.validate(v)
+                TypeAdapter(EmailStr).validate_python(v)
             except Exception as e:
                 raise ValueError(f"Invalid email address: {e}")
         elif notifier_type == NotifierType.GENERIC_WEBHOOK:
@@ -541,7 +541,7 @@ class NotifierCreate(NotifierBase):
         """Validate smtp_sender is a valid email address."""
         if v and values.get("type") == NotifierType.EMAIL:
             try:
-                EmailStr.validate(v)
+                TypeAdapter(EmailStr).validate_python(v)
             except Exception as e:
                 raise ValueError(f"Invalid sender email address: {e}") from e
         return v
@@ -809,6 +809,16 @@ class RemoteTransferJob(RemoteTransferJobBase):
 
     class Config:
         from_attributes = True
+
+
+class ServerEncryptionKeyResponse(BaseModel):
+    """Schema for server encryption key response."""
+
+    id: int
+    fingerprint: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ========================================

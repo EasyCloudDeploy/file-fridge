@@ -31,7 +31,7 @@ class EncryptionManager:
     """Manages encryption for sensitive fields like SMTP passwords."""
 
     _instance = None
-    _cipher = None
+    _multi_cipher = None
     _instance_lock = threading.Lock()
 
     @classmethod
@@ -45,39 +45,107 @@ class EncryptionManager:
         return cls._instance
 
     def __init__(self):
-        self._load_or_create_key()
+        # Initialize with None, will lazy load on first encrypt/decrypt
+        self._multi_cipher = None
 
-    def _load_or_create_key(self):
-        from app.config import settings
+    def _get_cipher(self):
+        """Lazy load ciphers from the database."""
+        if self._multi_cipher is not None:
+            return self._multi_cipher
 
-        key_file = settings.encryption_key_file
+        from cryptography.fernet import MultiFernet
+        from sqlalchemy import text
+        from sqlalchemy.orm import Session
+
+        from app.database import SessionLocal
+
+        db: Session = SessionLocal()
         try:
-            with open(key_file, "rb") as f:
-                key = f.read()
-            self._cipher = Fernet(key)
-        except FileNotFoundError:
-            key = Fernet.generate_key()
-            # Create file with secure permissions (0o600 - owner read/write only)
-            fd = os.open(
-                key_file,
-                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-                0o600
-            )
+            # Try to load keys from database
+            # We use a raw SQL query because we might be in a state where the model
+            # is not fully loaded or we're in a migration.
             try:
-                os.write(fd, key)
-            finally:
-                os.close(fd)
-            self._cipher = Fernet(key)
+                keys = db.execute(
+                    text("SELECT key_value FROM server_encryption_keys ORDER BY created_at DESC")
+                ).fetchall()
+            except Exception:
+                # Table might not exist yet (during initial migration)
+                keys = []
+
+            fernets = []
+            for key_row in keys:
+                try:
+                    fernets.append(Fernet(key_row[0].encode()))
+                except Exception:
+                    continue
+
+            if not fernets:
+                # Fallback to file-based key for migration/startup
+                from app.config import settings
+
+                key_file = settings.encryption_key_file
+                key = None
+                if os.path.exists(key_file):
+                    try:
+                        with open(key_file, "rb") as f:
+                            key = f.read().strip()
+                        fernets.append(Fernet(key))
+                    except Exception:
+                        pass
+
+                if not fernets:
+                    # No keys in DB or file, generate one and save to DB
+                    import hashlib
+
+                    new_key = Fernet.generate_key().decode()
+                    fingerprint = hashlib.sha256(new_key.encode()).hexdigest()
+                    try:
+                        db.execute(
+                            text(
+                                "INSERT INTO server_encryption_keys (key_value, fingerprint) VALUES (:val, :fp)"
+                            ),
+                            {"val": new_key, "fp": fingerprint},
+                        )
+                        db.commit()
+                        fernets.append(Fernet(new_key.encode()))
+                    except Exception:
+                        # Fallback to temporary key if DB insert fails
+                        fernets.append(Fernet(new_key.encode()))
+
+            self._multi_cipher = MultiFernet(fernets)
+            return self._multi_cipher
+        finally:
+            db.close()
+
+    def reset(self):
+        """Force reload of keys from database."""
+        with self._instance_lock:
+            self._multi_cipher = None
 
     def encrypt(self, plaintext: str) -> str:
         if not plaintext:
             return plaintext
-        return self._cipher.encrypt(plaintext.encode()).decode()
+        return self._get_cipher().encrypt(plaintext.encode()).decode()
 
     def decrypt(self, ciphertext: str) -> str:
-        if not ciphertext:
+        if not ciphertext or not self._get_cipher():
             return ciphertext
-        return self._cipher.decrypt(ciphertext.encode()).decode()
+        try:
+            return self._get_cipher().decrypt(ciphertext.encode()).decode()
+        except InvalidToken:
+            # If decryption fails, return as-is (might be unencrypted)
+            return ciphertext
+
+    def can_decrypt_with_key(self, ciphertext: str, key_value: str) -> bool:
+        """Test if a specific key can decrypt the given ciphertext."""
+        if not ciphertext or not key_value:
+            return False
+        try:
+            cipher = Fernet(key_value.encode())
+            cipher.decrypt(ciphertext.encode())
+            return True
+        except Exception:
+            return False
 
 
 encryption_manager = EncryptionManager.get_instance()
@@ -500,7 +568,7 @@ class Notifier(Base):
     smtp_port = Column(Integer, nullable=True)  # SMTP server port (default 587)
     smtp_user = Column(String, nullable=True)  # SMTP username
     smtp_password_encrypted = Column(
-        String, nullable=True, name="smtp_password"
+        "smtp_password", String, nullable=True
     )  # SMTP password (encrypted at rest)
     smtp_sender = Column(String, nullable=True)  # From address
     smtp_use_tls = Column(Boolean, default=True, nullable=True)  # Use TLS encryption
@@ -575,6 +643,17 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True, nullable=False)
+
+
+class ServerEncryptionKey(Base):
+    """Encryption keys for sensitive data."""
+
+    __tablename__ = "server_encryption_keys"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key_value = Column(String, nullable=False)  # Fernet key
+    fingerprint = Column(String, nullable=False, unique=True, index=True)  # SHA256 of the key
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class InstanceMetadata(Base):

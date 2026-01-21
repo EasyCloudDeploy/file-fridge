@@ -12,6 +12,7 @@ from app.database import SessionLocal, init_db
 from app.database_migrations import run_startup_migrations
 from app.routers.api import auth as api_auth
 from app.routers.api import browser as api_browser
+from app.routers.api import encryption as api_encryption
 from app.routers.api import cleanup as api_cleanup
 from app.routers.api import criteria as api_criteria
 from app.routers.api import files as api_files
@@ -107,6 +108,7 @@ app.include_router(api_tags.router, dependencies=api_dependencies)
 app.include_router(api_tag_rules.router, dependencies=api_dependencies)
 app.include_router(api_storage.router, dependencies=api_dependencies)
 app.include_router(api_notifiers.router, dependencies=api_dependencies)
+app.include_router(api_encryption.router, dependencies=api_dependencies)
 app.include_router(api_remote.router)
 
 # Include consolidated web router (public - frontend handles auth)

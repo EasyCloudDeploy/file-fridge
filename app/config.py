@@ -138,33 +138,27 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_encryption_key_file(self):
-        """Validate encryption key file exists and has restrictive permissions."""
+        """Validate encryption key file. Downgraded to warning as keys move to DB."""
         key_path = Path(self.encryption_key_file)
 
         if not key_path.exists():
-            print("\nERROR: Encryption key file not found.")  # noqa: T201
-            print(f"\nExpected encryption key file at: {key_path}")  # noqa: T201
-            print("\nThis file contains sensitive data and is required for encryption operations.")  # noqa: T201
-            print("\nTo create an encryption key file:")  # noqa: T201
-            print(f"  mkdir -p {key_path.parent}")  # noqa: T201
-            print(f"  openssl rand -hex 32 > {key_path}")  # noqa: T201
-            print(f"  chmod 600 {key_path}")  # noqa: T201
-            print("\nOr set a different path via ENCRYPTION_KEY_FILE environment variable.")  # noqa: T201
-            sys.exit(1)
+            logger.warning(
+                f"Legacy encryption key file not found at {key_path}. "
+                "The application will use database-stored encryption keys. "
+                "If this is a first-time setup, a new key will be generated in the database."
+            )
+            return self
 
         if not key_path.is_file():
-            print("\nERROR: Encryption key path exists but is not a file.")  # noqa: T201
-            print(f"Path: {key_path}")  # noqa: T201
-            sys.exit(1)
+            logger.warning(f"Encryption key path exists but is not a file: {key_path}")
+            return self
 
         try:
             with key_path.open("r"):
                 pass
         except PermissionError:
-            print("\nERROR: Cannot read encryption key file.")  # noqa: T201
-            print(f"Path: {key_path}")  # noqa: T201
-            print("\nCheck that the file has appropriate read permissions.")  # noqa: T201
-            sys.exit(1)
+            logger.warning(f"Cannot read encryption key file at {key_path} due to permissions.")
+            return self
 
         if sys.platform != "win32":
             import stat
@@ -174,13 +168,10 @@ class Settings(BaseSettings):
 
             expected_perms = 0o600
             if file_perms & ~expected_perms:
-                print("\nERROR: Encryption key file has permissive permissions.")  # noqa: T201
-                print(f"Path: {key_path}")  # noqa: T201
-                print(f"Current permissions: {oct(file_perms)}")  # noqa: T201
-                print(f"Expected permissions: {oct(expected_perms)} (owner read/write only)")  # noqa: T201
-                print("\nTo fix permissions:")  # noqa: T201
-                print(f"  chmod 600 {key_path}")  # noqa: T201
-                sys.exit(1)
+                logger.warning(
+                    f"Encryption key file {key_path} has permissive permissions: {oct(file_perms)}. "
+                    f"Expected {oct(expected_perms)} for security."
+                )
 
         return self
 
