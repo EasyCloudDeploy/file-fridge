@@ -410,6 +410,37 @@ class DatabaseMigration:
                 else:
                     logger.debug("remote_instance_uuid column already exists in remote_connections")
 
+                # Migration 15: Add threshold columns to cold_storage_locations
+                if not DatabaseMigration.column_exists(
+                    "cold_storage_locations", "caution_threshold_percent"
+                ):
+                    logger.info("Adding caution_threshold_percent column to cold_storage_locations...")
+                    conn.execute(
+                        text(
+                            "ALTER TABLE cold_storage_locations ADD COLUMN caution_threshold_percent INTEGER NOT NULL DEFAULT 20"
+                        )
+                    )
+                    conn.commit()
+                    logger.info("✓ Added caution_threshold_percent column")
+                else:
+                    logger.debug("caution_threshold_percent column already exists")
+
+                if not DatabaseMigration.column_exists(
+                    "cold_storage_locations", "critical_threshold_percent"
+                ):
+                    logger.info(
+                        "Adding critical_threshold_percent column to cold_storage_locations..."
+                    )
+                    conn.execute(
+                        text(
+                            "ALTER TABLE cold_storage_locations ADD COLUMN critical_threshold_percent INTEGER NOT NULL DEFAULT 10"
+                        )
+                    )
+                    conn.commit()
+                    logger.info("✓ Added critical_threshold_percent column")
+                else:
+                    logger.debug("critical_threshold_percent column already exists")
+
                 logger.info("✓ All database migrations completed successfully")
 
         except OperationalError as e:
