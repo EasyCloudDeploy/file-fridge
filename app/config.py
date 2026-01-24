@@ -84,9 +84,37 @@ class Settings(BaseSettings):
     # FileRecord entries older than this will be automatically deleted
     stats_retention_days: int = 30
 
+    # Remote Transfers
+    # Timeout (in seconds) for establishing a connection to a remote instance
+    # Override via REMOTE_TRANSFER_CONNECT_TIMEOUT environment variable
+    remote_transfer_connect_timeout: float = 15.0
+
+    # Timeout (in seconds) for reading a response from a remote instance
+    # This applies to verification steps, which can be slow
+    # Override via REMOTE_TRANSFER_READ_TIMEOUT environment variable
+    remote_transfer_read_timeout: float = 300.0
+
+    # Timeout (in seconds) for sending a chunk of data to a remote instance
+    # Set higher for slow upload connections
+    # Override via REMOTE_TRANSFER_WRITE_TIMEOUT environment variable
+    remote_transfer_write_timeout: float = 300.0
+
+    # Timeout (in seconds) for acquiring a connection from the HTTP pool
+    # Override via REMOTE_TRANSFER_POOL_TIMEOUT environment variable
+    remote_transfer_pool_timeout: float = 60.0
+
     # Remote Instance URL (for inter-instance communication)
     # Override via FF_INSTANCE_URL environment variable
     ff_instance_url: Optional[str] = None
+
+    # Security settings for remote connections
+    # Override via SIGNATURE_TIMESTAMP_TOLERANCE environment variable
+    # Maximum age of signed requests in seconds (default 5 minutes)
+    signature_timestamp_tolerance: int = 300
+
+    # Override via REQUIRE_FINGERPRINT_VERIFICATION environment variable
+    # Require manual fingerprint verification before trusting connections
+    require_fingerprint_verification: bool = True
 
     # Authentication
     # Override via SECRET_KEY environment variable

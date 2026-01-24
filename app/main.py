@@ -44,6 +44,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# Filter out /api/remote/receive from uvicorn access logs to prevent spam during file transfers
+class RemoteReceiveFilter(logging.Filter):
+    """Filter to suppress /api/remote/receive endpoint logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Return False to suppress log record."""
+        return "/api/remote/receive" not in record.getMessage()
+
+
+# Apply filter to uvicorn access logger
+logging.getLogger("uvicorn.access").addFilter(RemoteReceiveFilter())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
     """Application lifespan manager."""

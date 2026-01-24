@@ -1,5 +1,6 @@
 """Pydantic schemas for API validation."""
 
+import base64
 from datetime import datetime
 from typing import List, Optional
 
@@ -17,6 +18,7 @@ from app.models import (
     StorageType,
     TagRuleCriterionType,
     TransferStatus,
+    TrustStatus,
 )
 
 
@@ -744,6 +746,27 @@ class RemoteConnectionBase(BaseModel):
     url: str = Field(..., min_length=1)
 
 
+class RemoteConnectionIdentity(BaseModel):
+    """Public identity of a remote File Fridge instance."""
+
+    instance_name: str = Field(..., min_length=1, max_length=255)
+    fingerprint: str = Field(
+        ..., pattern=r"^[a-f0-9]{64}$", description="SHA256 fingerprint of Ed25519 public key"
+    )
+    ed25519_public_key: str = Field(..., description="Base64-encoded Ed25519 public signing key")
+    x25519_public_key: str = Field(..., description="Base64-encoded X25519 public key exchange key")
+    url: HttpUrl = Field(..., description="Base URL of the remote instance")
+
+    @validator("ed25519_public_key", "x25519_public_key")
+    def validate_base64(cls, v):
+        """Ensure public keys are valid base64."""
+        try:
+            base64.b64decode(v)
+            return v
+        except Exception:
+            raise ValueError("Invalid base64 encoding")
+
+
 class RemoteConnectionCreate(RemoteConnectionBase):
     """Schema for creating a remote connection."""
 
@@ -761,7 +784,8 @@ class RemoteConnection(RemoteConnectionBase):
     """Schema for remote connection response."""
 
     id: int
-    remote_instance_uuid: Optional[str] = None
+    remote_fingerprint: Optional[str] = None
+    trust_status: str
     created_at: datetime
     updated_at: Optional[datetime]
 

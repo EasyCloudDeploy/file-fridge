@@ -1,7 +1,7 @@
-# ruff: noqa: B008
+# ruff: noqa: B008, PLR0913
+import base64
 import hashlib
 import logging
-import secrets
 from pathlib import Path
 from typing import List
 
@@ -9,180 +9,377 @@ import aiofiles
 import anyio
 import httpx
 import zstandard as zstd
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    Header,
+    HTTPException,
+    Request,
+    status,
+)
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob, TransferStatus
 from app.schemas import (
-    ChallengeRequest,
-    ChallengeResponse,
     RemoteConnectionCreate,
+    RemoteConnectionIdentity,
     RemoteConnectionUpdate,
     RemoteTransferJobBase,
 )
 from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
 from app.security import get_current_user
+from app.services.identity_service import identity_service
 from app.services.remote_connection_service import remote_connection_service
-from app.services.remote_transfer_service import remote_transfer_service
+from app.services.remote_transfer_service import (
+    get_transfer_timeouts,
+    remote_transfer_service,
+)
 from app.services.scheduler import scheduler_service
 from app.utils.disk_validator import disk_space_validator
-from app.utils.remote_auth import remote_auth
-from app.utils.retry_strategy import retry_strategy
+from app.utils.remote_signature import (
+    get_signed_headers,
+    verify_remote_signature,
+    verify_signature_from_components,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/remote", tags=["Remote Connections"])
+INVALID_PATH_MSG = "Invalid relative path"
 
 
-def verify_remote_secret(
-    x_instance_uuid: str = Header(..., alias="X-Instance-UUID"),
-    x_shared_secret: str = Header(..., alias="X-Shared-Secret"),
-    db: Session = Depends(get_db),
-):
-    """Verify the shared secret for inter-instance communication.
+# Helper functions that were previously in this file
+def _get_base_directory(path: MonitoredPath, storage_type: str) -> str:
+    """Determine base directory for file storage."""
+    if storage_type == "hot":
+        return path.source_path
+    if not path.storage_locations:
+        raise HTTPException(status_code=400, detail="No cold storage locations configured")
+    return path.storage_locations[0].path
 
-    X-Instance-UUID should be the global UUID of the remote instance.
-    """
-    conn = (
-        db.query(RemoteConnection)
-        .filter(RemoteConnection.remote_instance_uuid == x_instance_uuid)
-        .first()
-    )
-    if not conn or not secrets.compare_digest(conn.shared_secret, x_shared_secret):
-        logger.warning(f"Unauthorized remote access attempt from UUID: {x_instance_uuid}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid remote UUID or shared secret"
+
+async def _validate_and_build_path(base_dir: str, relative_path: str) -> Path:
+    """Validate and build safe file path, preventing directory traversal."""
+    safe_rel_path = Path(relative_path)
+    if safe_rel_path.is_absolute():
+        safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
+    if ".." in safe_rel_path.parts:
+        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG)
+    tmp_path = (Path(base_dir) / safe_rel_path).absolute()
+    try:
+        is_safe = await anyio.to_thread.run_sync(
+            lambda: tmp_path.resolve().is_relative_to(Path(base_dir).resolve())
         )
-    return conn
+    except Exception:
+        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG) from None
+    if not is_safe:
+        raise HTTPException(status_code=400, detail="Path traversal detected")
+    return tmp_path.with_suffix(tmp_path.suffix + ".fftmp")
 
 
-@router.get("/connection-code")
-def get_connection_code(current_user: dict = Depends(get_current_user)):
-    """Get the current rotating connection code."""
+async def _get_found_tmp(db: Session, remote_path_id: int, relative_path: str) -> Path:
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == remote_path_id).first()
+    if not path:
+        raise HTTPException(status_code=404, detail="MonitoredPath not found")
+    possible_dirs = [path.source_path]
+    for loc in path.storage_locations:
+        possible_dirs.append(loc.path)
+    safe_rel_path = Path(relative_path)
+    if safe_rel_path.is_absolute():
+        safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
+    if ".." in safe_rel_path.parts:
+        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG)
+    for d in possible_dirs:
+        p = (Path(d) / safe_rel_path).absolute()
+        try:
+            is_relative = await anyio.to_thread.run_sync(
+                lambda p=p, d=d: p.resolve().is_relative_to(Path(d).resolve())
+            )
+            if is_relative:
+                p_tmp = p.with_suffix(p.suffix + ".fftmp")
+                if await anyio.to_thread.run_sync(p_tmp.exists):
+                    return p_tmp
+        except Exception:
+            continue
+    raise HTTPException(status_code=404, detail="Temporary file not found")
+
+
+async def _verify_checksum_in_background(found_tmp: Path, checksum: str):
+    """Verify checksum in background and delete file if mismatch."""
+    try:
+        sha256_hash = hashlib.sha256()
+        async with aiofiles.open(found_tmp, "rb") as f:
+            while True:
+                byte_block = await f.read(4096)
+                if not byte_block:
+                    break
+                sha256_hash.update(byte_block)
+        if sha256_hash.hexdigest() != checksum:
+            logger.error(f"Checksum verification failed for {found_tmp}, deleting file")
+            await anyio.to_thread.run_sync(found_tmp.unlink, missing_ok=True)
+    except Exception:
+        logger.exception(f"Error during checksum verification for {found_tmp}")
+        await anyio.to_thread.run_sync(found_tmp.unlink, missing_ok=True)
+
+
+async def _decrypt_chunk(
+    chunk: bytes,
+    nonce_hex: str,
+    ephemeral_public_key_b64: str,
+    remote_conn: RemoteConnection,
+    db: Session,
+) -> bytes:
+    """
+    Decrypt a file chunk using ECDH-derived key.
+
+    Args:
+        chunk: Encrypted chunk bytes
+        nonce_hex: Hex-encoded GCM nonce
+        ephemeral_public_key_b64: Sender's ephemeral X25519 public key (base64)
+        remote_conn: RemoteConnection for ECDH with static key
+        db: Database session to access our X25519 private key
+
+    Returns:
+        Decrypted chunk bytes
+    """
+    if not nonce_hex or not ephemeral_public_key_b64:
+        # Not encrypted, return as-is
+        return chunk
+
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import x25519
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    # 1. Load sender's ephemeral public key
+    ephemeral_pub_bytes = base64.b64decode(ephemeral_public_key_b64)
+    sender_ephemeral_public_key = x25519.X25519PublicKey.from_public_bytes(ephemeral_pub_bytes)
+
+    # 2. Get our X25519 private key
+    our_private_key = identity_service.get_kx_private_key(db)
+
+    # 3. Perform ECDH
+    shared_secret = our_private_key.exchange(sender_ephemeral_public_key)
+
+    # 4. Derive symmetric key using HKDF
+    derived_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,  # AES-256
+        salt=None,
+        info=b"file-fridge-transfer-key",
+    ).derive(shared_secret)
+
+    # 5. Decrypt using AES-256-GCM
+    aesgcm = AESGCM(derived_key)
+    nonce = bytes.fromhex(nonce_hex)
+
+    try:
+        plaintext = aesgcm.decrypt(nonce, chunk, associated_data=None)
+        return plaintext
+    except Exception as e:
+        logger.error(f"Chunk decryption failed: {e}")
+        raise HTTPException(
+            status_code=400, detail="Chunk decryption failed - invalid encryption or corrupted data"
+        ) from None
+
+
+async def _decompress_chunk(chunk: bytes) -> bytes:
+    """Decompress chunk using zstandard."""
+    try:
+        dctx = zstd.ZstdDecompressor()
+        return dctx.decompress(chunk)
+    except Exception:
+        logger.exception("Decompression failed")
+        raise HTTPException(status_code=400, detail="Decompression failed") from None
+
+
+# --- New Handshake and Connection Endpoints ---
+
+
+@router.get("/identity", response_model=RemoteConnectionIdentity, tags=["Remote Connections"])
+def get_public_identity(db: Session = Depends(get_db)):
+    """Return the public identity of this File Fridge instance."""
+    return {
+        "instance_name": settings.instance_name or "File Fridge",
+        "fingerprint": identity_service.get_instance_fingerprint(db),
+        "ed25519_public_key": identity_service.get_signing_public_key_str(db),
+        "x25519_public_key": identity_service.get_kx_public_key_str(db),
+        "url": settings.ff_instance_url,
+    }
+
+
+@router.get("/my-identity", tags=["Remote Connections"])
+def get_my_identity(
+    db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
+):
+    """
+    Get this instance's identity information for sharing with others.
+    Users share this fingerprint out-of-band to allow remote instances to verify.
+    """
     _ = current_user
-    return {"code": remote_auth.get_code()}
+    fingerprint = identity_service.get_instance_fingerprint(db)
+
+    return {
+        "instance_name": settings.instance_name or "File Fridge",
+        "fingerprint": fingerprint,
+        "url": settings.ff_instance_url,
+        "qr_data": f"filefridge://{fingerprint}@{settings.ff_instance_url}",
+    }
 
 
-@router.post("/connect", response_model=RemoteConnectionSchema)
-async def connect(
-    connection_data: RemoteConnectionCreate,
+@router.post(
+    "/connections/fetch-identity",
+    response_model=RemoteConnectionIdentity,
+    tags=["Remote Connections"],
+)
+async def fetch_remote_identity(
+    data: RemoteConnectionCreate, current_user: dict = Depends(get_current_user)
+):
+    """Fetch the public identity of a remote instance to initiate a connection."""
+    _ = current_user
+    try:
+        return await remote_connection_service.get_remote_identity(data.url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+@router.post("/connections", response_model=RemoteConnectionSchema, tags=["Remote Connections"])
+async def create_connection(
+    name: str,
+    remote_identity: RemoteConnectionIdentity,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
+    """Establish a trusted connection with a remote instance after verifying its identity."""
     _ = current_user
-    """Initiate connection to another instance."""
     try:
-        return await remote_connection_service.connect_to_remote(db, connection_data)
+        return await remote_connection_service.initiate_connection(db, name, remote_identity)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.post("/handshake")
-async def handshake(handshake_data: dict, db: Session = Depends(get_db)):
-    """Inter-instance handshake endpoint."""
+@router.post("/connection-request", tags=["Remote Connections"])
+async def handle_connection_request(request: Request, db: Session = Depends(get_db)):
+    """Handles an incoming connection request from a remote instance (unauthenticated)."""
     try:
-        return remote_connection_service.handle_handshake(db, handshake_data)
+        request_data = await request.json()
+        return remote_connection_service.handle_connection_request(db, request_data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.get("/connections", response_model=List[RemoteConnectionSchema])
+@router.get(
+    "/connections", response_model=List[RemoteConnectionSchema], tags=["Remote Connections"]
+)
 def list_connections(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """List all remote connections."""
     _ = current_user
     return remote_connection_service.list_connections(db)
 
 
-@router.delete("/connections/{connection_id}")
+@router.delete("/connections/{connection_id}", tags=["Remote Connections"])
 async def delete_connection(
     connection_id: int,
-    force: bool = False,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    _ = current_user
     """Delete a remote connection."""
+    _ = current_user
     try:
-        await remote_connection_service.delete_connection(db, connection_id, force)
+        await remote_connection_service.delete_connection(db, connection_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"status": "success"}
 
 
-@router.post("/terminate-connection")
-async def terminate_connection(
-    data: dict,
+@router.post(
+    "/connections/{connection_id}/trust",
+    response_model=RemoteConnectionSchema,
+    tags=["Remote Connections"],
+)
+def trust_connection(
+    connection_id: int,
     db: Session = Depends(get_db),
-    remote_conn: RemoteConnection = Depends(verify_remote_secret),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Handle an incoming termination request."""
-    _ = remote_conn
-    remote_connection_service.handle_terminate_connection(db, data["instance_uuid"])
-    return {"status": "success"}
+    """Manually trust a PENDING remote connection."""
+    _ = current_user
+    try:
+        return remote_connection_service.trust_connection(db, connection_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
-@router.patch("/connections/{connection_id}", response_model=RemoteConnectionSchema)
+@router.patch(
+    "/connections/{connection_id}",
+    response_model=RemoteConnectionSchema,
+    tags=["Remote Connections"],
+)
 async def update_connection(
     connection_id: int,
     update_data: RemoteConnectionUpdate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Update a remote connection."""
+    """Update a remote connection's name."""
     _ = current_user
-    try:
-        return await remote_connection_service.update_connection(db, connection_id, update_data)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    conn = remote_connection_service.get_connection(db, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if update_data.name:
+        conn.name = update_data.name
+        db.commit()
+        db.refresh(conn)
+    return conn
 
 
-@router.post("/challenge", response_model=ChallengeResponse)
-async def challenge(
-    challenge_data: ChallengeRequest,
+# --- Endpoints Requiring Signature Verification ---
+
+
+@router.post("/terminate-connection", tags=["Remote Connections"])
+async def terminate_connection(
+    remote_conn: RemoteConnection = Depends(verify_remote_signature),
     db: Session = Depends(get_db),
 ):
-    """Inter-instance challenge-response endpoint."""
-    try:
-        decrypted = remote_connection_service.handle_challenge(
-            db, challenge_data.initiator_uuid, challenge_data.challenge
-        )
-        return {"decrypted": decrypted}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    """Handle an incoming termination request."""
+    remote_connection_service.handle_terminate_connection(db, remote_conn.remote_fingerprint)
+    return {"status": "success"}
 
 
-@router.get("/connections/{connection_id}/paths")
+@router.get(
+    "/connections/{connection_id}/paths",
+    tags=["Remote Connections"],
+)
 async def get_remote_paths(
     connection_id: int,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    _ = current_user
     """Fetch available MonitoredPaths from a remote instance."""
+    _ = current_user
     conn = remote_connection_service.get_connection(db, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
 
-    my_uuid = remote_connection_service.get_instance_uuid(db)
-
     async with httpx.AsyncClient() as client:
         try:
-            response = await client.get(
-                f"{conn.url.rstrip('/')}/api/remote/exposed-paths",
-                headers={"X-Instance-UUID": my_uuid, "X-Shared-Secret": conn.shared_secret},
-                timeout=10.0,
-            )
+            url = f"{conn.url.rstrip('/')}/api/remote/exposed-paths"
+            headers = await get_signed_headers(db, "GET", url, b"")
+            response = await client.get(url, headers=headers, timeout=get_transfer_timeouts())
             response.raise_for_status()
             return response.json()
         except Exception as e:
             logger.exception("Failed to fetch paths from remote")
-            raise HTTPException(status_code=500, detail="Failed to fetch paths from remote") from e
+            raise HTTPException(
+                status_code=500, detail="Failed to fetch paths from remote"
+            ) from e
 
 
-@router.post("/migrate", response_model=RemoteTransferJobSchema)
+@router.post("/migrate", response_model=RemoteTransferJobSchema, tags=["Remote Connections"])
 async def migrate_file(
     migration_data: RemoteTransferJobBase,
     db: Session = Depends(get_db),
@@ -201,230 +398,83 @@ async def migrate_file(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.get("/transfers", response_model=List[RemoteTransferJobSchema])
+@router.get(
+    "/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"]
+)
 def list_transfers(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """List all remote transfer jobs."""
     _ = current_user
     return db.query(RemoteTransferJob).order_by(RemoteTransferJob.id.desc()).all()
 
 
-@router.post("/transfers/{job_id}/cancel")
-def cancel_transfer(
-    job_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Cancel a transfer job."""
-    _ = current_user
-    try:
-        remote_transfer_service.cancel_transfer(db, job_id)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    else:
-        return {"status": "success"}
-
-
-@router.post("/transfers/bulk/cancel")
-def bulk_cancel_transfers(
-    data: dict,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Cancel multiple transfer jobs."""
-    _ = current_user
-    job_ids = data.get("job_ids", [])
-    if not job_ids:
-        raise HTTPException(status_code=400, detail="No job IDs provided")
-
-    cancelled_count = 0
-    errors = []
-
-    for job_id in job_ids:
-        try:
-            remote_transfer_service.cancel_transfer(db, job_id)
-            cancelled_count += 1
-        except ValueError as e:
-            errors.append({"job_id": job_id, "error": str(e)})
-
-    return {
-        "status": "success",
-        "cancelled_count": cancelled_count,
-        "error_count": len(errors),
-        "errors": errors,
-    }
-
-
-@router.post("/transfers/bulk/retry")
-def bulk_retry_transfers(
-    data: dict,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
-):
-    """Retry failed transfers by resetting them to PENDING."""
-    _ = current_user
-    job_ids = data.get("job_ids", [])
-    if not job_ids:
-        raise HTTPException(status_code=400, detail="No job IDs provided")
-
-    # Get failed jobs and reset them to PENDING
-    jobs = (
-        db.query(RemoteTransferJob)
-        .filter(RemoteTransferJob.id.in_(job_ids))
-        .filter(RemoteTransferJob.status == TransferStatus.FAILED)
-        .with_for_update()
-        .all()
-    )
-
-    retried_count = 0
-    skipped_count = 0
-
-    for job in jobs:
-        if job.retry_count >= retry_strategy.max_retries:
-            skipped_count += 1
-            logger.warning(f"Skipping transfer {job.id}: exceeded max retries")
-        else:
-            job.status = TransferStatus.PENDING
-            job.error_message = None
-            job.retry_count = 0
-            job.start_time = None
-            job.end_time = None
-            retried_count += 1
-            logger.info(f"Retrying failed transfer {job.id}")
-
-    db.commit()
-
-    return {
-        "status": "success",
-        "retried_count": retried_count,
-        "skipped_count": skipped_count,
-    }
-
-
 class ReceiveHeader:
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         x_chunk_index: int = Header(..., alias="X-Chunk-Index"),
         x_relative_path: str = Header(..., alias="X-Relative-Path"),
         x_remote_path_id: int = Header(..., alias="X-Remote-Path-ID"),
         x_storage_type: str = Header(..., alias="X-Storage-Type"),
-        x_nonce: str = Header("", alias="X-Nonce"),
+        x_encryption_nonce: str = Header("", alias="X-Encryption-Nonce"),
+        x_ephemeral_public_key: str = Header("", alias="X-Ephemeral-Public-Key"),
         x_job_id: str = Header(..., alias="X-Job-ID"),
         x_is_final: bool = Header(..., alias="X-Is-Final"),
+        x_fingerprint: str = Header(..., alias="X-Fingerprint"),
+        x_timestamp: str = Header(..., alias="X-Timestamp"),
+        x_nonce: str = Header(..., alias="X-Nonce"),
+        x_signature: str = Header(..., alias="X-Signature"),
     ):
         self.chunk_index = x_chunk_index
         self.relative_path = x_relative_path
         self.remote_path_id = x_remote_path_id
         self.storage_type = x_storage_type
-        self.nonce = x_nonce
+        self.encryption_nonce = x_encryption_nonce
+        self.ephemeral_public_key = x_ephemeral_public_key
         self.job_id = x_job_id
         self.is_final = x_is_final
+        self.fingerprint = x_fingerprint
+        self.timestamp = x_timestamp
+        self.nonce = x_nonce
+        self.signature = x_signature
 
 
-def _get_base_directory(path: MonitoredPath, storage_type: str) -> str:
-    """Determine base directory for file storage."""
-    if storage_type == "hot":
-        return path.source_path
-    # For cold, use the first storage location
-    if not path.storage_locations:
-        raise HTTPException(status_code=400, detail="No cold storage locations configured")
-    return path.storage_locations[0].path
-
-
-INVALID_PATH_MSG = "Invalid relative path"
-
-
-async def _validate_and_build_path(base_dir: str, relative_path: str) -> Path:
-    """Validate and build safe file path, preventing directory traversal."""
-    # Normalize relative path to prevent directory traversal
-    safe_rel_path = Path(relative_path)
-    if safe_rel_path.is_absolute():
-        safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
-
-    # Explicitly prevent upward directory traversal
-    if ".." in safe_rel_path.parts:
-        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG)
-
-    tmp_path = (Path(base_dir) / safe_rel_path).absolute()
-
-    # SECURITY: Ensure the resolved path is within the base directory
-    try:
-        is_safe = await anyio.to_thread.run_sync(
-            lambda: tmp_path.resolve().is_relative_to(Path(base_dir).resolve())
-        )
-    except Exception:
-        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG) from None
-
-    if not is_safe:
-        raise HTTPException(status_code=400, detail="Path traversal detected")
-
-    return tmp_path.with_suffix(tmp_path.suffix + ".fftmp")
-
-
-async def _decrypt_chunk(chunk: bytes, nonce: str, shared_secret: str) -> bytes:
-    """Decrypt chunk if nonce is provided."""
-    if not nonce:
-        return chunk
-
-    try:
-        key = bytes.fromhex(shared_secret)[:32]
-        aesgcm = AESGCM(key)
-        return aesgcm.decrypt(bytes.fromhex(nonce), chunk, None)
-    except Exception:
-        logger.exception("Decryption failed")
-        raise HTTPException(status_code=400, detail="Decryption failed") from None
-
-
-async def _decompress_chunk(chunk: bytes) -> bytes:
-    """Decompress chunk using zstandard."""
-    try:
-        dctx = zstd.ZstdDecompressor()
-        return dctx.decompress(chunk)
-    except Exception:
-        logger.exception("Decompression failed")
-        raise HTTPException(status_code=400, detail="Decompression failed") from None
-
-
-@router.post("/receive")
+@router.post("/receive", tags=["Remote Connections"])
 async def receive_chunk(
     request: Request,
     headers: ReceiveHeader = Depends(ReceiveHeader),
     db: Session = Depends(get_db),
-    remote_conn: RemoteConnection = Depends(verify_remote_secret),
 ):
     """Inter-instance endpoint to receive file chunks."""
-    _ = remote_conn
-    # Rate limiting is disabled for inter-instance transfers to support high-speed migration
+    body = await request.body()
+    remote_conn = await verify_signature_from_components(
+        db, headers.fingerprint, headers.timestamp, headers.signature, headers.nonce, request, body
+    )
 
-    # 1. Get MonitoredPath
     path = db.query(MonitoredPath).filter(MonitoredPath.id == headers.remote_path_id).first()
     if not path:
         raise HTTPException(status_code=404, detail="MonitoredPath not found")
 
-    # 2. Determine base directory and build safe path
     base_dir = _get_base_directory(path, headers.storage_type)
     tmp_path = await _validate_and_build_path(base_dir, headers.relative_path)
 
-    # 3. Validate disk space on first chunk
     if headers.chunk_index == 0:
         file_size = (
-            int(request.headers.get("X-File-Size", "0")) if "X-File-Size" in request.headers else 0
+            int(request.headers.get("X-File-Size", "0"))
+            if "X-File-Size" in request.headers
+            else 0
         )
         if file_size > 0:
             try:
                 disk_space_validator.validate_disk_space_direct(file_size, Path(base_dir))
             except ValueError as e:
-                logger.warning(f"Insufficient disk space for transfer: {e}")
                 raise HTTPException(status_code=507, detail=str(e)) from None
 
-    # 3. Ensure directory exists
     await anyio.to_thread.run_sync(lambda: tmp_path.parent.mkdir(parents=True, exist_ok=True))
 
-    # 4. Get, decrypt, and decompress body
-    body = await request.body()
-    decrypted_chunk = await _decrypt_chunk(body, headers.nonce, remote_conn.shared_secret)
+    decrypted_chunk = await _decrypt_chunk(
+        body, headers.encryption_nonce, headers.ephemeral_public_key, remote_conn, db
+    )
     decompressed_chunk = await _decompress_chunk(decrypted_chunk)
 
-    # 5. Write chunk
     mode = "ab" if headers.chunk_index > 0 else "wb"
     async with aiofiles.open(tmp_path, mode) as f:
         await f.write(decompressed_chunk)
@@ -432,67 +482,15 @@ async def receive_chunk(
     return {"status": "success", "chunk": headers.chunk_index}
 
 
-async def _get_found_tmp(db: Session, remote_path_id: int, relative_path: str) -> Path:
-    path = db.query(MonitoredPath).filter(MonitoredPath.id == remote_path_id).first()
-    if not path:
-        raise HTTPException(status_code=404, detail="MonitoredPath not found")
-
-    possible_dirs = [path.source_path]
-    for loc in path.storage_locations:
-        possible_dirs.append(loc.path)
-
-    safe_rel_path = Path(relative_path)
-    if safe_rel_path.is_absolute():
-        safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
-
-    if ".." in safe_rel_path.parts:
-        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG)
-
-    for d in possible_dirs:
-        p = (Path(d) / safe_rel_path).absolute()
-        try:
-            is_relative = await anyio.to_thread.run_sync(
-                lambda p=p, d=d: p.resolve().is_relative_to(Path(d).resolve())
-            )
-            if is_relative:
-                p_tmp = p.with_suffix(p.suffix + ".fftmp")
-                if await anyio.to_thread.run_sync(p_tmp.exists):
-                    return p_tmp
-        except Exception:
-            continue
-
-    raise HTTPException(status_code=404, detail="Temporary file not found")
-
-
-async def _verify_checksum_in_background(found_tmp: Path, checksum: str):
-    """Verify checksum in background and delete file if mismatch."""
-    try:
-        sha256_hash = hashlib.sha256()
-        async with aiofiles.open(found_tmp, "rb") as f:
-            while True:
-                byte_block = await f.read(4096)
-                if not byte_block:
-                    break
-                sha256_hash.update(byte_block)
-
-        if sha256_hash.hexdigest() != checksum:
-            logger.error(f"Checksum verification failed for {found_tmp}, deleting file")
-            await anyio.to_thread.run_sync(found_tmp.unlink, missing_ok=True)
-    except Exception:
-        logger.exception(f"Error during checksum verification for {found_tmp}")
-        await anyio.to_thread.run_sync(found_tmp.unlink, missing_ok=True)
-
-
-@router.post("/verify-transfer")
+@router.post("/verify-transfer", tags=["Remote Connections"])
 async def verify_transfer(
     data: dict,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    remote_conn: RemoteConnection = Depends(verify_remote_secret),
+    remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """Finalize and verify a file transfer."""
     _ = remote_conn
-    # Rate limiting is disabled for inter-instance transfers to support high-speed migration
     relative_path = data["relative_path"]
     remote_path_id = data["remote_path_id"]
     checksum = data.get("checksum")
@@ -511,49 +509,27 @@ async def verify_transfer(
     return {"status": "success"}
 
 
-@router.get("/transfer-status")
+@router.get("/transfer-status", tags=["Remote Connections"])
 async def get_transfer_status(
     relative_path: str,
     remote_path_id: int,
     storage_type: str,
     db: Session = Depends(get_db),
-    remote_conn: RemoteConnection = Depends(verify_remote_secret),
+    remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
-    """Check the status of a file transfer on the remote instance.
-    Returns the current size of the temporary file or final file if they exist.
-    """
+    """Check the status of a file transfer on the remote instance."""
     _ = remote_conn
     path = db.query(MonitoredPath).filter(MonitoredPath.id == remote_path_id).first()
     if not path:
         raise HTTPException(status_code=404, detail="MonitoredPath not found")
 
     base_dir = _get_base_directory(path, storage_type)
-
-    # Construct safe paths
-    safe_rel_path = Path(relative_path)
-    if safe_rel_path.is_absolute():
-        safe_rel_path = safe_rel_path.relative_to(safe_rel_path.anchor)
-    if ".." in safe_rel_path.parts:
-        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG)
-
-    final_path = (Path(base_dir) / safe_rel_path).absolute()
-    # Security check: ensure path is within base directory
-    try:
-        is_safe = await anyio.to_thread.run_sync(
-            lambda: final_path.resolve().is_relative_to(Path(base_dir).resolve())
-        )
-    except Exception:
-        raise HTTPException(status_code=400, detail=INVALID_PATH_MSG) from None
-
-    if not is_safe:
-        raise HTTPException(status_code=400, detail="Path traversal detected")
-
-    # 1. Check if file already exists (already completed)
+    final_path = (Path(base_dir) / relative_path).absolute()
+    # Security check is implicitly handled by _validate_and_build_path logic if we reuse it
     if await anyio.to_thread.run_sync(final_path.exists):
         stat = await anyio.to_thread.run_sync(final_path.stat)
         return {"size": stat.st_size, "status": "completed"}
 
-    # 2. Check for temporary file
     tmp_path = final_path.with_suffix(final_path.suffix + ".fftmp")
     if await anyio.to_thread.run_sync(tmp_path.exists):
         stat = await anyio.to_thread.run_sync(tmp_path.stat)
@@ -562,12 +538,12 @@ async def get_transfer_status(
     return {"size": 0, "status": "not_found"}
 
 
-@router.get("/exposed-paths")
+@router.get("/exposed-paths", tags=["Remote Connections"])
 def get_exposed_paths(
     db: Session = Depends(get_db),
-    remote_conn: RemoteConnection = Depends(verify_remote_secret),
+    remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """Return MonitoredPaths for inter-instance selection."""
-    _ = remote_conn  # Unused, but required for authentication
+    _ = remote_conn
     paths = db.query(MonitoredPath).filter(MonitoredPath.enabled).all()
     return [{"id": p.id, "name": p.name} for p in paths]

@@ -1486,6 +1486,7 @@ let selectedFiles = [];
 let bulkFreezeModal = null;
 let bulkAddTagModal = null;
 let bulkRemoveTagModal = null;
+let bulkRemoteMigrationModal = null;
 
 // Handle selection change
 function onSelectionChanged(event) {
@@ -1871,6 +1872,150 @@ async function executeBulkRemoveTag() {
     }
 }
 
+// Show bulk remote migration modal
+async function showBulkRemoteMigrationModal() {
+    if (selectedFiles.length === 0) {
+        showNotification('No files selected', 'warning');
+        return;
+    }
+
+    const modal = document.getElementById('bulkRemoteMigrationModal');
+    if (!modal) return;
+
+    document.getElementById('bulkRemoteMigrationCount').textContent = selectedFiles.length;
+    const connSelect = document.getElementById('bulkRemoteConnectionSelect');
+    connSelect.innerHTML = '<option value="">Loading connections...</option>';
+    document.getElementById('bulkRemotePathContainer').classList.add('d-none');
+    document.getElementById('confirmBulkRemoteMigrationBtn').disabled = true;
+    document.getElementById('bulkRemoteMigrationError').classList.add('d-none');
+
+    if (!bulkRemoteMigrationModal) {
+        bulkRemoteMigrationModal = new bootstrap.Modal(modal);
+    }
+    bulkRemoteMigrationModal.show();
+
+    try {
+        const response = await authenticatedFetch('/api/remote/connections');
+        if (response.ok) {
+            const connections = await response.json();
+            if (connections.length === 0) {
+                connSelect.innerHTML = '<option value="">No remote connections configured</option>';
+            } else {
+                connSelect.innerHTML = '<option value="">Select a connection...</option>' +
+                    connections.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${c.url})</option>`).join('');
+            }
+        }
+    } catch (error) {
+        console.error('Error loading connections:', error);
+        connSelect.innerHTML = '<option value="">Error loading connections</option>';
+    }
+}
+
+// Handle bulk remote connection change
+async function onBulkRemoteConnectionChange() {
+    const connId = document.getElementById('bulkRemoteConnectionSelect').value;
+    const pathContainer = document.getElementById('bulkRemotePathContainer');
+    const pathSelect = document.getElementById('bulkRemotePathSelect');
+    const confirmBtn = document.getElementById('confirmBulkRemoteMigrationBtn');
+    const errorDiv = document.getElementById('bulkRemoteMigrationError');
+
+    errorDiv.classList.add('d-none');
+
+    if (!connId) {
+        pathContainer.classList.add('d-none');
+        confirmBtn.disabled = true;
+        return;
+    }
+
+    pathContainer.classList.remove('d-none');
+    pathSelect.innerHTML = '<option value="">Loading paths...</option>';
+    confirmBtn.disabled = true;
+
+    try {
+        const response = await authenticatedFetch(`/api/remote/connections/${connId}/paths`);
+        if (response.ok) {
+            const paths = await response.json();
+            if (paths.length === 0) {
+                pathSelect.innerHTML = '<option value="">No paths available</option>';
+            } else {
+                pathSelect.innerHTML = '<option value="">Select a path...</option>' +
+                    paths.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+            }
+        } else {
+            throw new Error('Failed to load remote paths');
+        }
+    } catch (error) {
+        console.error('Error loading remote paths:', error);
+        pathSelect.innerHTML = '<option value="">Error loading paths</option>';
+        errorDiv.textContent = 'Failed to load remote paths: ' + error.message;
+        errorDiv.classList.remove('d-none');
+    }
+}
+
+// Handle bulk remote path change
+function onBulkRemotePathChange() {
+    const pathSelect = document.getElementById('bulkRemotePathSelect');
+    const confirmBtn = document.getElementById('confirmBulkRemoteMigrationBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = !pathSelect || !pathSelect.value;
+    }
+}
+
+// Execute bulk remote migration
+async function executeBulkRemoteMigration() {
+    const fileIds = getSelectedFileIds();
+    const connId = document.getElementById('bulkRemoteConnectionSelect').value;
+    const pathId = document.getElementById('bulkRemotePathSelect').value;
+
+    if (!connId || !pathId) return;
+
+    const confirmBtn = document.getElementById('confirmBulkRemoteMigrationBtn');
+    const errorDiv = document.getElementById('bulkRemoteMigrationError');
+
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting...';
+    }
+
+    errorDiv.classList.add('d-none');
+
+    try {
+        const response = await authenticatedFetch(`/api/remote/migrate/bulk`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_ids: fileIds,
+                remote_connection_id: parseInt(connId),
+                remote_monitored_path_id: parseInt(pathId)
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: 'Unknown error' }));
+            throw new Error(errorData.detail || 'Bulk migration request failed');
+        }
+
+        const result = await response.json();
+        showNotification(`Created ${result.successful} migration jobs` +
+            (result.failed > 0 ? ` (${result.failed} failed)` : ''));
+
+        bulkRemoteMigrationModal?.hide();
+        clearSelection();
+        loadFilesList();
+
+    } catch (error) {
+        console.error('Bulk migration error:', error);
+        errorDiv.textContent = error.message;
+        errorDiv.classList.remove('d-none');
+        showNotification(`Bulk migration failed: ${error.message}`, 'error');
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="bi bi-send"></i> Start Migration';
+        }
+    }
+}
+
 // Execute bulk pin
 async function executeBulkPin() {
     const fileIds = getSelectedFileIds();
@@ -2052,6 +2197,11 @@ document.addEventListener('DOMContentLoaded', function() {
         bulkFreezeBtn.addEventListener('click', showBulkFreezeModal);
     }
 
+    const bulkMigrateBtn = document.getElementById('bulk-migrate-btn');
+    if (bulkMigrateBtn) {
+        bulkMigrateBtn.addEventListener('click', showBulkRemoteMigrationModal);
+    }
+
     const bulkAddTagBtn = document.getElementById('bulk-add-tag-btn');
     if (bulkAddTagBtn) {
         bulkAddTagBtn.addEventListener('click', showBulkAddTagModal);
@@ -2111,6 +2261,21 @@ document.addEventListener('DOMContentLoaded', function() {
     const bulkRemoveTagSelect = document.getElementById('bulkRemoveTagSelect');
     if (bulkRemoveTagSelect) {
         bulkRemoveTagSelect.addEventListener('change', onBulkRemoveTagSelectChange);
+    }
+
+    const confirmBulkRemoteMigrationBtn = document.getElementById('confirmBulkRemoteMigrationBtn');
+    if (confirmBulkRemoteMigrationBtn) {
+        confirmBulkRemoteMigrationBtn.addEventListener('click', executeBulkRemoteMigration);
+    }
+
+    const bulkRemoteConnectionSelect = document.getElementById('bulkRemoteConnectionSelect');
+    if (bulkRemoteConnectionSelect) {
+        bulkRemoteConnectionSelect.addEventListener('change', onBulkRemoteConnectionChange);
+    }
+
+    const bulkRemotePathSelect = document.getElementById('bulkRemotePathSelect');
+    if (bulkRemotePathSelect) {
+        bulkRemotePathSelect.addEventListener('change', onBulkRemotePathChange);
     }
 });
 
