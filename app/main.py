@@ -43,6 +43,11 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# --- TEMPORARY DEBUG: Verify effective log level ---
+logger.info(f"Effective logging level: {logging.getLevelName(logging.root.level)}")
+logger.info(f"Configured log_level from settings: {settings.log_level.upper()}")
+# --- END TEMPORARY DEBUG ---
+
 
 # Filter out /api/remote/receive from uvicorn access logs to prevent spam during file transfers
 class RemoteReceiveFilter(logging.Filter):
@@ -100,7 +105,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 # Create FastAPI app
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 
-# Configure Jinja2 templates
+# Configure Jinja2 Templates
 templates = Jinja2Templates(directory="templates")
 
 # Mount static files

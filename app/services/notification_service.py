@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from functools import wraps
@@ -473,9 +473,17 @@ class NotificationService:
         self, url: str, level: str, message: str, metadata: Optional[Dict[str, Any]] = None
     ) -> tuple:
         """Send a webhook notification."""
+        # Include multiple common field names for compatibility with different providers:
+        # - "content" for Discord
+        # - "text" for Slack
+        # - "message" for generic webhooks
+        formatted_message = f"[{level.upper()}] {message}"
+
         payload = {
+            "content": formatted_message,  # Discord
+            "text": formatted_message,     # Slack
+            "message": message,            # Generic
             "level": level.upper(),
-            "message": message,
             "timestamp": datetime.utcnow().isoformat(),
             "source": "File Fridge",
         }

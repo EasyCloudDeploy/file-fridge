@@ -24,6 +24,7 @@ from app.database import get_db
 from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob
 from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import (
+    ConnectionCodeResponse,
     RemoteConnectionCreate,
     RemoteConnectionIdentity,
     RemoteConnectionUpdate,
@@ -33,6 +34,7 @@ from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
 from app.security import get_current_user
 from app.services.identity_service import identity_service
 from app.services.remote_connection_service import remote_connection_service
+from app.utils.remote_auth import remote_auth
 from app.services.remote_transfer_service import (
     get_transfer_timeouts,
     remote_transfer_service,
@@ -47,7 +49,7 @@ from app.utils.remote_signature import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/remote", tags=["Remote Connections"])
+router = APIRouter(prefix="/api/v1/remote", tags=["Remote Connections"])
 INVALID_PATH_MSG = "Invalid relative path"
 
 
@@ -228,6 +230,18 @@ def get_my_identity(
         "url": settings.ff_instance_url,
         "qr_data": f"filefridge://{fingerprint}@{settings.ff_instance_url}",
     }
+
+
+@router.get("/connection-code", response_model=ConnectionCodeResponse, tags=["Remote Connections"])
+def get_connection_code(current_user: dict = Depends(get_current_user)):
+    """
+    Get the current rotating connection code for this instance.
+    This code can be shared with other File Fridge instances to establish a connection.
+    The code rotates automatically every hour for security.
+    """
+    _ = current_user
+    code, expires_in_seconds = remote_auth.get_code_with_expiry()
+    return {"code": code, "expires_in_seconds": expires_in_seconds}
 
 
 @router.post(
