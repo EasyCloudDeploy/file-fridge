@@ -1,4 +1,3 @@
-# ruff: noqa: A003
 import base64
 import hashlib
 import logging
@@ -8,7 +7,6 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, x25519
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
 from app.models import InstanceMetadata, encryption_manager
 
 logger = logging.getLogger(__name__)

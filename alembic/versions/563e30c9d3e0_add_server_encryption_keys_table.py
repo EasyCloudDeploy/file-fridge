@@ -5,16 +5,16 @@ Revises: ab498f37013c
 Create Date: 2026-01-21 12:00:00.000000
 
 """
-from alembic import op
-import sqlalchemy as sa
-import os
 import hashlib
-from cryptography.fernet import Fernet
+import os
 
+import sqlalchemy as sa
+
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = '563e30c9d3e0'
-down_revision = 'ab498f37013c'
+revision = "563e30c9d3e0"
+down_revision = "ab498f37013c"
 branch_labels = None
 depends_on = None
 
@@ -22,23 +22,23 @@ depends_on = None
 def upgrade():
     # Create server_encryption_keys table
     op.create_table(
-        'server_encryption_keys',
-        sa.Column('id', sa.Integer(), nullable=False),
-        sa.Column('key_value', sa.String(), nullable=False),
-        sa.Column('fingerprint', sa.String(), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
-        sa.PrimaryKeyConstraint('id')
+        "server_encryption_keys",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("key_value", sa.String(), nullable=False),
+        sa.Column("fingerprint", sa.String(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=True),
+        sa.PrimaryKeyConstraint("id")
     )
-    op.create_index(op.f('ix_server_encryption_keys_fingerprint'), 'server_encryption_keys', ['fingerprint'], unique=True)
-    op.create_index(op.f('ix_server_encryption_keys_id'), 'server_encryption_keys', ['id'], unique=False)
+    op.create_index(op.f("ix_server_encryption_keys_fingerprint"), "server_encryption_keys", ["fingerprint"], unique=True)
+    op.create_index(op.f("ix_server_encryption_keys_id"), "server_encryption_keys", ["id"], unique=False)
 
     # Migration of existing key file
     try:
         # We need to access settings but we don't want to import app.config if possible
         # to avoid side effects. Use default path.
-        key_file = 'data/encryption.key'
+        key_file = "data/encryption.key"
         if os.path.exists(key_file):
-            with open(key_file, 'rb') as f:
+            with open(key_file, "rb") as f:
                 key_value = f.read().decode().strip()
 
             if key_value:
@@ -65,6 +65,6 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_index(op.f('ix_server_encryption_keys_id'), table_name='server_encryption_keys')
-    op.drop_index(op.f('ix_server_encryption_keys_fingerprint'), table_name='server_encryption_keys')
-    op.drop_table('server_encryption_keys')
+    op.drop_index(op.f("ix_server_encryption_keys_id"), table_name="server_encryption_keys")
+    op.drop_index(op.f("ix_server_encryption_keys_fingerprint"), table_name="server_encryption_keys")
+    op.drop_table("server_encryption_keys")

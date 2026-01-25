@@ -1,13 +1,14 @@
+import hashlib
+from typing import List
+
+from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
-import hashlib
-from cryptography.fernet import Fernet
 
 from app.database import get_db
-from app.models import ServerEncryptionKey, encryption_manager, Notifier
-from app.schemas import ServerEncryptionKeyResponse
+from app.models import Notifier, ServerEncryptionKey, encryption_manager
 from app.routers.api.auth import get_current_user
+from app.schemas import ServerEncryptionKeyResponse
 
 router = APIRouter(prefix="/encryption", tags=["Encryption"])
 
@@ -77,4 +78,3 @@ def delete_key(
     # Reset encryption manager
     encryption_manager.reset()
 
-    return None

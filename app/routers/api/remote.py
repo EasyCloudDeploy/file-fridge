@@ -16,20 +16,19 @@ from fastapi import (
     Header,
     HTTPException,
     Request,
-    status,
 )
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob, TransferStatus
+from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob
+from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import (
     RemoteConnectionCreate,
     RemoteConnectionIdentity,
     RemoteConnectionUpdate,
     RemoteTransferJobBase,
 )
-from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
 from app.security import get_current_user
 from app.services.identity_service import identity_service

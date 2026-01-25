@@ -7,13 +7,14 @@ Create Date: 2026-01-24 16:06:55.758390
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import sqlite
 
+from alembic import op
+
 # revision identifiers, used by Alembic.
-revision: str = '935faa16ea14'
-down_revision: Union[str, None] = 'ceea8b4e07bf'
+revision: str = "935faa16ea14"
+down_revision: Union[str, None] = "ceea8b4e07bf"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -30,11 +31,11 @@ def upgrade() -> None:
     #            type_=sa.Enum('ACTIVE', 'MOVED', 'DELETED', 'MISSING', 'MIGRATING', name='filestatus'),
     #            existing_nullable=True)
 
-    op.drop_index(op.f('idx_file_inventory_cold_storage_location_id'), table_name='file_inventory')
-    op.drop_index(op.f('idx_inventory_checksum'), table_name='file_inventory')
-    op.drop_index(op.f('idx_file_records_cold_storage_location_id'), table_name='file_records')
-    op.drop_index(op.f('idx_file_tags_file_id'), table_name='file_tags')
-    op.drop_index(op.f('idx_file_tags_tag_id'), table_name='file_tags')
+    op.drop_index(op.f("idx_file_inventory_cold_storage_location_id"), table_name="file_inventory")
+    op.drop_index(op.f("idx_inventory_checksum"), table_name="file_inventory")
+    op.drop_index(op.f("idx_file_records_cold_storage_location_id"), table_name="file_records")
+    op.drop_index(op.f("idx_file_tags_file_id"), table_name="file_tags")
+    op.drop_index(op.f("idx_file_tags_tag_id"), table_name="file_tags")
 
     # SQLite does not support ALTER COLUMN TYPE for enums
     # op.alter_column('file_transaction_history', 'transaction_type',
@@ -42,13 +43,13 @@ def upgrade() -> None:
     #            type_=sa.Enum('FREEZE', 'THAW', 'MOVE_COLD', 'DELETE', 'COPY', 'RESTORE', 'CLEANUP', 'REMOTE_MIGRATE', 'REMOTE_RECEIVE', name='transactiontype'),
     #            existing_nullable=False)
 
-    op.add_column('instance_metadata', sa.Column('ed25519_public_key', sa.Text(), nullable=True))
-    op.add_column('instance_metadata', sa.Column('ed25519_private_key_encrypted', sa.Text(), nullable=True))
-    op.add_column('instance_metadata', sa.Column('x25519_public_key', sa.Text(), nullable=True))
-    op.add_column('instance_metadata', sa.Column('x25519_private_key_encrypted', sa.Text(), nullable=True))
-    op.drop_index(op.f('idx_dispatch_notifier_status'), table_name='notification_dispatches')
-    op.drop_index(op.f('idx_notification_level_created'), table_name='notifications')
-    op.add_column('notifiers', sa.Column('smtp_password', sa.String(), nullable=True))
+    op.add_column("instance_metadata", sa.Column("ed25519_public_key", sa.Text(), nullable=True))
+    op.add_column("instance_metadata", sa.Column("ed25519_private_key_encrypted", sa.Text(), nullable=True))
+    op.add_column("instance_metadata", sa.Column("x25519_public_key", sa.Text(), nullable=True))
+    op.add_column("instance_metadata", sa.Column("x25519_private_key_encrypted", sa.Text(), nullable=True))
+    op.drop_index(op.f("idx_dispatch_notifier_status"), table_name="notification_dispatches")
+    op.drop_index(op.f("idx_notification_level_created"), table_name="notifications")
+    op.add_column("notifiers", sa.Column("smtp_password", sa.String(), nullable=True))
 
     # notifiers.id is a PK, so it's implicitly NOT NULL. No-op for SQLite.
     # op.alter_column('notifiers', 'id', existing_type=sa.INTEGER(), nullable=False, autoincrement=True)
@@ -57,73 +58,73 @@ def upgrade() -> None:
     # Assuming existing subscribed_events can be NULL or empty list.
     # op.alter_column('notifiers', 'subscribed_events', existing_type=sqlite.JSON(), nullable=False)
 
-    op.create_index(op.f('ix_notifiers_id'), 'notifiers', ['id'], unique=False)
-    op.create_index(op.f('ix_notifiers_name'), 'notifiers', ['name'], unique=False)
-    op.drop_column('notifiers', 'smtp_password_encrypted')
-    op.add_column('remote_connections', sa.Column('remote_fingerprint', sa.String(), nullable=True))
-    op.add_column('remote_connections', sa.Column('remote_ed25519_public_key', sa.Text(), nullable=True))
-    op.add_column('remote_connections', sa.Column('remote_x25519_public_key', sa.Text(), nullable=True))
-    op.add_column('remote_connections', sa.Column('trust_status', sa.Enum('PENDING', 'TRUSTED', 'REJECTED', name='truststatus'), nullable=False, server_default=sa.text("'PENDING'")))
-    op.drop_index(op.f('idx_remote_connections_remote_instance_uuid'), table_name='remote_connections')
-    op.create_index(op.f('ix_remote_connections_remote_fingerprint'), 'remote_connections', ['remote_fingerprint'], unique=True)
-    op.drop_column('remote_connections', 'remote_instance_uuid')
-    op.drop_column('remote_connections', 'shared_secret')
-    op.drop_index(op.f('idx_tag_rules_enabled'), table_name='tag_rules')
-    op.drop_index(op.f('idx_tag_rules_priority'), table_name='tag_rules')
-    op.drop_index(op.f('idx_tag_rules_tag_id'), table_name='tag_rules')
-    op.drop_index(op.f('idx_tags_name'), table_name='tags')
+    op.create_index(op.f("ix_notifiers_id"), "notifiers", ["id"], unique=False)
+    op.create_index(op.f("ix_notifiers_name"), "notifiers", ["name"], unique=False)
+    op.drop_column("notifiers", "smtp_password_encrypted")
+    op.add_column("remote_connections", sa.Column("remote_fingerprint", sa.String(), nullable=True))
+    op.add_column("remote_connections", sa.Column("remote_ed25519_public_key", sa.Text(), nullable=True))
+    op.add_column("remote_connections", sa.Column("remote_x25519_public_key", sa.Text(), nullable=True))
+    op.add_column("remote_connections", sa.Column("trust_status", sa.Enum("PENDING", "TRUSTED", "REJECTED", name="truststatus"), nullable=False, server_default=sa.text("'PENDING'")))
+    op.drop_index(op.f("idx_remote_connections_remote_instance_uuid"), table_name="remote_connections")
+    op.create_index(op.f("ix_remote_connections_remote_fingerprint"), "remote_connections", ["remote_fingerprint"], unique=True)
+    op.drop_column("remote_connections", "remote_instance_uuid")
+    op.drop_column("remote_connections", "shared_secret")
+    op.drop_index(op.f("idx_tag_rules_enabled"), table_name="tag_rules")
+    op.drop_index(op.f("idx_tag_rules_priority"), table_name="tag_rules")
+    op.drop_index(op.f("idx_tag_rules_tag_id"), table_name="tag_rules")
+    op.drop_index(op.f("idx_tags_name"), table_name="tags")
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
-    op.create_index(op.f('idx_tags_name'), 'tags', ['name'], unique=False)
-    op.create_index(op.f('idx_tag_rules_tag_id'), 'tag_rules', ['tag_id'], unique=False)
-    op.create_index(op.f('idx_tag_rules_priority'), 'tag_rules', ['priority'], unique=False)
-    op.create_index(op.f('idx_tag_rules_enabled'), 'tag_rules', ['enabled'], unique=False)
-    op.add_column('remote_connections', sa.Column('shared_secret', sa.VARCHAR(), nullable=False))
-    op.add_column('remote_connections', sa.Column('remote_instance_uuid', sa.TEXT(), nullable=True))
-    op.drop_index(op.f('ix_remote_connections_remote_fingerprint'), table_name='remote_connections')
-    op.create_index(op.f('idx_remote_connections_remote_instance_uuid'), 'remote_connections', ['remote_instance_uuid'], unique=1)
-    op.drop_column('remote_connections', 'trust_status')
-    op.drop_column('remote_connections', 'remote_x25519_public_key')
-    op.drop_column('remote_connections', 'remote_ed25519_public_key')
-    op.drop_column('remote_connections', 'remote_fingerprint')
-    op.add_column('notifiers', sa.Column('smtp_password_encrypted', sa.VARCHAR(), nullable=True))
-    op.drop_index(op.f('ix_notifiers_name'), table_name='notifiers')
-    op.drop_index(op.f('ix_notifiers_id'), table_name='notifiers')
-    op.alter_column('notifiers', 'subscribed_events',
+    op.create_index(op.f("idx_tags_name"), "tags", ["name"], unique=False)
+    op.create_index(op.f("idx_tag_rules_tag_id"), "tag_rules", ["tag_id"], unique=False)
+    op.create_index(op.f("idx_tag_rules_priority"), "tag_rules", ["priority"], unique=False)
+    op.create_index(op.f("idx_tag_rules_enabled"), "tag_rules", ["enabled"], unique=False)
+    op.add_column("remote_connections", sa.Column("shared_secret", sa.VARCHAR(), nullable=False))
+    op.add_column("remote_connections", sa.Column("remote_instance_uuid", sa.TEXT(), nullable=True))
+    op.drop_index(op.f("ix_remote_connections_remote_fingerprint"), table_name="remote_connections")
+    op.create_index(op.f("idx_remote_connections_remote_instance_uuid"), "remote_connections", ["remote_instance_uuid"], unique=1)
+    op.drop_column("remote_connections", "trust_status")
+    op.drop_column("remote_connections", "remote_x25519_public_key")
+    op.drop_column("remote_connections", "remote_ed25519_public_key")
+    op.drop_column("remote_connections", "remote_fingerprint")
+    op.add_column("notifiers", sa.Column("smtp_password_encrypted", sa.VARCHAR(), nullable=True))
+    op.drop_index(op.f("ix_notifiers_name"), table_name="notifiers")
+    op.drop_index(op.f("ix_notifiers_id"), table_name="notifiers")
+    op.alter_column("notifiers", "subscribed_events",
                existing_type=sqlite.JSON(),
                nullable=True)
-    op.alter_column('notifiers', 'id',
+    op.alter_column("notifiers", "id",
                existing_type=sa.INTEGER(),
                nullable=True,
                autoincrement=True)
-    op.drop_column('notifiers', 'smtp_password')
-    op.create_index(op.f('idx_notification_level_created'), 'notifications', ['level', 'created_at'], unique=False)
-    op.create_index(op.f('idx_dispatch_notifier_status'), 'notification_dispatches', ['notifier_id', 'status'], unique=False)
-    op.drop_column('instance_metadata', 'x25519_private_key_encrypted')
-    op.drop_column('instance_metadata', 'x25519_public_key')
-    op.drop_column('instance_metadata', 'ed25519_private_key_encrypted')
-    op.drop_column('instance_metadata', 'ed25519_public_key')
-    op.alter_column('file_transaction_history', 'transaction_type',
-               existing_type=sa.Enum('FREEZE', 'THAW', 'MOVE_COLD', 'DELETE', 'COPY', 'RESTORE', 'CLEANUP', 'REMOTE_MIGRATE', 'REMOTE_RECEIVE', name='transactiontype'),
+    op.drop_column("notifiers", "smtp_password")
+    op.create_index(op.f("idx_notification_level_created"), "notifications", ["level", "created_at"], unique=False)
+    op.create_index(op.f("idx_dispatch_notifier_status"), "notification_dispatches", ["notifier_id", "status"], unique=False)
+    op.drop_column("instance_metadata", "x25519_private_key_encrypted")
+    op.drop_column("instance_metadata", "x25519_public_key")
+    op.drop_column("instance_metadata", "ed25519_private_key_encrypted")
+    op.drop_column("instance_metadata", "ed25519_public_key")
+    op.alter_column("file_transaction_history", "transaction_type",
+               existing_type=sa.Enum("FREEZE", "THAW", "MOVE_COLD", "DELETE", "COPY", "RESTORE", "CLEANUP", "REMOTE_MIGRATE", "REMOTE_RECEIVE", name="transactiontype"),
                type_=sa.VARCHAR(length=9),
                existing_nullable=False)
-    op.create_index(op.f('idx_file_tags_tag_id'), 'file_tags', ['tag_id'], unique=False)
-    op.create_index(op.f('idx_file_tags_file_id'), 'file_tags', ['file_id'], unique=False)
-    op.create_index(op.f('idx_file_records_cold_storage_location_id'), 'file_records', ['cold_storage_location_id'], unique=False)
-    op.create_index(op.f('idx_inventory_checksum'), 'file_inventory', ['checksum'], unique=False)
-    op.create_index(op.f('idx_file_inventory_cold_storage_location_id'), 'file_inventory', ['cold_storage_location_id'], unique=False)
-    op.alter_column('file_inventory', 'status',
-               existing_type=sa.Enum('ACTIVE', 'MOVED', 'DELETED', 'MISSING', 'MIGRATING', name='filestatus'),
+    op.create_index(op.f("idx_file_tags_tag_id"), "file_tags", ["tag_id"], unique=False)
+    op.create_index(op.f("idx_file_tags_file_id"), "file_tags", ["file_id"], unique=False)
+    op.create_index(op.f("idx_file_records_cold_storage_location_id"), "file_records", ["cold_storage_location_id"], unique=False)
+    op.create_index(op.f("idx_inventory_checksum"), "file_inventory", ["checksum"], unique=False)
+    op.create_index(op.f("idx_file_inventory_cold_storage_location_id"), "file_inventory", ["cold_storage_location_id"], unique=False)
+    op.alter_column("file_inventory", "status",
+               existing_type=sa.Enum("ACTIVE", "MOVED", "DELETED", "MISSING", "MIGRATING", name="filestatus"),
                type_=sa.VARCHAR(length=7),
                existing_nullable=True)
-    op.create_table('encryption_keys',
-    sa.Column('id', sa.INTEGER(), nullable=False),
-    sa.Column('key_data', sa.VARCHAR(), nullable=False),
-    sa.Column('created_at', sa.DATETIME(), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=True),
-    sa.PrimaryKeyConstraint('id')
+    op.create_table("encryption_keys",
+    sa.Column("id", sa.INTEGER(), nullable=False),
+    sa.Column("key_data", sa.VARCHAR(), nullable=False),
+    sa.Column("created_at", sa.DATETIME(), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=True),
+    sa.PrimaryKeyConstraint("id")
     )
-    op.create_index(op.f('ix_encryption_keys_id'), 'encryption_keys', ['id'], unique=False)
+    op.create_index(op.f("ix_encryption_keys_id"), "encryption_keys", ["id"], unique=False)
     # ### end Alembic commands ###

@@ -7,28 +7,25 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
-import anyio
 import httpx
 import zstandard as zstd
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.hashes import SHA256
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import SessionLocal
 from app.models import (
     FileInventory,
-    FileStatus,
+    MonitoredPath,
     RemoteConnection,
     RemoteTransferJob,
     TransferStatus,
 )
-from app.services.audit_trail_service import audit_trail_service
-from app.services.identity_service import identity_service
-from app.utils.circuit_breaker import get_circuit_breaker
+from app.services.file_metadata import file_metadata_extractor
 from app.utils.remote_signature import get_signed_headers
 from app.utils.retry_strategy import retry_strategy
 
@@ -59,15 +56,145 @@ class RemoteTransferService:
         remote_monitored_path_id: int,
     ) -> RemoteTransferJob:
         """Create a new remote transfer job."""
-        # ... (implementation remains the same)
-        pass
+        # Get the file from inventory
+        file_obj = db.query(FileInventory).filter(FileInventory.id == file_id).first()
+        if not file_obj:
+            msg = f"File with ID {file_id} not found in inventory"
+            raise ValueError(msg)
+
+        # Validate remote connection exists
+        conn = (
+            db.query(RemoteConnection).filter(RemoteConnection.id == remote_connection_id).first()
+        )
+        if not conn:
+            msg = f"Remote connection with ID {remote_connection_id} not found"
+            raise ValueError(msg)
+
+        # Get the monitored path to determine relative path
+        monitored_path = (
+            db.query(MonitoredPath).filter(MonitoredPath.id == file_obj.path_id).first()
+        )
+        if not monitored_path:
+            msg = f"Monitored path with ID {file_obj.path_id} not found"
+            raise ValueError(msg)
+
+        # Calculate relative path
+        source_path = Path(file_obj.file_path)
+        monitored_source = Path(monitored_path.source_path)
+        try:
+            relative_path = str(source_path.relative_to(monitored_source))
+        except ValueError as err:
+            msg = f"File path {source_path} is not relative to monitored path {monitored_source}"
+            raise ValueError(msg) from err
+
+        # Get file size
+        if not source_path.exists():
+            msg = f"Source file does not exist: {source_path}"
+            raise ValueError(msg)
+
+        file_size = source_path.stat().st_size
+
+        # Compute checksum if not already present
+        checksum = file_obj.checksum
+        if not checksum:
+            logger.info(f"Computing checksum for {source_path}")
+            checksum = file_metadata_extractor.compute_sha256(source_path)
+
+        # Create the transfer job
+        job = RemoteTransferJob(
+            file_inventory_id=file_id,
+            remote_connection_id=remote_connection_id,
+            remote_monitored_path_id=remote_monitored_path_id,
+            status=TransferStatus.PENDING,
+            progress=0,
+            current_size=0,
+            total_size=file_size,
+            source_path=str(source_path),
+            relative_path=relative_path,
+            storage_type=file_obj.storage_type,
+            checksum=checksum,
+        )
+
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+
+        logger.info(
+            f"Created transfer job {job.id} for file {file_obj.file_path} to remote connection {conn.name}"
+        )
+        return job
 
     async def process_pending_transfers(self):
         """Process pending transfer jobs."""
-        # ... (implementation remains the same)
-        pass
+        db = SessionLocal()
+        try:
+            # Get all pending jobs
+            pending_jobs = (
+                db.query(RemoteTransferJob)
+                .filter(RemoteTransferJob.status == TransferStatus.PENDING)
+                .all()
+            )
 
-    def _perform_ecdh_key_exchange(self, db: Session, conn: RemoteConnection):
+            if not pending_jobs:
+                logger.debug("No pending transfer jobs found")
+                return
+
+            logger.info(f"Found {len(pending_jobs)} pending transfer job(s)")
+
+            # Process each job in parallel (up to a reasonable limit)
+            tasks = []
+            for job in pending_jobs[:10]:  # Process max 10 jobs concurrently
+                logger.info(f"Starting transfer job {job.id}")
+                # Update status to in_progress
+                job.status = TransferStatus.IN_PROGRESS
+                job.start_time = datetime.now(timezone.utc)
+                db.commit()
+
+                # Launch the transfer as an async task
+                tasks.append(self.run_transfer(job.id))
+
+            # Wait for all tasks to complete
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        except Exception:
+            logger.exception("Error processing pending transfers")
+        finally:
+            db.close()
+
+    async def _is_final_chunk(self, file_handle) -> bool:
+        """Check if we've reached the end of the file."""
+        current_pos = await file_handle.tell()
+        await file_handle.seek(0, 2)  # Seek to end
+        end_pos = await file_handle.tell()
+        await file_handle.seek(current_pos)  # Seek back to original position
+        return current_pos >= end_pos
+
+    def _update_job_progress(
+        self, job: RemoteTransferJob, bytes_transferred: int, start_time: float, db: Session
+    ):
+        """Update job progress, speed, and ETA."""
+        job.current_size += bytes_transferred
+        job.progress = int((job.current_size / job.total_size) * 100) if job.total_size > 0 else 0
+
+        # Calculate transfer speed (bytes per second)
+        elapsed_time = time.time() - start_time
+        if elapsed_time > 0:
+            job.current_speed = int(job.current_size / elapsed_time)
+
+            # Calculate ETA (seconds remaining)
+            if job.current_speed > 0:
+                bytes_remaining = job.total_size - job.current_size
+                job.eta = int(bytes_remaining / job.current_speed)
+            else:
+                job.eta = None
+        else:
+            job.current_speed = 0
+            job.eta = None
+
+        db.commit()
+
+    def _perform_ecdh_key_exchange(self, conn: RemoteConnection):
         """
         Performs an ECDH key exchange to derive a symmetric key for this transfer.
         Returns the ephemeral public key to be sent and the derived symmetric key.
@@ -111,7 +238,9 @@ class RemoteTransferService:
             final_chunk = aesgcm.encrypt(nonce, final_chunk, None)
         return final_chunk, nonce
 
-    async def _get_remote_status(self, db: Session, client: httpx.AsyncClient, conn: RemoteConnection, job: RemoteTransferJob):
+    async def _get_remote_status(
+        self, db: Session, client: httpx.AsyncClient, conn: RemoteConnection, job: RemoteTransferJob
+    ):
         """Check remote status for resumability."""
         url = f"{conn.url.rstrip('/')}/api/remote/transfer-status"
         params = {
@@ -124,7 +253,9 @@ class RemoteTransferService:
         signed_headers = await get_signed_headers(db, req.method, str(req.url), req.content)
 
         try:
-            response = await client.get(url, params=params, headers=signed_headers, timeout=get_transfer_timeouts())
+            response = await client.get(
+                url, params=params, headers=signed_headers, timeout=get_transfer_timeouts()
+            )
             response.raise_for_status()
             return response.json()
         except Exception:
@@ -136,7 +267,7 @@ class RemoteTransferService:
         use_encryption = not conn.url.startswith("https://")
         ephemeral_pub_key_b64, session_key = None, None
         if use_encryption:
-            ephemeral_pub_key_b64, session_key = self._perform_ecdh_key_exchange(db, conn)
+            ephemeral_pub_key_b64, session_key = self._perform_ecdh_key_exchange(conn)
 
         cctx = zstd.ZstdCompressor()
         start_time_ts = time.time()
@@ -145,14 +276,23 @@ class RemoteTransferService:
         remote_status = await self._get_remote_status(db, client, conn, job)
         remote_size = remote_status.get("size", 0)
 
+        # Initialize chunk index
+        chunk_idx = 0
+
         async with aiofiles.open(source_path, "rb") as f:
-            # ... (resume logic is the same)
+            # Resume from where we left off if remote has partial data
+            if remote_size > 0:
+                logger.info(f"Resuming transfer from byte {remote_size}")
+                await f.seek(remote_size)
+                job.current_size = remote_size
+                chunk_idx = remote_size // CHUNK_SIZE
+                db.commit()
 
             while True:
                 chunk = await f.read(CHUNK_SIZE)
                 if not chunk:
                     break
-                
+
                 db.refresh(job)
                 if job.status == TransferStatus.CANCELLED:
                     logger.info(f"Transfer {job.id} was cancelled, stopping")
@@ -162,7 +302,7 @@ class RemoteTransferService:
                 final_chunk, nonce = self._compress_and_encrypt_chunk(
                     chunk, cctx, use_encryption, session_key
                 )
-                
+
                 # --- Signing and Header construction ---
                 url = f"{conn.url.rstrip('/')}/api/remote/receive"
                 signed_headers = await get_signed_headers(db, "POST", url, final_chunk)
@@ -182,13 +322,10 @@ class RemoteTransferService:
                     headers["X-Ephemeral-Public-Key"] = ephemeral_pub_key_b64
                 # --- End Header Construction ---
 
-                async def chunk_generator():
-                    yield final_chunk
-
                 response = await client.post(
                     url,
                     headers=headers,
-                    content=chunk_generator(),
+                    content=final_chunk,
                     timeout=get_transfer_timeouts(),
                 )
                 response.raise_for_status()
@@ -199,8 +336,38 @@ class RemoteTransferService:
     async def run_transfer(self, job_id: int):
         db = SessionLocal()
         try:
-            # ... (setup logic is the same, but remove my_uuid)
-            
+            # Get the job
+            job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
+            if not job:
+                logger.error(f"Transfer job {job_id} not found")
+                return
+
+            # Get the remote connection
+            conn = (
+                db.query(RemoteConnection)
+                .filter(RemoteConnection.id == job.remote_connection_id)
+                .first()
+            )
+            if not conn:
+                logger.error(
+                    f"Remote connection {job.remote_connection_id} not found for job {job_id}"
+                )
+                job.status = TransferStatus.FAILED
+                job.error_message = f"Remote connection {job.remote_connection_id} not found"
+                job.end_time = datetime.now(timezone.utc)
+                db.commit()
+                return
+
+            # Ensure source file still exists
+            source_path = Path(job.source_path)
+            if not source_path.exists():
+                logger.error(f"Source file {source_path} not found for job {job_id}")
+                job.status = TransferStatus.FAILED
+                job.error_message = f"Source file not found: {source_path}"
+                job.end_time = datetime.now(timezone.utc)
+                db.commit()
+                return
+
             # Retry loop with exponential backoff
             for attempt in range(MAX_RETRIES):
                 try:
@@ -215,8 +382,10 @@ class RemoteTransferService:
                             "relative_path": job.relative_path,
                             "remote_path_id": job.remote_monitored_path_id,
                         }
-                        signed_headers = await get_signed_headers(db, "POST", url, str(json_payload).encode('utf-8'))
-                        
+                        signed_headers = await get_signed_headers(
+                            db, "POST", url, str(json_payload).encode("utf-8")
+                        )
+
                         verify_response = await client.post(
                             url,
                             headers=signed_headers,
@@ -225,20 +394,110 @@ class RemoteTransferService:
                         )
                         verify_response.raise_for_status()
 
-                        # ... (rest of the success logic is the same)
+                        # Transfer successful!
+                        logger.info(f"Transfer job {job.id} completed successfully")
+                        job.status = TransferStatus.COMPLETED
+                        job.progress = 100
+                        job.end_time = datetime.now(timezone.utc)
+                        job.error_message = None
+                        db.commit()
+
+                        # Optional cleanup
+                        await self._cleanup_after_transfer(db, job, conn)
                         return
 
                 except Exception as e:
-                    # ... (error handling is the same)
-                    pass
+                    logger.warning(
+                        f"Transfer job {job.id} attempt {attempt + 1}/{MAX_RETRIES} failed: {e}"
+                    )
+                    job.retry_count = attempt + 1
+                    db.commit()
+
+                    # Determine if we should retry
+                    should_retry, delay, reason = retry_strategy.should_retry(attempt + 1, e)
+
+                    if not should_retry:
+                        logger.exception(f"Transfer job {job.id} failed permanently: {reason}")
+                        job.status = TransferStatus.FAILED
+                        job.error_message = f"{reason}: {e!s}"
+                        job.end_time = datetime.now(timezone.utc)
+                        db.commit()
+                        return
+
+                    # Wait before retrying
+                    logger.info(f"Transfer job {job.id}: {reason}")
+                    await asyncio.sleep(delay)
+
+            # If we get here, all retries failed
+            logger.error(f"Transfer job {job.id} failed after {MAX_RETRIES} attempts")
+            job.status = TransferStatus.FAILED
+            job.error_message = f"Transfer failed after {MAX_RETRIES} retry attempts"
+            job.end_time = datetime.now(timezone.utc)
+            db.commit()
+
+        except Exception:
+            logger.exception(f"Unexpected error in transfer job {job_id}")
+            try:
+                job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
+                if job:
+                    job.status = TransferStatus.FAILED
+                    job.error_message = "Unexpected error during transfer"
+                    job.end_time = datetime.now(timezone.utc)
+                    db.commit()
+            except Exception:
+                logger.exception("Failed to update job status after error")
         finally:
             db.close()
-            
-    # ... (other methods are mostly the same)
-    def cancel_transfer(self, db: Session, job_id: int):
-        pass
-    async def _cleanup_after_transfer(self, db, job, conn):
-        pass
+
+    def cancel_transfer(self, db: Session, job_id: int) -> bool:
+        """
+        Cancel a transfer job.
+
+        Args:
+            db: Database session
+            job_id: ID of the transfer job to cancel
+
+        Returns:
+            True if the job was cancelled, False otherwise
+        """
+        job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
+        if not job:
+            logger.warning(f"Transfer job {job_id} not found for cancellation")
+            return False
+
+        # Can only cancel pending or in-progress jobs
+        if job.status not in (TransferStatus.PENDING, TransferStatus.IN_PROGRESS):
+            logger.warning(
+                f"Transfer job {job_id} cannot be cancelled (status: {job.status.value})"
+            )
+            return False
+
+        logger.info(f"Cancelling transfer job {job_id}")
+        job.status = TransferStatus.CANCELLED
+        job.end_time = datetime.now(timezone.utc)
+        job.error_message = "Transfer cancelled by user"
+        db.commit()
+
+        return True
+
+    async def _cleanup_after_transfer(
+        self, _db: Session, job: RemoteTransferJob, _conn: RemoteConnection
+    ):
+        """
+        Optional cleanup after successful transfer.
+
+        This method can be extended to perform actions like:
+        - Deleting the source file after successful transfer
+        - Updating file inventory status
+        - Sending notifications
+        - Logging to audit trail
+
+        Args:
+            _db: Database session (unused, reserved for future use)
+            job: The completed transfer job
+            _conn: The remote connection used (unused, reserved for future use)
+        """
+        logger.debug(f"Cleanup completed for transfer job {job.id}")
 
 
 remote_transfer_service = RemoteTransferService()

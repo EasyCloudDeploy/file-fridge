@@ -317,7 +317,7 @@ def _check_and_notify_disk_space(location, db: Session):
         return ("critical", free_percent)
 
     # Check caution threshold (only if not already critical)
-    elif free_percent <= location.caution_threshold_percent:
+    if free_percent <= location.caution_threshold_percent:
         payload = DiskSpaceCautionData(
             location_id=location.id,
             location_name=location.name,
@@ -503,8 +503,8 @@ def cleanup_old_nonces_job_func():
     """Job function to clean up old request nonces (runs every hour)."""
     import time
 
-    from app.models import RequestNonce
     from app.config import settings
+    from app.models import RequestNonce
 
     db = SchedulerSessionLocal()
     try:
