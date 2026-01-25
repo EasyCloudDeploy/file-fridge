@@ -144,6 +144,7 @@ async def verify_signature_from_components(
     # 5. Store nonce to prevent replay
     request_nonce = RequestNonce(fingerprint=fingerprint, nonce=nonce, timestamp=timestamp)
     db.add(request_nonce)
+    db.commit()
 
     return conn
 
