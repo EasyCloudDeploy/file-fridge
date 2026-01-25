@@ -37,7 +37,7 @@ def build_message_to_sign(
     body_hash = hashlib.sha256(body).hexdigest()
     return (
         f"{method.upper()}|{path}|{query_params}|{timestamp}|{fingerprint}|{nonce}|{body_hash}"
-    ).encode("utf-8")
+    ).encode()
 
 
 async def get_signed_headers(db: Session, method: str, url: str, content: bytes) -> Dict[str, str]:
@@ -46,6 +46,7 @@ async def get_signed_headers(db: Session, method: str, url: str, content: bytes)
     This is the client-side part of the signature process.
     """
     import secrets
+
     from httpx import URL
 
     parsed_url = URL(url)
@@ -143,15 +144,6 @@ async def verify_signature_from_components(
     # 5. Store nonce to prevent replay
     request_nonce = RequestNonce(fingerprint=fingerprint, nonce=nonce, timestamp=timestamp)
     db.add(request_nonce)
-    # Use savepoint to ensure nonce is only committed if the outer transaction succeeds
-    # This prevents nonce consumption if endpoint processing fails
-    savepoint = db.begin_nested()
-    try:
-        db.commit()
-        savepoint.commit()
-    except Exception:
-        savepoint.rollback()
-        raise
 
     return conn
 
