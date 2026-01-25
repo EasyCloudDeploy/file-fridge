@@ -1388,7 +1388,7 @@ async function showRemoteMigrationModal(fileId, filePath) {
     remoteMigrationModal.show();
 
     try {
-        const response = await authenticatedFetch('/api/remote/connections');
+        const response = await authenticatedFetch('/api/v1/remote/connections');
         if (response.ok) {
             const connections = await response.json();
             if (connections.length === 0) {
@@ -1420,7 +1420,7 @@ async function onRemoteConnectionChange() {
     confirmBtn.disabled = true;
 
     try {
-        const response = await authenticatedFetch(`/api/remote/connections/${connId}/paths`);
+        const response = await authenticatedFetch(`/api/v1/remote/connections/${connId}/paths`);
         if (response.ok) {
             const paths = await response.json();
             if (paths.length === 0) {
@@ -1449,7 +1449,7 @@ async function startRemoteMigration() {
     errorEl.classList.add('d-none');
 
     try {
-        const response = await authenticatedFetch('/api/remote/migrate', {
+        const response = await authenticatedFetch('/api/v1/remote/migrate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1895,7 +1895,7 @@ async function showBulkRemoteMigrationModal() {
     bulkRemoteMigrationModal.show();
 
     try {
-        const response = await authenticatedFetch('/api/remote/connections');
+        const response = await authenticatedFetch('/api/v1/remote/connections');
         if (response.ok) {
             const connections = await response.json();
             if (connections.length === 0) {
@@ -1932,7 +1932,7 @@ async function onBulkRemoteConnectionChange() {
     confirmBtn.disabled = true;
 
     try {
-        const response = await authenticatedFetch(`/api/remote/connections/${connId}/paths`);
+        const response = await authenticatedFetch(`/api/v1/remote/connections/${connId}/paths`);
         if (response.ok) {
             const paths = await response.json();
             if (paths.length === 0) {
@@ -1980,7 +1980,7 @@ async function executeBulkRemoteMigration() {
     errorDiv.classList.add('d-none');
 
     try {
-        const response = await authenticatedFetch(`/api/remote/migrate/bulk`, {
+        const response = await authenticatedFetch(`/api/v1/remote/migrate/bulk`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

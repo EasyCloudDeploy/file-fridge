@@ -260,6 +260,42 @@ async def fetch_remote_identity(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@router.post("/connect", response_model=RemoteConnectionSchema, tags=["Remote Connections"])
+async def connect_with_code(
+    connection_data: RemoteConnectionCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Establish a connection using a connection code.
+    This endpoint fetches the remote instance's identity and creates a connection,
+    including the connection code in the handshake for the remote to verify.
+    The code verification happens server-side during the authenticated handshake,
+    avoiding TOCTOU issues and authentication problems.
+    """
+    _ = current_user
+
+    try:
+        # Step 1: Fetch the remote identity
+        remote_identity = await remote_connection_service.get_remote_identity(connection_data.url)
+
+        # Step 2: Create the connection and send the code for verification
+        # The connection code will be verified by the remote during the handshake
+        return await remote_connection_service.initiate_connection(
+            db, connection_data.name, remote_identity, connection_data.connection_code
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("Unexpected error connecting to remote instance")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error: {str(e)}"
+        ) from e
+
+
 @router.post("/connections", response_model=RemoteConnectionSchema, tags=["Remote Connections"])
 async def create_connection(
     name: str,
@@ -380,7 +416,7 @@ async def get_remote_paths(
 
     async with httpx.AsyncClient() as client:
         try:
-            url = f"{conn.url.rstrip('/')}/api/remote/exposed-paths"
+            url = f"{conn.url.rstrip('/')}/api/v1/remote/exposed-paths"
             headers = await get_signed_headers(db, "GET", url, b"")
             response = await client.get(url, headers=headers, timeout=get_transfer_timeouts())
             response.raise_for_status()

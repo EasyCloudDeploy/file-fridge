@@ -242,7 +242,7 @@ class RemoteTransferService:
         self, db: Session, client: httpx.AsyncClient, conn: RemoteConnection, job: RemoteTransferJob
     ):
         """Check remote status for resumability."""
-        url = f"{conn.url.rstrip('/')}/api/remote/transfer-status"
+        url = f"{conn.url.rstrip('/')}/api/v1/remote/transfer-status"
         params = {
             "relative_path": job.relative_path,
             "remote_path_id": str(job.remote_monitored_path_id),
@@ -304,7 +304,7 @@ class RemoteTransferService:
                 )
 
                 # --- Signing and Header construction ---
-                url = f"{conn.url.rstrip('/')}/api/remote/receive"
+                url = f"{conn.url.rstrip('/')}/api/v1/remote/receive"
                 signed_headers = await get_signed_headers(db, "POST", url, final_chunk)
 
                 headers = {
@@ -375,7 +375,7 @@ class RemoteTransferService:
                         await self._send_chunks(job, conn, db, client)
 
                         # Finalize
-                        url = f"{conn.url.rstrip('/')}/api/remote/verify-transfer"
+                        url = f"{conn.url.rstrip('/')}/api/v1/remote/verify-transfer"
                         json_payload = {
                             "job_id": job.id,
                             "checksum": job.checksum,

@@ -49,13 +49,13 @@ logger.info(f"Configured log_level from settings: {settings.log_level.upper()}")
 # --- END TEMPORARY DEBUG ---
 
 
-# Filter out /api/remote/receive from uvicorn access logs to prevent spam during file transfers
+# Filter out /api/v1/remote/receive from uvicorn access logs to prevent spam during file transfers
 class RemoteReceiveFilter(logging.Filter):
-    """Filter to suppress /api/remote/receive endpoint logs."""
+    """Filter to suppress /api/v1/remote/receive endpoint logs."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         """Return False to suppress log record."""
-        return "/api/remote/receive" not in record.getMessage()
+        return "/api/v1/remote/receive" not in record.getMessage()
 
 
 # Apply filter to uvicorn access logger
