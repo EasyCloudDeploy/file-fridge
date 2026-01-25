@@ -693,7 +693,12 @@ class RemoteConnection(Base):
     )  # SHA256 of remote's public key
     remote_ed25519_public_key = Column(Text, nullable=True)  # Remote's signing public key
     remote_x25519_public_key = Column(Text, nullable=True)  # Remote's key exchange public key
-    trust_status = Column(SQLEnum(TrustStatus), default=TrustStatus.PENDING, nullable=False)
+    trust_status = Column(
+        SQLEnum(TrustStatus),
+        default=TrustStatus.PENDING,
+        nullable=False,
+        server_default=sa.text("'PENDING'"),
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

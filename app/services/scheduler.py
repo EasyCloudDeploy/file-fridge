@@ -504,22 +504,21 @@ def cleanup_old_nonces_job_func():
     import time
 
     from app.models import RequestNonce
-    from app.utils.remote_signature import TIMESTAMP_TOLERANCE
+    from app.config import settings
 
     db = SchedulerSessionLocal()
     try:
-        # Clean up nonces older than TIMESTAMP_TOLERANCE + buffer (6 minutes total)
-        cutoff_time = int(time.time()) - (TIMESTAMP_TOLERANCE + 60)
+        # Clean up nonces older than signature_timestamp_tolerance + buffer (6 minutes total)
+        cutoff_time = int(time.time()) - (settings.signature_timestamp_tolerance + 60)
         deleted = db.query(RequestNonce).filter(RequestNonce.timestamp < cutoff_time).delete()
         db.commit()
         if deleted > 0:
             logger.info(f"Cleaned up {deleted} old request nonces")
-    except Exception:
-        logger.exception("Error cleaning up old nonces")
+    except Exception as e:
+        logger.exception("Error cleaning up old nonces", exc_info=e)
         db.rollback()
     finally:
-        try:
-            db.close()
+        db.close()
         except Exception:
             logger.warning("Error closing scheduler database session in nonce cleanup")
 

@@ -9,7 +9,7 @@ from app.database import engine
 logger = logging.getLogger(__name__)
 
 
-def run_startup_migrations():
+def run_startup_migrations() -> None:
     """Run database migrations using Alembic on application startup."""
     try:
         # Run Alembic upgrade to head

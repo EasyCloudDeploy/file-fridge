@@ -1,4 +1,5 @@
 """Utility for signing and verifying inter-instance API requests."""
+
 import hashlib
 import logging
 import time
@@ -7,6 +8,7 @@ from typing import Dict
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import RemoteConnection, TrustStatus
 from app.services.identity_service import identity_service
@@ -15,11 +17,17 @@ from app.services.remote_connection_service import remote_connection_service
 logger = logging.getLogger(__name__)
 
 # The maximum age of a request timestamp in seconds
-TIMESTAMP_TOLERANCE = 300  # 5 minutes
+# This is now configurable via settings.signature_timestamp_tolerance
 
 
 def build_message_to_sign(
-    method: str, path: str, query_params: str, body: bytes, timestamp: str, fingerprint: str, nonce: str
+    method: str,
+    path: str,
+    query_params: str,
+    body: bytes,
+    timestamp: str,
+    fingerprint: str,
+    nonce: str,
 ) -> bytes:
     """
     Construct a canonical message from request components for signing.
@@ -28,13 +36,7 @@ def build_message_to_sign(
     """
     body_hash = hashlib.sha256(body).hexdigest()
     return (
-        f"{method.upper()}|"
-        f"{path}|"
-        f"{query_params}|"
-        f"{timestamp}|"
-        f"{fingerprint}|"
-        f"{nonce}|"
-        f"{body_hash}"
+        f"{method.upper()}|{path}|{query_params}|{timestamp}|{fingerprint}|{nonce}|{body_hash}"
     ).encode("utf-8")
 
 
@@ -80,14 +82,14 @@ async def verify_signature_from_components(
     try:
         timestamp = int(timestamp_str)
         current_time = int(time.time())
-        if abs(current_time - timestamp) > TIMESTAMP_TOLERANCE:
+        if abs(current_time - timestamp) > settings.signature_timestamp_tolerance:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED, detail="Request timestamp is too old."
             )
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as err:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid timestamp format."
-        )
+        ) from err
 
     # 2. Check nonce hasn't been used (replay protection)
     from app.models import RequestNonce
@@ -136,14 +138,20 @@ async def verify_signature_from_components(
         security_audit_service.log_signature_verification_failed(
             db, fingerprint, "Invalid signature"
         )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature."
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature.")
 
-    # 5. Store nonce to prevent replay
-    request_nonce = RequestNonce(fingerprint=fingerprint, nonce=nonce, timestamp=timestamp)
-    db.add(request_nonce)
-    db.commit()
+     # 5. Store nonce to prevent replay
+     request_nonce = RequestNonce(fingerprint=fingerprint, nonce=nonce, timestamp=timestamp)
+     db.add(request_nonce)
+     # Use savepoint to ensure nonce is only committed if the outer transaction succeeds
+     # This prevents nonce consumption if endpoint processing fails
+     savepoint = db.begin_nested()
+     try:
+         db.commit()
+         savepoint.commit()
+     except Exception:
+         savepoint.rollback()
+         raise
 
     return conn
 

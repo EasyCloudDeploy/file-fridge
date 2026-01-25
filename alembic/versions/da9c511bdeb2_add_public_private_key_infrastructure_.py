@@ -67,19 +67,24 @@ def upgrade() -> None:
     op.create_index(op.f('ix_instance_key_history_id'), 'instance_key_history', ['id'], unique=False)
     op.create_index(op.f('ix_instance_key_history_key_version'), 'instance_key_history', ['key_version'], unique=True)
 
-    op.alter_column('file_inventory', 'status',
-               existing_type=sa.VARCHAR(length=7),
-               type_=sa.Enum('ACTIVE', 'MOVED', 'DELETED', 'MISSING', 'MIGRATING', name='filestatus'),
-               existing_nullable=True)
-    op.drop_index(op.f('idx_file_inventory_cold_storage_location_id'), table_name='file_inventory')
-    op.drop_index(op.f('idx_inventory_checksum'), table_name='file_inventory')
+    # Use batch_alter_table for SQLite compatibility when changing enum types
+    with op.batch_alter_table('file_inventory', schema=None) as batch_op:
+        batch_op.alter_column('status',
+                   existing_type=sa.VARCHAR(length=7),
+                   type_=sa.Enum('ACTIVE', 'MOVED', 'DELETED', 'MISSING', 'MIGRATING', name='filestatus'),
+                   existing_nullable=True)
+        batch_op.drop_index('idx_file_inventory_cold_storage_location_id')
+        batch_op.drop_index('idx_inventory_checksum')
+
     op.drop_index(op.f('idx_file_records_cold_storage_location_id'), table_name='file_records')
     op.drop_index(op.f('idx_file_tags_file_id'), table_name='file_tags')
     op.drop_index(op.f('idx_file_tags_tag_id'), table_name='file_tags')
-    op.alter_column('file_transaction_history', 'transaction_type',
-               existing_type=sa.VARCHAR(length=9),
-               type_=sa.Enum('FREEZE', 'THAW', 'MOVE_COLD', 'DELETE', 'COPY', 'RESTORE', 'CLEANUP', 'REMOTE_MIGRATE', 'REMOTE_RECEIVE', name='transactiontype'),
-               existing_nullable=False)
+
+    with op.batch_alter_table('file_transaction_history', schema=None) as batch_op:
+        batch_op.alter_column('transaction_type',
+                   existing_type=sa.VARCHAR(length=9),
+                   type_=sa.Enum('FREEZE', 'THAW', 'MOVE_COLD', 'DELETE', 'COPY', 'RESTORE', 'CLEANUP', 'REMOTE_MIGRATE', 'REMOTE_RECEIVE', name='transactiontype'),
+                   existing_nullable=False)
     op.add_column('instance_metadata', sa.Column('current_key_version', sa.Integer(), nullable=False, server_default='1'))
     op.alter_column('notifiers', 'id',
                existing_type=sa.INTEGER(),
@@ -130,17 +135,23 @@ def downgrade() -> None:
                nullable=True,
                autoincrement=True)
     op.drop_column('instance_metadata', 'current_key_version')
-    op.alter_column('file_transaction_history', 'transaction_type',
-               existing_type=sa.Enum('FREEZE', 'THAW', 'MOVE_COLD', 'DELETE', 'COPY', 'RESTORE', 'CLEANUP', 'REMOTE_MIGRATE', 'REMOTE_RECEIVE', name='transactiontype'),
-               type_=sa.VARCHAR(length=9),
-               existing_nullable=False)
+
+    # Use batch_alter_table for SQLite compatibility when changing enum types
+    with op.batch_alter_table('file_transaction_history', schema=None) as batch_op:
+        batch_op.alter_column('transaction_type',
+                   existing_type=sa.Enum('FREEZE', 'THAW', 'MOVE_COLD', 'DELETE', 'COPY', 'RESTORE', 'CLEANUP', 'REMOTE_MIGRATE', 'REMOTE_RECEIVE', name='transactiontype'),
+                   type_=sa.VARCHAR(length=9),
+                   existing_nullable=False)
+
     op.create_index(op.f('idx_file_tags_tag_id'), 'file_tags', ['tag_id'], unique=False)
     op.create_index(op.f('idx_file_tags_file_id'), 'file_tags', ['file_id'], unique=False)
     op.create_index(op.f('idx_file_records_cold_storage_location_id'), 'file_records', ['cold_storage_location_id'], unique=False)
-    op.create_index(op.f('idx_inventory_checksum'), 'file_inventory', ['checksum'], unique=False)
-    op.create_index(op.f('idx_file_inventory_cold_storage_location_id'), 'file_inventory', ['cold_storage_location_id'], unique=False)
-    op.alter_column('file_inventory', 'status',
-               existing_type=sa.Enum('ACTIVE', 'MOVED', 'DELETED', 'MISSING', 'MIGRATING', name='filestatus'),
-               type_=sa.VARCHAR(length=7),
-               existing_nullable=True)
+
+    with op.batch_alter_table('file_inventory', schema=None) as batch_op:
+        batch_op.create_index('idx_inventory_checksum', ['checksum'], unique=False)
+        batch_op.create_index('idx_file_inventory_cold_storage_location_id', ['cold_storage_location_id'], unique=False)
+        batch_op.alter_column('status',
+                   existing_type=sa.Enum('ACTIVE', 'MOVED', 'DELETED', 'MISSING', 'MIGRATING', name='filestatus'),
+                   type_=sa.VARCHAR(length=7),
+                   existing_nullable=True)
     # ### end Alembic commands ###

@@ -1,6 +1,8 @@
 """Service for logging security-relevant events."""
+
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -47,18 +49,23 @@ class SecurityAuditService:
         )
 
     def _log(
-        self, db: Session, event_type: str, message: str, initiated_by: str, event_metadata: dict = None
-    ):
+        self,
+        db: Session,
+        event_type: str,
+        message: str,
+        initiated_by: str,
+        event_metadata: Optional[dict] = None,
+    ) -> None:
         """Internal logging helper."""
         entry = SecurityAuditLog(
             event_type=event_type,
             message=message,
             initiated_by=initiated_by,
             event_metadata=event_metadata or {},
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(tz=timezone.utc),
         )
         db.add(entry)
-        db.commit()
+        db.flush()
         logger.info(f"Security audit: {event_type} - {message}")
 
 
