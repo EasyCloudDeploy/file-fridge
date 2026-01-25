@@ -63,7 +63,7 @@ def upgrade() -> None:
     op.add_column('remote_connections', sa.Column('remote_fingerprint', sa.String(), nullable=True))
     op.add_column('remote_connections', sa.Column('remote_ed25519_public_key', sa.Text(), nullable=True))
     op.add_column('remote_connections', sa.Column('remote_x25519_public_key', sa.Text(), nullable=True))
-    op.add_column('remote_connections', sa.Column('trust_status', sa.Enum('PENDING', 'TRUSTED', 'REJECTED', name='truststatus'), nullable=False, server_default=sa.text("'pending'")))
+    op.add_column('remote_connections', sa.Column('trust_status', sa.Enum('PENDING', 'TRUSTED', 'REJECTED', name='truststatus'), nullable=False, server_default=sa.text("'PENDING'")))
     op.drop_index(op.f('idx_remote_connections_remote_instance_uuid'), table_name='remote_connections')
     op.create_index(op.f('ix_remote_connections_remote_fingerprint'), 'remote_connections', ['remote_fingerprint'], unique=True)
     op.drop_column('remote_connections', 'remote_instance_uuid')

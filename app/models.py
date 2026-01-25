@@ -6,6 +6,7 @@ import threading
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
+import sqlalchemy as sa
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -755,7 +756,7 @@ class RequestNonce(Base):
     id = Column(Integer, primary_key=True, index=True)
     fingerprint = Column(String, nullable=False, index=True)
     nonce = Column(String, nullable=False, unique=True, index=True)
-    timestamp = Column(Integer, nullable=False)
+    timestamp = Column(Integer, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
