@@ -62,11 +62,21 @@ class RemoteConnectionService:
                 raise ValueError(msg) from e
 
     async def initiate_connection(
-        self, db: Session, name: str, remote_identity: RemoteConnectionIdentity
+        self,
+        db: Session,
+        name: str,
+        remote_identity: RemoteConnectionIdentity,
+        connection_code: Optional[str] = None,
     ) -> RemoteConnection:
         """
         Create a new trusted remote connection and notify the remote instance.
         This is the second step, taken after the user has verified the remote's identity.
+
+        Args:
+            db: Database session
+            name: Local name for this connection
+            remote_identity: Identity information from the remote instance
+            connection_code: Optional connection code to authenticate with the remote
         """
         # 1. Check if connection already exists
         existing_conn = self.get_connection_by_fingerprint(db, remote_identity.fingerprint)
@@ -107,11 +117,16 @@ class RemoteConnectionService:
         message_to_sign = canonical_json_encode(my_identity_payload)
         signature = identity_service.sign_message(db, message_to_sign)
 
+        # Build request payload
+        request_payload = {"identity": my_identity_payload, "signature": signature.hex()}
+        if connection_code:
+            request_payload["connection_code"] = connection_code
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
                     f"{remote_identity.url.rstrip('/')}/api/v1/remote/connection-request",
-                    json={"identity": my_identity_payload, "signature": signature.hex()},
+                    json=request_payload,
                     timeout=10.0,
                 )
                 response.raise_for_status()
@@ -120,6 +135,18 @@ class RemoteConnectionService:
                 remote_response = response.json()
                 self._verify_remote_response(remote_identity, remote_response)
 
+            except httpx.HTTPStatusError as e:
+                # If we get a 401/403, it's likely a connection code issue
+                if e.response.status_code in (401, 403):
+                    # Rollback the local connection since the remote rejected us
+                    db.delete(new_conn)
+                    db.commit()
+                    raise ValueError(
+                        "Connection rejected by remote instance. "
+                        "The connection code may be invalid or expired."
+                    ) from e
+                # Re-raise other HTTP errors
+                raise
             except Exception as e:
                 # If the notification fails, we still keep the local connection.
                 # The user can retry later. We can add a status field for this.
@@ -154,14 +181,26 @@ class RemoteConnectionService:
         """
         Handle an incoming connection request from a remote instance.
         If the request is valid, create a PENDING connection.
+
+        If a connection_code is provided in the request, it will be verified
+        before proceeding. This allows authenticated connection establishment.
         """
         identity = request_data.get("identity", {})
         signature_hex = request_data.get("signature")
+        connection_code = request_data.get("connection_code")
 
         if not all([identity, signature_hex]):
             raise ValueError("Incomplete connection request data.")
 
-        # 1. Verify the signature
+        # 1. Verify the connection code if provided
+        if connection_code:
+            from app.utils.remote_auth import remote_auth
+
+            current_code = remote_auth.get_code()
+            if connection_code != current_code:
+                raise ValueError("Invalid or expired connection code.")
+
+        # 2. Verify the signature
         message_to_verify = canonical_json_encode(identity)
         signature = bytes.fromhex(signature_hex)
         if not identity_service.verify_signature(
@@ -169,7 +208,7 @@ class RemoteConnectionService:
         ):
             raise ValueError("Signature verification failed for connection request.")
 
-        # 2. Create or update the connection as PENDING
+        # 3. Create or update the connection as PENDING
         fingerprint = identity.get("fingerprint")
         conn = self.get_connection_by_fingerprint(db, fingerprint)
         if not conn:
@@ -191,7 +230,7 @@ class RemoteConnectionService:
 
         db.commit()
 
-        # 3. Return our own signed identity to prove who we are
+        # 4. Return our own signed identity to prove who we are
         my_identity_payload = {
             "instance_name": settings.instance_name or "File Fridge",
             "fingerprint": identity_service.get_instance_fingerprint(db),
