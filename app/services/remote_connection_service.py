@@ -46,7 +46,7 @@ class RemoteConnectionService:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
-                    f"{remote_url.rstrip('/')}/api/remote/identity", timeout=10.0
+                    f"{remote_url.rstrip('/')}/api/v1/remote/identity", timeout=10.0
                 )
                 response.raise_for_status()
                 identity_data = response.json()
@@ -110,7 +110,7 @@ class RemoteConnectionService:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
-                    f"{remote_identity.url.rstrip('/')}/api/remote/connection-request",
+                    f"{remote_identity.url.rstrip('/')}/api/v1/remote/connection-request",
                     json={"identity": my_identity_payload, "signature": signature.hex()},
                     timeout=10.0,
                 )
@@ -230,7 +230,7 @@ class RemoteConnectionService:
             from app.utils.remote_signature import get_signed_headers
 
             try:
-                url = f"{conn.url.rstrip('/')}/api/remote/terminate-connection"
+                url = f"{conn.url.rstrip('/')}/api/v1/remote/terminate-connection"
                 headers = await get_signed_headers(db, "POST", url, b"")
 
                 async with httpx.AsyncClient(timeout=10.0) as client:

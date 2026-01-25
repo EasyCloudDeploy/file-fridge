@@ -260,6 +260,62 @@ async def fetch_remote_identity(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@router.post("/connect", response_model=RemoteConnectionSchema, tags=["Remote Connections"])
+async def connect_with_code(
+    connection_data: RemoteConnectionCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Establish a connection using a connection code.
+    This endpoint validates the connection code with the remote instance,
+    fetches its identity, and creates the connection in one step.
+    """
+    _ = current_user
+
+    try:
+        # Step 1: Fetch the remote identity
+        remote_identity = await remote_connection_service.get_remote_identity(connection_data.url)
+
+        # Step 2: Verify the connection code with the remote instance
+        async with httpx.AsyncClient() as client:
+            try:
+                # Get the connection code from the remote to verify it matches
+                response = await client.get(
+                    f"{connection_data.url.rstrip('/')}/api/v1/remote/connection-code",
+                    timeout=10.0
+                )
+                response.raise_for_status()
+                remote_code_data = response.json()
+
+                if remote_code_data.get("code") != connection_data.connection_code:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid connection code. Please verify the code and try again."
+                    )
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to verify connection code: {e}")
+                raise HTTPException(
+                    status_code=400,
+                    detail="Failed to verify connection code with remote instance"
+                ) from e
+
+        # Step 3: Create the connection
+        return await remote_connection_service.initiate_connection(
+            db, connection_data.name, remote_identity
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("Unexpected error connecting to remote instance")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Unexpected error: {str(e)}"
+        ) from e
+
+
 @router.post("/connections", response_model=RemoteConnectionSchema, tags=["Remote Connections"])
 async def create_connection(
     name: str,
@@ -380,7 +436,7 @@ async def get_remote_paths(
 
     async with httpx.AsyncClient() as client:
         try:
-            url = f"{conn.url.rstrip('/')}/api/remote/exposed-paths"
+            url = f"{conn.url.rstrip('/')}/api/v1/remote/exposed-paths"
             headers = await get_signed_headers(db, "GET", url, b"")
             response = await client.get(url, headers=headers, timeout=get_transfer_timeouts())
             response.raise_for_status()
