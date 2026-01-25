@@ -5,8 +5,8 @@ import os
 import threading
 from typing import Optional
 
-from cryptography.fernet import Fernet, InvalidToken
 import sqlalchemy as sa
+from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import (
     JSON,
     Boolean,

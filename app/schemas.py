@@ -18,7 +18,6 @@ from app.models import (
     StorageType,
     TagRuleCriterionType,
     TransferStatus,
-    TrustStatus,
 )
 
 

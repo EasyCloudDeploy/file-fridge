@@ -12,9 +12,9 @@ from app.database import SessionLocal, init_db
 from app.database_migrations import run_startup_migrations
 from app.routers.api import auth as api_auth
 from app.routers.api import browser as api_browser
-from app.routers.api import encryption as api_encryption
 from app.routers.api import cleanup as api_cleanup
 from app.routers.api import criteria as api_criteria
+from app.routers.api import encryption as api_encryption
 from app.routers.api import files as api_files
 from app.routers.api import notifiers as api_notifiers
 from app.routers.api import paths as api_paths

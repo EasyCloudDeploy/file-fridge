@@ -1,34 +1,26 @@
-import asyncio
 import base64
 import logging
 import os
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
-import anyio
 import httpx
 import zstandard as zstd
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import x25519
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.hashes import SHA256
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import SessionLocal
 from app.models import (
-    FileInventory,
-    FileStatus,
     RemoteConnection,
     RemoteTransferJob,
     TransferStatus,
 )
-from app.services.audit_trail_service import audit_trail_service
-from app.services.identity_service import identity_service
-from app.utils.circuit_breaker import get_circuit_breaker
 from app.utils.remote_signature import get_signed_headers
 from app.utils.retry_strategy import retry_strategy
 
@@ -60,12 +52,10 @@ class RemoteTransferService:
     ) -> RemoteTransferJob:
         """Create a new remote transfer job."""
         # ... (implementation remains the same)
-        pass
 
     async def process_pending_transfers(self):
         """Process pending transfer jobs."""
         # ... (implementation remains the same)
-        pass
 
     def _perform_ecdh_key_exchange(self, db: Session, conn: RemoteConnection):
         """
@@ -152,7 +142,7 @@ class RemoteTransferService:
                 chunk = await f.read(CHUNK_SIZE)
                 if not chunk:
                     break
-                
+
                 db.refresh(job)
                 if job.status == TransferStatus.CANCELLED:
                     logger.info(f"Transfer {job.id} was cancelled, stopping")
@@ -162,7 +152,7 @@ class RemoteTransferService:
                 final_chunk, nonce = self._compress_and_encrypt_chunk(
                     chunk, cctx, use_encryption, session_key
                 )
-                
+
                 # --- Signing and Header construction ---
                 url = f"{conn.url.rstrip('/')}/api/remote/receive"
                 signed_headers = await get_signed_headers(db, "POST", url, final_chunk)
@@ -200,7 +190,7 @@ class RemoteTransferService:
         db = SessionLocal()
         try:
             # ... (setup logic is the same, but remove my_uuid)
-            
+
             # Retry loop with exponential backoff
             for attempt in range(MAX_RETRIES):
                 try:
@@ -215,8 +205,8 @@ class RemoteTransferService:
                             "relative_path": job.relative_path,
                             "remote_path_id": job.remote_monitored_path_id,
                         }
-                        signed_headers = await get_signed_headers(db, "POST", url, str(json_payload).encode('utf-8'))
-                        
+                        signed_headers = await get_signed_headers(db, "POST", url, str(json_payload).encode("utf-8"))
+
                         verify_response = await client.post(
                             url,
                             headers=signed_headers,
@@ -228,12 +218,12 @@ class RemoteTransferService:
                         # ... (rest of the success logic is the same)
                         return
 
-                except Exception as e:
+                except Exception:
                     # ... (error handling is the same)
                     pass
         finally:
             db.close()
-            
+
     # ... (other methods are mostly the same)
     def cancel_transfer(self, db: Session, job_id: int):
         pass

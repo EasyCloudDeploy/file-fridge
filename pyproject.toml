@@ -42,6 +42,7 @@ dependencies = [
     "zstandard>=0.23.0",
     "cryptography>=46.0.3",
     "email-validator>=2.0.0",
+    "typing-extensions>=4.13.2",
 ]
 
 [project.optional-dependencies]

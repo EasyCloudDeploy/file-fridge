@@ -1,9 +1,10 @@
 """Database migration utilities."""
 
 import logging
-from alembic.config import Config
-from alembic import command
 
+from alembic.config import Config
+
+from alembic import command
 from app.database import engine
 
 logger = logging.getLogger(__name__)
