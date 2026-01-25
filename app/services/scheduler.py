@@ -68,8 +68,7 @@ class SchedulerService:
                 self._load_existing_jobs()
                 self._add_stats_cleanup_job()
                 self._add_disk_space_monitoring_job()
-            except Exception as e:
-                logger.exception(f"Error starting scheduler: {e}")
+                self._add_nonce_cleanup_job()
                 self._add_remote_code_rotation_job()
                 self._add_remote_transfer_job()
             except Exception:
@@ -232,6 +231,30 @@ class SchedulerService:
             logger.info("Added scheduled job for hourly remote code rotation")
         except Exception:
             logger.exception("Error adding remote code rotation job")
+
+    def _add_nonce_cleanup_job(self):
+        """Add scheduled job for cleaning up old request nonces (runs every hour)."""
+        if not self.scheduler.running:
+            logger.warning("Scheduler not running, skipping nonce cleanup job addition")
+            return
+
+        job_id = "nonce_cleanup"
+        try:
+            # Remove existing job if present
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            # Schedule to run every hour
+            self.scheduler.add_job(
+                cleanup_old_nonces_job_func,
+                "interval",
+                hours=1,
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info("Added scheduled job for nonce cleanup (runs every hour)")
+        except Exception as e:
+            logger.exception(f"Error adding nonce cleanup job: {e}")
 
     def _add_disk_space_monitoring_job(self):
         """Add scheduled job for disk space monitoring (runs every 10 minutes)."""
@@ -474,6 +497,30 @@ def scan_path_job_func(path_id: int):
             db.close()
         except Exception:
             logger.warning("Error closing scheduler database session")
+
+
+def cleanup_old_nonces_job_func():
+    """Job function to clean up old request nonces (runs every hour)."""
+    import time
+
+    from app.models import RequestNonce
+    from app.config import settings
+
+    db = SchedulerSessionLocal()
+    try:
+        # Clean up nonces older than signature_timestamp_tolerance + buffer (6 minutes total)
+        cutoff_time = int(time.time()) - (settings.signature_timestamp_tolerance + 60)
+        deleted = db.query(RequestNonce).filter(RequestNonce.timestamp < cutoff_time).delete()
+        db.commit()
+        if deleted > 0:
+            logger.info(f"Cleaned up {deleted} old request nonces")
+    except Exception as e:
+        logger.exception("Error cleaning up old nonces", exc_info=e)
+        db.rollback()
+    finally:
+        db.close()
+        except Exception:
+            logger.warning("Error closing scheduler database session in nonce cleanup")
 
 
 # Global scheduler instance

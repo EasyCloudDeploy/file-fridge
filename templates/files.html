@@ -317,6 +317,9 @@
                 <button type="button" class="btn btn-info btn-sm" id="bulk-freeze-btn" title="Freeze selected files">
                     <i class="bi bi-snow"></i> Freeze
                 </button>
+                <button type="button" class="btn btn-outline-info btn-sm" id="bulk-migrate-btn" title="Migrate selected files to remote instance">
+                    <i class="bi bi-hdd-network"></i> Migrate
+                </button>
                 <button type="button" class="btn btn-primary btn-sm" id="bulk-add-tag-btn" title="Add tag to selected files">
                     <i class="bi bi-tag"></i> Add Tag
                 </button>
@@ -461,6 +464,49 @@
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                         <button type="button" class="btn btn-primary" id="confirmRemoteMigrationBtn" disabled>
+                            <i class="bi bi-send"></i> Start Migration
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bulk Remote Migration Modal -->
+        <div class="modal fade" id="bulkRemoteMigrationModal" tabindex="-1" aria-labelledby="bulkRemoteMigrationModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="bulkRemoteMigrationModalLabel"><i class="bi bi-hdd-network"></i> Bulk Migrate to Remote</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p>Migrate <strong id="bulkRemoteMigrationCount">0</strong> files to a remote File Fridge instance?</p>
+
+                        <div class="mb-3">
+                            <label for="bulkRemoteConnectionSelect" class="form-label">Remote Instance</label>
+                            <select class="form-select" id="bulkRemoteConnectionSelect">
+                                <option value="">Select a connection...</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3 d-none" id="bulkRemotePathContainer">
+                            <label for="bulkRemotePathSelect" class="form-label">Remote Monitored Path</label>
+                            <select class="form-select" id="bulkRemotePathSelect">
+                                <option value="">Select a path...</option>
+                            </select>
+                            <div class="form-text">Files will be placed in the corresponding tier (Hot/Cold) on the remote server.</div>
+                        </div>
+
+                        <div class="alert alert-info mt-3">
+                            <i class="bi bi-info-circle"></i>
+                            <small>Files from both hot and cold storage can be migrated. Transfer jobs will be queued and processed automatically.</small>
+                        </div>
+
+                        <div id="bulkRemoteMigrationError" class="alert alert-danger d-none mt-3"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="confirmBulkRemoteMigrationBtn" disabled>
                             <i class="bi bi-send"></i> Start Migration
                         </button>
                     </div>

@@ -3,6 +3,7 @@
 import enum
 import os
 import threading
+from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import (
@@ -582,7 +583,7 @@ class Notifier(Base):
     )
 
     @property
-    def smtp_password(self) -> str | None:
+    def smtp_password(self) -> Optional[str]:
         """Decrypt and return SMTP password."""
         if self.smtp_password_encrypted:
             try:
@@ -592,7 +593,7 @@ class Notifier(Base):
         return None
 
     @smtp_password.setter
-    def smtp_password(self, value: str | None):
+    def smtp_password(self, value: Optional[str]):
         """Encrypt and store SMTP password."""
         if value:
             self.smtp_password_encrypted = encryption_manager.encrypt(value)
@@ -663,7 +664,20 @@ class InstanceMetadata(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     instance_uuid = Column(String, nullable=False, unique=True)
+    ed25519_public_key = Column(Text, nullable=True)  # Signing public key
+    ed25519_private_key_encrypted = Column(Text, nullable=True)  # Encrypted signing private key
+    x25519_public_key = Column(Text, nullable=True)  # Key exchange public key
+    x25519_private_key_encrypted = Column(Text, nullable=True)  # Encrypted key exchange private key
+    current_key_version = Column(Integer, nullable=False, default=1)  # For key rotation
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class TrustStatus(str, enum.Enum):
+    """Trust status for remote connections."""
+
+    PENDING = "PENDING"
+    TRUSTED = "TRUSTED"
+    REJECTED = "REJECTED"
 
 
 class RemoteConnection(Base):
@@ -674,8 +688,17 @@ class RemoteConnection(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, index=True)
     url = Column(String, nullable=False)
-    remote_instance_uuid = Column(String, nullable=True, unique=True, index=True)
-    shared_secret = Column(String, nullable=False)  # Shared 32-byte secret
+    remote_fingerprint = Column(
+        String, nullable=True, unique=True, index=True
+    )  # SHA256 of remote's public key
+    remote_ed25519_public_key = Column(Text, nullable=True)  # Remote's signing public key
+    remote_x25519_public_key = Column(Text, nullable=True)  # Remote's key exchange public key
+    trust_status = Column(
+        SQLEnum(TrustStatus),
+        default=TrustStatus.PENDING,
+        nullable=False,
+        server_default=sa.text("'PENDING'"),
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -722,3 +745,45 @@ class RemoteTransferJob(Base):
 
     file = relationship("FileInventory")
     remote_connection = relationship("RemoteConnection", back_populates="transfers")
+
+
+class RequestNonce(Base):
+    """Track request nonces to prevent replay attacks."""
+
+    __tablename__ = "request_nonces"
+
+    id = Column(Integer, primary_key=True, index=True)
+    fingerprint = Column(String, nullable=False, index=True)
+    nonce = Column(String, nullable=False, unique=True, index=True)
+    timestamp = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class SecurityAuditLog(Base):
+    """Security audit log for compliance and incident response."""
+
+    __tablename__ = "security_audit_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_type = Column(String, nullable=False, index=True)
+    message = Column(Text, nullable=False)
+    initiated_by = Column(String, nullable=True)
+    event_metadata = Column(JSON, nullable=True)  # Renamed from 'metadata' (reserved name)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+class InstanceKeyHistory(Base):
+    """Historical record of instance key pairs (for rotation)."""
+
+    __tablename__ = "instance_key_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key_version = Column(Integer, nullable=False, unique=True)
+    ed25519_public_key = Column(Text, nullable=False)
+    ed25519_private_key_encrypted = Column(Text, nullable=False)
+    x25519_public_key = Column(Text, nullable=False)
+    x25519_private_key_encrypted = Column(Text, nullable=False)
+    fingerprint = Column(String, nullable=False, unique=True, index=True)
+    active = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    retired_at = Column(DateTime(timezone=True), nullable=True)

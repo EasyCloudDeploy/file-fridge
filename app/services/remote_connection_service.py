@@ -1,121 +1,26 @@
+"""Service for managing remote File Fridge connections."""
+import json
 import logging
-import secrets
-import uuid
 from typing import List, Optional
 
 import httpx
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import InstanceMetadata, RemoteConnection
-from app.schemas import RemoteConnectionCreate, RemoteConnectionUpdate
-from app.utils.remote_auth import remote_auth
+from app.models import RemoteConnection, TrustStatus
+from app.schemas import RemoteConnectionIdentity
+from app.services.identity_service import identity_service
 
 logger = logging.getLogger(__name__)
 
 
+def canonical_json_encode(data: dict) -> bytes:
+    """Encode dict as canonical JSON for signing."""
+    return json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
 class RemoteConnectionService:
     """Service for managing remote File Fridge connections."""
-
-    def get_instance_uuid(self, db: Session) -> str:
-        """Get the global instance UUID."""
-        metadata = db.query(InstanceMetadata).first()
-        if not metadata:
-            metadata = InstanceMetadata(instance_uuid=str(uuid.uuid4()))
-            db.add(metadata)
-            db.commit()
-            db.refresh(metadata)
-        return metadata.instance_uuid
-
-    async def connect_to_remote(
-        self, db: Session, connection_data: RemoteConnectionCreate
-    ) -> RemoteConnection:
-        """Initiate connection to a remote File Fridge instance."""
-        # Generate a shared secret
-        shared_secret = secrets.token_hex(32)
-
-        # Get our own URL and UUID
-        my_url = settings.ff_instance_url or "http://localhost:8000"  # Fallback if not set
-        my_name = settings.instance_name or settings.app_name
-        my_uuid = self.get_instance_uuid(db)
-
-        # Call the remote instance's handshake endpoint
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    f"{connection_data.url.rstrip('/')}/api/remote/handshake",
-                    json={
-                        "name": my_name,
-                        "url": my_url,
-                        "instance_uuid": my_uuid,
-                        "connection_code": connection_data.connection_code,
-                        "shared_secret": shared_secret,
-                    },
-                    timeout=10.0,
-                )
-                response.raise_for_status()
-                remote_data = response.json()
-                remote_instance_uuid = remote_data.get("instance_uuid")
-            except httpx.HTTPError as e:
-                msg = f"Could not connect to remote instance: {e}"
-                logger.exception("Failed to connect to remote instance at %s", connection_data.url)
-                raise ValueError(msg) from e
-
-        # Store the connection locally
-        remote_conn = RemoteConnection(
-            name=connection_data.name,
-            url=connection_data.url,
-            remote_instance_uuid=remote_instance_uuid,
-            shared_secret=shared_secret,
-        )
-        db.add(remote_conn)
-        db.commit()
-        db.refresh(remote_conn)
-        return remote_conn
-
-    def handle_handshake(self, db: Session, handshake_data: dict) -> dict:
-        """Handle an incoming handshake request from a remote instance."""
-        # Verify connection code
-        if handshake_data["connection_code"] != remote_auth.get_code():
-            msg = "Invalid connection code"
-            raise ValueError(msg)
-
-        remote_uuid = handshake_data.get("instance_uuid")
-        remote_url = handshake_data["url"]
-
-        # Check if connection already exists by UUID (preferred) or URL (fallback)
-        existing = None
-        if remote_uuid:
-            existing = (
-                db.query(RemoteConnection)
-                .filter(RemoteConnection.remote_instance_uuid == remote_uuid)
-                .first()
-            )
-
-        if not existing:
-            existing = db.query(RemoteConnection).filter(RemoteConnection.url == remote_url).first()
-
-        if existing:
-            # Update existing connection
-            existing.name = handshake_data["name"]
-            existing.url = remote_url
-            existing.remote_instance_uuid = remote_uuid
-            existing.shared_secret = handshake_data["shared_secret"]
-            db.commit()
-            db.refresh(existing)
-            return {"status": "success", "instance_uuid": self.get_instance_uuid(db)}
-
-        # Create new connection
-        remote_conn = RemoteConnection(
-            name=handshake_data["name"],
-            url=remote_url,
-            remote_instance_uuid=remote_uuid,
-            shared_secret=handshake_data["shared_secret"],
-        )
-        db.add(remote_conn)
-        db.commit()
-        return {"status": "success", "instance_uuid": self.get_instance_uuid(db)}
 
     def list_connections(self, db: Session) -> List[RemoteConnection]:
         """List all remote connections."""
@@ -125,133 +30,236 @@ class RemoteConnectionService:
         """Get a specific remote connection."""
         return db.query(RemoteConnection).filter(RemoteConnection.id == connection_id).first()
 
-    async def delete_connection(self, db: Session, connection_id: int, force: bool = False):
-        """Delete a remote connection."""
-        conn = self.get_connection(db, connection_id)
+    def get_connection_by_fingerprint(
+        self, db: Session, fingerprint: str
+    ) -> Optional[RemoteConnection]:
+        """Get a remote connection by its public key fingerprint."""
+        return (
+            db.query(RemoteConnection).filter(RemoteConnection.remote_fingerprint == fingerprint).first()
+        )
+
+    async def get_remote_identity(self, remote_url: str) -> RemoteConnectionIdentity:
+        """
+        Fetch the public identity of a remote File Fridge instance.
+        This is the first step of the connection handshake.
+        """
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{remote_url.rstrip('/')}/api/remote/identity", timeout=10.0
+                )
+                response.raise_for_status()
+                identity_data = response.json()
+                # TODO: Add validation with a Pydantic model
+                return RemoteConnectionIdentity(**identity_data)
+            except httpx.HTTPError as e:
+                msg = f"Could not fetch identity from remote instance: {e}"
+                logger.exception("Failed to fetch identity from %s", remote_url)
+                raise ValueError(msg) from e
+            except Exception as e:
+                msg = f"An unexpected error occurred while fetching identity: {e}"
+                logger.exception("Unexpected error fetching identity from %s", remote_url)
+                raise ValueError(msg) from e
+
+    async def initiate_connection(
+        self, db: Session, name: str, remote_identity: RemoteConnectionIdentity
+    ) -> RemoteConnection:
+        """
+        Create a new trusted remote connection and notify the remote instance.
+        This is the second step, taken after the user has verified the remote's identity.
+        """
+        # 1. Check if connection already exists
+        existing_conn = self.get_connection_by_fingerprint(db, remote_identity.fingerprint)
+        if existing_conn:
+            if existing_conn.trust_status == TrustStatus.TRUSTED:
+                return existing_conn
+            # If pending or rejected, we can update and proceed
+            existing_conn.name = name
+            existing_conn.url = remote_identity.url
+            existing_conn.trust_status = TrustStatus.TRUSTED
+            db.commit()
+            db.refresh(existing_conn)
+            return existing_conn
+
+        # 2. Create and save the new connection locally as TRUSTED
+        new_conn = RemoteConnection(
+            name=name,
+            url=remote_identity.url,
+            remote_fingerprint=remote_identity.fingerprint,
+            remote_ed25519_public_key=remote_identity.ed25519_public_key,
+            remote_x25519_public_key=remote_identity.x25519_public_key,
+            trust_status=TrustStatus.TRUSTED,
+        )
+        db.add(new_conn)
+        db.commit()
+        db.refresh(new_conn)
+
+        # 3. Send our identity to the remote to establish a PENDING connection there
+        my_identity_payload = {
+            "instance_name": settings.instance_name or "File Fridge",
+            "fingerprint": identity_service.get_instance_fingerprint(db),
+            "ed25519_public_key": identity_service.get_signing_public_key_str(db),
+            "x25519_public_key": identity_service.get_kx_public_key_str(db),
+            "url": settings.ff_instance_url,
+        }
+
+        # Sign the payload
+        message_to_sign = canonical_json_encode(my_identity_payload)
+        signature = identity_service.sign_message(db, message_to_sign)
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{remote_identity.url.rstrip('/')}/api/remote/connection-request",
+                    json={"identity": my_identity_payload, "signature": signature.hex()},
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+                # The response from the remote also contains its signed identity,
+                # which we can verify to prevent man-in-the-middle attacks.
+                remote_response = response.json()
+                self._verify_remote_response(remote_identity, remote_response)
+
+            except Exception as e:
+                # If the notification fails, we still keep the local connection.
+                # The user can retry later. We can add a status field for this.
+                logger.error(
+                    "Failed to send connection request to remote instance %s: %s", name, e
+                )
+                # Rollback or mark as "local_only"? For now, we'll keep it.
+
+        return new_conn
+
+    def _verify_remote_response(self, original_identity, response_data):
+        """Verify the signature in the response from a remote instance."""
+        response_identity = response_data.get("identity", {})
+        response_signature_hex = response_data.get("signature")
+
+        # Check if the fingerprint matches the one we originally trusted
+        if response_identity.get("fingerprint") != original_identity.fingerprint:
+            raise ValueError("Man-in-the-middle attack suspected! Fingerprint mismatch.")
+
+        # Verify the signature
+        message_to_verify = canonical_json_encode(response_identity)
+        signature = bytes.fromhex(response_signature_hex)
+
+        if not identity_service.verify_signature(
+            original_identity.ed25519_public_key, signature, message_to_verify
+        ):
+            raise ValueError("Signature verification of remote response failed.")
+
+        logger.info("Successfully verified remote instance identity.")
+
+    def handle_connection_request(self, db: Session, request_data: dict) -> dict:
+        """
+        Handle an incoming connection request from a remote instance.
+        If the request is valid, create a PENDING connection.
+        """
+        identity = request_data.get("identity", {})
+        signature_hex = request_data.get("signature")
+
+        if not all([identity, signature_hex]):
+            raise ValueError("Incomplete connection request data.")
+
+        # 1. Verify the signature
+        message_to_verify = canonical_json_encode(identity)
+        signature = bytes.fromhex(signature_hex)
+        if not identity_service.verify_signature(
+            identity.get("ed25519_public_key"), signature, message_to_verify
+        ):
+            raise ValueError("Signature verification failed for connection request.")
+
+        # 2. Create or update the connection as PENDING
+        fingerprint = identity.get("fingerprint")
+        conn = self.get_connection_by_fingerprint(db, fingerprint)
         if not conn:
-            return
+            conn = RemoteConnection(
+                name=identity.get("instance_name"),
+                url=identity.get("url"),
+                remote_fingerprint=fingerprint,
+                remote_ed25519_public_key=identity.get("ed25519_public_key"),
+                remote_x25519_public_key=identity.get("x25519_public_key"),
+                trust_status=TrustStatus.PENDING,
+            )
+            db.add(conn)
+        else:
+            # Update info but keep trust status as is, unless it was rejected.
+            conn.name = identity.get("instance_name")
+            conn.url = identity.get("url")
+            if conn.trust_status == TrustStatus.REJECTED:
+                conn.trust_status = TrustStatus.PENDING
 
-        if not force:
-            # Try to notify the remote instance
-            my_uuid = self.get_instance_uuid(db)
-            async with httpx.AsyncClient() as client:
-                try:
-                    await client.post(
-                        f"{conn.url.rstrip('/')}/api/remote/terminate-connection",
-                        headers={
-                            "X-Instance-UUID": my_uuid,
-                            "X-Shared-Secret": conn.shared_secret,
-                        },
-                        json={"instance_uuid": my_uuid},
-                        timeout=5.0,
-                    )
-                except Exception as e:
-                    msg = "Could not notify remote instance. Use 'force' to delete anyway."
-                    logger.warning(f"Failed to notify remote instance of deletion: {e}")
-                    raise ValueError(msg) from e
-
-        db.delete(conn)
         db.commit()
 
-    async def update_connection(
-        self, db: Session, connection_id: int, update_data: RemoteConnectionUpdate
-    ) -> RemoteConnection:
-        """Update a remote connection, verifying the new URL if provided."""
+        # 3. Return our own signed identity to prove who we are
+        my_identity_payload = {
+            "instance_name": settings.instance_name or "File Fridge",
+            "fingerprint": identity_service.get_instance_fingerprint(db),
+            "ed25519_public_key": identity_service.get_signing_public_key_str(db),
+            "x25519_public_key": identity_service.get_kx_public_key_str(db),
+            "url": settings.ff_instance_url,
+        }
+        message_to_sign = canonical_json_encode(my_identity_payload)
+        my_signature = identity_service.sign_message(db, message_to_sign)
+
+        return {"identity": my_identity_payload, "signature": my_signature.hex()}
+
+    def trust_connection(self, db: Session, connection_id: int) -> RemoteConnection:
+        """Manually trust a PENDING connection."""
         conn = self.get_connection(db, connection_id)
         if not conn:
             raise ValueError("Connection not found")
-
-        if update_data.name is not None:
-            conn.name = update_data.name
-
-        if update_data.url is not None and update_data.url != conn.url:
-            # Verify new URL via challenge-response
-            await self._verify_remote_url(db, conn, update_data.url)
-            conn.url = update_data.url
-
+        if conn.trust_status != TrustStatus.PENDING:
+            logger.warning(
+                "Attempted to trust a connection that is not pending (status: %s)",
+                conn.trust_status.value,
+            )
+        conn.trust_status = TrustStatus.TRUSTED
         db.commit()
         db.refresh(conn)
         return conn
 
-    async def _verify_remote_url(self, db: Session, conn: RemoteConnection, new_url: str):
-        """Perform challenge-response verification for a new URL."""
-        # 1. Generate random challenge
-        challenge = secrets.token_hex(16)
-
-        # 2. Encrypt challenge with shared secret
-        try:
-            key = bytes.fromhex(conn.shared_secret)[:32]
-            aesgcm = AESGCM(key)
-            nonce = secrets.token_bytes(12)
-            encrypted = aesgcm.encrypt(nonce, challenge.encode(), None)
-            challenge_payload = nonce.hex() + encrypted.hex()
-        except Exception as e:
-            logger.exception("Failed to encrypt challenge")
-            raise ValueError(f"Failed to prepare verification challenge: {e}") from e
-
-        # 3. Send to remote challenge endpoint
-        my_uuid = self.get_instance_uuid(db)
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    f"{new_url.rstrip('/')}/api/remote/challenge",
-                    json={"initiator_uuid": my_uuid, "challenge": challenge_payload},
-                    timeout=10.0,
-                )
-                response.raise_for_status()
-                data = response.json()
-
-                # 4. Verify response matches original challenge
-                if data.get("decrypted") != challenge:
-                    raise ValueError(
-                        "Challenge verification failed: incorrect response from remote"
-                    )
-
-            except httpx.HTTPError as e:
-                logger.warning(f"Failed to verify remote URL {new_url}: {e}")
-                raise ValueError(
-                    f"Could not verify remote instance at {new_url}. "
-                    "Ensure the shared secret is still valid and the server is reachable."
-                ) from e
-            except Exception as e:
-                logger.exception("Unexpected error during URL verification")
-                raise ValueError(f"Verification failed: {e}") from e
-
-    def handle_challenge(self, db: Session, initiator_uuid: str, encrypted_challenge: str) -> str:
-        """Decrypt a challenge from a remote instance."""
-        # Find connection by initiator UUID
-        conn = (
-            db.query(RemoteConnection)
-            .filter(RemoteConnection.remote_instance_uuid == initiator_uuid)
-            .first()
-        )
+    async def delete_connection(self, db: Session, connection_id: int):
+        """Delete a remote connection and notify the remote instance."""
+        conn = self.get_connection(db, connection_id)
         if not conn:
-            raise ValueError("No connection found for this UUID")
+            return
 
-        try:
-            # Extract nonce (first 12 bytes / 24 hex chars)
-            nonce = bytes.fromhex(encrypted_challenge[:24])
-            ciphertext = bytes.fromhex(encrypted_challenge[24:])
+        if conn.trust_status == TrustStatus.TRUSTED:
+            # Notify remote instance of termination
+            from app.utils.remote_signature import get_signed_headers
 
-            # Decrypt
-            key = bytes.fromhex(conn.shared_secret)[:32]
-            aesgcm = AESGCM(key)
-            decrypted = aesgcm.decrypt(nonce, ciphertext, None)
-            return decrypted.decode()
-        except Exception as e:
-            logger.warning(f"Decryption failed for challenge from {initiator_uuid}: {e}")
-            raise ValueError("Decryption failed") from e
+            try:
+                url = f"{conn.url.rstrip('/')}/api/remote/terminate-connection"
+                headers = await get_signed_headers(db, "POST", url, b"")
 
-    def handle_terminate_connection(self, db: Session, remote_uuid: str):
-        """Handle an incoming termination request."""
-        conn = (
-            db.query(RemoteConnection)
-            .filter(RemoteConnection.remote_instance_uuid == remote_uuid)
-            .first()
-        )
-        if conn:
-            db.delete(conn)
-            db.commit()
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    response = await client.post(url, headers=headers, json={})
+                    response.raise_for_status()
+                    logger.info(f"Successfully notified {conn.name} of connection termination")
+            except Exception as e:
+                logger.warning(
+                    f"Failed to notify remote instance {conn.name} of termination: {e}. "
+                    "Proceeding with local deletion."
+                )
+                # Continue with deletion even if notification fails
+
+        # Delete locally
+        db.delete(conn)
+        db.commit()
+
+    def handle_terminate_connection(self, db: Session, remote_fingerprint: str):
+        """Handle an incoming termination request from a remote instance."""
+        conn = self.get_connection_by_fingerprint(db, remote_fingerprint)
+        if not conn:
+            logger.warning(f"Received termination for unknown fingerprint: {remote_fingerprint}")
+            return
+
+        # Mark connection as rejected rather than deleting
+        # (preserves history, prevents auto-reconnect)
+        conn.trust_status = TrustStatus.REJECTED
+        db.commit()
+        logger.info(f"Connection with {conn.name} terminated by remote request")
 
 
 remote_connection_service = RemoteConnectionService()
