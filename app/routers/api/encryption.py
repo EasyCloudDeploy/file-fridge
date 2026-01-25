@@ -10,7 +10,7 @@ from app.models import Notifier, ServerEncryptionKey, encryption_manager
 from app.routers.api.auth import get_current_user
 from app.schemas import ServerEncryptionKeyResponse
 
-router = APIRouter(prefix="/encryption", tags=["Encryption"])
+router = APIRouter(prefix="/api/v1/encryption", tags=["Encryption"])
 
 @router.get("/keys", response_model=List[ServerEncryptionKeyResponse])
 def list_keys(

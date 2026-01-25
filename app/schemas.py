@@ -779,6 +779,15 @@ class RemoteConnectionUpdate(BaseModel):
     url: Optional[str] = Field(None, min_length=1)
 
 
+class ConnectionCodeResponse(BaseModel):
+    """Schema for connection code response."""
+
+    code: str = Field(..., description="The current rotating connection code (UUID)")
+    expires_in_seconds: int = Field(
+        ..., description="Number of seconds until this code expires"
+    )
+
+
 class RemoteConnection(RemoteConnectionBase):
     """Schema for remote connection response."""
 

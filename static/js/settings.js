@@ -155,7 +155,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Fetch and display connection code
     async function fetchConnectionCode() {
         try {
-            const response = await authenticatedFetch('/api/remote/connection-code');
+            const response = await authenticatedFetch('/api/v1/remote/connection-code');
             if (response.ok) {
                 const data = await response.json();
                 document.getElementById('my-connection-code').value = data.code;
@@ -194,7 +194,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadRemoteConnections() {
         const list = document.getElementById('remote-connections-list');
         try {
-            const response = await authenticatedFetch('/api/remote/connections');
+            const response = await authenticatedFetch('/api/v1/remote/connections');
             if (response.ok) {
                 const connections = await response.json();
                 list.innerHTML = '';
@@ -329,14 +329,14 @@ document.addEventListener('DOMContentLoaded', function() {
                         name: data.name,
                         url: data.url
                     };
-                    response = await authenticatedFetch(`/api/remote/connections/${editingConnectionId}`, {
+                    response = await authenticatedFetch(`/api/v1/remote/connections/${editingConnectionId}`, {
                         method: 'PATCH',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(updateData)
                     });
                 } else {
                     // Create new connection
-                    response = await authenticatedFetch('/api/remote/connect', {
+                    response = await authenticatedFetch('/api/v1/remote/connect', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(data)
@@ -386,7 +386,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadRemoteTransfers() {
         const list = document.getElementById('remote-transfers-list');
         try {
-            const response = await authenticatedFetch('/api/remote/transfers');
+            const response = await authenticatedFetch('/api/v1/remote/transfers');
             if (response.ok) {
                 const transfers = await response.json();
                 if (transfers.length === 0) {
@@ -445,7 +445,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!confirm('Are you sure you want to cancel this transfer?')) return;
 
         try {
-            const response = await authenticatedFetch(`/api/remote/transfers/${jobId}/cancel`, {
+            const response = await authenticatedFetch(`/api/v1/remote/transfers/${jobId}/cancel`, {
                 method: 'POST'
             });
 
@@ -472,7 +472,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         try {
             const jobIds = failedJobs.map(t => t.id);
-            const response = await authenticatedFetch('/api/remote/transfers/bulk/cancel', {
+            const response = await authenticatedFetch('/api/v1/remote/transfers/bulk/cancel', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ job_ids: jobIds })
@@ -503,7 +503,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         try {
             const jobIds = failedJobs.map(t => t.id);
-            const response = await authenticatedFetch('/api/remote/transfers/bulk/retry', {
+            const response = await authenticatedFetch('/api/v1/remote/transfers/bulk/retry', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ job_ids: jobIds })
@@ -544,7 +544,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         try {
             const force = document.getElementById('force-delete-check').checked;
-            const response = await authenticatedFetch(`/api/remote/connections/${connectionToDelete}?force=${force}`, {
+            const response = await authenticatedFetch(`/api/v1/remote/connections/${connectionToDelete}?force=${force}`, {
                 method: 'DELETE'
             });
 
@@ -570,7 +570,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!list) return;
 
         try {
-            const response = await authenticatedFetch('/api/encryption/keys');
+            const response = await authenticatedFetch('/api/v1/encryption/keys');
             if (response.ok) {
                 const keys = await response.json();
                 list.innerHTML = '';
@@ -615,7 +615,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         try {
-            const response = await authenticatedFetch(`/api/encryption/keys/${keyId}`, {
+            const response = await authenticatedFetch(`/api/v1/encryption/keys/${keyId}`, {
                 method: 'DELETE'
             });
 
@@ -640,7 +640,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             this.disabled = true;
             try {
-                const response = await authenticatedFetch('/api/encryption/keys', {
+                const response = await authenticatedFetch('/api/v1/encryption/keys', {
                     method: 'POST'
                 });
 
