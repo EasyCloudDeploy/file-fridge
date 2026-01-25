@@ -518,9 +518,10 @@ def cleanup_old_nonces_job_func():
         logger.exception("Error cleaning up old nonces", exc_info=e)
         db.rollback()
     finally:
-        db.close()
-        except Exception:
-            logger.warning("Error closing scheduler database session in nonce cleanup")
+        try:
+            db.close()
+        except Exception as e:
+            logger.warning("Error closing scheduler database session in nonce cleanup", exc_info=e)
 
 
 # Global scheduler instance

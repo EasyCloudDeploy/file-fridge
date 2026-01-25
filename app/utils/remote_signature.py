@@ -140,18 +140,18 @@ async def verify_signature_from_components(
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature.")
 
-     # 5. Store nonce to prevent replay
-     request_nonce = RequestNonce(fingerprint=fingerprint, nonce=nonce, timestamp=timestamp)
-     db.add(request_nonce)
-     # Use savepoint to ensure nonce is only committed if the outer transaction succeeds
-     # This prevents nonce consumption if endpoint processing fails
-     savepoint = db.begin_nested()
-     try:
-         db.commit()
-         savepoint.commit()
-     except Exception:
-         savepoint.rollback()
-         raise
+    # 5. Store nonce to prevent replay
+    request_nonce = RequestNonce(fingerprint=fingerprint, nonce=nonce, timestamp=timestamp)
+    db.add(request_nonce)
+    # Use savepoint to ensure nonce is only committed if the outer transaction succeeds
+    # This prevents nonce consumption if endpoint processing fails
+    savepoint = db.begin_nested()
+    try:
+        db.commit()
+        savepoint.commit()
+    except Exception:
+        savepoint.rollback()
+        raise
 
     return conn
 

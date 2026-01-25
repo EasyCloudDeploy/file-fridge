@@ -47,6 +47,7 @@ def downgrade() -> None:
             existing_type=sa.Enum("PENDING", "TRUSTED", "REJECTED", name="truststatus"),
             type_=sa.VARCHAR(),  # Revert to generic VARCHAR
             existing_nullable=False,
+            server_default=sa.text("'pending'"),
         )
 
     op.execute(
