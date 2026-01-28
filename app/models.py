@@ -670,6 +670,8 @@ class InstanceMetadata(Base):
     x25519_public_key = Column(Text, nullable=True)  # Key exchange public key
     x25519_private_key_encrypted = Column(Text, nullable=True)  # Encrypted key exchange private key
     current_key_version = Column(Integer, nullable=False, default=1)  # For key rotation
+    instance_url = Column(String, nullable=True)  # Instance URL for remote connections (fallback if env var not set)
+    instance_name = Column(String, nullable=True)  # Custom instance name
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

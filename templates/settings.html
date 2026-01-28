@@ -122,6 +122,81 @@
 
         <!-- Remote Connections Section -->
         <div id="remote-connections-section" class="settings-section d-none">
+
+        <!-- Configuration Warning Alert (shown when FF_INSTANCE_URL not set) -->
+        <div id="remote-config-warning" class="alert alert-warning d-none mb-4" role="alert">
+            <div class="d-flex align-items-start">
+                <i class="bi bi-exclamation-triangle-fill fs-4 me-3 flex-shrink-0"></i>
+                <div class="flex-grow-1">
+                    <h5 class="alert-heading mb-2">Remote Connections Not Configured</h5>
+                    <p class="mb-2">Remote connections require an instance URL to be configured before they can be used.</p>
+                    <p class="mb-2"><strong>Configure below to enable remote connections.</strong></p>
+                    <p class="mb-0 small text-muted">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Use the IP address or hostname that other File Fridge instances can reach on your network.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Instance Configuration Card -->
+        <div id="instance-config" class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-gear me-2"></i>Instance Configuration
+                </h5>
+            </div>
+            <div class="card-body">
+                <form id="instance-config-form">
+                    <div class="mb-3">
+                        <label for="instance-url-input" class="form-label">
+                            Instance URL
+                            <span class="text-danger">*</span>
+                        </label>
+                        <input type="url" class="form-control" id="instance-url-input" name="instance_url"
+                               placeholder="http://your-server:8000" required>
+                        <div class="form-text">
+                            The full URL where this File Fridge instance can be reached by other instances.
+                            Use an IP address or hostname accessible on your network.
+                        </div>
+                        <div id="instance-url-source" class="small text-muted mt-1"></div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="instance-name-input" class="form-label">Instance Name (Optional)</label>
+                        <input type="text" class="form-control" id="instance-name-input" name="instance_name"
+                               placeholder="e.g., Home Server">
+                        <div class="form-text">
+                            A friendly name for this instance to help identify it in remote connection lists.
+                        </div>
+                        <div id="instance-name-source" class="small text-muted mt-1"></div>
+                    </div>
+
+                    <div class="d-grid gap-2 d-md-flex justify-content-md-end">
+                        <button type="submit" class="btn btn-primary" id="save-config-btn">
+                            <span id="save-config-text">
+                                <i class="bi bi-save me-2"></i>Save Configuration
+                            </span>
+                            <span id="save-config-spinner" class="d-none">
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                Saving...
+                            </span>
+                        </button>
+                    </div>
+                </form>
+
+                <div id="config-error" class="alert alert-danger mt-3 d-none" role="alert">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    <span id="config-error-text"></span>
+                </div>
+
+                <div id="config-success" class="alert alert-success mt-3 d-none" role="alert">
+                    <i class="bi bi-check-circle me-2"></i>
+                    <span id="config-success-text"></span>
+                </div>
+            </div>
+        </div>
+
         <div id="remote-connections" class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0">
@@ -131,7 +206,7 @@
                     <i class="bi bi-plus-circle me-1"></i>Add Connection
                 </button>
             </div>
-            <div class="card-body">
+            <div class="card-body" id="remote-connections-content">
                 <div class="mb-4">
                     <h6 class="text-muted">Instance Connection Code</h6>
                     <p class="text-muted small">

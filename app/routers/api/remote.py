@@ -33,6 +33,7 @@ from app.schemas import (
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
 from app.security import get_current_user
 from app.services.identity_service import identity_service
+from app.services.instance_config_service import instance_config_service
 from app.services.remote_connection_service import remote_connection_service
 from app.utils.remote_auth import remote_auth
 from app.services.remote_transfer_service import (
@@ -201,15 +202,86 @@ async def _decompress_chunk(chunk: bytes) -> bytes:
 # --- New Handshake and Connection Endpoints ---
 
 
+@router.get("/status", tags=["Remote Connections"])
+def get_remote_status(db: Session = Depends(get_db)):
+    """Check if remote connections are properly configured."""
+    instance_url = instance_config_service.get_instance_url(db)
+    is_configured = bool(instance_url)
+    return {
+        "configured": is_configured,
+        "instance_url": instance_url if is_configured else None,
+        "message": (
+            "Remote connections are ready to use."
+            if is_configured
+            else "Remote connections require instance URL to be configured. "
+            "Set the FF_INSTANCE_URL environment variable or configure it in the UI below."
+        ),
+    }
+
+
+@router.get("/config", tags=["Remote Connections"])
+def get_instance_config(
+    db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
+):
+    """Get instance configuration including source information (environment vs database)."""
+    _ = current_user
+    return instance_config_service.get_config_info(db)
+
+
+@router.post("/config", tags=["Remote Connections"])
+def update_instance_config(
+    config_data: dict,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Update instance configuration (database values).
+
+    Note: Environment variables take precedence and cannot be overridden via API.
+    Only updates database values which serve as fallback.
+    """
+    _ = current_user
+
+    # Check if values are set via environment variables
+    if "instance_url" in config_data:
+        if settings.ff_instance_url:
+            raise HTTPException(
+                status_code=400,
+                detail="Instance URL is set via FF_INSTANCE_URL environment variable and cannot be changed via API. "
+                "To update, modify the environment variable and restart the application.",
+            )
+        instance_config_service.set_instance_url(db, config_data["instance_url"])
+
+    if "instance_name" in config_data:
+        if settings.instance_name:
+            raise HTTPException(
+                status_code=400,
+                detail="Instance name is set via INSTANCE_NAME environment variable and cannot be changed via API. "
+                "To update, modify the environment variable and restart the application.",
+            )
+        instance_config_service.set_instance_name(db, config_data["instance_name"])
+
+    return instance_config_service.get_config_info(db)
+
+
 @router.get("/identity", response_model=RemoteConnectionIdentity, tags=["Remote Connections"])
 def get_public_identity(db: Session = Depends(get_db)):
     """Return the public identity of this File Fridge instance."""
+    instance_url = instance_config_service.get_instance_url(db)
+    if not instance_url:
+        logger.error("Instance URL not configured")
+        raise HTTPException(
+            status_code=500,
+            detail="Instance URL not configured. Please set FF_INSTANCE_URL environment variable "
+            "or configure it via the UI to enable remote connections.",
+        )
+    instance_name = instance_config_service.get_instance_name(db) or "File Fridge"
     return {
-        "instance_name": settings.instance_name or "File Fridge",
+        "instance_name": instance_name,
         "fingerprint": identity_service.get_instance_fingerprint(db),
         "ed25519_public_key": identity_service.get_signing_public_key_str(db),
         "x25519_public_key": identity_service.get_kx_public_key_str(db),
-        "url": settings.ff_instance_url,
+        "url": instance_url,
     }
 
 
@@ -222,24 +294,39 @@ def get_my_identity(
     Users share this fingerprint out-of-band to allow remote instances to verify.
     """
     _ = current_user
+    instance_url = instance_config_service.get_instance_url(db)
+    if not instance_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Instance URL not configured. Please set FF_INSTANCE_URL environment variable "
+            "or configure it via the UI to enable remote connections.",
+        )
+    instance_name = instance_config_service.get_instance_name(db) or "File Fridge"
     fingerprint = identity_service.get_instance_fingerprint(db)
 
     return {
-        "instance_name": settings.instance_name or "File Fridge",
+        "instance_name": instance_name,
         "fingerprint": fingerprint,
-        "url": settings.ff_instance_url,
-        "qr_data": f"filefridge://{fingerprint}@{settings.ff_instance_url}",
+        "url": instance_url,
+        "qr_data": f"filefridge://{fingerprint}@{instance_url}",
     }
 
 
 @router.get("/connection-code", response_model=ConnectionCodeResponse, tags=["Remote Connections"])
-def get_connection_code(current_user: dict = Depends(get_current_user)):
+def get_connection_code(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """
     Get the current rotating connection code for this instance.
     This code can be shared with other File Fridge instances to establish a connection.
     The code rotates automatically every hour for security.
     """
     _ = current_user
+    instance_url = instance_config_service.get_instance_url(db)
+    if not instance_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Instance URL not configured. Please set FF_INSTANCE_URL environment variable "
+            "or configure it via the UI to enable remote connections.",
+        )
     code, expires_in_seconds = remote_auth.get_code_with_expiry()
     return {"code": code, "expires_in_seconds": expires_in_seconds}
 

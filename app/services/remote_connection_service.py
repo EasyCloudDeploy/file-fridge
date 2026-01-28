@@ -78,6 +78,16 @@ class RemoteConnectionService:
             remote_identity: Identity information from the remote instance
             connection_code: Optional connection code to authenticate with the remote
         """
+        # 0. Verify instance URL is configured
+        from app.services.instance_config_service import instance_config_service
+
+        instance_url = instance_config_service.get_instance_url(db)
+        if not instance_url:
+            raise ValueError(
+                "Instance URL not configured. Please set FF_INSTANCE_URL environment variable "
+                "or configure it via the UI to enable remote connections."
+            )
+
         # 1. Check if connection already exists
         existing_conn = self.get_connection_by_fingerprint(db, remote_identity.fingerprint)
         if existing_conn:
@@ -85,7 +95,7 @@ class RemoteConnectionService:
                 return existing_conn
             # If pending or rejected, we can update and proceed
             existing_conn.name = name
-            existing_conn.url = remote_identity.url
+            existing_conn.url = str(remote_identity.url)
             existing_conn.trust_status = TrustStatus.TRUSTED
             db.commit()
             db.refresh(existing_conn)
@@ -94,7 +104,7 @@ class RemoteConnectionService:
         # 2. Create and save the new connection locally as TRUSTED
         new_conn = RemoteConnection(
             name=name,
-            url=remote_identity.url,
+            url=str(remote_identity.url),
             remote_fingerprint=remote_identity.fingerprint,
             remote_ed25519_public_key=remote_identity.ed25519_public_key,
             remote_x25519_public_key=remote_identity.x25519_public_key,
@@ -105,12 +115,13 @@ class RemoteConnectionService:
         db.refresh(new_conn)
 
         # 3. Send our identity to the remote to establish a PENDING connection there
+        instance_name = instance_config_service.get_instance_name(db) or "File Fridge"
         my_identity_payload = {
-            "instance_name": settings.instance_name or "File Fridge",
+            "instance_name": instance_name,
             "fingerprint": identity_service.get_instance_fingerprint(db),
             "ed25519_public_key": identity_service.get_signing_public_key_str(db),
             "x25519_public_key": identity_service.get_kx_public_key_str(db),
-            "url": settings.ff_instance_url,
+            "url": instance_url,
         }
 
         # Sign the payload
@@ -185,6 +196,16 @@ class RemoteConnectionService:
         If a connection_code is provided in the request, it will be verified
         before proceeding. This allows authenticated connection establishment.
         """
+        # Verify instance URL is configured
+        from app.services.instance_config_service import instance_config_service
+
+        instance_url = instance_config_service.get_instance_url(db)
+        if not instance_url:
+            raise ValueError(
+                "Instance URL not configured. Please set FF_INSTANCE_URL environment variable "
+                "or configure it via the UI to enable remote connections."
+            )
+
         identity = request_data.get("identity", {})
         signature_hex = request_data.get("signature")
         connection_code = request_data.get("connection_code")
@@ -214,7 +235,7 @@ class RemoteConnectionService:
         if not conn:
             conn = RemoteConnection(
                 name=identity.get("instance_name"),
-                url=identity.get("url"),
+                url=str(identity.get("url")),
                 remote_fingerprint=fingerprint,
                 remote_ed25519_public_key=identity.get("ed25519_public_key"),
                 remote_x25519_public_key=identity.get("x25519_public_key"),
@@ -224,19 +245,20 @@ class RemoteConnectionService:
         else:
             # Update info but keep trust status as is, unless it was rejected.
             conn.name = identity.get("instance_name")
-            conn.url = identity.get("url")
+            conn.url = str(identity.get("url"))
             if conn.trust_status == TrustStatus.REJECTED:
                 conn.trust_status = TrustStatus.PENDING
 
         db.commit()
 
         # 4. Return our own signed identity to prove who we are
+        instance_name = instance_config_service.get_instance_name(db) or "File Fridge"
         my_identity_payload = {
-            "instance_name": settings.instance_name or "File Fridge",
+            "instance_name": instance_name,
             "fingerprint": identity_service.get_instance_fingerprint(db),
             "ed25519_public_key": identity_service.get_signing_public_key_str(db),
             "x25519_public_key": identity_service.get_kx_public_key_str(db),
-            "url": settings.ff_instance_url,
+            "url": instance_url,
         }
         message_to_sign = canonical_json_encode(my_identity_payload)
         my_signature = identity_service.sign_message(db, message_to_sign)
