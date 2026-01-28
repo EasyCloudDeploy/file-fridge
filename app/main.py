@@ -3,7 +3,8 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request, status
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -104,6 +105,22 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
 
 # Create FastAPI app
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
+
+
+# Add global exception handler to log unhandled exceptions
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch and log all unhandled exceptions."""
+    logger.exception(
+        f"Unhandled exception occurred: {exc!r}\n"
+        f"Request: {request.method} {request.url}\n"
+        f"Client: {request.client.host if request.client else 'unknown'}"
+    )
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error occurred. Check logs for details."},
+    )
+
 
 # Configure Jinja2 Templates
 templates = Jinja2Templates(directory="templates")

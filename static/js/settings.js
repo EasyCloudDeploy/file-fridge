@@ -23,9 +23,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             // Initial load for remote connections if clicked
             if (sectionId === 'remote-connections') {
-                loadRemoteConnections();
-                fetchConnectionCode();
-                loadRemoteTransfers();
+                checkRemoteConfiguration();
             }
 
             // Initial load for encryption if clicked
@@ -152,6 +150,179 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- Remote Connections ---
 
+    // Load instance configuration
+    async function loadInstanceConfig() {
+        try {
+            const response = await authenticatedFetch('/api/v1/remote/config');
+            if (response.ok) {
+                const config = await response.json();
+
+                // Instance URL
+                const urlInput = document.getElementById('instance-url-input');
+                const urlSource = document.getElementById('instance-url-source');
+                if (urlInput && config.instance_url) {
+                    urlInput.value = config.instance_url.value || '';
+                    urlInput.disabled = !config.instance_url.can_edit;
+
+                    if (config.instance_url.source === 'environment') {
+                        urlSource.innerHTML = '<i class="bi bi-lock-fill me-1"></i>Set via FF_INSTANCE_URL environment variable (read-only)';
+                        urlSource.classList.add('text-info');
+                    } else if (config.instance_url.source === 'database') {
+                        urlSource.innerHTML = '<i class="bi bi-database me-1"></i>Configured in database (can be changed)';
+                        urlSource.classList.add('text-success');
+                    } else {
+                        urlSource.innerHTML = '<i class="bi bi-exclamation-circle me-1"></i>Not configured';
+                        urlSource.classList.add('text-warning');
+                    }
+                }
+
+                // Instance Name
+                const nameInput = document.getElementById('instance-name-input');
+                const nameSource = document.getElementById('instance-name-source');
+                if (nameInput && config.instance_name) {
+                    nameInput.value = config.instance_name.value || '';
+                    nameInput.disabled = !config.instance_name.can_edit;
+
+                    if (config.instance_name.source === 'environment') {
+                        nameSource.innerHTML = '<i class="bi bi-lock-fill me-1"></i>Set via INSTANCE_NAME environment variable (read-only)';
+                        nameSource.classList.add('text-info');
+                    } else if (config.instance_name.source === 'database') {
+                        nameSource.innerHTML = '<i class="bi bi-database me-1"></i>Configured in database (can be changed)';
+                        nameSource.classList.add('text-success');
+                    }
+                }
+
+                // Disable save button if all fields are read-only
+                const saveBtn = document.getElementById('save-config-btn');
+                if (saveBtn && !config.instance_url.can_edit && !config.instance_name.can_edit) {
+                    saveBtn.disabled = true;
+                    saveBtn.title = 'Configuration is set via environment variables and cannot be changed';
+                }
+            }
+        } catch (error) {
+            console.error('Error loading instance config:', error);
+        }
+    }
+
+    // Save instance configuration
+    const instanceConfigForm = document.getElementById('instance-config-form');
+    if (instanceConfigForm) {
+        instanceConfigForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+            const data = Object.fromEntries(formData.entries());
+
+            // Hide messages
+            document.getElementById('config-error')?.classList.add('d-none');
+            document.getElementById('config-success')?.classList.add('d-none');
+            setFormButtonLoading('save-config', true);
+
+            try {
+                const response = await authenticatedFetch('/api/v1/remote/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    const configSuccess = document.getElementById('config-success');
+                    const configSuccessText = document.getElementById('config-success-text');
+                    if (configSuccess && configSuccessText) {
+                        configSuccessText.textContent = 'Configuration saved successfully!';
+                        configSuccess.classList.remove('d-none');
+                    }
+                    // Reload config to show updated source info
+                    await loadInstanceConfig();
+                    // Recheck remote configuration status
+                    await checkRemoteConfiguration();
+                } else {
+                    const errorData = await response.json();
+                    const configError = document.getElementById('config-error');
+                    const configErrorText = document.getElementById('config-error-text');
+                    if (configError && configErrorText) {
+                        configErrorText.textContent = errorData.detail || 'Failed to save configuration';
+                        configError.classList.remove('d-none');
+                    }
+                }
+            } catch (error) {
+                console.error('Error saving config:', error);
+                const configError = document.getElementById('config-error');
+                const configErrorText = document.getElementById('config-error-text');
+                if (configError && configErrorText) {
+                    configErrorText.textContent = 'Failed to connect to server.';
+                    configError.classList.remove('d-none');
+                }
+            } finally {
+                setFormButtonLoading('save-config', false);
+            }
+        });
+    }
+
+    // Check if remote connections are configured
+    async function checkRemoteConfiguration() {
+        // Load configuration first
+        await loadInstanceConfig();
+
+        try {
+            const response = await authenticatedFetch('/api/v1/remote/status');
+            if (response.ok) {
+                const data = await response.json();
+                const warningDiv = document.getElementById('remote-config-warning');
+                const remoteConnectionsCard = document.getElementById('remote-connections');
+                const remoteTransfersCard = document.getElementById('remote-transfers');
+                const addRemoteBtn = document.getElementById('add-remote-btn');
+                const connectionCodeInput = document.getElementById('my-connection-code');
+                const copyCodeBtn = document.getElementById('copy-code-btn');
+                const refreshCodeBtn = document.getElementById('refresh-code-btn');
+
+                if (!data.configured) {
+                    // Show warning and disable UI
+                    warningDiv.classList.remove('d-none');
+
+                    // Disable buttons
+                    if (addRemoteBtn) addRemoteBtn.disabled = true;
+                    if (copyCodeBtn) copyCodeBtn.disabled = true;
+                    if (refreshCodeBtn) refreshCodeBtn.disabled = true;
+
+                    // Show disabled message in connection code input
+                    if (connectionCodeInput) {
+                        connectionCodeInput.value = 'Configuration required - see warning above';
+                        connectionCodeInput.disabled = true;
+                    }
+
+                    // Show configuration message in connections list
+                    const list = document.getElementById('remote-connections-list');
+                    if (list) {
+                        list.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Remote connections are disabled until instance URL is configured above.</td></tr>';
+                    }
+
+                    // Show configuration message in transfers list
+                    const transfersList = document.getElementById('remote-transfers-list');
+                    if (transfersList) {
+                        transfersList.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Remote connections are disabled until instance URL is configured above.</td></tr>';
+                    }
+                } else {
+                    // Hide warning and enable UI
+                    warningDiv.classList.add('d-none');
+
+                    // Enable buttons
+                    if (addRemoteBtn) addRemoteBtn.disabled = false;
+                    if (copyCodeBtn) copyCodeBtn.disabled = false;
+                    if (refreshCodeBtn) refreshCodeBtn.disabled = false;
+                    if (connectionCodeInput) connectionCodeInput.disabled = false;
+
+                    // Load data
+                    loadRemoteConnections();
+                    fetchConnectionCode();
+                    loadRemoteTransfers();
+                }
+            }
+        } catch (error) {
+            console.error('Error checking remote configuration:', error);
+        }
+    }
+
     // Fetch and display connection code
     async function fetchConnectionCode() {
         try {
@@ -159,6 +330,13 @@ document.addEventListener('DOMContentLoaded', function() {
             if (response.ok) {
                 const data = await response.json();
                 document.getElementById('my-connection-code').value = data.code;
+            } else if (response.status === 500) {
+                // Configuration error - likely FF_INSTANCE_URL not set
+                const codeInput = document.getElementById('my-connection-code');
+                if (codeInput) {
+                    codeInput.value = 'Configuration required';
+                    codeInput.disabled = true;
+                }
             }
         } catch (error) {
             console.error('Error fetching connection code:', error);
@@ -193,6 +371,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load remote connections
     async function loadRemoteConnections() {
         const list = document.getElementById('remote-connections-list');
+        if (!list) return;
+
         try {
             const response = await authenticatedFetch('/api/v1/remote/connections');
             if (response.ok) {
@@ -528,10 +708,13 @@ document.addEventListener('DOMContentLoaded', function() {
         refreshTransfersBtn.addEventListener('click', loadRemoteTransfers);
     }
 
-    // Auto-refresh transfers if visible
+    // Auto-refresh transfers if visible (only if configured)
+    let remoteConfigured = false;
     setInterval(() => {
         const section = document.getElementById('remote-connections-section');
-        if (section && !section.classList.contains('d-none')) {
+        const warningDiv = document.getElementById('remote-config-warning');
+        // Only refresh if section is visible and configuration warning is hidden
+        if (section && !section.classList.contains('d-none') && warningDiv && warningDiv.classList.contains('d-none')) {
             loadRemoteTransfers();
         }
     }, 5000);

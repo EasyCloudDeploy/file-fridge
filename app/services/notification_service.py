@@ -369,7 +369,7 @@ class NotificationService:
                     event_enum = NotificationEventType(event_type)
                     if not rate_limiter.should_notify(notifier.id, event_enum):
                         logger.info(
-                            f"Rate limited: Skipping notification to '{notifier.name}' for event {event_type.value}"
+                            f"Rate limited: Skipping notification to '{notifier.name}' for event {event_enum.value}"
                         )
                         self._log_dispatch(
                             db,
