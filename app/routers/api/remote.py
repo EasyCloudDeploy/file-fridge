@@ -244,21 +244,9 @@ def update_instance_config(
 
     # Check if values are set via environment variables
     if "instance_url" in config_data:
-        if settings.ff_instance_url:
-            raise HTTPException(
-                status_code=400,
-                detail="Instance URL is set via FF_INSTANCE_URL environment variable and cannot be changed via API. "
-                "To update, modify the environment variable and restart the application.",
-            )
         instance_config_service.set_instance_url(db, config_data["instance_url"])
 
     if "instance_name" in config_data:
-        if settings.instance_name:
-            raise HTTPException(
-                status_code=400,
-                detail="Instance name is set via INSTANCE_NAME environment variable and cannot be changed via API. "
-                "To update, modify the environment variable and restart the application.",
-            )
         instance_config_service.set_instance_name(db, config_data["instance_name"])
 
     return instance_config_service.get_config_info(db)
