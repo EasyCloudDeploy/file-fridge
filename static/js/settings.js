@@ -588,7 +588,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         statusClass = 'warning';
                     }
 
-                    const canCancel = ['pending', 'in_progress', 'failed'].includes(job.status);
+                    const canCancel = ['pending', 'in_progress'].includes(job.status);
+                    const canDelete = ['failed', 'completed', 'cancelled'].includes(job.status);
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td title="${job.source_path}">${fileName}</td>
@@ -603,6 +604,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <td>
                             ${job.error_message ? `<i class="bi bi-exclamation-circle text-danger" title="${job.error_message}"></i>` : ''}
                             ${canCancel ? `<button class="btn btn-sm btn-outline-danger ms-2" onclick="cancelTransfer(${job.id})" title="Cancel transfer"><i class="bi bi-x-circle"></i></button>` : ''}
+                            ${canDelete ? `<button class="btn btn-sm btn-outline-secondary ms-2" onclick="deleteTransfer(${job.id})" title="Remove from list"><i class="bi bi-trash"></i></button>` : ''}
                         </td>
                     `;
                     list.appendChild(tr);
@@ -641,21 +643,41 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
+    globalThis.deleteTransfer = async function(jobId) {
+        if (!confirm('Are you sure you want to remove this transfer from the list?')) return;
+
+        try {
+            const response = await authenticatedFetch(`/api/v1/remote/transfers/${jobId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                await loadRemoteTransfers();
+            } else {
+                const errorData = await response.json();
+                alert('Error: ' + (errorData.detail || 'Failed to delete transfer'));
+            }
+        } catch (error) {
+            console.error('Error deleting transfer:', error);
+            alert('Failed to connect to server.');
+        }
+    };
+
     globalThis.bulkCancelTransfers = async function() {
-        const failedJobs = transfers.filter(t => ['failed', 'pending'].includes(t.status));
-        if (failedJobs.length === 0) {
-            alert('No failed or pending transfers to cancel.');
+        const pendingJobs = transfers.filter(t => ['pending', 'in_progress'].includes(t.status));
+        if (pendingJobs.length === 0) {
+            alert('No pending or in-progress transfers to cancel.');
             return;
         }
 
-        if (!confirm(`Cancel ${failedJobs.length} transfers?`)) return;
+        if (!confirm(`Cancel ${pendingJobs.length} transfers?`)) return;
 
         try {
-            const jobIds = failedJobs.map(t => t.id);
+            const jobIds = pendingJobs.map(t => t.id);
             const response = await authenticatedFetch('/api/v1/remote/transfers/bulk/cancel', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ job_ids: jobIds })
+                body: JSON.stringify(jobIds)
             });
 
             if (response.ok) {

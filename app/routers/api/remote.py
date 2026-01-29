@@ -19,10 +19,8 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.database import get_db
 from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob
-from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import (
     ConnectionCodeResponse,
     RemoteConnectionCreate,
@@ -30,18 +28,19 @@ from app.schemas import (
     RemoteConnectionUpdate,
     RemoteTransferJobBase,
 )
+from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
 from app.security import get_current_user
 from app.services.identity_service import identity_service
 from app.services.instance_config_service import instance_config_service
 from app.services.remote_connection_service import remote_connection_service
-from app.utils.remote_auth import remote_auth
 from app.services.remote_transfer_service import (
     get_transfer_timeouts,
     remote_transfer_service,
 )
 from app.services.scheduler import scheduler_service
 from app.utils.disk_validator import disk_space_validator
+from app.utils.remote_auth import remote_auth
 from app.utils.remote_signature import (
     get_signed_headers,
     verify_remote_signature,
@@ -58,10 +57,18 @@ INVALID_PATH_MSG = "Invalid relative path"
 def _get_base_directory(path: MonitoredPath, storage_type: str) -> str:
     """Determine base directory for file storage."""
     if storage_type == "hot":
+        logger.debug(f"Using hot storage path: {path.source_path}")
         return path.source_path
     if not path.storage_locations:
-        raise HTTPException(status_code=400, detail="No cold storage locations configured")
-    return path.storage_locations[0].path
+        error_msg = (
+            f"No cold storage locations configured for path '{path.name}' (ID: {path.id}). "
+            "Please configure at least one cold storage location for this monitored path."
+        )
+        logger.error(error_msg)
+        raise HTTPException(status_code=400, detail=error_msg)
+    cold_path = path.storage_locations[0].path
+    logger.debug(f"Using cold storage path: {cold_path}")
+    return cold_path
 
 
 async def _validate_and_build_path(base_dir: str, relative_path: str) -> Path:
@@ -122,10 +129,10 @@ async def _verify_checksum_in_background(found_tmp: Path, checksum: str):
                 sha256_hash.update(byte_block)
         if sha256_hash.hexdigest() != checksum:
             logger.error(f"Checksum verification failed for {found_tmp}, deleting file")
-            await anyio.to_thread.run_sync(found_tmp.unlink, missing_ok=True)
+            await anyio.to_thread.run_sync(lambda: found_tmp.unlink(missing_ok=True))
     except Exception:
         logger.exception(f"Error during checksum verification for {found_tmp}")
-        await anyio.to_thread.run_sync(found_tmp.unlink, missing_ok=True)
+        await anyio.to_thread.run_sync(lambda: found_tmp.unlink(missing_ok=True))
 
 
 async def _decrypt_chunk(
@@ -367,7 +374,7 @@ async def connect_with_code(
         logger.exception("Unexpected error connecting to remote instance")
         raise HTTPException(
             status_code=500,
-            detail=f"Unexpected error: {str(e)}"
+            detail=f"Unexpected error: {e!s}"
         ) from e
 
 
@@ -511,14 +518,22 @@ async def migrate_file(
 ):
     """Trigger a file migration to a remote instance."""
     _ = current_user
+    logger.info(
+        f"Migration requested: file_id={migration_data.file_inventory_id}, "
+        f"remote_connection_id={migration_data.remote_connection_id}, "
+        f"remote_path_id={migration_data.remote_monitored_path_id}"
+    )
     try:
-        return remote_transfer_service.create_transfer_job(
+        job = remote_transfer_service.create_transfer_job(
             db,
             migration_data.file_inventory_id,
             migration_data.remote_connection_id,
             migration_data.remote_monitored_path_id,
         )
+        logger.info(f"Transfer job {job.id} created successfully")
+        return job
     except ValueError as e:
+        logger.error(f"Failed to create transfer job: {e}")
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
@@ -529,6 +544,114 @@ def list_transfers(db: Session = Depends(get_db), current_user: dict = Depends(g
     """List all remote transfer jobs."""
     _ = current_user
     return db.query(RemoteTransferJob).order_by(RemoteTransferJob.id.desc()).all()
+
+
+@router.post("/transfers/{job_id}/cancel", tags=["Remote Connections"])
+def cancel_transfer(
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Cancel a remote transfer job."""
+    _ = current_user
+
+    # Check if job exists first
+    job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Transfer job {job_id} not found"
+        )
+
+    # Check if job can be cancelled (must be PENDING or IN_PROGRESS)
+    from app.models import TransferStatus
+    if job.status not in (TransferStatus.PENDING, TransferStatus.IN_PROGRESS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Transfer job {job_id} cannot be cancelled (current status: {job.status.value}). Only pending or in-progress transfers can be cancelled."
+        )
+
+    success = remote_transfer_service.cancel_transfer(db, job_id)
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to cancel transfer job {job_id}"
+        )
+    return {"status": "success", "message": f"Transfer {job_id} cancelled"}
+
+
+@router.post("/transfers/bulk/cancel", tags=["Remote Connections"])
+def bulk_cancel_transfers(
+    job_ids: List[int],
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Cancel multiple remote transfer jobs."""
+    _ = current_user
+    results = {"succeeded": [], "failed": []}
+    for job_id in job_ids:
+        if remote_transfer_service.cancel_transfer(db, job_id):
+            results["succeeded"].append(job_id)
+        else:
+            results["failed"].append(job_id)
+    return results
+
+
+@router.delete("/transfers/{job_id}", tags=["Remote Connections"])
+def delete_transfer(
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete a transfer job record (for failed/completed/cancelled transfers)."""
+    _ = current_user
+
+    job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
+    if not job:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Transfer job {job_id} not found"
+        )
+
+    # Only allow deletion of terminal state jobs
+    from app.models import TransferStatus
+    if job.status in (TransferStatus.PENDING, TransferStatus.IN_PROGRESS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete transfer job {job_id} while it is {job.status.value}. Cancel it first or wait for it to complete."
+        )
+
+    db.delete(job)
+    db.commit()
+    return {"status": "success", "message": f"Transfer job {job_id} deleted"}
+
+
+@router.post("/transfers/bulk/delete", tags=["Remote Connections"])
+def bulk_delete_transfers(
+    job_ids: List[int],
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete multiple transfer job records."""
+    _ = current_user
+    from app.models import TransferStatus
+
+    results = {"succeeded": [], "failed": []}
+    for job_id in job_ids:
+        job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
+        if not job:
+            results["failed"].append({"id": job_id, "reason": "not found"})
+            continue
+
+        if job.status in (TransferStatus.PENDING, TransferStatus.IN_PROGRESS):
+            results["failed"].append({"id": job_id, "reason": "still in progress"})
+            continue
+
+        db.delete(job)
+        results["succeeded"].append(job_id)
+
+    db.commit()
+    return results
 
 
 class ReceiveHeader:
@@ -568,17 +691,50 @@ async def receive_chunk(
     db: Session = Depends(get_db),
 ):
     """Inter-instance endpoint to receive file chunks."""
-    body = await request.body()
-    remote_conn = await verify_signature_from_components(
-        db, headers.fingerprint, headers.timestamp, headers.signature, headers.nonce, request, body
+    logger.info(
+        f"Receiving chunk {headers.chunk_index} for job {headers.job_id}: "
+        f"path_id={headers.remote_path_id}, relative_path={headers.relative_path}, "
+        f"storage_type={headers.storage_type}, is_final={headers.is_final}"
     )
+
+    body = await request.body()
+    logger.debug(f"Chunk {headers.chunk_index} body size: {len(body)} bytes")
+
+    try:
+        remote_conn = await verify_signature_from_components(
+            db, headers.fingerprint, headers.timestamp, headers.signature, headers.nonce, request, body
+        )
+        logger.debug(f"Signature verified for chunk {headers.chunk_index} from {remote_conn.name}")
+    except Exception as e:
+        logger.error(f"Signature verification failed for chunk {headers.chunk_index}: {e}")
+        raise
 
     path = db.query(MonitoredPath).filter(MonitoredPath.id == headers.remote_path_id).first()
     if not path:
+        logger.error(
+            f"MonitoredPath {headers.remote_path_id} not found for chunk {headers.chunk_index}"
+        )
         raise HTTPException(status_code=404, detail="MonitoredPath not found")
 
-    base_dir = _get_base_directory(path, headers.storage_type)
-    tmp_path = await _validate_and_build_path(base_dir, headers.relative_path)
+    try:
+        base_dir = _get_base_directory(path, headers.storage_type)
+        logger.debug(f"Base directory for chunk {headers.chunk_index}: {base_dir}")
+    except Exception as e:
+        logger.error(
+            f"Failed to get base directory for path {headers.remote_path_id}, "
+            f"storage_type={headers.storage_type}: {e}"
+        )
+        raise
+
+    try:
+        tmp_path = await _validate_and_build_path(base_dir, headers.relative_path)
+        logger.debug(f"Validated temp path for chunk {headers.chunk_index}: {tmp_path}")
+    except HTTPException as e:
+        logger.error(
+            f"Path validation failed for chunk {headers.chunk_index}: "
+            f"base_dir={base_dir}, relative_path={headers.relative_path}, error={e.detail}"
+        )
+        raise
 
     if headers.chunk_index == 0:
         file_size = (
@@ -586,23 +742,48 @@ async def receive_chunk(
             if "X-File-Size" in request.headers
             else 0
         )
+        logger.info(f"First chunk for job {headers.job_id}, file size: {file_size} bytes")
         if file_size > 0:
             try:
                 disk_space_validator.validate_disk_space_direct(file_size, Path(base_dir))
+                logger.debug(f"Disk space validated for {file_size} bytes at {base_dir}")
             except ValueError as e:
+                logger.error(f"Insufficient disk space for job {headers.job_id}: {e}")
                 raise HTTPException(status_code=507, detail=str(e)) from None
 
     await anyio.to_thread.run_sync(lambda: tmp_path.parent.mkdir(parents=True, exist_ok=True))
+    logger.debug(f"Created parent directory for chunk {headers.chunk_index}")
 
-    decrypted_chunk = await _decrypt_chunk(
-        body, headers.encryption_nonce, headers.ephemeral_public_key, remote_conn, db
-    )
-    decompressed_chunk = await _decompress_chunk(decrypted_chunk)
+    try:
+        decrypted_chunk = await _decrypt_chunk(
+            body, headers.encryption_nonce, headers.ephemeral_public_key, remote_conn, db
+        )
+        logger.debug(
+            f"Decrypted chunk {headers.chunk_index} "
+            f"(encrypted: {len(body)} -> decrypted: {len(decrypted_chunk)} bytes)"
+        )
+    except Exception as e:
+        logger.error(f"Decryption failed for chunk {headers.chunk_index}: {e}")
+        raise
+
+    try:
+        decompressed_chunk = await _decompress_chunk(decrypted_chunk)
+        logger.debug(
+            f"Decompressed chunk {headers.chunk_index} "
+            f"(compressed: {len(decrypted_chunk)} -> decompressed: {len(decompressed_chunk)} bytes)"
+        )
+    except Exception as e:
+        logger.error(f"Decompression failed for chunk {headers.chunk_index}: {e}")
+        raise
 
     mode = "ab" if headers.chunk_index > 0 else "wb"
     async with aiofiles.open(tmp_path, mode) as f:
         await f.write(decompressed_chunk)
 
+    logger.info(
+        f"Successfully received chunk {headers.chunk_index} for job {headers.job_id} "
+        f"({len(decompressed_chunk)} bytes written)"
+    )
     return {"status": "success", "chunk": headers.chunk_index}
 
 

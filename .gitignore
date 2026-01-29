@@ -156,3 +156,5 @@ logs/
 # uv
 .uv/
 .DS_Store
+
+test_run/

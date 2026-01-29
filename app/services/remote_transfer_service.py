@@ -31,7 +31,7 @@ from app.utils.retry_strategy import retry_strategy
 
 logger = logging.getLogger(__name__)
 
-CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+CHUNK_SIZE = 5 * 1024 * 1024  # 5MB chunks
 MAX_RETRIES = retry_strategy.max_retries
 
 
@@ -56,10 +56,17 @@ class RemoteTransferService:
         remote_monitored_path_id: int,
     ) -> RemoteTransferJob:
         """Create a new remote transfer job."""
+        logger.info(
+            f"Creating transfer job: file_id={file_id}, "
+            f"remote_connection_id={remote_connection_id}, "
+            f"remote_monitored_path_id={remote_monitored_path_id}"
+        )
+
         # Get the file from inventory
         file_obj = db.query(FileInventory).filter(FileInventory.id == file_id).first()
         if not file_obj:
             msg = f"File with ID {file_id} not found in inventory"
+            logger.error(msg)
             raise ValueError(msg)
 
         # Validate remote connection exists
@@ -68,7 +75,10 @@ class RemoteTransferService:
         )
         if not conn:
             msg = f"Remote connection with ID {remote_connection_id} not found"
+            logger.error(msg)
             raise ValueError(msg)
+
+        logger.debug(f"Using remote connection: {conn.name} ({conn.url})")
 
         # Get the monitored path to determine relative path
         monitored_path = (
@@ -76,29 +86,38 @@ class RemoteTransferService:
         )
         if not monitored_path:
             msg = f"Monitored path with ID {file_obj.path_id} not found"
+            logger.error(msg)
             raise ValueError(msg)
+
+        logger.debug(f"Source monitored path: {monitored_path.name} ({monitored_path.source_path})")
 
         # Calculate relative path
         source_path = Path(file_obj.file_path)
         monitored_source = Path(monitored_path.source_path)
         try:
             relative_path = str(source_path.relative_to(monitored_source))
+            logger.debug(f"Relative path: {relative_path}")
         except ValueError as err:
             msg = f"File path {source_path} is not relative to monitored path {monitored_source}"
+            logger.error(msg)
             raise ValueError(msg) from err
 
         # Get file size
         if not source_path.exists():
             msg = f"Source file does not exist: {source_path}"
+            logger.error(msg)
             raise ValueError(msg)
 
         file_size = source_path.stat().st_size
+        logger.debug(f"File size: {file_size} bytes")
 
         # Compute checksum if not already present
         checksum = file_obj.checksum
         if not checksum:
             logger.info(f"Computing checksum for {source_path}")
             checksum = file_metadata_extractor.compute_sha256(source_path)
+        else:
+            logger.debug(f"Using existing checksum: {checksum}")
 
         # Create the transfer job
         job = RemoteTransferJob(
@@ -228,8 +247,9 @@ class RemoteTransferService:
 
         return ephemeral_public_key_b64, symmetric_key
 
-    def _compress_and_encrypt_chunk(self, chunk, cctx, use_encryption, aesgcm_key):
+    def _compress_and_encrypt_chunk(self, chunk, use_encryption, aesgcm_key):
         """Compress and optionally encrypt a chunk using the derived session key."""
+        cctx = zstd.ZstdCompressor(level=3)
         final_chunk = cctx.compress(chunk)
         nonce = b""
         if use_encryption:
@@ -262,14 +282,13 @@ class RemoteTransferService:
             logger.debug(f"Failed to get remote status for job {job.id}, starting fresh")
             return {"size": 0, "status": "not_found"}
 
-    async def _send_chunks(self, job, conn, db, client):
+    async def _send_chunks(self, job: RemoteTransferJob, conn: RemoteConnection, db: Session, client: httpx.AsyncClient):
         """Internal helper to send file chunks."""
         use_encryption = not conn.url.startswith("https://")
         ephemeral_pub_key_b64, session_key = None, None
         if use_encryption:
             ephemeral_pub_key_b64, session_key = self._perform_ecdh_key_exchange(conn)
 
-        cctx = zstd.ZstdCompressor()
         start_time_ts = time.time()
         source_path = Path(job.source_path)
 
@@ -300,7 +319,7 @@ class RemoteTransferService:
 
                 is_final = await self._is_final_chunk(f)
                 final_chunk, nonce = self._compress_and_encrypt_chunk(
-                    chunk, cctx, use_encryption, session_key
+                    chunk, use_encryption, session_key
                 )
 
                 # --- Signing and Header construction ---
@@ -314,13 +333,28 @@ class RemoteTransferService:
                     "X-Relative-Path": job.relative_path,
                     "X-Remote-Path-ID": str(job.remote_monitored_path_id),
                     "X-Storage-Type": job.storage_type.value,
-                    "X-Nonce": nonce.hex() if use_encryption else "",
+                    "X-Encryption-Nonce": nonce.hex() if use_encryption else "",
                     "X-File-Size": str(job.total_size),
                     **signed_headers,
                 }
-                if use_encryption and chunk_idx == 0:
+                if use_encryption:
                     headers["X-Ephemeral-Public-Key"] = ephemeral_pub_key_b64
                 # --- End Header Construction ---
+
+                logger.debug(
+                    f"Sending chunk {chunk_idx} for job {job.id} to {url} "
+                    f"(size: {len(final_chunk)} bytes, is_final: {is_final})"
+                )
+                logger.debug(
+                    f"Request headers for chunk {chunk_idx}: "
+                    f"X-Remote-Path-ID={headers.get('X-Remote-Path-ID')}, "
+                    f"X-Storage-Type={headers.get('X-Storage-Type')}, "
+                    f"X-Relative-Path={headers.get('X-Relative-Path')}, "
+                    f"X-Job-ID={headers.get('X-Job-ID')}"
+                )
+
+                if chunk_idx == 0:
+                    logger.debug(f"Sending first chunk with headers: {headers}")
 
                 response = await client.post(
                     url,
@@ -328,10 +362,32 @@ class RemoteTransferService:
                     content=final_chunk,
                     timeout=get_transfer_timeouts(),
                 )
-                response.raise_for_status()
+
+                try:
+                    response.raise_for_status()
+                except httpx.HTTPStatusError:
+                    # Log the full error response for debugging
+                    error_detail = response.text if response.text else "No error details provided"
+                    logger.error(
+                        f"Chunk {chunk_idx} upload failed for job {job.id}: "
+                        f"Status {response.status_code}, Response: {error_detail}"
+                    )
+                    raise
 
                 chunk_idx += 1
                 self._update_job_progress(job, len(chunk), start_time_ts, db)
+
+                # Log progress at reasonable intervals (approx every 10%)
+                if job.total_size > 0:
+                    chunks_per_10_percent = max(1, (job.total_size // CHUNK_SIZE) // 10)
+                    if chunk_idx % chunks_per_10_percent == 0 or is_final:
+                        eta_str = f", ETA: {job.eta}s" if job.eta is not None else ""
+                        speed_mb = job.current_speed / (1024 * 1024) if job.current_speed else 0
+                        logger.info(
+                            f"Transfer Job {job.id} progress: {job.progress}% "
+                            f"({job.current_size}/{job.total_size} bytes, "
+                            f"Speed: {speed_mb:.2f} MB/s{eta_str})"
+                        )
 
     async def run_transfer(self, job_id: int):
         db = SessionLocal()
@@ -341,6 +397,14 @@ class RemoteTransferService:
             if not job:
                 logger.error(f"Transfer job {job_id} not found")
                 return
+
+            logger.info(
+                f"Starting transfer job {job_id}: "
+                f"file={job.source_path}, "
+                f"remote_path_id={job.remote_monitored_path_id}, "
+                f"storage_type={job.storage_type.value}, "
+                f"size={job.total_size} bytes"
+            )
 
             # Get the remote connection
             conn = (
@@ -358,6 +422,8 @@ class RemoteTransferService:
                 db.commit()
                 return
 
+            logger.debug(f"Transfer job {job_id} using connection: {conn.name} ({conn.url})")
+
             # Ensure source file still exists
             source_path = Path(job.source_path)
             if not source_path.exists():
@@ -371,7 +437,7 @@ class RemoteTransferService:
             # Retry loop with exponential backoff
             for attempt in range(MAX_RETRIES):
                 try:
-                    async with httpx.AsyncClient() as client:
+                    async with httpx.AsyncClient(timeout=get_transfer_timeouts()) as client:
                         await self._send_chunks(job, conn, db, client)
 
                         # Finalize
@@ -382,15 +448,16 @@ class RemoteTransferService:
                             "relative_path": job.relative_path,
                             "remote_path_id": job.remote_monitored_path_id,
                         }
+                        import json
+                        body_bytes = json.dumps(json_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
                         signed_headers = await get_signed_headers(
-                            db, "POST", url, str(json_payload).encode("utf-8")
+                            db, "POST", url, body_bytes
                         )
 
                         verify_response = await client.post(
                             url,
                             headers=signed_headers,
-                            json=json_payload,
-                            timeout=get_transfer_timeouts(),
+                            content=body_bytes,
                         )
                         verify_response.raise_for_status()
 

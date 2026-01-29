@@ -14,10 +14,6 @@ Create Date: 2026-01-24 21:16:40.460590
 
 from typing import Sequence, Union
 
-import sqlalchemy as sa
-
-from alembic import op
-
 # revision identifiers, used by Alembic.
 revision: str = "1c10588157df"
 down_revision: Union[str, None] = ("836bbd0f8c8d", "f9251147202f")
@@ -37,7 +33,6 @@ def upgrade() -> None:
     2. Incremental upgrades from development versions use the path through
        63d866f824e9, 2c525e893192, and f9251147202f
     """
-    pass
 
 
 def downgrade() -> None:
@@ -47,4 +42,3 @@ def downgrade() -> None:
     Both parent migrations result in the same schema state,
     so no changes are needed when downgrading through this merge point.
     """
-    pass

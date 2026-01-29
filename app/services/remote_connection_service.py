@@ -6,7 +6,6 @@ from typing import List, Optional
 import httpx
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.models import RemoteConnection, TrustStatus
 from app.schemas import RemoteConnectionIdentity
 from app.services.identity_service import identity_service
@@ -34,9 +33,15 @@ class RemoteConnectionService:
         self, db: Session, fingerprint: str
     ) -> Optional[RemoteConnection]:
         """Get a remote connection by its public key fingerprint."""
-        return (
+        logger.debug(f"Looking up remote connection by fingerprint: {fingerprint}")
+        conn = (
             db.query(RemoteConnection).filter(RemoteConnection.remote_fingerprint == fingerprint).first()
         )
+        if conn:
+            logger.debug(f"Found remote connection: {conn.name} (ID: {conn.id})")
+        else:
+            logger.debug("Remote connection not found")
+        return conn
 
     async def get_remote_identity(self, remote_url: str) -> RemoteConnectionIdentity:
         """
