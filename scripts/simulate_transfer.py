@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 # We'll use absolute paths to avoid confusion
-BASE_DIR = Path("/Users/martino/repos/file-fridge").absolute()
+BASE_DIR = Path("./file-fridge").absolute()
 TEST_DIR = BASE_DIR / "test_run"
 INSTANCE_A_DIR = TEST_DIR / "instance_a"
 INSTANCE_B_DIR = TEST_DIR / "instance_b"
