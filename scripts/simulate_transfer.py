@@ -1,10 +1,10 @@
 import asyncio
+import hashlib
 import os
 import shutil
 import subprocess
-import time
-import hashlib
 from pathlib import Path
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -59,28 +59,35 @@ def run_setup(db_path):
 
 async def run_simulation():
     cleanup()
-    
+
     file_a = INSTANCE_A_DIR / "hot" / "large_file.dat"
     create_dummy_1gb_file(file_a)
-    
+
     # 1. Initialize Identities in separate processes
     print("Initializing Instance A...")
     id_a = run_setup(INSTANCE_A_DIR / "data" / "file_fridge_a.db")
     print(f"Identity A: {id_a['FINGERPRINT']}")
-    
+
     print("Initializing Instance B...")
     id_b = run_setup(INSTANCE_B_DIR / "data" / "file_fridge_b.db")
     print(f"Identity B: {id_b['FINGERPRINT']}")
-    
+
     # 2. Setup Mutual Trust and Paths (Direct DB write)
-    from app.models import Base, RemoteConnection, TrustStatus, MonitoredPath, FileInventory, StorageType
     from datetime import datetime, timezone
-    
+
+    from app.models import (
+        FileInventory,
+        MonitoredPath,
+        RemoteConnection,
+        StorageType,
+        TrustStatus,
+    )
+
     # DB A setup
     engine_a = create_engine(f"sqlite:///{INSTANCE_A_DIR / 'data' / 'file_fridge_a.db'}")
     SessionA = sessionmaker(bind=engine_a)
     db_a = SessionA()
-    
+
     conn_b = RemoteConnection(
         name="Instance B", url=f"http://localhost:{PORT_B}",
         remote_fingerprint=id_b["FINGERPRINT"],
@@ -103,7 +110,7 @@ async def run_simulation():
     file_id_a = file_obj.id
     conn_b_id = conn_b.id
     db_a.close()
-    
+
     # DB B setup
     engine_b = create_engine(f"sqlite:///{INSTANCE_B_DIR / 'data' / 'file_fridge_b.db'}")
     SessionB = sessionmaker(bind=engine_b)
@@ -121,7 +128,7 @@ async def run_simulation():
     db_b.commit()
     remote_path_id_b = path_b.id
     db_b.close()
-    
+
     print("Mutual trust and paths configured.")
 
     # 3. Start Instance B (Receiver)
@@ -134,7 +141,7 @@ async def run_simulation():
         "LOG_LEVEL": "DEBUG",
         "PYTHONUNBUFFERED": "1"
     }
-    
+
     import threading
     def stream_logs(pipe, prefix):
         for line in iter(pipe.readline, b""):
@@ -145,7 +152,7 @@ async def run_simulation():
         cwd=BASE_DIR, env=env_b, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
     )
     threading.Thread(target=stream_logs, args=(proc_b.stdout, "[B]"), daemon=True).start()
-    
+
     import httpx
     # Wait for B to be ready
     print("Waiting for Instance B to be ready...")
@@ -160,7 +167,7 @@ async def run_simulation():
         except Exception:
             pass
         await asyncio.sleep(1)
-    
+
     if not ready:
         print("Instance B failed to start.")
         proc_b.terminate()

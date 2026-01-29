@@ -17,7 +17,7 @@ config = context.config
 # Only configure logging via fileConfig if the main Alembic script is running.
 # When run programmatically (e.g., during app startup), the application's
 # logging configuration should take precedence.
-if config.config_file_name is not None and not hasattr(context, 'script_directory'): # Check for programmatic execution
+if config.config_file_name is not None and not hasattr(context, "script_directory"): # Check for programmatic execution
     fileConfig(config.config_file_name)
 
 # add your model's MetaData object here

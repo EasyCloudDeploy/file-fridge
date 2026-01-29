@@ -19,10 +19,8 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.database import get_db
 from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob
-from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import (
     ConnectionCodeResponse,
     RemoteConnectionCreate,
@@ -30,18 +28,19 @@ from app.schemas import (
     RemoteConnectionUpdate,
     RemoteTransferJobBase,
 )
+from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
 from app.security import get_current_user
 from app.services.identity_service import identity_service
 from app.services.instance_config_service import instance_config_service
 from app.services.remote_connection_service import remote_connection_service
-from app.utils.remote_auth import remote_auth
 from app.services.remote_transfer_service import (
     get_transfer_timeouts,
     remote_transfer_service,
 )
 from app.services.scheduler import scheduler_service
 from app.utils.disk_validator import disk_space_validator
+from app.utils.remote_auth import remote_auth
 from app.utils.remote_signature import (
     get_signed_headers,
     verify_remote_signature,
@@ -375,7 +374,7 @@ async def connect_with_code(
         logger.exception("Unexpected error connecting to remote instance")
         raise HTTPException(
             status_code=500,
-            detail=f"Unexpected error: {str(e)}"
+            detail=f"Unexpected error: {e!s}"
         ) from e
 
 

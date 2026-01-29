@@ -2,11 +2,11 @@
 
 import logging
 
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect, text
 
-from app.database import engine, SessionLocal
+from alembic import command
+from app.database import SessionLocal, engine
 
 logger = logging.getLogger(__name__)
 

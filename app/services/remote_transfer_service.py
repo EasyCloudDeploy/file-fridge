@@ -365,7 +365,7 @@ class RemoteTransferService:
 
                 try:
                     response.raise_for_status()
-                except httpx.HTTPStatusError as e:
+                except httpx.HTTPStatusError:
                     # Log the full error response for debugging
                     error_detail = response.text if response.text else "No error details provided"
                     logger.error(

@@ -6,7 +6,6 @@ from typing import List, Optional
 import httpx
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.models import RemoteConnection, TrustStatus
 from app.schemas import RemoteConnectionIdentity
 from app.services.identity_service import identity_service
