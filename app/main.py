@@ -44,29 +44,16 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# --- TEMPORARY DEBUG: Verify effective log level ---
-logger.info(f"Effective logging level: {logging.getLevelName(logging.root.level)}")
-logger.info(f"Configured log_level from settings: {settings.log_level.upper()}")
-# --- END TEMPORARY DEBUG ---
-
-
-# Filter out /api/v1/remote/receive from uvicorn access logs to prevent spam during file transfers
-class RemoteReceiveFilter(logging.Filter):
-    """Filter to suppress /api/v1/remote/receive endpoint logs."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        """Return False to suppress log record."""
-        return "/api/v1/remote/receive" not in record.getMessage()
-
-
 # Apply filter to uvicorn access logger
-logging.getLogger("uvicorn.access").addFilter(RemoteReceiveFilter())
+# TODO: Implement RemoteReceiveFilter to reduce log noise from /receive endpoint
+# logging.getLogger("uvicorn.access").addFilter(RemoteReceiveFilter())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):  # noqa: ARG001
     """Application lifespan manager."""
     # Startup
+    logger.info(f"Starting File Fridge with DATABASE_PATH: {settings.database_path}")
     logger.info("Initializing database...")
     init_db()
 
