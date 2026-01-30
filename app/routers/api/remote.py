@@ -877,6 +877,27 @@ def get_exposed_paths(
 # --- Bidirectional Transfer Endpoints ---
 
 
+def _get_relative_path(file_obj: FileInventory, monitored_path: MonitoredPath) -> str:
+    """Compute a relative path for *file_obj* against the monitored path.
+
+    Tries, in order:
+    1. ``relative_to(monitored_path.source_path)``
+    2. ``relative_to(loc.path)`` for each cold-storage location
+    3. Falls back to the bare filename
+    """
+    fp = Path(file_obj.file_path)
+    try:
+        return str(fp.relative_to(monitored_path.source_path))
+    except ValueError:
+        pass
+    for loc in monitored_path.storage_locations:
+        try:
+            return str(fp.relative_to(loc.path))
+        except ValueError:
+            continue
+    return fp.name
+
+
 @router.get("/browse-files", tags=["Remote Connections"])
 def browse_remote_files(
     path_id: int,
@@ -915,7 +936,7 @@ def browse_remote_files(
             {
                 "inventory_id": f.id,
                 "file_path": f.file_path,
-                "relative_path": str(Path(f.file_path).relative_to(path.source_path)),
+                "relative_path": _get_relative_path(f, path),
                 "file_size": f.file_size or 0,
                 "storage_type": f.storage_type.value if f.storage_type else "HOT",
                 "file_mtime": f.file_mtime,
