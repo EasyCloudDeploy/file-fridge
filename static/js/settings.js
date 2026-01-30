@@ -1,12 +1,12 @@
 // Settings page JavaScript
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     // Tab switching
     const navLinks = document.querySelectorAll('#settings-nav .list-group-item');
     const sections = document.querySelectorAll('.settings-section');
 
     navLinks.forEach(link => {
-        link.addEventListener('click', function(e) {
+        link.addEventListener('click', function (e) {
             e.preventDefault();
             const sectionId = this.dataset.section;
 
@@ -51,7 +51,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const toggleIcon = document.getElementById('toggle-icon');
 
     if (togglePasswordBtn) {
-        togglePasswordBtn.addEventListener('click', function() {
+        togglePasswordBtn.addEventListener('click', function () {
             if (newPasswordInput.type === 'password') {
                 newPasswordInput.type = 'text';
                 toggleIcon.classList.remove('bi-eye');
@@ -70,7 +70,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const passwordStrengthText = document.getElementById('password-strength-text');
 
     if (newPasswordInputWithStrength) {
-        newPasswordInputWithStrength.addEventListener('input', function() {
+        newPasswordInputWithStrength.addEventListener('input', function () {
             const password = this.value;
             const strength = calculatePasswordStrength(password);
 
@@ -88,7 +88,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const changePasswordForm = document.getElementById('change-password-form');
 
     if (changePasswordForm) {
-        changePasswordForm.addEventListener('submit', async function(e) {
+        changePasswordForm.addEventListener('submit', async function (e) {
             e.preventDefault();
 
             const oldPassword = document.getElementById('old-password').value;
@@ -207,7 +207,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Save instance configuration
     const instanceConfigForm = document.getElementById('instance-config-form');
     if (instanceConfigForm) {
-        instanceConfigForm.addEventListener('submit', async function(e) {
+        instanceConfigForm.addEventListener('submit', async function (e) {
             e.preventDefault();
 
             const formData = new FormData(this);
@@ -350,7 +350,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const copyCodeBtn = document.getElementById('copy-code-btn');
     if (copyCodeBtn) {
-        copyCodeBtn.addEventListener('click', async function() {
+        copyCodeBtn.addEventListener('click', async function () {
             const codeInput = document.getElementById('my-connection-code');
             try {
                 await navigator.clipboard.writeText(codeInput.value);
@@ -429,7 +429,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Add edit event listeners
                 document.querySelectorAll('.edit-conn-btn').forEach(btn => {
-                    btn.addEventListener('click', function() {
+                    btn.addEventListener('click', function () {
                         const id = this.dataset.id;
                         const name = this.dataset.name;
                         const url = this.dataset.url;
@@ -440,7 +440,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Add delete event listeners
                 document.querySelectorAll('.delete-conn-btn').forEach(btn => {
-                    btn.addEventListener('click', function() {
+                    btn.addEventListener('click', function () {
                         const id = this.dataset.id;
                         const name = this.dataset.name;
                         showDeleteModal(id, name);
@@ -516,13 +516,13 @@ document.addEventListener('DOMContentLoaded', function() {
         // Reset modal when it's hidden
         const addConnectionModal = document.getElementById('addConnectionModal');
         if (addConnectionModal) {
-            addConnectionModal.addEventListener('hidden.bs.modal', function() {
+            addConnectionModal.addEventListener('hidden.bs.modal', function () {
                 addConnectionForm.reset();
                 resetModalToAddMode();
             });
         }
 
-        addConnectionForm.addEventListener('submit', async function(e) {
+        addConnectionForm.addEventListener('submit', async function (e) {
             e.preventDefault();
             setFormButtonLoading('save-connection', true);
 
@@ -582,7 +582,7 @@ document.addEventListener('DOMContentLoaded', function() {
         deleteModal.show();
     }
 
-    document.getElementById('force-delete-check').addEventListener('change', function() {
+    document.getElementById('force-delete-check').addEventListener('change', function () {
         const warning = document.getElementById('force-delete-warning');
         if (this.checked) {
             warning.classList.remove('d-none');
@@ -591,13 +591,26 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // Delete transfer logic
+    let transferToDelete = null;
+    let transferFileName = '';
+    const deleteTransferModal = new bootstrap.Modal(document.getElementById('deleteTransferModal'));
+
+    function showDeleteTransferModal(jobId, fileName) {
+        transferToDelete = jobId;
+        transferFileName = fileName;
+        document.getElementById('delete-transfer-name').textContent = fileName;
+        deleteTransferModal.show();
+    }
+
     // Load remote transfers
+    let transfers = [];
     async function loadRemoteTransfers() {
         const list = document.getElementById('remote-transfers-list');
         try {
             const response = await authenticatedFetch('/api/v1/remote/transfers');
             if (response.ok) {
-                const transfers = await response.json();
+                transfers = await response.json();
                 if (transfers.length === 0) {
                     list.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No active transfers.</td></tr>';
                     return;
@@ -637,7 +650,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <td>
                             ${job.error_message ? `<i class="bi bi-exclamation-circle text-danger" title="${job.error_message}"></i>` : ''}
                             ${canCancel ? `<button class="btn btn-sm btn-outline-danger ms-2" onclick="cancelTransfer(${job.id})" title="Cancel transfer"><i class="bi bi-x-circle"></i></button>` : ''}
-                            ${canDelete ? `<button class="btn btn-sm btn-outline-secondary ms-2" onclick="deleteTransfer(${job.id})" title="Remove from list"><i class="bi bi-trash"></i></button>` : ''}
+                            ${canDelete ? `<button class="btn btn-sm btn-outline-secondary ms-2" onclick="showDeleteTransferModal(${job.id}, '${fileName.replace(/'/g, "\\\'")}')" title="Remove from list"><i class="bi bi-trash"></i></button>` : ''}
                         </td>
                     `;
                     list.appendChild(tr);
@@ -656,7 +669,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return mins + 'm ' + secs + 's';
     }
 
-    globalThis.cancelTransfer = async function(jobId) {
+    globalThis.cancelTransfer = async function (jobId) {
         if (!confirm('Are you sure you want to cancel this transfer?')) return;
 
         try {
@@ -676,15 +689,23 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    globalThis.deleteTransfer = async function(jobId) {
-        if (!confirm('Are you sure you want to remove this transfer from the list?')) return;
+    // Make showDeleteTransferModal globally accessible for inline onclick
+    globalThis.showDeleteTransferModal = showDeleteTransferModal;
+
+    // Confirm delete transfer button handler
+    document.getElementById('confirm-delete-transfer-btn').addEventListener('click', async function () {
+        if (!transferToDelete) return;
+
+        const button = this;
+        setButtonTextLoading(button, true, 'Removing...', 'Remove');
 
         try {
-            const response = await authenticatedFetch(`/api/v1/remote/transfers/${jobId}`, {
+            const response = await authenticatedFetch(`/api/v1/remote/transfers/${transferToDelete}`, {
                 method: 'DELETE'
             });
 
             if (response.ok) {
+                deleteTransferModal.hide();
                 await loadRemoteTransfers();
             } else {
                 const errorData = await response.json();
@@ -693,10 +714,12 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Error deleting transfer:', error);
             alert('Failed to connect to server.');
+        } finally {
+            setButtonTextLoading(button, false, 'Removing...', 'Remove');
         }
-    };
+    });
 
-    globalThis.bulkCancelTransfers = async function() {
+    globalThis.bulkCancelTransfers = async function () {
         const pendingJobs = transfers.filter(t => ['pending', 'in_progress'].includes(t.status));
         if (pendingJobs.length === 0) {
             alert('No pending or in-progress transfers to cancel.');
@@ -727,7 +750,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    globalThis.bulkRetryTransfers = async function() {
+    globalThis.bulkRetryTransfers = async function () {
         const failedJobs = transfers.filter(t => t.status === 'failed');
         if (failedJobs.length === 0) {
             alert('No failed transfers to retry.');
@@ -774,7 +797,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }, 5000);
 
-    document.getElementById('confirm-delete-conn-btn').addEventListener('click', async function() {
+    document.getElementById('confirm-delete-conn-btn').addEventListener('click', async function () {
         if (!connectionToDelete) return;
 
         const button = this;
@@ -996,7 +1019,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Add delete event listeners
                 document.querySelectorAll('.btn-delete-key').forEach(btn => {
-                    btn.addEventListener('click', function() {
+                    btn.addEventListener('click', function () {
                         deleteEncryptionKey(this.dataset.id);
                     });
                 });
@@ -1031,7 +1054,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const btnGenerateKey = document.getElementById('btn-generate-key');
     if (btnGenerateKey) {
-        btnGenerateKey.addEventListener('click', async function() {
+        btnGenerateKey.addEventListener('click', async function () {
             if (!confirm('Are you sure you want to generate a new encryption key? This will rotate the current active key. New data will use this key, while existing data remains readable using old keys.')) {
                 return;
             }
@@ -1056,6 +1079,260 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // --- User Management ---
+
+    /**
+     * Parse JWT to extract roles
+     */
+    function parseJwt(token) {
+        try {
+            const base64Url = token.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const jsonPayload = decodeURIComponent(atob(base64).split('').map(function (c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+            return JSON.parse(jsonPayload);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    const payload = parseJwt(sessionStorage.getItem('auth_token'));
+
+    /**
+     * Check if current user is an admin and show admin-only elements
+     */
+    function initUserManagement() {
+        if (!payload) return;
+
+        if (payload.roles && payload.roles.includes('admin')) {
+            // Show admin-only elements
+            document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('d-none'));
+
+            // If the hash is #users, load the users list
+            if (globalThis.location.hash === '#users') {
+                loadUsers();
+            }
+        }
+    }
+
+    initUserManagement();
+
+    // Listen for tab switch to users
+    navLinks.forEach(link => {
+        link.addEventListener('click', function () {
+            if (this.dataset.section === 'users') {
+                loadUsers();
+            }
+        });
+    });
+
+    async function loadUsers() {
+        const list = document.getElementById('users-list');
+        if (!list) return;
+
+        try {
+            const response = await authenticatedFetch('/api/v1/users');
+            if (response.ok) {
+                const users = await response.json();
+                list.innerHTML = '';
+
+                if (users.length === 0) {
+                    list.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No users found.</td></tr>';
+                    return;
+                }
+
+                users.forEach(user => {
+                    const date = new Date(user.created_at).toLocaleDateString();
+                    const tr = document.createElement('tr');
+
+                    // Simple badges for roles
+                    const roleBadges = user.roles.map(r =>
+                        `<span class="badge bg-secondary me-1">${r}</span>`
+                    ).join('');
+
+                    const statusBadge = user.is_active ?
+                        '<span class="badge bg-success" title="User is allowed to login">Active</span>' :
+                        '<span class="badge bg-danger" title="User is blocked from login">Inactive</span>';
+
+                    tr.innerHTML = `
+                        <td><strong>${escapeHtml(user.username)}</strong></td>
+                        <td>${roleBadges}</td>
+                        <td>${statusBadge}</td>
+                        <td>${date}</td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-primary btn-edit-roles me-1" 
+                                    data-id="${user.id}" data-username="${escapeHtml(user.username)}" data-roles='${JSON.stringify(user.roles)}' title="Edit Roles">
+                                <i class="bi bi-shield-check"></i>
+                            </button>
+                            ${user.username !== payload.sub ? `
+                            <button class="btn btn-sm btn-outline-danger btn-delete-user" data-id="${user.id}" data-username="${escapeHtml(user.username)}" title="Delete User">
+                                <i class="bi bi-trash"></i>
+                            </button>` : `<small class="text-muted">(You)</small>`}
+                        </td>
+                    `;
+                    list.appendChild(tr);
+                });
+
+                // Add event listeners
+                document.querySelectorAll('.btn-edit-roles').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        showEditRolesModal(this.dataset.id, this.dataset.username, JSON.parse(this.dataset.roles));
+                    });
+                });
+
+                document.querySelectorAll('.btn-delete-user').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        showDeleteUserModal(this.dataset.id, this.dataset.username);
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('Error loading users:', error);
+            list.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Failed to load users.</td></tr>';
+        }
+    }
+
+    // Modal instances
+    const addUserModalElement = document.getElementById('addUserModal');
+    const editRolesModalElement = document.getElementById('editRolesModal');
+    const deleteUserModalElement = document.getElementById('deleteUserModal');
+
+    let addUserModal, editRolesModal, deleteUserModal;
+
+    if (addUserModalElement) addUserModal = new bootstrap.Modal(addUserModalElement);
+    if (editRolesModalElement) editRolesModal = new bootstrap.Modal(editRolesModalElement);
+    if (deleteUserModalElement) deleteUserModal = new bootstrap.Modal(deleteUserModalElement);
+
+    // Add user button
+    document.getElementById('add-user-btn')?.addEventListener('click', () => {
+        document.getElementById('add-user-form').reset();
+        addUserModal?.show();
+    });
+
+    // Add user form submission
+    document.getElementById('add-user-form')?.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const formData = new FormData(this);
+        const data = Object.fromEntries(formData.entries());
+
+        // Collect selected roles
+        const roles = ['viewer']; // default
+        if (document.getElementById('role-manager').checked) roles.push('manager');
+        if (document.getElementById('role-admin').checked) roles.push('admin');
+
+        setFormButtonLoading('save-user', true);
+
+        try {
+            const response = await authenticatedFetch('/api/v1/users', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            if (response.ok) {
+                const newUser = await response.json();
+
+                // If roles were specified, update them (user creation API defaults to viewer)
+                if (roles.length > 1) {
+                    await authenticatedFetch(`/api/v1/users/${newUser.id}/roles`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(roles)
+                    });
+                }
+
+                addUserModal?.hide();
+                showToast(`User ${data.username} created successfully`, 'success');
+                loadUsers();
+            } else {
+                const err = await response.json();
+                showToast(err.detail || 'Failed to create user', 'error');
+            }
+        } catch (error) {
+            showToast('Connection error', 'error');
+        } finally {
+            setFormButtonLoading('save-user', false);
+        }
+    });
+
+    // Edit roles
+    let currentUserIdForRoles = null;
+    function showEditRolesModal(id, username, roles) {
+        currentUserIdForRoles = id;
+        document.getElementById('edit-roles-username').textContent = username;
+
+        // Reset checkboxes
+        document.getElementById('edit-role-viewer').checked = roles.includes('viewer');
+        document.getElementById('edit-role-manager').checked = roles.includes('manager');
+        document.getElementById('edit-role-admin').checked = roles.includes('admin');
+
+        editRolesModal?.show();
+    }
+
+    document.getElementById('confirm-roles-btn')?.addEventListener('click', async function () {
+        const roles = [];
+        if (document.getElementById('edit-role-viewer').checked) roles.push('viewer');
+        if (document.getElementById('edit-role-manager').checked) roles.push('manager');
+        if (document.getElementById('edit-role-admin').checked) roles.push('admin');
+
+        const btn = this;
+        setButtonTextLoading(btn, true, 'Updating...', 'Update Roles');
+
+        try {
+            const response = await authenticatedFetch(`/api/v1/users/${currentUserIdForRoles}/roles`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(roles)
+            });
+
+            if (response.ok) {
+                editRolesModal?.hide();
+                showToast('Roles updated successfully', 'success');
+                loadUsers();
+            } else {
+                const err = await response.json();
+                showToast(err.detail || 'Failed to update roles', 'error');
+            }
+        } catch (error) {
+            showToast('Connection error', 'error');
+        } finally {
+            setButtonTextLoading(btn, false, 'Updating...', 'Update Roles');
+        }
+    });
+
+    // Delete user
+    let userToDeleteId = null;
+    function showDeleteUserModal(id, username) {
+        userToDeleteId = id;
+        document.getElementById('delete-user-name').textContent = username;
+        deleteUserModal?.show();
+    }
+
+    document.getElementById('confirm-delete-user-btn')?.addEventListener('click', async function () {
+        const btn = this;
+        setButtonTextLoading(btn, true, 'Deleting...', 'Delete User');
+
+        try {
+            const response = await authenticatedFetch(`/api/v1/users/${userToDeleteId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                deleteUserModal?.hide();
+                showToast('User deleted successfully', 'success');
+                loadUsers();
+            } else {
+                const err = await response.json();
+                showToast(err.detail || 'Failed to delete user', 'error');
+            }
+        } catch (error) {
+            showToast('Connection error', 'error');
+        } finally {
+            setButtonTextLoading(btn, false, 'Deleting...', 'Delete User');
+        }
+    });
 });
 
 function setFormButtonLoading(baseName, isLoading) {

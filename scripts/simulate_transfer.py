@@ -99,11 +99,16 @@ async def run_simulation():
     path_a = MonitoredPath(name="Hot A", source_path=str(INSTANCE_A_DIR / "hot"))
     db_a.add(path_a)
     db_a.flush()
+
+    # Compute checksum with proper file handle management
+    with open(file_a, "rb") as f:
+        checksum = hashlib.sha256(f.read(4096)).hexdigest()
+
     file_obj = FileInventory(
         path_id=path_a.id, file_path=str(file_a), file_size=1024 * 1024 * 1024,
         file_mtime=datetime.fromtimestamp(file_a.stat().st_mtime, tz=timezone.utc),
         storage_type=StorageType.HOT,
-        checksum=hashlib.sha256(open(file_a, "rb").read(4096)).hexdigest()
+        checksum=checksum
     )
     db_a.add(file_obj)
     db_a.commit()

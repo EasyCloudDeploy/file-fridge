@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
@@ -84,12 +84,41 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(normalized.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
+# Role-based permissions mapping
+# Format: role_name: [tag:action, ...]
+# action can be 'read', 'write', or '*'
+ROLE_PERMISSIONS = {
+    "admin": ["*"],
+    "viewer": [
+        "files:read",
+        "paths:read",
+        "stats:read",
+        "browser:read",
+        "tags:read",
+        "storage:read",
+        "authentication:read",
+        "Remote Connections:read",
+    ],
+    "manager": [
+        "files:*",
+        "paths:*",
+        "tags:*",
+        "tag-rules:*",
+        "criteria:*",
+        "cleanup:*",
+        "notifiers:*",
+        "Encryption:read",
+        "Remote Connections:*",
+    ],
+}
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
     Create a JWT access token.
 
     Args:
-        data: Data to encode in the token (typically {"sub": username})
+        data: Data to encode in the token (typically {"sub": username, "roles": []})
         expires_delta: Optional custom expiration time delta
 
     Returns:
@@ -127,6 +156,7 @@ def verify_token(token: str) -> Optional[dict]:
     except JWTError as e:
         logger.warning(f"JWT verification failed: {e}")
         return None
+
 
 
 def get_current_user(
@@ -179,6 +209,63 @@ def get_current_user(
         )
 
     return user
+
+
+class PermissionChecker:
+    """
+    Dependency to check if the current user has permission for the request.
+    """
+
+    def __init__(self, tag: str):
+        self.tag = tag
+
+    def __call__(self, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+        # Admin bypass
+        if "admin" in user.roles:
+            return user
+
+        # Determine required action based on HTTP method
+        action = "read" if request.method == "GET" else "write"
+
+        if not self.check_permission(user, self.tag, action):
+            # Log violation using the existing service
+            from app.services.security_audit_service import security_audit_service
+            
+            security_audit_service._log(
+                db,
+                "ACCESS_DENIED",
+                f"Unauthorized {request.method} access to {self.tag}",
+                user.username,
+                {"tag": self.tag, "method": request.method, "severity": "MEDIUM"},
+            )
+            
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: user does not have {action} access to {self.tag}"
+            )
+            
+        return user
+
+    @staticmethod
+    def check_permission(user: User, tag: str, action: str) -> bool:
+        """Check if a user has a specific permission."""
+        if "admin" in user.roles:
+            return True
+
+        if not user.roles:
+            return False
+
+        user_permissions = []
+        for role in user.roles:
+            user_permissions.extend(ROLE_PERMISSIONS.get(role, []))
+
+        # Check for exact Match, tag:* or *
+        required = f"{tag}:{action}"
+        star_tag = f"{tag}:*"
+
+        return any(p in ["*", required, star_tag] for p in user_permissions)
+
+
 
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:

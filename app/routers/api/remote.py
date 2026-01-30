@@ -21,6 +21,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob, TransferStatus
 from app.models import (
     FileInventory,
     FileStatus,
@@ -41,7 +42,7 @@ from app.schemas import (
 )
 from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
-from app.security import get_current_user
+from app.security import PermissionChecker, get_current_user
 from app.services.identity_service import identity_service
 from app.services.instance_config_service import instance_config_service
 from app.services.remote_connection_service import remote_connection_service
@@ -221,8 +222,12 @@ async def _decompress_chunk(chunk: bytes) -> bytes:
 
 
 @router.get("/status", tags=["Remote Connections"])
-def get_remote_status(db: Session = Depends(get_db)):
+def get_remote_status(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+):
     """Check if remote connections are properly configured."""
+    _ = current_user
     instance_url = instance_config_service.get_instance_url(db)
     is_configured = bool(instance_url)
     return {
@@ -239,7 +244,8 @@ def get_remote_status(db: Session = Depends(get_db)):
 
 @router.get("/config", tags=["Remote Connections"])
 def get_instance_config(
-    db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Get instance configuration including source information (environment vs database)."""
     _ = current_user
@@ -250,7 +256,7 @@ def get_instance_config(
 def update_instance_config(
     config_data: dict,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """
     Update instance configuration (database values).
@@ -292,7 +298,10 @@ def get_public_identity(db: Session = Depends(get_db)):
 
 
 @router.get("/my-identity", tags=["Remote Connections"])
-def get_my_identity(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_my_identity(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+):
     """
     Get this instance's identity information for sharing with others.
     Users share this fingerprint out-of-band to allow remote instances to verify.
@@ -318,7 +327,8 @@ def get_my_identity(db: Session = Depends(get_db), current_user: dict = Depends(
 
 @router.get("/connection-code", response_model=ConnectionCodeResponse, tags=["Remote Connections"])
 def get_connection_code(
-    db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """
     Get the current rotating connection code for this instance.
@@ -343,7 +353,8 @@ def get_connection_code(
     tags=["Remote Connections"],
 )
 async def fetch_remote_identity(
-    data: RemoteConnectionCreate, current_user: dict = Depends(get_current_user)
+    data: RemoteConnectionCreate,
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Fetch the public identity of a remote instance to initiate a connection."""
     _ = current_user
@@ -357,7 +368,7 @@ async def fetch_remote_identity(
 async def connect_with_code(
     connection_data: RemoteConnectionCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """
     Establish a connection using a connection code.
@@ -394,7 +405,7 @@ async def create_connection(
     name: str,
     remote_identity: RemoteConnectionIdentity,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Establish a trusted connection with a remote instance after verifying its identity."""
     _ = current_user
@@ -417,7 +428,10 @@ async def handle_connection_request(request: Request, db: Session = Depends(get_
 @router.get(
     "/connections", response_model=List[RemoteConnectionSchema], tags=["Remote Connections"]
 )
-def list_connections(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def list_connections(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+):
     """List all remote connections."""
     _ = current_user
     return remote_connection_service.list_connections(db)
@@ -427,7 +441,7 @@ def list_connections(db: Session = Depends(get_db), current_user: dict = Depends
 async def delete_connection(
     connection_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Delete a remote connection."""
     _ = current_user
@@ -446,7 +460,7 @@ async def delete_connection(
 def trust_connection(
     connection_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Manually trust a PENDING remote connection."""
     _ = current_user
@@ -465,7 +479,7 @@ async def update_connection(
     connection_id: int,
     update_data: RemoteConnectionUpdate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Update a remote connection's name and/or transfer mode."""
     _ = current_user
@@ -518,7 +532,7 @@ async def terminate_connection(
 async def get_remote_paths(
     connection_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Fetch available MonitoredPaths from a remote instance."""
     _ = current_user
@@ -542,7 +556,7 @@ async def get_remote_paths(
 async def migrate_file(
     migration_data: RemoteTransferJobBase,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Trigger a file migration to a remote instance."""
     _ = current_user
@@ -565,8 +579,13 @@ async def migrate_file(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.get("/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"])
-def list_transfers(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+@router.get(
+    "/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"]
+)
+def list_transfers(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+):
     """List all remote transfer jobs."""
     _ = current_user
     return db.query(RemoteTransferJob).order_by(RemoteTransferJob.id.desc()).all()
@@ -576,7 +595,7 @@ def list_transfers(db: Session = Depends(get_db), current_user: dict = Depends(g
 def cancel_transfer(
     job_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Cancel a remote transfer job."""
     _ = current_user
@@ -605,7 +624,7 @@ def cancel_transfer(
 def bulk_cancel_transfers(
     job_ids: List[int],
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Cancel multiple remote transfer jobs."""
     _ = current_user
@@ -622,7 +641,7 @@ def bulk_cancel_transfers(
 def delete_transfer(
     job_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Delete a transfer job record (for failed/completed/cancelled transfers)."""
     _ = current_user
@@ -649,11 +668,10 @@ def delete_transfer(
 def bulk_delete_transfers(
     job_ids: List[int],
     db: Session = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
     """Delete multiple transfer job records."""
     _ = current_user
-    from app.models import TransferStatus
 
     results = {"succeeded": [], "failed": []}
     for job_id in job_ids:

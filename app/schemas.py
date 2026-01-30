@@ -706,6 +706,19 @@ class UserLogin(BaseModel):
     password: str = Field(..., description="Password")
 
 
+class UserOut(BaseModel):
+    """Schema for user response."""
+
+    id: int
+    username: str
+    is_active: bool
+    roles: List[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class Token(BaseModel):
     """JWT token response."""
 

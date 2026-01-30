@@ -24,8 +24,9 @@ from app.routers.api import stats as api_stats
 from app.routers.api import storage as api_storage
 from app.routers.api import tag_rules as api_tag_rules
 from app.routers.api import tags as api_tags
+from app.routers.api import users as api_users
 from app.routers.web.views import router as web_router
-from app.security import get_current_user
+from app.security import PermissionChecker, get_current_user
 from app.services.file_cleanup import FileCleanup
 from app.services.scheduler import scheduler_service
 
@@ -118,20 +119,20 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Include authentication router (public - no authentication required)
 app.include_router(api_auth.router)
 
-# Protected API routers - require authentication
-api_dependencies = [Depends(get_current_user)]
-app.include_router(api_browser.router, dependencies=api_dependencies)
-app.include_router(api_paths.router, dependencies=api_dependencies)
-app.include_router(api_criteria.router, dependencies=api_dependencies)
-app.include_router(api_files.router, dependencies=api_dependencies)
-app.include_router(api_stats.router, dependencies=api_dependencies)
-app.include_router(api_cleanup.router, dependencies=api_dependencies)
-app.include_router(api_tags.router, dependencies=api_dependencies)
-app.include_router(api_tag_rules.router, dependencies=api_dependencies)
-app.include_router(api_storage.router, dependencies=api_dependencies)
-app.include_router(api_notifiers.router, dependencies=api_dependencies)
-app.include_router(api_encryption.router, dependencies=api_dependencies)
-app.include_router(api_remote.router)
+# Protected API routers - require authentication and RBAC
+app.include_router(api_browser.router, dependencies=[Depends(PermissionChecker("browser"))])
+app.include_router(api_paths.router, dependencies=[Depends(PermissionChecker("paths"))])
+app.include_router(api_criteria.router, dependencies=[Depends(PermissionChecker("criteria"))])
+app.include_router(api_files.router, dependencies=[Depends(PermissionChecker("files"))])
+app.include_router(api_stats.router, dependencies=[Depends(PermissionChecker("stats"))])
+app.include_router(api_cleanup.router, dependencies=[Depends(PermissionChecker("cleanup"))])
+app.include_router(api_tags.router, dependencies=[Depends(PermissionChecker("tags"))])
+app.include_router(api_tag_rules.router, dependencies=[Depends(PermissionChecker("tag-rules"))])
+app.include_router(api_storage.router, dependencies=[Depends(PermissionChecker("storage"))])
+app.include_router(api_notifiers.router, dependencies=[Depends(PermissionChecker("notifiers"))])
+app.include_router(api_encryption.router, dependencies=[Depends(PermissionChecker("Encryption"))])
+app.include_router(api_users.router)  # Roles handled inside this router
+app.include_router(api_remote.router)  # Remote connections has its own internal auth/security logic
 
 # Include consolidated web router (public - frontend handles auth)
 app.include_router(web_router)
