@@ -1291,41 +1291,69 @@ def bulk_unpin_files(request: BulkFileActionRequest, db: Session = Depends(get_d
     successful = 0
     failed = 0
 
-    for file_id in request.file_ids:
-        try:
-            # Get the file from inventory
-            file = db.query(FileInventory).filter(FileInventory.id == file_id).first()
+    try:
+        # Get unique IDs to fetch
+        unique_ids = list(set(request.file_ids))
 
-            if not file:
+        # Fetch all files
+        files = db.query(FileInventory).filter(FileInventory.id.in_(unique_ids)).all()
+        files_map = {f.id: f for f in files}
+
+        if files:
+            # Find existing pins
+            file_paths = [f.file_path for f in files]
+            existing_pins = db.query(PinnedFile).filter(PinnedFile.file_path.in_(file_paths)).all()
+            paths_pinned = {p.file_path for p in existing_pins}
+
+            # Bulk delete pins
+            if existing_pins:
+                pin_ids_to_delete = [p.id for p in existing_pins]
+                db.query(PinnedFile).filter(PinnedFile.id.in_(pin_ids_to_delete)).delete(synchronize_session=False)
+                db.commit()
+        else:
+            paths_pinned = set()
+
+        # Generate results
+        for file_id in request.file_ids:
+            if file_id not in files_map:
                 results.append(
                     BulkActionResult(file_id=file_id, success=False, message="File not found")
                 )
                 failed += 1
                 continue
 
-            # Find and delete the pin
-            pin = db.query(PinnedFile).filter(PinnedFile.file_path == file.file_path).first()
+            file = files_map[file_id]
+            file_path = file.file_path
 
-            if not pin:
+            if file_path in paths_pinned:
+                results.append(
+                    BulkActionResult(
+                        file_id=file_id, success=True, message="File unpinned successfully"
+                    )
+                )
+                # Remove from set to handle duplicates in request correctly (though typically idempotent)
+                # If we have duplicate file_ids pointing to same path, first is "unpinned", second is "not pinned"
+                # But wait, logic: "File unpinned successfully" vs "File not pinned".
+                # If I delete it, it is gone. Next time I check, it is "not pinned".
+                # To match loop behavior:
+                # Loop: 1. Unpin (Success). 2. Unpin (Not pinned).
+                # Here: We delete once.
+                # So we should mark the first occurrence as "Unpinned", subsequent as "Not pinned".
+                if file_path in paths_pinned:
+                    paths_pinned.remove(file_path)
+            else:
                 results.append(
                     BulkActionResult(file_id=file_id, success=True, message="File not pinned")
                 )
-                successful += 1
-                continue
 
-            db.delete(pin)
-            db.commit()
-
-            results.append(
-                BulkActionResult(
-                    file_id=file_id, success=True, message="File unpinned successfully"
-                )
-            )
             successful += 1
 
-        except Exception as e:
-            db.rollback()
-            logger.exception(f"Error unpinning file {file_id}")
+    except Exception as e:
+        db.rollback()
+        logger.exception("Error in bulk unpin operation")
+        processed_count = len(results)
+        for i in range(processed_count, len(request.file_ids)):
+            file_id = request.file_ids[i]
             results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
             failed += 1
 
