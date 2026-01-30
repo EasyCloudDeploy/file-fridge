@@ -17,6 +17,8 @@ from app.models import (
     ScanStatus,
     StorageType,
     TagRuleCriterionType,
+    TransferDirection,
+    TransferMode,
     TransferStatus,
 )
 
@@ -790,15 +792,14 @@ class RemoteConnectionUpdate(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     url: Optional[str] = Field(None, min_length=1)
+    transfer_mode: Optional[TransferMode] = None
 
 
 class ConnectionCodeResponse(BaseModel):
     """Schema for connection code response."""
 
     code: str = Field(..., description="The current rotating connection code (UUID)")
-    expires_in_seconds: int = Field(
-        ..., description="Number of seconds until this code expires"
-    )
+    expires_in_seconds: int = Field(..., description="Number of seconds until this code expires")
 
 
 class RemoteConnection(RemoteConnectionBase):
@@ -807,6 +808,9 @@ class RemoteConnection(RemoteConnectionBase):
     id: int
     remote_fingerprint: Optional[str] = None
     trust_status: str
+    transfer_mode: TransferMode = TransferMode.PUSH_ONLY
+    remote_transfer_mode: TransferMode = TransferMode.PUSH_ONLY
+    effective_bidirectional: bool = False
     created_at: datetime
     updated_at: Optional[datetime]
 
@@ -851,9 +855,38 @@ class RemoteTransferJob(RemoteTransferJobBase):
     storage_type: StorageType
     checksum: Optional[str]
     eta: Optional[float] = None  # Seconds remaining, calculated at runtime
+    direction: TransferDirection = TransferDirection.PUSH
 
     class Config:
         from_attributes = True
+
+
+class PullTransferRequest(BaseModel):
+    """Request to pull a file from a remote instance."""
+
+    remote_connection_id: int
+    remote_file_inventory_id: int
+    local_monitored_path_id: int
+
+
+class RemoteFileListItem(BaseModel):
+    """A file available for pull transfer from a remote instance."""
+
+    inventory_id: int
+    file_path: str
+    relative_path: str
+    file_size: int
+    storage_type: str
+    file_mtime: Optional[float] = None
+    checksum: Optional[str] = None
+
+
+class RemoteFileListResponse(BaseModel):
+    """Response for browsing files on a remote instance."""
+
+    path_name: str
+    files: List[RemoteFileListItem]
+    total_count: int
 
 
 class ServerEncryptionKeyResponse(BaseModel):

@@ -294,7 +294,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     // Show configuration message in connections list
                     const list = document.getElementById('remote-connections-list');
                     if (list) {
-                        list.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">Remote connections are disabled until instance URL is configured above.</td></tr>';
+                        list.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Remote connections are disabled until instance URL is configured above.</td></tr>';
                     }
 
                     // Show configuration message in transfers list
@@ -380,7 +380,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 list.innerHTML = '';
 
                 if (connections.length === 0) {
-                    list.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No remote connections found.</td></tr>';
+                    list.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No remote connections found.</td></tr>';
                     return;
                 }
 
@@ -393,12 +393,30 @@ document.addEventListener('DOMContentLoaded', function () {
                     // Escape quotes for data attributes (use original values, not HTML-escaped)
                     const safeName = conn.name.replace(/"/g, '&quot;');
                     const safeUrl = conn.url.replace(/"/g, '&quot;');
+                    const safeMode = (conn.transfer_mode || 'PUSH_ONLY').replace(/"/g, '&quot;');
+
+                    // Build mode display
+                    const modeLabel = conn.transfer_mode === 'BIDIRECTIONAL' ? 'Bidirectional' : 'Push Only';
+                    let modeBadge = '';
+                    if (conn.effective_bidirectional) {
+                        modeBadge = '<span class="badge bg-success ms-1">Active</span>';
+                    } else if (conn.transfer_mode === 'BIDIRECTIONAL') {
+                        modeBadge = '<span class="badge bg-warning ms-1">Pending Remote</span>';
+                    }
+
+                    // Browse button only for effective bidirectional
+                    const browseBtn = conn.effective_bidirectional
+                        ? `<button class="btn btn-sm btn-outline-info browse-remote-btn me-2" data-id="${conn.id}" title="Browse remote files"><i class="bi bi-folder2-open"></i></button>`
+                        : '';
+
                     tr.innerHTML = `
                         <td>${escapedName}</td>
                         <td>${escapedUrl}</td>
+                        <td>${modeLabel}${modeBadge}</td>
                         <td>${date}</td>
                         <td>
-                            <button class="btn btn-sm btn-outline-primary edit-conn-btn me-2" data-id="${conn.id}" data-name="${safeName}" data-url="${safeUrl}">
+                            ${browseBtn}
+                            <button class="btn btn-sm btn-outline-primary edit-conn-btn me-2" data-id="${conn.id}" data-name="${safeName}" data-url="${safeUrl}" data-mode="${safeMode}">
                                 <i class="bi bi-pencil"></i>
                             </button>
                             <button class="btn btn-sm btn-outline-danger delete-conn-btn" data-id="${conn.id}" data-name="${safeName}">
@@ -415,7 +433,8 @@ document.addEventListener('DOMContentLoaded', function () {
                         const id = this.dataset.id;
                         const name = this.dataset.name;
                         const url = this.dataset.url;
-                        showEditModal(id, name, url);
+                        const mode = this.dataset.mode;
+                        showEditModal(id, name, url, mode);
                     });
                 });
 
@@ -427,10 +446,18 @@ document.addEventListener('DOMContentLoaded', function () {
                         showDeleteModal(id, name);
                     });
                 });
+
+                // Add browse event listeners
+                document.querySelectorAll('.browse-remote-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const id = this.dataset.id;
+                        openBrowseRemoteFiles(id);
+                    });
+                });
             }
         } catch (error) {
             console.error('Error loading connections:', error);
-            list.innerHTML = '<tr><td colspan="4" class="text-center text-danger py-4">Failed to load connections.</td></tr>';
+            list.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Failed to load connections.</td></tr>';
         }
     }
 
@@ -438,7 +465,7 @@ document.addEventListener('DOMContentLoaded', function () {
     let editingConnectionId = null;
 
     // Show edit modal
-    function showEditModal(id, name, url) {
+    function showEditModal(id, name, url, transferMode) {
         editingConnectionId = id;
         const modal = document.getElementById('addConnectionModal');
         const modalTitle = document.getElementById('addConnectionModalLabel');
@@ -447,6 +474,7 @@ document.addEventListener('DOMContentLoaded', function () {
         const codeInput = document.getElementById('connection-code');
         const codeGroup = codeInput.closest('.mb-3');
         const saveBtn = document.getElementById('save-connection-text');
+        const modeSelect = document.getElementById('transfer-mode');
 
         // Update modal title
         modalTitle.textContent = 'Edit Remote Connection';
@@ -454,6 +482,7 @@ document.addEventListener('DOMContentLoaded', function () {
         // Populate form fields
         nameInput.value = name;
         urlInput.value = url;
+        if (modeSelect) modeSelect.value = transferMode || 'PUSH_ONLY';
 
         // Hide connection code field for editing
         codeGroup.classList.add('d-none');
@@ -504,10 +533,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 let response;
                 if (editingConnectionId) {
                     // Update existing connection
-                    // Only send name and url (connection code not needed for updates)
                     const updateData = {
                         name: data.name,
-                        url: data.url
+                        url: data.url,
+                        transfer_mode: data.transfer_mode || 'PUSH_ONLY',
                     };
                     response = await authenticatedFetch(`/api/v1/remote/connections/${editingConnectionId}`, {
                         method: 'PATCH',
@@ -601,11 +630,15 @@ document.addEventListener('DOMContentLoaded', function () {
                         statusClass = 'warning';
                     }
 
+                    const directionBadge = job.direction === 'PULL'
+                        ? '<span class="badge bg-info me-1" title="Pull transfer (serving to remote)"><i class="bi bi-arrow-up"></i></span>'
+                        : '<span class="badge bg-secondary me-1" title="Push transfer"><i class="bi bi-arrow-right"></i></span>';
+
                     const canCancel = ['pending', 'in_progress'].includes(job.status);
                     const canDelete = ['failed', 'completed', 'cancelled'].includes(job.status);
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td title="${job.source_path}">${fileName}</td>
+                        <td title="${job.source_path}">${directionBadge}${fileName}</td>
                         <td><span class="badge bg-${statusClass}">${job.status}</span></td>
                         <td>
                             <div class="progress" style="height: 10px; width: 100px;">
@@ -790,6 +823,166 @@ document.addEventListener('DOMContentLoaded', function () {
             setButtonTextLoading(button, false, 'Deleting...', 'Delete');
         }
     });
+
+    // --- Browse Remote Files ---
+
+    let browseConnectionId = null;
+
+    async function openBrowseRemoteFiles(connectionId) {
+        browseConnectionId = connectionId;
+        const modal = document.getElementById('browseRemoteFilesModal');
+        const pathSelect = document.getElementById('browse-remote-path-select');
+        const localSelect = document.getElementById('pull-local-path-select');
+        const filesList = document.getElementById('remote-files-list');
+
+        // Reset state
+        pathSelect.innerHTML = '<option value="">Loading...</option>';
+        localSelect.innerHTML = '<option value="">Loading...</option>';
+        filesList.innerHTML = '<p class="text-muted text-center py-3">Select a remote path to browse files.</p>';
+
+        // Show modal
+        const modalInstance = new bootstrap.Modal(modal);
+        modalInstance.show();
+
+        // Load remote paths and local paths in parallel
+        try {
+            const [remotePaths, localPaths] = await Promise.all([
+                authenticatedFetch(`/api/v1/remote/connections/${connectionId}/paths`).then(r => r.json()),
+                authenticatedFetch('/api/v1/paths').then(r => r.json()),
+            ]);
+
+            pathSelect.innerHTML = '<option value="">Select a path...</option>';
+            remotePaths.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.name;
+                pathSelect.appendChild(opt);
+            });
+
+            localSelect.innerHTML = '<option value="">Select local destination...</option>';
+            const localPathList = Array.isArray(localPaths) ? localPaths : (localPaths.items || []);
+            localPathList.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.id;
+                opt.textContent = p.name;
+                localSelect.appendChild(opt);
+            });
+        } catch (error) {
+            console.error('Error loading paths:', error);
+            pathSelect.innerHTML = '<option value="">Failed to load paths</option>';
+            localSelect.innerHTML = '<option value="">Failed to load paths</option>';
+        }
+    }
+
+    // Load files when remote path changes
+    const browsePathSelect = document.getElementById('browse-remote-path-select');
+    if (browsePathSelect) {
+        browsePathSelect.addEventListener('change', async function() {
+            const pathId = this.value;
+            const filesList = document.getElementById('remote-files-list');
+
+            if (!pathId) {
+                filesList.innerHTML = '<p class="text-muted text-center py-3">Select a remote path to browse files.</p>';
+                return;
+            }
+
+            filesList.innerHTML = '<p class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading files...</p>';
+
+            try {
+                const response = await authenticatedFetch(
+                    `/api/v1/remote/connections/${browseConnectionId}/browse-files?path_id=${pathId}&limit=200`
+                );
+                if (!response.ok) {
+                    const err = await response.json();
+                    filesList.innerHTML = `<div class="alert alert-danger">${escapeHtml(err.detail || 'Failed to browse files')}</div>`;
+                    return;
+                }
+
+                const data = await response.json();
+                if (data.files.length === 0) {
+                    filesList.innerHTML = '<p class="text-muted text-center py-3">No files found in this path.</p>';
+                    return;
+                }
+
+                let html = `<p class="text-muted small mb-2">Showing ${data.files.length} of ${data.total_count} files in "${escapeHtml(data.path_name)}"</p>`;
+                html += '<div class="table-responsive"><table class="table table-sm table-hover">';
+                html += '<thead><tr><th>File</th><th>Size</th><th>Type</th><th>Action</th></tr></thead><tbody>';
+
+                data.files.forEach(file => {
+                    const fileName = file.relative_path || file.file_path.split('/').pop();
+                    const sizeStr = formatFileSize(file.file_size);
+                    html += `<tr>
+                        <td title="${escapeHtml(file.file_path)}">${escapeHtml(fileName)}</td>
+                        <td>${sizeStr}</td>
+                        <td><span class="badge bg-${file.storage_type === 'HOT' ? 'success' : 'info'}">${escapeHtml(file.storage_type)}</span></td>
+                        <td><button class="btn btn-sm btn-outline-primary pull-file-btn" data-inventory-id="${file.inventory_id}" title="Pull this file"><i class="bi bi-download me-1"></i>Pull</button></td>
+                    </tr>`;
+                });
+
+                html += '</tbody></table></div>';
+                filesList.innerHTML = html;
+
+                // Add pull event listeners
+                document.querySelectorAll('.pull-file-btn').forEach(btn => {
+                    btn.addEventListener('click', async function() {
+                        const inventoryId = this.dataset.inventoryId;
+                        const localPathId = document.getElementById('pull-local-path-select').value;
+                        if (!localPathId) {
+                            alert('Please select a local destination path first.');
+                            return;
+                        }
+                        await pullFile(browseConnectionId, inventoryId, localPathId, this);
+                    });
+                });
+            } catch (error) {
+                console.error('Error browsing remote files:', error);
+                filesList.innerHTML = '<div class="alert alert-danger">Failed to connect to remote instance.</div>';
+            }
+        });
+    }
+
+    async function pullFile(connectionId, remoteInventoryId, localPathId, button) {
+        const originalHtml = button.innerHTML;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        button.disabled = true;
+
+        try {
+            const response = await authenticatedFetch('/api/v1/remote/pull', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    remote_connection_id: parseInt(connectionId),
+                    remote_file_inventory_id: parseInt(remoteInventoryId),
+                    local_monitored_path_id: parseInt(localPathId),
+                }),
+            });
+
+            if (response.ok) {
+                button.innerHTML = '<i class="bi bi-check me-1"></i>Requested';
+                button.classList.remove('btn-outline-primary');
+                button.classList.add('btn-success');
+                // Refresh transfers list
+                loadRemoteTransfers();
+            } else {
+                const err = await response.json();
+                alert('Pull failed: ' + (err.detail || 'Unknown error'));
+                button.innerHTML = originalHtml;
+                button.disabled = false;
+            }
+        } catch (error) {
+            console.error('Error pulling file:', error);
+            alert('Failed to connect to server.');
+            button.innerHTML = originalHtml;
+            button.disabled = false;
+        }
+    }
+
+    function formatFileSize(bytes) {
+        if (!bytes || bytes === 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+    }
 
     // --- Encryption Management ---
 

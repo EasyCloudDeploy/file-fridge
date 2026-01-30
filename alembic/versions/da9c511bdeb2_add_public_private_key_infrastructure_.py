@@ -5,6 +5,7 @@ Revises: 935faa16ea14
 Create Date: 2026-01-24 16:39:29.038807
 
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -29,10 +30,17 @@ def upgrade() -> None:
         sa.Column("fingerprint", sa.String(), nullable=False),
         sa.Column("nonce", sa.String(), nullable=False),
         sa.Column("timestamp", sa.Integer(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=True),
-        sa.PrimaryKeyConstraint("id")
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
+            nullable=True,
+        ),
+        sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_request_nonces_fingerprint"), "request_nonces", ["fingerprint"], unique=False)
+    op.create_index(
+        op.f("ix_request_nonces_fingerprint"), "request_nonces", ["fingerprint"], unique=False
+    )
     op.create_index(op.f("ix_request_nonces_id"), "request_nonces", ["id"], unique=False)
     op.create_index(op.f("ix_request_nonces_nonce"), "request_nonces", ["nonce"], unique=True)
 
@@ -43,12 +51,21 @@ def upgrade() -> None:
         sa.Column("message", sa.Text(), nullable=False),
         sa.Column("initiated_by", sa.String(), nullable=True),
         sa.Column("event_metadata", sa.JSON(), nullable=True),
-        sa.Column("timestamp", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=True),
-        sa.PrimaryKeyConstraint("id")
+        sa.Column(
+            "timestamp",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
+            nullable=True,
+        ),
+        sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_security_audit_log_event_type"), "security_audit_log", ["event_type"], unique=False)
+    op.create_index(
+        op.f("ix_security_audit_log_event_type"), "security_audit_log", ["event_type"], unique=False
+    )
     op.create_index(op.f("ix_security_audit_log_id"), "security_audit_log", ["id"], unique=False)
-    op.create_index(op.f("ix_security_audit_log_timestamp"), "security_audit_log", ["timestamp"], unique=False)
+    op.create_index(
+        op.f("ix_security_audit_log_timestamp"), "security_audit_log", ["timestamp"], unique=False
+    )
 
     op.create_table(
         "instance_key_history",
@@ -60,46 +77,70 @@ def upgrade() -> None:
         sa.Column("x25519_private_key_encrypted", sa.Text(), nullable=False),
         sa.Column("fingerprint", sa.String(), nullable=False),
         sa.Column("active", sa.Boolean(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("(CURRENT_TIMESTAMP)"), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
+            nullable=True,
+        ),
         sa.Column("retired_at", sa.DateTime(timezone=True), nullable=True),
-        sa.PrimaryKeyConstraint("id")
+        sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_instance_key_history_fingerprint"), "instance_key_history", ["fingerprint"], unique=True)
-    op.create_index(op.f("ix_instance_key_history_id"), "instance_key_history", ["id"], unique=False)
-    op.create_index(op.f("ix_instance_key_history_key_version"), "instance_key_history", ["key_version"], unique=True)
+    op.create_index(
+        op.f("ix_instance_key_history_fingerprint"),
+        "instance_key_history",
+        ["fingerprint"],
+        unique=True,
+    )
+    op.create_index(
+        op.f("ix_instance_key_history_id"), "instance_key_history", ["id"], unique=False
+    )
+    op.create_index(
+        op.f("ix_instance_key_history_key_version"),
+        "instance_key_history",
+        ["key_version"],
+        unique=True,
+    )
 
-    # Use batch_alter_table for SQLite compatibility when changing enum types
-    with op.batch_alter_table("file_inventory", schema=None) as batch_op:
-        batch_op.alter_column("status",
-                   existing_type=sa.VARCHAR(length=7),
-                   type_=sa.Enum("ACTIVE", "MOVED", "DELETED", "MISSING", "MIGRATING", name="filestatus"),
-                   existing_nullable=True)
-        batch_op.drop_index("idx_file_inventory_cold_storage_location_id")
-        batch_op.drop_index("idx_inventory_checksum")
+    # Note: batch_alter_table drop_index doesn't support try/except well,
+    # and these indexes may already have been dropped by the previous migration.
+    # Use direct op.drop_index with try/except instead.
+    for idx_name, tbl_name in [
+        ("idx_file_inventory_cold_storage_location_id", "file_inventory"),
+        ("idx_inventory_checksum", "file_inventory"),
+        ("idx_file_records_cold_storage_location_id", "file_records"),
+        ("idx_file_tags_file_id", "file_tags"),
+        ("idx_file_tags_tag_id", "file_tags"),
+    ]:
+        try:
+            op.drop_index(op.f(idx_name), table_name=tbl_name)
+        except Exception:
+            pass
 
-    op.drop_index(op.f("idx_file_records_cold_storage_location_id"), table_name="file_records")
-    op.drop_index(op.f("idx_file_tags_file_id"), table_name="file_tags")
-    op.drop_index(op.f("idx_file_tags_tag_id"), table_name="file_tags")
+    try:
+        op.add_column(
+            "instance_metadata",
+            sa.Column("current_key_version", sa.Integer(), nullable=False, server_default="1"),
+        )
+    except Exception:
+        pass
 
-    with op.batch_alter_table("file_transaction_history", schema=None) as batch_op:
-        batch_op.alter_column("transaction_type",
-                   existing_type=sa.VARCHAR(length=9),
-                   type_=sa.Enum("FREEZE", "THAW", "MOVE_COLD", "DELETE", "COPY", "RESTORE", "CLEANUP", "REMOTE_MIGRATE", "REMOTE_RECEIVE", name="transactiontype"),
-                   existing_nullable=False)
-    op.add_column("instance_metadata", sa.Column("current_key_version", sa.Integer(), nullable=False, server_default="1"))
-    op.alter_column("notifiers", "id",
-               existing_type=sa.INTEGER(),
-               nullable=False,
-               autoincrement=True)
-    op.alter_column("notifiers", "subscribed_events",
-               existing_type=sqlite.JSON(),
-               nullable=False)
-    op.drop_index(op.f("idx_remote_connections_remote_instance_uuid"), table_name="remote_connections")
-    op.drop_column("remote_connections", "remote_instance_uuid")
-    op.drop_index(op.f("idx_tag_rules_enabled"), table_name="tag_rules")
-    op.drop_index(op.f("idx_tag_rules_priority"), table_name="tag_rules")
-    op.drop_index(op.f("idx_tag_rules_tag_id"), table_name="tag_rules")
-    op.drop_index(op.f("idx_tags_name"), table_name="tags")
+    for idx_name, tbl_name in [
+        ("idx_remote_connections_remote_instance_uuid", "remote_connections"),
+        ("idx_tag_rules_enabled", "tag_rules"),
+        ("idx_tag_rules_priority", "tag_rules"),
+        ("idx_tag_rules_tag_id", "tag_rules"),
+        ("idx_tags_name", "tags"),
+    ]:
+        try:
+            op.drop_index(op.f(idx_name), table_name=tbl_name)
+        except Exception:
+            pass
+
+    try:
+        op.drop_column("remote_connections", "remote_instance_uuid")
+    except Exception:
+        pass
     # ### end Alembic commands ###
 
 
@@ -127,32 +168,60 @@ def downgrade() -> None:
     op.create_index(op.f("idx_tag_rules_priority"), "tag_rules", ["priority"], unique=False)
     op.create_index(op.f("idx_tag_rules_enabled"), "tag_rules", ["enabled"], unique=False)
     op.add_column("remote_connections", sa.Column("remote_instance_uuid", sa.TEXT(), nullable=True))
-    op.create_index(op.f("idx_remote_connections_remote_instance_uuid"), "remote_connections", ["remote_instance_uuid"], unique=1)
-    op.alter_column("notifiers", "subscribed_events",
-               existing_type=sqlite.JSON(),
-               nullable=True)
-    op.alter_column("notifiers", "id",
-               existing_type=sa.INTEGER(),
-               nullable=True,
-               autoincrement=True)
+    op.create_index(
+        op.f("idx_remote_connections_remote_instance_uuid"),
+        "remote_connections",
+        ["remote_instance_uuid"],
+        unique=1,
+    )
+    op.alter_column("notifiers", "subscribed_events", existing_type=sqlite.JSON(), nullable=True)
+    op.alter_column(
+        "notifiers", "id", existing_type=sa.INTEGER(), nullable=True, autoincrement=True
+    )
     op.drop_column("instance_metadata", "current_key_version")
 
     # Use batch_alter_table for SQLite compatibility when changing enum types
     with op.batch_alter_table("file_transaction_history", schema=None) as batch_op:
-        batch_op.alter_column("transaction_type",
-                   existing_type=sa.Enum("FREEZE", "THAW", "MOVE_COLD", "DELETE", "COPY", "RESTORE", "CLEANUP", "REMOTE_MIGRATE", "REMOTE_RECEIVE", name="transactiontype"),
-                   type_=sa.VARCHAR(length=9),
-                   existing_nullable=False)
+        batch_op.alter_column(
+            "transaction_type",
+            existing_type=sa.Enum(
+                "FREEZE",
+                "THAW",
+                "MOVE_COLD",
+                "DELETE",
+                "COPY",
+                "RESTORE",
+                "CLEANUP",
+                "REMOTE_MIGRATE",
+                "REMOTE_RECEIVE",
+                name="transactiontype",
+            ),
+            type_=sa.VARCHAR(length=9),
+            existing_nullable=False,
+        )
 
     op.create_index(op.f("idx_file_tags_tag_id"), "file_tags", ["tag_id"], unique=False)
     op.create_index(op.f("idx_file_tags_file_id"), "file_tags", ["file_id"], unique=False)
-    op.create_index(op.f("idx_file_records_cold_storage_location_id"), "file_records", ["cold_storage_location_id"], unique=False)
+    op.create_index(
+        op.f("idx_file_records_cold_storage_location_id"),
+        "file_records",
+        ["cold_storage_location_id"],
+        unique=False,
+    )
 
     with op.batch_alter_table("file_inventory", schema=None) as batch_op:
         batch_op.create_index("idx_inventory_checksum", ["checksum"], unique=False)
-        batch_op.create_index("idx_file_inventory_cold_storage_location_id", ["cold_storage_location_id"], unique=False)
-        batch_op.alter_column("status",
-                   existing_type=sa.Enum("ACTIVE", "MOVED", "DELETED", "MISSING", "MIGRATING", name="filestatus"),
-                   type_=sa.VARCHAR(length=7),
-                   existing_nullable=True)
+        batch_op.create_index(
+            "idx_file_inventory_cold_storage_location_id",
+            ["cold_storage_location_id"],
+            unique=False,
+        )
+        batch_op.alter_column(
+            "status",
+            existing_type=sa.Enum(
+                "ACTIVE", "MOVED", "DELETED", "MISSING", "MIGRATING", name="filestatus"
+            ),
+            type_=sa.VARCHAR(length=7),
+            existing_nullable=True,
+        )
     # ### end Alembic commands ###

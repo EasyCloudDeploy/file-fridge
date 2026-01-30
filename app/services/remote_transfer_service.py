@@ -24,6 +24,7 @@ from app.models import (
     MonitoredPath,
     RemoteConnection,
     RemoteTransferJob,
+    TransferDirection,
     TransferStatus,
 )
 from app.services.file_metadata import file_metadata_extractor
@@ -55,6 +56,7 @@ class RemoteTransferService:
         file_id: int,
         remote_connection_id: int,
         remote_monitored_path_id: int,
+        direction: TransferDirection = TransferDirection.PUSH,
     ) -> RemoteTransferJob:
         """Create a new remote transfer job."""
         logger.info(
@@ -133,6 +135,7 @@ class RemoteTransferService:
             relative_path=relative_path,
             storage_type=file_obj.storage_type,
             checksum=checksum,
+            direction=direction,
         )
 
         db.add(job)
@@ -140,7 +143,8 @@ class RemoteTransferService:
         db.refresh(job)
 
         logger.info(
-            f"Created transfer job {job.id} for file {file_obj.file_path} to remote connection {conn.name}"
+            f"Created transfer job {job.id} ({direction.value}) for file "
+            f"{file_obj.file_path} to remote connection {conn.name}"
         )
         return job
 
@@ -283,7 +287,9 @@ class RemoteTransferService:
             logger.debug(f"Failed to get remote status for job {job.id}, starting fresh")
             return {"size": 0, "status": "not_found"}
 
-    async def _send_chunks(self, job: RemoteTransferJob, conn: RemoteConnection, db: Session, client: httpx.AsyncClient):
+    async def _send_chunks(
+        self, job: RemoteTransferJob, conn: RemoteConnection, db: Session, client: httpx.AsyncClient
+    ):
         """Internal helper to send file chunks."""
         use_encryption = not conn.url.startswith("https://")
         ephemeral_pub_key_b64, session_key = None, None
@@ -400,7 +406,7 @@ class RemoteTransferService:
                 return
 
             logger.info(
-                f"Starting transfer job {job_id}: "
+                f"Starting transfer job {job_id} ({job.direction.value}): "
                 f"file={job.source_path}, "
                 f"remote_path_id={job.remote_monitored_path_id}, "
                 f"storage_type={job.storage_type.value}, "
@@ -453,6 +459,12 @@ class RemoteTransferService:
                         signed_headers = await get_signed_headers(
                             db, "POST", url, body_bytes
                         )
+                        import json
+
+                        body_bytes = json.dumps(
+                            json_payload, sort_keys=True, separators=(",", ":")
+                        ).encode("utf-8")
+                        signed_headers = await get_signed_headers(db, "POST", url, body_bytes)
 
                         verify_response = await client.post(
                             url,
