@@ -24,6 +24,7 @@ document.addEventListener('DOMContentLoaded', function () {
             // Initial load for remote connections if clicked
             if (sectionId === 'remote-connections') {
                 checkRemoteConfiguration();
+                loadInstanceIdentity();
             }
 
             // Initial load for encryption if clicked
@@ -80,6 +81,88 @@ document.addEventListener('DOMContentLoaded', function () {
                 passwordStrengthDiv.classList.remove('d-none');
                 passwordStrengthDiv.className = 'alert alert-' + getStrengthClass(strength);
                 passwordStrengthText.textContent = getStrengthMessage(strength);
+            }
+        });
+    }
+
+    // --- API Token Generation ---
+
+    const generateTokenForm = document.getElementById('generate-token-form');
+    if (generateTokenForm) {
+        generateTokenForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const expirySelect = document.getElementById('token-expiry');
+            const expiryValue = expirySelect.value;
+
+            // Hide previous messages
+            document.getElementById('token-result')?.classList.add('d-none');
+            document.getElementById('token-error')?.classList.add('d-none');
+
+            // Disable button during request
+            const generateBtn = document.getElementById('generate-token-btn');
+            generateBtn.disabled = true;
+            const originalText = generateBtn.innerHTML;
+            generateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating...';
+
+            try {
+                const payload = expiryValue === '' ? {} : { expires_days: parseInt(expiryValue) };
+
+                const response = await authenticatedFetch('/api/v1/auth/tokens', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    const tokenInput = document.getElementById('generated-token');
+                    const tokenResult = document.getElementById('token-result');
+
+                    tokenInput.value = data.access_token;
+                    tokenResult.classList.remove('d-none');
+                } else {
+                    const errorData = await response.json();
+                    const tokenError = document.getElementById('token-error');
+                    const tokenErrorText = document.getElementById('token-error-text');
+
+                    if (tokenError && tokenErrorText) {
+                        tokenErrorText.textContent = errorData.detail || 'Failed to generate token';
+                        tokenError.classList.remove('d-none');
+                    }
+                }
+            } catch (error) {
+                console.error('Token generation error:', error);
+                const tokenError = document.getElementById('token-error');
+                const tokenErrorText = document.getElementById('token-error-text');
+
+                if (tokenError && tokenErrorText) {
+                    tokenErrorText.textContent = 'Failed to connect to server';
+                    tokenError.classList.remove('d-none');
+                }
+            } finally {
+                generateBtn.disabled = false;
+                generateBtn.innerHTML = originalText;
+            }
+        });
+    }
+
+    // Copy token button
+    const copyTokenBtn = document.getElementById('copy-token-btn');
+    if (copyTokenBtn) {
+        copyTokenBtn.addEventListener('click', async function () {
+            const tokenInput = document.getElementById('generated-token');
+            try {
+                await navigator.clipboard.writeText(tokenInput.value);
+
+                const originalIcon = this.innerHTML;
+                this.innerHTML = '<i class="bi bi-check"></i> Copied!';
+                setTimeout(() => {
+                    this.innerHTML = originalIcon;
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy:', err);
+                tokenInput.select();
             }
         });
     }
@@ -257,6 +340,84 @@ document.addEventListener('DOMContentLoaded', function () {
                 setFormButtonLoading('save-config', false);
             }
         });
+    }
+
+    // Load instance identity and generate QR code
+    let qrCodeInstance = null;
+    async function loadInstanceIdentity() {
+        const identityContent = document.getElementById('identity-content');
+        const identityData = document.getElementById('identity-data');
+        const identityError = document.getElementById('identity-error');
+        const identityErrorText = document.getElementById('identity-error-text');
+
+        try {
+            const response = await authenticatedFetch('/api/v1/remote/my-identity');
+            if (response.ok) {
+                const data = await response.json();
+
+                // Hide loading, show data
+                identityContent.classList.add('d-none');
+                identityData.classList.remove('d-none');
+                identityError.classList.add('d-none');
+
+                // Populate identity fields
+                document.getElementById('identity-name').textContent = data.instance_name;
+                document.getElementById('identity-url').textContent = data.url;
+                document.getElementById('identity-fingerprint').textContent = data.fingerprint;
+
+                // Generate QR code
+                const qrCanvas = document.getElementById('qr-code');
+                if (qrCanvas && data.qr_data) {
+                    // Clear previous QR code if it exists
+                    if (qrCodeInstance) {
+                        qrCanvas.innerHTML = '';
+                    }
+
+                    // Generate new QR code
+                    qrCodeInstance = new QRCode(qrCanvas, {
+                        text: data.qr_data,
+                        width: 200,
+                        height: 200,
+                        colorDark: "#000000",
+                        colorLight: "#ffffff",
+                        correctLevel: QRCode.CorrectLevel.M
+                    });
+                }
+
+                // Setup copy button
+                const copyIdentityBtn = document.getElementById('copy-identity-btn');
+                if (copyIdentityBtn) {
+                    copyIdentityBtn.onclick = async function() {
+                        const identityText = `Instance: ${data.instance_name}\nURL: ${data.url}\nFingerprint: ${data.fingerprint}`;
+                        try {
+                            await navigator.clipboard.writeText(identityText);
+                            const originalHtml = this.innerHTML;
+                            this.innerHTML = '<i class="bi bi-check me-1"></i>Copied!';
+                            setTimeout(() => {
+                                this.innerHTML = originalHtml;
+                            }, 2000);
+                        } catch (err) {
+                            console.error('Failed to copy:', err);
+                            alert('Failed to copy to clipboard');
+                        }
+                    };
+                }
+            } else {
+                // Show error
+                identityContent.classList.add('d-none');
+                identityData.classList.add('d-none');
+                identityError.classList.remove('d-none');
+
+                const errorData = await response.json();
+                identityErrorText.textContent = errorData.detail || 'Failed to load instance identity';
+            }
+        } catch (error) {
+            console.error('Error loading instance identity:', error);
+            identityContent.classList.add('d-none');
+            identityData.classList.add('d-none');
+            identityError.classList.remove('d-none');
+            identityErrorText.textContent = 'Failed to connect to server';
+        }
     }
 
     // Check if remote connections are configured
