@@ -1,6 +1,7 @@
 # ruff: noqa: B008, PLR0913
 import base64
 import hashlib
+import json
 import logging
 from pathlib import Path
 from typing import List
@@ -20,9 +21,19 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob
+from app.models import (
+    FileInventory,
+    FileStatus,
+    MonitoredPath,
+    RemoteConnection,
+    RemoteTransferJob,
+    TransferDirection,
+    TransferMode,
+    TrustStatus,
+)
 from app.schemas import (
     ConnectionCodeResponse,
+    PullTransferRequest,
     RemoteConnectionCreate,
     RemoteConnectionIdentity,
     RemoteConnectionUpdate,
@@ -281,9 +292,7 @@ def get_public_identity(db: Session = Depends(get_db)):
 
 
 @router.get("/my-identity", tags=["Remote Connections"])
-def get_my_identity(
-    db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
-):
+def get_my_identity(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """
     Get this instance's identity information for sharing with others.
     Users share this fingerprint out-of-band to allow remote instances to verify.
@@ -308,7 +317,9 @@ def get_my_identity(
 
 
 @router.get("/connection-code", response_model=ConnectionCodeResponse, tags=["Remote Connections"])
-def get_connection_code(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_connection_code(
+    db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
+):
     """
     Get the current rotating connection code for this instance.
     This code can be shared with other File Fridge instances to establish a connection.
@@ -372,10 +383,7 @@ async def connect_with_code(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Unexpected error connecting to remote instance")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unexpected error: {e!s}"
-        ) from e
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {e!s}") from e
 
 
 @router.post("/connections", response_model=RemoteConnectionSchema, tags=["Remote Connections"])
@@ -456,15 +464,34 @@ async def update_connection(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    """Update a remote connection's name."""
+    """Update a remote connection's name and/or transfer mode."""
     _ = current_user
     conn = remote_connection_service.get_connection(db, connection_id)
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    if update_data.name:
+
+    changed = False
+    if update_data.name is not None:
         conn.name = update_data.name
+        changed = True
+    if update_data.transfer_mode is not None:
+        conn.transfer_mode = update_data.transfer_mode
+        changed = True
+
+    if changed:
         db.commit()
         db.refresh(conn)
+
+    # Notify remote of transfer mode change if connection is trusted
+    if update_data.transfer_mode is not None and conn.trust_status == TrustStatus.TRUSTED:
+        try:
+            await remote_connection_service.notify_transfer_mode_change(db, conn)
+        except Exception:
+            logger.warning(
+                "Failed to notify remote instance of transfer mode change for connection %s",
+                connection_id,
+            )
+
     return conn
 
 
@@ -505,9 +532,7 @@ async def get_remote_paths(
             return response.json()
         except Exception as e:
             logger.exception("Failed to fetch paths from remote")
-            raise HTTPException(
-                status_code=500, detail="Failed to fetch paths from remote"
-            ) from e
+            raise HTTPException(status_code=500, detail="Failed to fetch paths from remote") from e
 
 
 @router.post("/migrate", response_model=RemoteTransferJobSchema, tags=["Remote Connections"])
@@ -537,9 +562,7 @@ async def migrate_file(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.get(
-    "/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"]
-)
+@router.get("/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"])
 def list_transfers(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """List all remote transfer jobs."""
     _ = current_user
@@ -558,25 +581,20 @@ def cancel_transfer(
     # Check if job exists first
     job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
     if not job:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Transfer job {job_id} not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Transfer job {job_id} not found")
 
     # Check if job can be cancelled (must be PENDING or IN_PROGRESS)
     from app.models import TransferStatus
+
     if job.status not in (TransferStatus.PENDING, TransferStatus.IN_PROGRESS):
         raise HTTPException(
             status_code=400,
-            detail=f"Transfer job {job_id} cannot be cancelled (current status: {job.status.value}). Only pending or in-progress transfers can be cancelled."
+            detail=f"Transfer job {job_id} cannot be cancelled (current status: {job.status.value}). Only pending or in-progress transfers can be cancelled.",
         )
 
     success = remote_transfer_service.cancel_transfer(db, job_id)
     if not success:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to cancel transfer job {job_id}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to cancel transfer job {job_id}")
     return {"status": "success", "message": f"Transfer {job_id} cancelled"}
 
 
@@ -608,17 +626,15 @@ def delete_transfer(
 
     job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
     if not job:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Transfer job {job_id} not found"
-        )
+        raise HTTPException(status_code=404, detail=f"Transfer job {job_id} not found")
 
     # Only allow deletion of terminal state jobs
     from app.models import TransferStatus
+
     if job.status in (TransferStatus.PENDING, TransferStatus.IN_PROGRESS):
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot delete transfer job {job_id} while it is {job.status.value}. Cancel it first or wait for it to complete."
+            detail=f"Cannot delete transfer job {job_id} while it is {job.status.value}. Cancel it first or wait for it to complete.",
         )
 
     db.delete(job)
@@ -702,7 +718,13 @@ async def receive_chunk(
 
     try:
         remote_conn = await verify_signature_from_components(
-            db, headers.fingerprint, headers.timestamp, headers.signature, headers.nonce, request, body
+            db,
+            headers.fingerprint,
+            headers.timestamp,
+            headers.signature,
+            headers.nonce,
+            request,
+            body,
         )
         logger.debug(f"Signature verified for chunk {headers.chunk_index} from {remote_conn.name}")
     except Exception as e:
@@ -738,9 +760,7 @@ async def receive_chunk(
 
     if headers.chunk_index == 0:
         file_size = (
-            int(request.headers.get("X-File-Size", "0"))
-            if "X-File-Size" in request.headers
-            else 0
+            int(request.headers.get("X-File-Size", "0")) if "X-File-Size" in request.headers else 0
         )
         logger.info(f"First chunk for job {headers.job_id}, file size: {file_size} bytes")
         if file_size > 0:
@@ -852,3 +872,248 @@ def get_exposed_paths(
     _ = remote_conn
     paths = db.query(MonitoredPath).filter(MonitoredPath.enabled).all()
     return [{"id": p.id, "name": p.name} for p in paths]
+
+
+# --- Bidirectional Transfer Endpoints ---
+
+
+@router.get("/browse-files", tags=["Remote Connections"])
+def browse_remote_files(
+    path_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    remote_conn: RemoteConnection = Depends(verify_remote_signature),
+):
+    """
+    Expose file inventory for a MonitoredPath to an authorized remote instance.
+    Only accessible if the connection is effectively bidirectional.
+    """
+    if not remote_conn.effective_bidirectional:
+        raise HTTPException(
+            status_code=403,
+            detail="Bidirectional mode not enabled. Both sides must enable it.",
+        )
+
+    path = (
+        db.query(MonitoredPath).filter(MonitoredPath.id == path_id, MonitoredPath.enabled).first()
+    )
+    if not path:
+        raise HTTPException(status_code=404, detail="MonitoredPath not found")
+
+    query = db.query(FileInventory).filter(
+        FileInventory.path_id == path_id,
+        FileInventory.status == FileStatus.ACTIVE,
+    )
+    total = query.count()
+    files = query.offset(skip).limit(limit).all()
+
+    return {
+        "path_name": path.name,
+        "total_count": total,
+        "files": [
+            {
+                "inventory_id": f.id,
+                "file_path": f.file_path,
+                "relative_path": str(Path(f.file_path).relative_to(path.source_path)),
+                "file_size": f.file_size or 0,
+                "storage_type": f.storage_type.value if f.storage_type else "HOT",
+                "file_mtime": f.file_mtime,
+                "checksum": f.checksum,
+            }
+            for f in files
+        ],
+    }
+
+
+@router.post("/serve-transfer", tags=["Remote Connections"])
+async def serve_transfer_request(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    remote_conn: RemoteConnection = Depends(verify_remote_signature),
+):
+    """
+    Accept a pull request from a remote instance.
+    Creates a PULL transfer job on this (serving) side and starts
+    sending chunks to the remote's /receive endpoint.
+    """
+    if not remote_conn.effective_bidirectional:
+        raise HTTPException(
+            status_code=403,
+            detail="Bidirectional mode not enabled. Both sides must enable it.",
+        )
+
+    data = await request.json()
+    file_inventory_id = data.get("file_inventory_id")
+    remote_path_id = data.get("remote_monitored_path_id")
+
+    if not file_inventory_id or not remote_path_id:
+        raise HTTPException(
+            status_code=400,
+            detail="file_inventory_id and remote_monitored_path_id are required",
+        )
+
+    # Validate the file exists in our inventory
+    file_obj = db.query(FileInventory).filter(FileInventory.id == file_inventory_id).first()
+    if not file_obj:
+        raise HTTPException(status_code=404, detail="File not found in inventory")
+
+    try:
+        job = remote_transfer_service.create_transfer_job(
+            db,
+            file_inventory_id,
+            remote_conn.id,
+            remote_path_id,
+            direction=TransferDirection.PULL,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    # Queue the transfer to run in background
+    background_tasks.add_task(remote_transfer_service.run_transfer, job.id)
+
+    return {"status": "accepted", "job_id": job.id}
+
+
+@router.post("/sync-transfer-mode", tags=["Remote Connections"])
+def sync_transfer_mode(
+    request: dict,
+    db: Session = Depends(get_db),
+    remote_conn: RemoteConnection = Depends(verify_remote_signature),
+):
+    """
+    Receive a transfer mode update notification from a remote instance.
+    Called when the remote changes its transfer_mode setting.
+    """
+    new_mode = request.get("transfer_mode")
+    if new_mode not in [m.value for m in TransferMode]:
+        raise HTTPException(status_code=400, detail="Invalid transfer mode")
+
+    remote_conn.remote_transfer_mode = TransferMode(new_mode)
+    db.commit()
+
+    logger.info(
+        "Updated remote_transfer_mode to %s for connection %s (effective_bidirectional=%s)",
+        new_mode,
+        remote_conn.name,
+        remote_conn.effective_bidirectional,
+    )
+
+    return {
+        "status": "success",
+        "effective_bidirectional": remote_conn.effective_bidirectional,
+    }
+
+
+# --- Requesting-Side Endpoints (called by local admin to browse/pull) ---
+
+
+@router.get(
+    "/connections/{connection_id}/browse-files",
+    tags=["Remote Connections"],
+)
+async def browse_remote_instance_files(
+    connection_id: int,
+    path_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Browse files on a remote instance for pull transfer."""
+    _ = current_user
+    conn = remote_connection_service.get_connection(db, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if not conn.effective_bidirectional:
+        raise HTTPException(
+            status_code=403,
+            detail="Bidirectional mode not enabled. Both sides must enable it.",
+        )
+
+    url = f"{conn.url.rstrip('/')}/api/v1/remote/browse-files"
+    params = {"path_id": str(path_id), "skip": str(skip), "limit": str(limit)}
+
+    headers = await get_signed_headers(db, "GET", url, b"", query_params=params)
+
+    async with httpx.AsyncClient(timeout=get_transfer_timeouts()) as client:
+        try:
+            response = await client.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error("Remote returned error browsing files: %s", e.response.text)
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"Remote error: {e.response.text}",
+            ) from e
+        except Exception as e:
+            logger.exception("Failed to browse files on remote instance")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to browse remote files: {e}",
+            ) from e
+
+
+@router.post("/pull", tags=["Remote Connections"])
+async def pull_file(
+    pull_data: PullTransferRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Request a file from a remote instance (pull transfer).
+    Sends a serve-transfer request to the remote, which will then
+    push chunks back to this instance's /receive endpoint.
+    """
+    _ = current_user
+    conn = remote_connection_service.get_connection(db, pull_data.remote_connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    if not conn.effective_bidirectional:
+        raise HTTPException(
+            status_code=403,
+            detail="Bidirectional mode not enabled. Both sides must enable it.",
+        )
+
+    # Verify local destination path exists
+    local_path = (
+        db.query(MonitoredPath)
+        .filter(MonitoredPath.id == pull_data.local_monitored_path_id)
+        .first()
+    )
+    if not local_path:
+        raise HTTPException(status_code=404, detail="Local MonitoredPath not found")
+
+    url = f"{conn.url.rstrip('/')}/api/v1/remote/serve-transfer"
+    payload = {
+        "file_inventory_id": pull_data.remote_file_inventory_id,
+        "remote_monitored_path_id": pull_data.local_monitored_path_id,
+    }
+    body_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    headers = await get_signed_headers(db, "POST", url, body_bytes)
+    headers["Content-Type"] = "application/json"
+
+    async with httpx.AsyncClient(timeout=get_transfer_timeouts()) as client:
+        try:
+            response = await client.post(url, headers=headers, content=body_bytes)
+            response.raise_for_status()
+            result = response.json()
+            return {
+                "status": "accepted",
+                "remote_job_id": result.get("job_id"),
+                "message": "Pull transfer initiated. The remote instance will send the file.",
+            }
+        except httpx.HTTPStatusError as e:
+            logger.error("Remote returned error for pull request: %s", e.response.text)
+            raise HTTPException(
+                status_code=e.response.status_code,
+                detail=f"Remote error: {e.response.text}",
+            ) from e
+        except Exception as e:
+            logger.exception("Failed to initiate pull transfer")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to request file from remote: {e}",
+            ) from e

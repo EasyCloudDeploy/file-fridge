@@ -230,6 +230,7 @@
                             <tr>
                                 <th>Name</th>
                                 <th>URL</th>
+                                <th>Mode</th>
                                 <th>Created</th>
                                 <th>Actions</th>
                             </tr>
@@ -237,7 +238,7 @@
                         <tbody id="remote-connections-list">
                             <!-- Connections will be loaded here -->
                             <tr>
-                                <td colspan="4" class="text-center text-muted py-4">
+                                <td colspan="5" class="text-center text-muted py-4">
                                     <output>
                                         <div class="spinner-border spinner-border-sm me-2" aria-label="Loading"></div>
                                         Loading connections...
@@ -355,6 +356,17 @@
                         <label for="connection-code" class="form-label">Connection Code</label>
                         <input type="text" class="form-control" id="connection-code" name="connection_code" required placeholder="Paste the code from the remote instance">
                     </div>
+                    <div class="mb-3">
+                        <label for="transfer-mode" class="form-label">Transfer Mode</label>
+                        <select class="form-select" id="transfer-mode" name="transfer_mode">
+                            <option value="PUSH_ONLY">Push Only (default)</option>
+                            <option value="BIDIRECTIONAL">Bidirectional</option>
+                        </select>
+                        <div class="form-text">
+                            Bidirectional allows the remote instance to browse and pull files from this server.
+                            Both sides must enable this for it to take effect.
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -397,6 +409,38 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                 <button type="button" class="btn btn-danger" id="confirm-delete-conn-btn">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Browse Remote Files Modal -->
+<div class="modal fade" id="browseRemoteFilesModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-folder2-open me-2"></i>Browse Remote Files
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label for="browse-remote-path-select" class="form-label">Remote Path</label>
+                        <select class="form-select" id="browse-remote-path-select">
+                            <option value="">Select a path...</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="pull-local-path-select" class="form-label">Local Destination Path</label>
+                        <select class="form-select" id="pull-local-path-select">
+                            <option value="">Select local destination...</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="remote-files-list">
+                    <p class="text-muted text-center py-3">Select a remote path to browse files.</p>
+                </div>
             </div>
         </div>
     </div>

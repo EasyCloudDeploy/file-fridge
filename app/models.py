@@ -670,7 +670,9 @@ class InstanceMetadata(Base):
     x25519_public_key = Column(Text, nullable=True)  # Key exchange public key
     x25519_private_key_encrypted = Column(Text, nullable=True)  # Encrypted key exchange private key
     current_key_version = Column(Integer, nullable=False, default=1)  # For key rotation
-    instance_url = Column(String, nullable=True)  # Instance URL for remote connections (fallback if env var not set)
+    instance_url = Column(
+        String, nullable=True
+    )  # Instance URL for remote connections (fallback if env var not set)
     instance_name = Column(String, nullable=True)  # Custom instance name
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -681,6 +683,20 @@ class TrustStatus(str, enum.Enum):
     PENDING = "PENDING"
     TRUSTED = "TRUSTED"
     REJECTED = "REJECTED"
+
+
+class TransferMode(str, enum.Enum):
+    """Transfer mode for a remote connection."""
+
+    PUSH_ONLY = "PUSH_ONLY"
+    BIDIRECTIONAL = "BIDIRECTIONAL"
+
+
+class TransferDirection(str, enum.Enum):
+    """Direction of a remote file transfer."""
+
+    PUSH = "PUSH"  # This instance sends to remote
+    PULL = "PULL"  # This instance serves file to remote on request
 
 
 class RemoteConnection(Base):
@@ -702,12 +718,32 @@ class RemoteConnection(Base):
         nullable=False,
         server_default=sa.text("'PENDING'"),
     )
+    transfer_mode = Column(
+        SQLEnum(TransferMode),
+        default=TransferMode.PUSH_ONLY,
+        nullable=False,
+        server_default=sa.text("'PUSH_ONLY'"),
+    )
+    remote_transfer_mode = Column(
+        SQLEnum(TransferMode),
+        default=TransferMode.PUSH_ONLY,
+        nullable=False,
+        server_default=sa.text("'PUSH_ONLY'"),
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     transfers = relationship(
         "RemoteTransferJob", back_populates="remote_connection", cascade="all, delete-orphan"
     )
+
+    @property
+    def effective_bidirectional(self) -> bool:
+        """Bidirectional only if BOTH sides agree."""
+        return (
+            self.transfer_mode == TransferMode.BIDIRECTIONAL
+            and self.remote_transfer_mode == TransferMode.BIDIRECTIONAL
+        )
 
 
 class TransferStatus(str, enum.Enum):
@@ -745,6 +781,12 @@ class RemoteTransferJob(Base):
     checksum = Column(String, nullable=True)
     current_speed = Column(Integer, default=0)  # bytes per second
     eta = Column(Integer, nullable=True)  # seconds remaining
+    direction = Column(
+        SQLEnum(TransferDirection),
+        default=TransferDirection.PUSH,
+        nullable=False,
+        server_default=sa.text("'PUSH'"),
+    )
 
     file = relationship("FileInventory")
     remote_connection = relationship("RemoteConnection", back_populates="transfers")

@@ -1,4 +1,5 @@
 """Service for managing remote File Fridge connections."""
+
 import json
 import logging
 from typing import List, Optional
@@ -6,7 +7,7 @@ from typing import List, Optional
 import httpx
 from sqlalchemy.orm import Session
 
-from app.models import RemoteConnection, TrustStatus
+from app.models import RemoteConnection, TransferMode, TrustStatus
 from app.schemas import RemoteConnectionIdentity
 from app.services.identity_service import identity_service
 
@@ -35,7 +36,9 @@ class RemoteConnectionService:
         """Get a remote connection by its public key fingerprint."""
         logger.debug(f"Looking up remote connection by fingerprint: {fingerprint}")
         conn = (
-            db.query(RemoteConnection).filter(RemoteConnection.remote_fingerprint == fingerprint).first()
+            db.query(RemoteConnection)
+            .filter(RemoteConnection.remote_fingerprint == fingerprint)
+            .first()
         )
         if conn:
             logger.debug(f"Found remote connection: {conn.name} (ID: {conn.id})")
@@ -127,6 +130,7 @@ class RemoteConnectionService:
             "ed25519_public_key": identity_service.get_signing_public_key_str(db),
             "x25519_public_key": identity_service.get_kx_public_key_str(db),
             "url": instance_url,
+            "transfer_mode": new_conn.transfer_mode.value,
         }
 
         # Sign the payload
@@ -166,9 +170,7 @@ class RemoteConnectionService:
             except Exception as e:
                 # If the notification fails, we still keep the local connection.
                 # The user can retry later. We can add a status field for this.
-                logger.error(
-                    "Failed to send connection request to remote instance %s: %s", name, e
-                )
+                logger.error("Failed to send connection request to remote instance %s: %s", name, e)
                 # Rollback or mark as "local_only"? For now, we'll keep it.
 
         return new_conn
@@ -237,6 +239,12 @@ class RemoteConnectionService:
         # 3. Create or update the connection as PENDING
         fingerprint = identity.get("fingerprint")
         conn = self.get_connection_by_fingerprint(db, fingerprint)
+        # Parse remote transfer mode from identity payload
+        remote_mode_str = identity.get("transfer_mode", "PUSH_ONLY")
+        remote_mode = TransferMode.PUSH_ONLY
+        if remote_mode_str in [m.value for m in TransferMode]:
+            remote_mode = TransferMode(remote_mode_str)
+
         if not conn:
             conn = RemoteConnection(
                 name=identity.get("instance_name"),
@@ -245,12 +253,14 @@ class RemoteConnectionService:
                 remote_ed25519_public_key=identity.get("ed25519_public_key"),
                 remote_x25519_public_key=identity.get("x25519_public_key"),
                 trust_status=TrustStatus.PENDING,
+                remote_transfer_mode=remote_mode,
             )
             db.add(conn)
         else:
             # Update info but keep trust status as is, unless it was rejected.
             conn.name = identity.get("instance_name")
             conn.url = str(identity.get("url"))
+            conn.remote_transfer_mode = remote_mode
             if conn.trust_status == TrustStatus.REJECTED:
                 conn.trust_status = TrustStatus.PENDING
 
@@ -313,6 +323,24 @@ class RemoteConnectionService:
         # Delete locally
         db.delete(conn)
         db.commit()
+
+    async def notify_transfer_mode_change(self, db: Session, conn: RemoteConnection):
+        """Notify the remote instance that our transfer mode has changed."""
+        from app.utils.remote_signature import get_signed_headers
+
+        url = f"{conn.url.rstrip('/')}/api/v1/remote/sync-transfer-mode"
+        payload = {"transfer_mode": conn.transfer_mode.value}
+        body_bytes = canonical_json_encode(payload)
+        headers = await get_signed_headers(db, "POST", url, body_bytes)
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                url,
+                headers=headers,
+                content=body_bytes,
+            )
+            response.raise_for_status()
+            return response.json()
 
     def handle_terminate_connection(self, db: Session, remote_fingerprint: str):
         """Handle an incoming termination request from a remote instance."""
