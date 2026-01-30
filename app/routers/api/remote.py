@@ -1056,14 +1056,16 @@ async def browse_remote_instance_files(
             detail="Bidirectional mode not enabled. Both sides must enable it.",
         )
 
-    url = f"{conn.url.rstrip('/')}/api/v1/remote/browse-files"
+    base_url = f"{conn.url.rstrip('/')}/api/v1/remote/browse-files"
     params = {"path_id": str(path_id), "skip": str(skip), "limit": str(limit)}
+    query_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+    signed_url = f"{base_url}?{query_string}"
 
-    headers = await get_signed_headers(db, "GET", url, b"", query_params=params)
+    headers = await get_signed_headers(db, "GET", signed_url, b"")
 
     async with httpx.AsyncClient(timeout=get_transfer_timeouts()) as client:
         try:
-            response = await client.get(url, params=params, headers=headers)
+            response = await client.get(base_url, params=params, headers=headers)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
