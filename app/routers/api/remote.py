@@ -302,7 +302,6 @@ def get_my_identity(
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
-def get_my_identity(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """
     Get this instance's identity information for sharing with others.
     Users share this fingerprint out-of-band to allow remote instances to verify.
@@ -330,7 +329,6 @@ def get_my_identity(db: Session = Depends(get_db), current_user: dict = Depends(
 def get_connection_code(
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
-    db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)
 ):
     """
     Get the current rotating connection code for this instance.
@@ -588,8 +586,6 @@ def list_transfers(
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
 ):
-@router.get("/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"])
-def list_transfers(db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     """List all remote transfer jobs."""
     _ = current_user
     return db.query(RemoteTransferJob).order_by(RemoteTransferJob.id.desc()).all()
