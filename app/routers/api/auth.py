@@ -73,11 +73,12 @@ def setup_first_user(user_data: schemas.UserCreate, db: Session = Depends(get_db
             detail=f"Username '{user_data.username}' is already taken",
         )
 
-    # Create first user
+    # Create first user as admin
     user = User(
         username=user_data.username,
         password_hash=hash_password(user_data.password),
         is_active=True,
+        roles=["admin"],
     )
 
     try:
@@ -93,8 +94,8 @@ def setup_first_user(user_data: schemas.UserCreate, db: Session = Depends(get_db
             detail="Failed to create user account",
         ) from None
 
-    # Generate and return access token
-    access_token = create_access_token(data={"sub": user.username})
+    # Generate and return access token with roles
+    access_token = create_access_token(data={"sub": user.username, "roles": user.roles})
     return schemas.Token(access_token=access_token, token_type="bearer")
 
 
@@ -168,8 +169,8 @@ def login(credentials: schemas.UserLogin, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Generate and return access token
-    access_token = create_access_token(data={"sub": user.username})
+    # Generate and return access token with roles
+    access_token = create_access_token(data={"sub": user.username, "roles": user.roles})
     logger.info(f"User logged in: {user.username}")
     return schemas.Token(access_token=access_token, token_type="bearer")
 
@@ -217,8 +218,9 @@ def generate_api_token(
             f"({token_data.expires_days} days)"
         )
 
-    # Generate and return access token
+    # Generate and return access token with roles
     access_token = create_access_token(
-        data={"sub": current_user.username}, expires_delta=expires_delta
+        data={"sub": current_user.username, "roles": current_user.roles},
+        expires_delta=expires_delta,
     )
     return schemas.Token(access_token=access_token, token_type="bearer")
