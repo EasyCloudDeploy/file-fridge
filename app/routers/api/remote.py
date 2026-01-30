@@ -383,7 +383,10 @@ async def connect_with_code(
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.exception("Unexpected error connecting to remote instance")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {e!s}") from e
+        raise HTTPException(
+            status_code=500,
+            detail="Unexpected internal server error while processing remote request",
+        ) from e
 
 
 @router.post("/connections", response_model=RemoteConnectionSchema, tags=["Remote Connections"])
