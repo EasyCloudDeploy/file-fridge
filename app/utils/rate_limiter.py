@@ -54,6 +54,9 @@ class RateLimiter:
 # Global rate limiter instance
 _remote_rate_limiter = RateLimiter(requests_per_minute=100)
 
+# Global rate limiter for login
+_login_rate_limiter = RateLimiter(requests_per_minute=5)
+
 
 def get_rate_limit_key(request: Request) -> str:
     """Extract rate limit key from request."""
@@ -82,8 +85,20 @@ def check_rate_limit(request: Request) -> None:
         )
 
 
+def check_login_rate_limit(request: Request) -> None:
+    """Check login rate limit and raise HTTPException if exceeded."""
+    key = get_rate_limit_key(request)
+    if not _login_rate_limiter.is_allowed(key):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later.",
+            headers={"Retry-After": "60"},
+        )
+
+
 def rate_limit(requests_per_minute: int = 60):
     """Decorator to rate limit an endpoint."""
+    limiter = RateLimiter(requests_per_minute=requests_per_minute)
 
     def decorator(func: Callable):
         @wraps(func)
@@ -99,7 +114,6 @@ def rate_limit(requests_per_minute: int = 60):
                     break
 
             if request:
-                limiter = RateLimiter(requests_per_minute=requests_per_minute)
                 key = get_rate_limit_key(request)
                 if not limiter.is_allowed(key):
                     raise HTTPException(
