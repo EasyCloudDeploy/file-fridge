@@ -68,8 +68,27 @@ class FileThawer:
                     # Ensure destination directory exists
                     original_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    # Decrypt to destination
-                    file_encryption_service.decrypt_file(db, cold_path, original_path)
+                    # Handle symlinks and atomic replacement
+                    if original_path.is_symlink():
+                        original_path.unlink()
+                        target_path = original_path
+                    else:
+                        # Decrypt to temporary file first for atomic replacement
+                        target_path = original_path.with_suffix(original_path.suffix + ".tmp")
+
+                    try:
+                        # Decrypt to destination/temp
+                        file_encryption_service.decrypt_file(db, cold_path, target_path)
+
+                        # If we used a temp file, atomically move it to final destination
+                        if target_path != original_path:
+                            target_path.replace(original_path)
+
+                    except Exception:
+                        # Clean up temp file if decryption failed
+                        if target_path != original_path and target_path.exists():
+                            target_path.unlink()
+                        raise
 
                     # Remove encrypted file if operation was MOVE or SYMLINK (assuming symlink targeted the encrypted file)
                     # For COPY, we might want to keep it? The logic below handles unlinking for MOVE.
