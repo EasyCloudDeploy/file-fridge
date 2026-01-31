@@ -1,6 +1,5 @@
 # ruff: noqa: B008, PLR0913
 import base64
-import hashlib
 import json
 import logging
 from pathlib import Path
@@ -22,7 +21,6 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob, TransferStatus
 from app.models import (
     FileInventory,
     FileStatus,
@@ -31,11 +29,12 @@ from app.models import (
     RemoteTransferJob,
     TransferDirection,
     TransferMode,
+    TransferStatus,
     TrustStatus,
 )
 from app.schemas import (
-    BulkActionResult,
     BulkActionResponse,
+    BulkActionResult,
     BulkRemoteMigrationRequest,
     ConnectionCodeResponse,
     FileTransferStrategy,
@@ -913,19 +912,19 @@ async def verify_transfer(
         # For safety, we verify the checksum BEFORE returning success
         # especially important for MOVE operations.
         logger.info(f"Verifying checksum for {found_tmp}...")
-        
+
         # We rename it first so we hash the final file
         await anyio.to_thread.run_sync(found_tmp.rename, final_path)
-        
+
         # Calculate local hash
         from app.services.file_metadata import file_metadata_extractor
         local_hash = await anyio.to_thread.run_sync(file_metadata_extractor.compute_sha256, final_path)
-        
+
         if local_hash != checksum:
             logger.error(f"Checksum mismatch! Expected {checksum}, got {local_hash}. Deleting {final_path}")
             await anyio.to_thread.run_sync(final_path.unlink, True)
             raise HTTPException(status_code=422, detail="Checksum verification failed")
-        
+
         logger.info(f"Checksum verified for {final_path}")
     else:
         await anyio.to_thread.run_sync(found_tmp.rename, final_path)

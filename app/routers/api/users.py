@@ -46,7 +46,7 @@ def create_user(user_data: schemas.UserCreate, db: Session = Depends(get_db), cu
         db.add(user)
         db.commit()
         db.refresh(user)
-        
+
         security_audit_service._log(
             db,
             "USER_CREATED",
@@ -54,7 +54,7 @@ def create_user(user_data: schemas.UserCreate, db: Session = Depends(get_db), cu
             current_user.username,
             {"username": user.username}
         )
-        
+
         return user
     except Exception:
         db.rollback()
@@ -67,8 +67,8 @@ def create_user(user_data: schemas.UserCreate, db: Session = Depends(get_db), cu
 
 @router.put("/{user_id}/roles", response_model=schemas.UserOut, dependencies=admin_only)
 def update_user_roles(
-    user_id: int, 
-    roles: List[str], 
+    user_id: int,
+    roles: List[str],
     db: Session = Depends(get_db),
     current_user: User = Depends(PermissionChecker("admin"))
 ):
@@ -86,11 +86,11 @@ def update_user_roles(
 
     old_roles = user.roles
     user.roles = roles
-    
+
     try:
         db.commit()
         db.refresh(user)
-        
+
         security_audit_service._log(
             db,
             "ROLE_CHANGED",
@@ -98,7 +98,7 @@ def update_user_roles(
             current_user.username,
             {"username": user.username, "old_roles": old_roles, "new_roles": roles}
         )
-        
+
         return user
     except Exception:
         db.rollback()
@@ -107,7 +107,7 @@ def update_user_roles(
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=admin_only)
 def delete_user(
-    user_id: int, 
+    user_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(PermissionChecker("admin"))
 ):
@@ -123,7 +123,7 @@ def delete_user(
     try:
         db.delete(user)
         db.commit()
-        
+
         security_audit_service._log(
             db,
             "USER_DELETED",

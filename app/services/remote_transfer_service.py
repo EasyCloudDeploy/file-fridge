@@ -22,12 +22,12 @@ from app.database import SessionLocal
 from app.models import (
     FileInventory,
     FileStatus,
+    FileTransferStrategy,
     MonitoredPath,
     RemoteConnection,
     RemoteTransferJob,
     TransferDirection,
     TransferStatus,
-    FileTransferStrategy,
 )
 from app.services.file_metadata import file_metadata_extractor
 from app.utils.remote_signature import get_signed_headers

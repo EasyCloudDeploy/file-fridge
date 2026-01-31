@@ -50,7 +50,7 @@ from app.routers.api import tag_rules as api_tag_rules
 from app.routers.api import tags as api_tags
 from app.routers.api import users as api_users
 from app.routers.web.views import router as web_router
-from app.security import PermissionChecker, get_current_user
+from app.security import PermissionChecker
 from app.services.file_cleanup import FileCleanup
 from app.services.scheduler import scheduler_service
 
