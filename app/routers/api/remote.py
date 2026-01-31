@@ -21,7 +21,6 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import MonitoredPath, RemoteConnection, RemoteTransferJob, TransferStatus
 from app.models import (
     FileInventory,
     FileStatus,
@@ -30,6 +29,7 @@ from app.models import (
     RemoteTransferJob,
     TransferDirection,
     TransferMode,
+    TransferStatus,
     TrustStatus,
 )
 from app.schemas import (
@@ -579,9 +579,7 @@ async def migrate_file(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.get(
-    "/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"]
-)
+@router.get("/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"])
 def list_transfers(
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),

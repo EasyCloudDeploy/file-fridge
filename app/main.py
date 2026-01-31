@@ -17,6 +17,7 @@ from app.routers.api import cleanup as api_cleanup
 from app.routers.api import criteria as api_criteria
 from app.routers.api import encryption as api_encryption
 from app.routers.api import files as api_files
+from app.routers.api import identity as api_identity
 from app.routers.api import notifiers as api_notifiers
 from app.routers.api import paths as api_paths
 from app.routers.api import remote as api_remote
@@ -26,7 +27,7 @@ from app.routers.api import tag_rules as api_tag_rules
 from app.routers.api import tags as api_tags
 from app.routers.api import users as api_users
 from app.routers.web.views import router as web_router
-from app.security import PermissionChecker, get_current_user
+from app.security import PermissionChecker
 from app.services.file_cleanup import FileCleanup
 from app.services.scheduler import scheduler_service
 
@@ -132,6 +133,7 @@ app.include_router(api_storage.router, dependencies=[Depends(PermissionChecker("
 app.include_router(api_notifiers.router, dependencies=[Depends(PermissionChecker("notifiers"))])
 app.include_router(api_encryption.router, dependencies=[Depends(PermissionChecker("Encryption"))])
 app.include_router(api_users.router)  # Roles handled inside this router
+app.include_router(api_identity.router)  # Permissions handled inside router
 app.include_router(api_remote.router)  # Remote connections has its own internal auth/security logic
 
 # Include consolidated web router (public - frontend handles auth)

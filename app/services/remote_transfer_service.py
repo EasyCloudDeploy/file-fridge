@@ -455,10 +455,10 @@ class RemoteTransferService:
                             "relative_path": job.relative_path,
                             "remote_path_id": job.remote_monitored_path_id,
                         }
-                        body_bytes = json.dumps(json_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-                        signed_headers = await get_signed_headers(
-                            db, "POST", url, body_bytes
-                        )
+                        body_bytes = json.dumps(
+                            json_payload, sort_keys=True, separators=(",", ":")
+                        ).encode("utf-8")
+                        signed_headers = await get_signed_headers(db, "POST", url, body_bytes)
                         import json
 
                         body_bytes = json.dumps(

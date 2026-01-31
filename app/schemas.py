@@ -900,6 +900,42 @@ class ServerEncryptionKeyResponse(BaseModel):
 
 
 # ========================================
+# Identity Export/Import Schemas
+# ========================================
+
+
+class IdentityExportResponse(BaseModel):
+    """Response containing all identity keys in PEM format (Private & Public)."""
+
+    signing_private_key: str
+    signing_public_key: str
+    kx_private_key: str
+    kx_public_key: str
+
+
+class IdentityPublicExportResponse(BaseModel):
+    """Response containing public identity keys in PEM format."""
+
+    signing_public_key: str
+    kx_public_key: str
+
+
+class PrivateExportRequest(BaseModel):
+    """Request to export private keys (requires password)."""
+
+    password: str
+
+
+class IdentityImportRequest(BaseModel):
+    """Request to import identity private keys."""
+
+    signing_private_key: str
+    kx_private_key: str
+    password: str
+    confirm_replace: bool = False
+
+
+# ========================================
 # File Browser Schemas
 # ========================================
 

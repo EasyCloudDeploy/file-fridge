@@ -83,6 +83,7 @@ class InstanceConfigService:
             # This should not happen as InstanceMetadata is created on startup
             # but handle it gracefully
             import uuid
+
             metadata = InstanceMetadata(instance_uuid=str(uuid.uuid4()))
             db.add(metadata)
 
@@ -110,6 +111,7 @@ class InstanceConfigService:
         metadata = db.query(InstanceMetadata).first()
         if not metadata:
             import uuid
+
             metadata = InstanceMetadata(instance_uuid=str(uuid.uuid4()))
             db.add(metadata)
 
@@ -135,14 +137,22 @@ class InstanceConfigService:
         return {
             "instance_url": {
                 "value": self.get_instance_url(db),
-                "source": "environment" if settings.ff_instance_url else "database" if metadata and metadata.instance_url else "not_set",
+                "source": (
+                    "environment"
+                    if settings.ff_instance_url
+                    else "database" if metadata and metadata.instance_url else "not_set"
+                ),
                 "env_value": settings.ff_instance_url,
                 "db_value": metadata.instance_url if metadata else None,
                 "can_edit": not bool(settings.ff_instance_url),  # Can only edit if not set in env
             },
             "instance_name": {
                 "value": self.get_instance_name(db),
-                "source": "environment" if settings.instance_name else "database" if metadata and metadata.instance_name else "not_set",
+                "source": (
+                    "environment"
+                    if settings.instance_name
+                    else "database" if metadata and metadata.instance_name else "not_set"
+                ),
                 "env_value": settings.instance_name,
                 "db_value": metadata.instance_name if metadata else None,
                 "can_edit": not bool(settings.instance_name),  # Can only edit if not set in env
