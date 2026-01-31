@@ -158,7 +158,6 @@ def verify_token(token: str) -> Optional[dict]:
         return None
 
 
-
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)
 ) -> User:
@@ -219,7 +218,12 @@ class PermissionChecker:
     def __init__(self, tag: str):
         self.tag = tag
 
-    def __call__(self, request: Request, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    def __call__(
+        self,
+        request: Request,
+        user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ):
         # Admin bypass
         if "admin" in user.roles:
             return user
@@ -241,7 +245,7 @@ class PermissionChecker:
 
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied: user does not have {action} access to {self.tag}"
+                detail=f"Permission denied: user does not have {action} access to {self.tag}",
             )
 
         return user
@@ -264,8 +268,6 @@ class PermissionChecker:
         star_tag = f"{tag}:*"
 
         return any(p in ["*", required, star_tag] for p in user_permissions)
-
-
 
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:

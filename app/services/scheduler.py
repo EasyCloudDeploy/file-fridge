@@ -155,6 +155,24 @@ class SchedulerService:
         """Manually trigger a scan for a path."""
         scan_path_job_func(path_id)
 
+    def trigger_encryption_job(self, location_id: int):
+        """Trigger background job to encrypt all files in a location."""
+        self.scheduler.add_job(
+            encrypt_location_job_func,
+            id=f"encrypt_location_{location_id}",
+            args=[location_id],
+            replace_existing=True,
+        )
+
+    def trigger_decryption_job(self, location_id: int):
+        """Trigger background job to decrypt all files in a location."""
+        self.scheduler.add_job(
+            decrypt_location_job_func,
+            id=f"decrypt_location_{location_id}",
+            args=[location_id],
+            replace_existing=True,
+        )
+
     def _scan_path_job(self, path_id: int):
         """Job function to scan a path (kept for backward compatibility, but use scan_path_job_func instead)."""
         scan_path_job_func(path_id)
@@ -497,6 +515,174 @@ def scan_path_job_func(path_id: int):
             db.close()
         except Exception:
             logger.warning("Error closing scheduler database session")
+
+
+def encrypt_location_job_func(location_id: int):
+    """Job to encrypt all files in a storage location."""
+    from pathlib import Path
+
+    from app.models import ColdStorageLocation, EncryptionStatus, FileInventory, StorageType
+    from app.services.encryption_service import file_encryption_service
+
+    db = SchedulerSessionLocal()
+    try:
+        location = (
+            db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
+        )
+        if not location:
+            logger.error(f"Location {location_id} not found for encryption job")
+            return
+
+        logger.info(f"Starting bulk encryption for location {location.name}")
+
+        # Get all unencrypted files in this location
+        files = (
+            db.query(FileInventory)
+            .filter(
+                FileInventory.cold_storage_location_id == location_id,
+                FileInventory.storage_type == StorageType.COLD,
+                ~FileInventory.is_encrypted,
+            )
+            .all()
+        )
+
+        total = len(files)
+        logger.info(f"Found {total} files to encrypt")
+
+        success_count = 0
+
+        for file in files:
+            try:
+                source_path = Path(file.file_path)
+                if not source_path.exists():
+                    logger.warning(f"File missing during encryption: {source_path}")
+                    continue
+
+                target_path = source_path.with_suffix(source_path.suffix + ".ffenc")
+
+                # Encrypt
+                file_encryption_service.encrypt_file(db, source_path, target_path)
+
+                # Update DB (but don't commit until file operations are safe)
+                file.file_path = str(target_path)
+                file.is_encrypted = True
+
+                # Delete original file
+                try:
+                    source_path.unlink()
+                    # Only commit if deletion succeeded (or file was gone)
+                    db.commit()
+                    success_count += 1
+                except Exception:
+                    # Failed to delete source, rollback DB changes to match filesystem state
+                    # (where source still exists, possibly alongside target)
+                    db.rollback()
+                    # Clean up target if we can't switch over
+                    if target_path.exists():
+                        target_path.unlink()
+                    raise
+
+            except Exception:
+                db.rollback()
+                logger.exception(f"Failed to encrypt file {file.id}")
+                # Continue with other files
+
+        # Update location status
+        location.encryption_status = EncryptionStatus.ENCRYPTED
+        db.commit()
+        logger.info(
+            f"Completed encryption for location {location.name}. Encrypted {success_count}/{total} files."
+        )
+
+    except Exception:
+        logger.exception(f"Error in encryption job for location {location_id}")
+    finally:
+        db.close()
+
+
+def decrypt_location_job_func(location_id: int):
+    """Job to decrypt all files in a storage location."""
+    from pathlib import Path
+
+    from app.models import ColdStorageLocation, EncryptionStatus, FileInventory, StorageType
+    from app.services.encryption_service import file_encryption_service
+
+    db = SchedulerSessionLocal()
+    try:
+        location = (
+            db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
+        )
+        if not location:
+            logger.error(f"Location {location_id} not found for decryption job")
+            return
+
+        logger.info(f"Starting bulk decryption for location {location.name}")
+
+        # Get all encrypted files in this location
+        files = (
+            db.query(FileInventory)
+            .filter(
+                FileInventory.cold_storage_location_id == location_id,
+                FileInventory.storage_type == StorageType.COLD,
+                FileInventory.is_encrypted,
+            )
+            .all()
+        )
+
+        total = len(files)
+        logger.info(f"Found {total} files to decrypt")
+
+        success_count = 0
+
+        for file in files:
+            try:
+                source_path = Path(file.file_path)
+                if not source_path.exists():
+                    logger.warning(f"File missing during decryption: {source_path}")
+                    continue
+
+                # Remove .ffenc suffix if present
+                if source_path.suffix == ".ffenc":
+                    target_path = source_path.with_suffix("")
+                else:
+                    # Fallback if no suffix (shouldn't happen with our naming convention but good to handle)
+                    target_path = source_path.with_name(source_path.name + ".decrypted")
+
+                # Decrypt
+                file_encryption_service.decrypt_file(db, source_path, target_path)
+
+                # Update DB
+                file.file_path = str(target_path)
+                file.is_encrypted = False
+
+                try:
+                    # Delete encrypted original
+                    source_path.unlink()
+                    # Commit only after successful filesystem update
+                    db.commit()
+                    success_count += 1
+                except Exception:
+                    db.rollback()
+                    # Clean up target
+                    if target_path.exists():
+                        target_path.unlink()
+                    raise
+
+            except Exception:
+                db.rollback()
+                logger.exception(f"Failed to decrypt file {file.id}")
+
+        # Update location status
+        location.encryption_status = EncryptionStatus.NONE
+        db.commit()
+        logger.info(
+            f"Completed decryption for location {location.name}. Decrypted {success_count}/{total} files."
+        )
+
+    except Exception:
+        logger.exception(f"Error in decryption job for location {location_id}")
+    finally:
+        db.close()
 
 
 def cleanup_old_nonces_job_func():

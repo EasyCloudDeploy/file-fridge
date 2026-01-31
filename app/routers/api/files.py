@@ -1307,11 +1307,15 @@ def bulk_pin_files(request: BulkFileActionRequest, db: Session = Depends(get_db)
                 if file_path in seen_paths:
                     # It was pinned in this request, but this is a duplicate reference
                     results.append(
-                        BulkActionResult(file_id=file_id, success=True, message="File already pinned")
+                        BulkActionResult(
+                            file_id=file_id, success=True, message="File already pinned"
+                        )
                     )
                 else:
                     results.append(
-                        BulkActionResult(file_id=file_id, success=True, message="File pinned successfully")
+                        BulkActionResult(
+                            file_id=file_id, success=True, message="File pinned successfully"
+                        )
                     )
             elif file_path in paths_previously_pinned:
                 results.append(
@@ -1369,7 +1373,9 @@ def bulk_unpin_files(request: BulkFileActionRequest, db: Session = Depends(get_d
             # Bulk delete pins
             if existing_pins:
                 pin_ids_to_delete = [p.id for p in existing_pins]
-                db.query(PinnedFile).filter(PinnedFile.id.in_(pin_ids_to_delete)).delete(synchronize_session=False)
+                db.query(PinnedFile).filter(PinnedFile.id.in_(pin_ids_to_delete)).delete(
+                    synchronize_session=False
+                )
                 db.commit()
         else:
             paths_pinned = set()

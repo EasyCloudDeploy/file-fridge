@@ -12,27 +12,20 @@ from app.schemas import ServerEncryptionKeyResponse
 
 router = APIRouter(prefix="/api/v1/encryption", tags=["Encryption"])
 
+
 @router.get("/keys", response_model=List[ServerEncryptionKeyResponse])
-def list_keys(
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
+def list_keys(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """List all server encryption keys."""
     return db.query(ServerEncryptionKey).order_by(ServerEncryptionKey.created_at.desc()).all()
 
+
 @router.post("/keys", response_model=ServerEncryptionKeyResponse)
-def generate_key(
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
+def generate_key(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Generate a new encryption key (rotate)."""
     new_key = Fernet.generate_key().decode()
     fingerprint = hashlib.sha256(new_key.encode()).hexdigest()
 
-    db_key = ServerEncryptionKey(
-        key_value=new_key,
-        fingerprint=fingerprint
-    )
+    db_key = ServerEncryptionKey(key_value=new_key, fingerprint=fingerprint)
     db.add(db_key)
     db.commit()
     db.refresh(db_key)
@@ -42,12 +35,9 @@ def generate_key(
 
     return db_key
 
+
 @router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_key(
-    key_id: int,
-    db: Session = Depends(get_db),
-    current_user = Depends(get_current_user)
-):
+def delete_key(key_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
     """Delete an encryption key."""
     key = db.query(ServerEncryptionKey).filter(ServerEncryptionKey.id == key_id).first()
     if not key:
@@ -58,7 +48,7 @@ def delete_key(
     if total_keys <= 1:
         raise HTTPException(
             status_code=400,
-            detail="Cannot delete the last encryption key. Generate a new one first."
+            detail="Cannot delete the last encryption key. Generate a new one first.",
         )
 
     # Optional: Check if any data is encrypted with this key
@@ -69,7 +59,9 @@ def delete_key(
             # If this key can decrypt it, and NO OTHER REMAINING key can decrypt it,
             # we should probably warn or handle it.
             # Simplified: if this key can decrypt it, we clear it to be safe.
-            if encryption_manager.can_decrypt_with_key(notifier.smtp_password_encrypted, key.key_value):
+            if encryption_manager.can_decrypt_with_key(
+                notifier.smtp_password_encrypted, key.key_value
+            ):
                 notifier.smtp_password = None
 
     db.delete(key)
@@ -77,4 +69,3 @@ def delete_key(
 
     # Reset encryption manager
     encryption_manager.reset()
-

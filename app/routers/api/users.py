@@ -25,8 +25,14 @@ def list_users(db: Session = Depends(get_db)):
     return db.query(User).all()
 
 
-@router.post("", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED, dependencies=admin_only)
-def create_user(user_data: schemas.UserCreate, db: Session = Depends(get_db), current_user: User = Depends(PermissionChecker("admin"))):
+@router.post(
+    "", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED, dependencies=admin_only
+)
+def create_user(
+    user_data: schemas.UserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(PermissionChecker("admin")),
+):
     """Create a new user with default role."""
     existing_user = db.query(User).filter(User.username == user_data.username).first()
     if existing_user:
@@ -52,7 +58,7 @@ def create_user(user_data: schemas.UserCreate, db: Session = Depends(get_db), cu
             "USER_CREATED",
             f"User created: {user.username}",
             current_user.username,
-            {"username": user.username}
+            {"username": user.username},
         )
 
         return user
@@ -70,7 +76,7 @@ def update_user_roles(
     user_id: int,
     roles: List[str],
     db: Session = Depends(get_db),
-    current_user: User = Depends(PermissionChecker("admin"))
+    current_user: User = Depends(PermissionChecker("admin")),
 ):
     """Update a user's roles."""
     user = db.query(User).filter(User.id == user_id).first()
@@ -79,7 +85,7 @@ def update_user_roles(
 
     # Prevent removing own admin role to avoid lockout
     if user.id == current_user.id and "admin" not in roles:
-         raise HTTPException(
+        raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot remove admin role from yourself",
         )
@@ -96,7 +102,7 @@ def update_user_roles(
             "ROLE_CHANGED",
             f"Roles updated for {user.username}: {old_roles} -> {roles}",
             current_user.username,
-            {"username": user.username, "old_roles": old_roles, "new_roles": roles}
+            {"username": user.username, "old_roles": old_roles, "new_roles": roles},
         )
 
         return user
@@ -109,7 +115,7 @@ def update_user_roles(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(PermissionChecker("admin"))
+    current_user: User = Depends(PermissionChecker("admin")),
 ):
     """Delete a user."""
     user = db.query(User).filter(User.id == user_id).first()
@@ -129,7 +135,7 @@ def delete_user(
             "USER_DELETED",
             f"User deleted: {username}",
             current_user.username,
-            {"username": username}
+            {"username": username},
         )
     except Exception:
         db.rollback()

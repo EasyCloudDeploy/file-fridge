@@ -197,6 +197,15 @@ class ScanStatus(str, enum.Enum):
     PENDING = "pending"
 
 
+class EncryptionStatus(str, enum.Enum):
+    """Encryption status for cold storage locations."""
+
+    NONE = "none"  # Not encrypted
+    PENDING = "pending"  # Encryption scheduled
+    ENCRYPTED = "encrypted"  # Fully encrypted
+    DECRYPTING = "decrypting"  # Decryption in progress
+
+
 # Association table for many-to-many relationship between MonitoredPath and ColdStorageLocation
 path_storage_location_association = Table(
     "path_storage_location_association",
@@ -218,6 +227,10 @@ class ColdStorageLocation(Base):
     path = Column(String, nullable=False, unique=True)
     caution_threshold_percent = Column(Integer, nullable=False, default=20)  # Warn at 20% free
     critical_threshold_percent = Column(Integer, nullable=False, default=10)  # Critical at 10% free
+    is_encrypted = Column(Boolean, nullable=False, default=False)
+    encryption_status = Column(
+        SQLEnum(EncryptionStatus), nullable=False, default=EncryptionStatus.NONE
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -376,6 +389,7 @@ class FileInventory(Base):
     cold_storage_location_id = Column(
         Integer, ForeignKey("cold_storage_locations.id"), nullable=True, index=True
     )
+    is_encrypted = Column(Boolean, nullable=False, default=False)
 
     # Composite indexes for common query patterns
     __table_args__ = (
@@ -670,6 +684,9 @@ class InstanceMetadata(Base):
     ed25519_private_key_encrypted = Column(Text, nullable=True)  # Encrypted signing private key
     x25519_public_key = Column(Text, nullable=True)  # Key exchange public key
     x25519_private_key_encrypted = Column(Text, nullable=True)  # Encrypted key exchange private key
+    file_encryption_root_key_encrypted = Column(
+        Text, nullable=True
+    )  # Persistent master key for file encryption
     current_key_version = Column(Integer, nullable=False, default=1)  # For key rotation
     instance_url = Column(
         String, nullable=True

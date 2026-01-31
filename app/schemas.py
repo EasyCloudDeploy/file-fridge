@@ -10,6 +10,7 @@ from app.models import (
     ConflictResolution,
     CriterionType,
     DispatchStatus,
+    EncryptionStatus,
     FileStatus,
     FileTransferStrategy,
     NotificationLevel,
@@ -69,6 +70,9 @@ class ColdStorageLocationBase(BaseModel):
     critical_threshold_percent: int = Field(
         10, ge=0, le=100, description="Critical at this % free space"
     )
+    is_encrypted: bool = Field(
+        False, description="Whether files in this location should be encrypted"
+    )
 
     @validator("critical_threshold_percent")
     @classmethod
@@ -93,12 +97,14 @@ class ColdStorageLocationUpdate(BaseModel):
     path: Optional[str] = Field(None, min_length=1)
     caution_threshold_percent: Optional[int] = Field(None, ge=0, le=100)
     critical_threshold_percent: Optional[int] = Field(None, ge=0, le=100)
+    is_encrypted: Optional[bool] = None
 
 
 class ColdStorageLocation(ColdStorageLocationBase):
     """Schema for cold storage location response."""
 
     id: int
+    encryption_status: EncryptionStatus
     created_at: datetime
     updated_at: Optional[datetime]
 
@@ -225,6 +231,7 @@ class FileInventoryBase(BaseModel):
     file_extension: Optional[str] = None
     mime_type: Optional[str] = None
     status: FileStatus = FileStatus.ACTIVE
+    is_encrypted: bool = False
 
 
 class FileInventoryCreate(FileInventoryBase):
@@ -955,6 +962,42 @@ class ServerEncryptionKeyResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ========================================
+# Identity Export/Import Schemas
+# ========================================
+
+
+class IdentityExportResponse(BaseModel):
+    """Response containing all identity keys in PEM format (Private & Public)."""
+
+    signing_private_key: str
+    signing_public_key: str
+    kx_private_key: str
+    kx_public_key: str
+
+
+class IdentityPublicExportResponse(BaseModel):
+    """Response containing public identity keys in PEM format."""
+
+    signing_public_key: str
+    kx_public_key: str
+
+
+class PrivateExportRequest(BaseModel):
+    """Request to export private keys (requires password)."""
+
+    password: str
+
+
+class IdentityImportRequest(BaseModel):
+    """Request to import identity private keys."""
+
+    signing_private_key: str
+    kx_private_key: str
+    password: str
+    confirm_replace: bool = False
 
 
 # ========================================
