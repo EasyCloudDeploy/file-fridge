@@ -116,6 +116,25 @@ class StorageRoutingService:
                 # Get disk usage
                 stat = shutil.disk_usage(path)
                 free_space = stat.free
+                total_space = stat.total
+
+                # Check percentage-based thresholds
+                free_percent = (free_space / total_space) * 100 if total_space > 0 else 0
+
+                # Critical threshold check - reject location if below critical threshold
+                if free_percent <= location.critical_threshold_percent:
+                    logger.warning(
+                        f"Location {location.name} below critical threshold: "
+                        f"{free_percent:.2f}% free (threshold: {location.critical_threshold_percent}%)"
+                    )
+                    continue
+
+                # Caution threshold check - log warning but still allow
+                if free_percent <= location.caution_threshold_percent:
+                    logger.info(
+                        f"Location {location.name} below caution threshold: "
+                        f"{free_percent:.2f}% free (threshold: {location.caution_threshold_percent}%)"
+                    )
 
                 # Minimum space check
                 min_space = StorageRoutingService.MIN_FREE_SPACE_MB * 1024 * 1024
@@ -230,6 +249,16 @@ class StorageRoutingService:
                 return False
 
             stat = shutil.disk_usage(path)
+
+            # Check percentage-based critical threshold
+            free_percent = (stat.free / stat.total) * 100 if stat.total > 0 else 0
+            if free_percent <= location.critical_threshold_percent:
+                logger.debug(
+                    f"Location {location.name} below critical threshold: "
+                    f"{free_percent:.2f}% free (threshold: {location.critical_threshold_percent}%)"
+                )
+                return False
+
             min_space = StorageRoutingService.MIN_FREE_SPACE_MB * 1024 * 1024
             required_space = file_size_bytes + (1024 * 1024)  # +1MB buffer
 
