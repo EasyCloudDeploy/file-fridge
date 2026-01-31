@@ -7,9 +7,11 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, TypeAdapter, validator
 
 from app.models import (
+    ConflictResolution,
     CriterionType,
     DispatchStatus,
     FileStatus,
+    FileTransferStrategy,
     NotificationLevel,
     NotifierType,
     OperationType,
@@ -770,6 +772,7 @@ class RemoteConnectionIdentity(BaseModel):
     ed25519_public_key: str = Field(..., description="Base64-encoded Ed25519 public signing key")
     x25519_public_key: str = Field(..., description="Base64-encoded X25519 public key exchange key")
     url: HttpUrl = Field(..., description="Base URL of the remote instance")
+    transfer_mode: Optional[TransferMode] = Field(None, description="Current transfer mode of the instance")
 
     @validator("ed25519_public_key", "x25519_public_key")
     def validate_base64(cls, v):
@@ -785,6 +788,7 @@ class RemoteConnectionCreate(RemoteConnectionBase):
     """Schema for creating a remote connection."""
 
     connection_code: str = Field(..., description="The rotating code from the remote instance")
+    transfer_mode: Optional[TransferMode] = TransferMode.PUSH_ONLY
 
 
 class RemoteConnectionUpdate(BaseModel):
@@ -837,6 +841,38 @@ class RemoteTransferJobBase(BaseModel):
     file_inventory_id: int
     remote_connection_id: int
     remote_monitored_path_id: int
+    strategy: FileTransferStrategy = FileTransferStrategy.COPY
+    conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE
+
+
+class BulkRemoteMigrationRequest(BaseModel):
+    """Request for bulk remote migration."""
+
+    file_ids: List[int] = Field(..., min_length=1, description="List of file inventory IDs")
+    remote_connection_id: int = Field(..., description="Remote connection ID")
+    remote_monitored_path_id: int = Field(..., description="Target remote monitored path ID")
+    strategy: FileTransferStrategy = FileTransferStrategy.COPY
+    conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE
+
+
+class BulkRetryTransfersRequest(BaseModel):
+    """Request for bulk retry of failed transfer jobs."""
+
+    job_ids: List[int] = Field(..., min_length=1, description="List of transfer job IDs to retry")
+
+
+class BulkRetryFailure(BaseModel):
+    """Details of a failed retry attempt."""
+
+    id: int = Field(..., description="Transfer job ID")
+    reason: str = Field(..., description="Reason for retry failure")
+
+
+class BulkRetryTransfersResponse(BaseModel):
+    """Response for bulk retry operation."""
+
+    succeeded: List[int] = Field(..., description="List of successfully retried job IDs")
+    failed: List[BulkRetryFailure] = Field(..., description="List of failed retry attempts")
 
 
 class RemoteTransferJob(RemoteTransferJobBase):
@@ -856,6 +892,7 @@ class RemoteTransferJob(RemoteTransferJobBase):
     checksum: Optional[str]
     eta: Optional[float] = None  # Seconds remaining, calculated at runtime
     direction: TransferDirection = TransferDirection.PUSH
+    strategy: FileTransferStrategy = FileTransferStrategy.COPY
 
     class Config:
         from_attributes = True
@@ -867,6 +904,27 @@ class PullTransferRequest(BaseModel):
     remote_connection_id: int
     remote_file_inventory_id: int
     local_monitored_path_id: int
+    strategy: FileTransferStrategy = FileTransferStrategy.COPY
+    conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE
+
+
+class ConflictCheckRequest(BaseModel):
+    """Request to check for file conflicts before transfer."""
+
+    relative_path: str
+    remote_path_id: int
+    storage_type: StorageType
+    source_checksum: Optional[str] = None  # For COMPARE mode
+
+
+class ConflictCheckResponse(BaseModel):
+    """Response indicating if a file conflict exists."""
+
+    exists: bool
+    file_size: Optional[int] = None
+    checksum: Optional[str] = None
+    modified_time: Optional[datetime] = None
+    conflict: bool  # True if exists and checksums differ (or no checksum to compare)
 
 
 class RemoteFileListItem(BaseModel):

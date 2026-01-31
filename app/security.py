@@ -230,7 +230,7 @@ class PermissionChecker:
         if not self.check_permission(user, self.tag, action):
             # Log violation using the existing service
             from app.services.security_audit_service import security_audit_service
-            
+
             security_audit_service._log(
                 db,
                 "ACCESS_DENIED",
@@ -238,12 +238,12 @@ class PermissionChecker:
                 user.username,
                 {"tag": self.tag, "method": request.method, "severity": "MEDIUM"},
             )
-            
+
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permission denied: user does not have {action} access to {self.tag}"
             )
-            
+
         return user
 
     @staticmethod

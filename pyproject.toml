@@ -53,9 +53,6 @@ dev = [
     "ruff>=0.1.0",
 ]
 
-[project.scripts]
-file-fridge = "app.main:main"
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

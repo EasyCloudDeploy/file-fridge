@@ -3,547 +3,612 @@
 {% block title %}Files - File Fridge{% endblock %}
 
 {% block extra_head %}
-    <!-- AG Grid CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-grid.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-theme-quartz.css">
-    <style>
-        #filesGrid {
-            height: 70vh;
-            min-height: 400px;
-        }
-        .ag-theme-quartz {
-            --ag-font-size: 13px;
-        }
-        .file-path-cell {
-            font-family: monospace;
-            font-size: 12px;
-        }
-        /* Bulk actions toolbar */
+<!-- AG Grid CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-grid.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-theme-quartz.css">
+<style>
+    #filesGrid {
+        height: 70vh;
+        min-height: 400px;
+    }
+
+    .ag-theme-quartz {
+        --ag-font-size: 13px;
+    }
+
+    .file-path-cell {
+        font-family: monospace;
+        font-size: 12px;
+    }
+
+    /* Ensure dropdown menus appear above all grid content */
+    .dropdown-menu {
+        z-index: 9999 !important;
+    }
+
+    /* Bulk actions toolbar */
+    .bulk-actions-toolbar {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: var(--bs-body-bg);
+        border-top: 2px solid var(--bs-primary);
+        padding: 0.75rem 1rem;
+        display: none;
+        align-items: center;
+        gap: 1rem;
+        z-index: 1050;
+        box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+    }
+
+    .bulk-actions-toolbar .selection-info {
+        font-weight: 500;
+        color: var(--bs-primary);
+    }
+
+    .bulk-actions-toolbar .btn-group {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+
+    @media (max-width: 768px) {
         .bulk-actions-toolbar {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: var(--bs-body-bg);
-            border-top: 2px solid var(--bs-primary);
-            padding: 0.75rem 1rem;
-            display: none;
-            align-items: center;
-            gap: 1rem;
-            z-index: 1050;
-            box-shadow: 0 -4px 12px rgba(0,0,0,0.15);
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0.5rem;
         }
-        .bulk-actions-toolbar .selection-info {
-            font-weight: 500;
-            color: var(--bs-primary);
-        }
+
         .bulk-actions-toolbar .btn-group {
-            flex-wrap: wrap;
-            gap: 0.25rem;
+            justify-content: center;
         }
-        @media (max-width: 768px) {
-            .bulk-actions-toolbar {
-                flex-direction: column;
-                align-items: stretch;
-                gap: 0.5rem;
-            }
-            .bulk-actions-toolbar .btn-group {
-                justify-content: center;
-            }
-        }
-    </style>
+    }
+</style>
 {% endblock %}
 
 {% block content %}
-        <div class="row">
-            <div class="col-12">
-                <h1 class="mb-4">
-                    <i class="bi bi-file-earmark"></i> File Browser
-                </h1>
-            </div>
-        </div>
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">
+            <i class="bi bi-file-earmark"></i> File Browser
+        </h1>
+    </div>
+</div>
 
-        <!-- Search and Filters -->
-        <div class="row mb-3 filters-row">
-            <div class="col-12 col-md-6 mb-2 mb-md-0">
-                <div class="input-group">
-                    <span class="input-group-text"><i class="bi bi-search"></i></span>
-                    <input type="text" class="form-control" id="search_input" placeholder="Search file paths..." inputmode="search">
-                    <button class="btn btn-primary" type="button" id="search_btn">
-                        <i class="bi bi-search d-md-none"></i>
-                        <span class="d-none d-md-inline">Search</span>
-                    </button>
-                    <button class="btn btn-outline-secondary" type="button" id="clear_search_btn">
-                        <i class="bi bi-x-lg d-md-none"></i>
-                        <span class="d-none d-md-inline">Clear</span>
-                    </button>
-                </div>
-            </div>
-            <div class="col-6 col-md-3">
-                <div class="input-group">
-                    <label class="input-group-text d-none d-sm-flex" for="path_id_filter">Path:</label>
-                    <select class="form-select" id="path_id_filter" aria-label="Filter by path">
-                        <option value="">All Paths</option>
-                    </select>
-                </div>
-            </div>
-            <div class="col-6 col-md-3">
-                <div class="input-group">
-                    <label class="input-group-text d-none d-sm-flex" for="storage_filter">Storage:</label>
-                    <select class="form-select" id="storage_filter" aria-label="Filter by storage">
-                        <option value="">All</option>
-                        <option value="hot">Hot</option>
-                        <option value="cold">Cold</option>
-                    </select>
-                </div>
-            </div>
-        </div>
-
-        <!-- Tag Filter -->
-        <div class="row mb-3 filters-row">
-            <div class="col-12 col-md-6 mb-2 mb-md-0">
-                <div class="input-group">
-                    <label class="input-group-text" for="tag_filter"><i class="bi bi-tags"></i><span class="d-none d-sm-inline ms-1">Tags:</span></label>
-                    <select class="form-select" id="tag_filter" multiple size="1" aria-label="Filter by tags">
-                        <option value="">All Tags</option>
-                    </select>
-                    <button class="btn btn-outline-secondary" type="button" id="clear_tag_filter_btn" title="Clear tag filter">
-                        <i class="bi bi-x-circle"></i><span class="d-none d-sm-inline ms-1">Clear</span>
-                    </button>
-                </div>
-                <div class="form-text d-none d-md-block">Select one or more tags to filter files (hold Ctrl/Cmd to select multiple)</div>
-            </div>
-            <div class="col-12 col-md-6 text-md-end">
-                <div class="btn-group">
-
-                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()" title="Remove duplicate file records">
-                        <i class="bi bi-files"></i><span class="d-none d-sm-inline ms-1">Remove Duplicates</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-
-        <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-body p-2">
-                        <div id="files-loading" class="text-center py-5">
-                            <div class="spinner-border text-primary" role="status">
-                                <span class="visually-hidden">Loading files...</span>
-                            </div>
-                            <p class="text-muted mt-3" id="loading-text">Loading files...</p>
-                            <div class="progress mt-2" style="width: 200px; margin: 0 auto; display: none;" id="stream-progress-container">
-                                <div class="progress-bar" id="stream-progress" role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
-                            </div>
-                        </div>
-                        <div id="filesGrid" class="ag-theme-quartz" style="display: none;"></div>
-                        <div id="no-files-message" class="text-center py-5" style="display: none;">
-                            <i class="bi bi-file-earmark-x display-1 text-muted"></i>
-                            <p class="text-muted mt-3">No files found.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Status Bar -->
-        <div class="row mt-2">
-            <div class="col-12">
-                <p class="text-center text-muted mb-0" id="status-bar"></p>
-            </div>
-        </div>
-
-        <!-- Thaw Modal -->
-        <div class="modal fade" id="thawModal" tabindex="-1" aria-labelledby="thawModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-fullscreen-sm-down">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="thawModalLabel">Thaw File</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Move this file from cold storage back to hot storage?</p>
-                        <p><strong>File:</strong> <code id="thawFileName"></code></p>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="thawPinCheckbox">
-                            <label class="form-check-label" for="thawPinCheckbox">
-                                <i class="bi bi-pin-angle"></i> Pin file (prevent automatic freeze)
-                            </label>
-                            <div class="form-text">Pinned files will not be moved to cold storage during automatic scans</div>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-warning" id="confirmThawBtn">
-                            <i class="bi bi-fire"></i> Thaw
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Freeze Modal -->
-        <div class="modal fade" id="freezeModal" tabindex="-1" aria-labelledby="freezeModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-fullscreen-sm-down">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="freezeModalLabel">Send to Cold Storage</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Move this file to cold storage?</p>
-                        <p><strong>File:</strong> <code id="freezeFileName"></code></p>
-                        <div class="mb-3">
-                            <label for="freezeLocationSelect" class="form-label">Storage Location</label>
-                            <select class="form-select" id="freezeLocationSelect">
-                                <option value="">Loading locations...</option>
-                            </select>
-                            <div class="form-text">Select the cold storage location for this file</div>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="freezePinCheckbox">
-                            <label class="form-check-label" for="freezePinCheckbox">
-                                <i class="bi bi-pin-angle"></i> Pin file (prevent automatic thaw)
-                            </label>
-                            <div class="form-text">Pinned files will not be moved back to hot storage during automatic scans</div>
-                        </div>
-                        <div id="freezeError" class="alert alert-danger d-none mt-3" role="alert"></div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-info" id="confirmFreezeBtn" disabled>
-                            <i class="bi bi-snow"></i> Send to Fridge
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Manage Tags Modal -->
-        <div class="modal fade" id="manageTagsModal" tabindex="-1" aria-labelledby="manageTagsModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-lg modal-fullscreen-md-down">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="manageTagsModalLabel">Manage Tags</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p><strong>File:</strong> <code id="tagFileName"></code></p>
-
-                        <div class="mb-3">
-                            <label class="form-label">Current Tags</label>
-                            <div id="currentTags" class="mb-2">
-                                <span class="text-muted">Loading...</span>
-                            </div>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="addTagSelect" class="form-label">Add Tag</label>
-                            <div class="input-group">
-                                <select class="form-select" id="addTagSelect">
-                                    <option value="">Select a tag...</option>
-                                </select>
-                                <button class="btn btn-primary" type="button" id="addTagBtn" disabled>
-                                    <i class="bi bi-plus-circle"></i> Add
-                                </button>
-                            </div>
-                            <div class="form-text">Select a tag from the list to add it to this file</div>
-                        </div>
-
-                        <div id="tagError" class="alert alert-danger d-none" role="alert"></div>
-                        <div id="tagSuccess" class="alert alert-success d-none" role="alert"></div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Relocate Modal -->
-        <div class="modal fade" id="relocateModal" tabindex="-1" aria-labelledby="relocateModalLabel" aria-hidden="true">
-            <div class="modal-dialog modal-fullscreen-sm-down">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="relocateModalLabel">Relocate File to Another Cold Storage</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Move this file to a different cold storage location?</p>
-                        <p><strong>File:</strong> <code id="relocateFileName"></code></p>
-
-                        <div class="mb-3">
-                            <label for="relocateCurrentLocation" class="form-label">Current Location</label>
-                            <div id="relocateCurrentLocation" class="form-control-plaintext">
-                                <span class="text-muted">Loading...</span>
-                            </div>
-                        </div>
-
-                        <div class="mb-3">
-                            <label for="relocateTargetSelect" class="form-label">Target Storage Location</label>
-                            <select class="form-select" id="relocateTargetSelect">
-                                <option value="">Loading locations...</option>
-                            </select>
-                            <div class="form-text">Select the cold storage location to move the file to</div>
-                        </div>
-
-                        <div id="relocateError" class="alert alert-danger d-none" role="alert"></div>
-                        <div id="relocateNoOptions" class="alert alert-warning d-none" role="alert">
-                            <i class="bi bi-exclamation-triangle"></i>
-                            This path only has one cold storage location configured.
-                            Add more storage locations to the path to enable relocation.
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" id="confirmRelocateBtn" disabled>
-                            <i class="bi bi-arrow-right-circle"></i> Relocate File
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Bulk Actions Toolbar -->
-        <div id="bulk-actions-toolbar" class="bulk-actions-toolbar">
-            <span class="selection-info">
-                <i class="bi bi-check2-square"></i>
-                <span id="selection-count">0 files selected</span>
-            </span>
-            <div class="btn-group" role="group" aria-label="Bulk actions">
-                <button type="button" class="btn btn-warning btn-sm" id="bulk-thaw-btn" title="Thaw selected files">
-                    <i class="bi bi-fire"></i> Thaw
-                </button>
-                <button type="button" class="btn btn-info btn-sm" id="bulk-freeze-btn" title="Freeze selected files">
-                    <i class="bi bi-snow"></i> Freeze
-                </button>
-                <button type="button" class="btn btn-outline-info btn-sm" id="bulk-migrate-btn" title="Migrate selected files to remote instance">
-                    <i class="bi bi-hdd-network"></i> Migrate
-                </button>
-                <button type="button" class="btn btn-primary btn-sm" id="bulk-add-tag-btn" title="Add tag to selected files">
-                    <i class="bi bi-tag"></i> Add Tag
-                </button>
-                <button type="button" class="btn btn-outline-primary btn-sm" id="bulk-remove-tag-btn" title="Remove tag from selected files">
-                    <i class="bi bi-tag-x"></i> Remove Tag
-                </button>
-                <button type="button" class="btn btn-secondary btn-sm" id="bulk-pin-btn" title="Pin selected files">
-                    <i class="bi bi-pin"></i> Pin
-                </button>
-                <button type="button" class="btn btn-outline-secondary btn-sm" id="bulk-unpin-btn" title="Unpin selected files">
-                    <i class="bi bi-pin-angle"></i> Unpin
-                </button>
-            </div>
-            <button type="button" class="btn btn-link btn-sm text-muted" id="clear-selection-btn">
-                <i class="bi bi-x-lg"></i> Clear
+<!-- Search and Filters -->
+<div class="row mb-3 filters-row">
+    <div class="col-12 col-md-6 mb-2 mb-md-0">
+        <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="search_input" placeholder="Search file paths..."
+                inputmode="search">
+            <button class="btn btn-primary" type="button" id="search_btn">
+                <i class="bi bi-search d-md-none"></i>
+                <span class="d-none d-md-inline">Search</span>
+            </button>
+            <button class="btn btn-outline-secondary" type="button" id="clear_search_btn">
+                <i class="bi bi-x-lg d-md-none"></i>
+                <span class="d-none d-md-inline">Clear</span>
             </button>
         </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="input-group">
+            <label class="input-group-text d-none d-sm-flex" for="path_id_filter">Path:</label>
+            <select class="form-select" id="path_id_filter" aria-label="Filter by path">
+                <option value="">All Paths</option>
+            </select>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="input-group">
+            <label class="input-group-text d-none d-sm-flex" for="storage_filter">Storage:</label>
+            <select class="form-select" id="storage_filter" aria-label="Filter by storage">
+                <option value="">All</option>
+                <option value="hot">Hot</option>
+                <option value="cold">Cold</option>
+            </select>
+        </div>
+    </div>
+</div>
 
-        <!-- Bulk Thaw Modal -->
-        <div class="modal fade" id="bulkThawModal" tabindex="-1" aria-labelledby="bulkThawModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="bulkThawModalLabel"><i class="bi bi-fire"></i> Bulk Thaw Files</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+<!-- Tag Filter -->
+<div class="row mb-3 filters-row">
+    <div class="col-12 col-md-6 mb-2 mb-md-0">
+        <div class="input-group">
+            <label class="input-group-text" for="tag_filter"><i class="bi bi-tags"></i><span
+                    class="d-none d-sm-inline ms-1">Tags:</span></label>
+            <select class="form-select" id="tag_filter" multiple size="1" aria-label="Filter by tags">
+                <option value="">All Tags</option>
+            </select>
+            <button class="btn btn-outline-secondary" type="button" id="clear_tag_filter_btn" title="Clear tag filter">
+                <i class="bi bi-x-circle"></i><span class="d-none d-sm-inline ms-1">Clear</span>
+            </button>
+        </div>
+        <div class="form-text d-none d-md-block">Select one or more tags to filter files (hold Ctrl/Cmd to select
+            multiple)</div>
+    </div>
+    <div class="col-12 col-md-6 text-md-end">
+        <div class="btn-group">
+
+            <button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()"
+                title="Remove duplicate file records">
+                <i class="bi bi-files"></i><span class="d-none d-sm-inline ms-1">Remove Duplicates</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body p-2">
+                <div id="files-loading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading files...</span>
                     </div>
-                    <div class="modal-body">
-                        <p>Move <strong id="bulkThawCount">0</strong> files from cold storage back to hot storage?</p>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="bulkThawPinCheckbox">
-                            <label class="form-check-label" for="bulkThawPinCheckbox">
-                                <i class="bi bi-pin-angle"></i> Pin files after thawing
-                            </label>
-                            <div class="form-text">Pinned files will not be moved to cold storage during automatic scans</div>
-                        </div>
+                    <p class="text-muted mt-3" id="loading-text">Loading files...</p>
+                    <div class="progress mt-2" style="width: 200px; margin: 0 auto; display: none;"
+                        id="stream-progress-container">
+                        <div class="progress-bar" id="stream-progress" role="progressbar" style="width: 0%"
+                            aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                     </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-warning" id="confirmBulkThawBtn">
-                            <i class="bi bi-fire"></i> Thaw Files
-                        </button>
-                    </div>
+                </div>
+                <div id="filesGrid" class="ag-theme-quartz" style="display: none;"></div>
+                <div id="no-files-message" class="text-center py-5" style="display: none;">
+                    <i class="bi bi-file-earmark-x display-1 text-muted"></i>
+                    <p class="text-muted mt-3">No files found.</p>
                 </div>
             </div>
         </div>
+    </div>
+</div>
 
-        <!-- Bulk Freeze Modal -->
-        <div class="modal fade" id="bulkFreezeModal" tabindex="-1" aria-labelledby="bulkFreezeModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="bulkFreezeModalLabel"><i class="bi bi-snow"></i> Bulk Freeze Files</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Move <strong id="bulkFreezeCount">0</strong> files to cold storage?</p>
-                        <div class="mb-3">
-                            <label for="bulkFreezeLocationSelect" class="form-label">Storage Location</label>
-                            <select class="form-select" id="bulkFreezeLocationSelect">
-                                <option value="">Loading...</option>
-                            </select>
-                            <div class="form-text">Select the cold storage location for these files</div>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="bulkFreezePinCheckbox">
-                            <label class="form-check-label" for="bulkFreezePinCheckbox">
-                                <i class="bi bi-pin-angle"></i> Pin files after freezing
-                            </label>
-                            <div class="form-text">Pinned files will not be moved back to hot storage during automatic scans</div>
-                        </div>
-                        <div class="alert alert-info mt-3">
-                            <i class="bi bi-info-circle"></i>
-                            <small>Files from paths not associated with the selected storage location will be skipped.</small>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-info" id="confirmBulkFreezeBtn" disabled>
-                            <i class="bi bi-snow"></i> Freeze Files
-                        </button>
-                    </div>
+<!-- Status Bar -->
+<div class="row mt-2">
+    <div class="col-12">
+        <p class="text-center text-muted mb-0" id="status-bar"></p>
+    </div>
+</div>
+
+<!-- Thaw Modal -->
+<div class="modal fade" id="thawModal" tabindex="-1" aria-labelledby="thawModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="thawModalLabel">Thaw File</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Move this file from cold storage back to hot storage?</p>
+                <p><strong>File:</strong> <code id="thawFileName"></code></p>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="thawPinCheckbox">
+                    <label class="form-check-label" for="thawPinCheckbox">
+                        <i class="bi bi-pin-angle"></i> Pin file (prevent automatic freeze)
+                    </label>
+                    <div class="form-text">Pinned files will not be moved to cold storage during automatic scans</div>
                 </div>
             </div>
-        </div>
-
-        <!-- Bulk Add Tag Modal -->
-        <div class="modal fade" id="bulkAddTagModal" tabindex="-1" aria-labelledby="bulkAddTagModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="bulkAddTagModalLabel"><i class="bi bi-tag"></i> Add Tag to Files</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Add a tag to <strong id="bulkAddTagCount">0</strong> selected files.</p>
-                        <div class="mb-3">
-                            <label for="bulkAddTagSelect" class="form-label">Select Tag</label>
-                            <select class="form-select" id="bulkAddTagSelect">
-                                <option value="">Select a tag...</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" id="confirmBulkAddTagBtn" disabled>
-                            <i class="bi bi-tag"></i> Add Tag
-                        </button>
-                    </div>
-                </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" id="confirmThawBtn">
+                    <i class="bi bi-fire"></i> Thaw
+                </button>
             </div>
         </div>
+    </div>
+</div>
 
-        <!-- Remote Migration Modal -->
-        <div class="modal fade" id="remoteMigrationModal" tabindex="-1" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-hdd-network"></i> Migrate to Remote</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Migrate this file to a remote File Fridge instance?</p>
-                        <p><strong>File:</strong> <code id="remoteMigrationFileName"></code></p>
-
-                        <div class="mb-3">
-                            <label for="remoteConnectionSelect" class="form-label">Remote Instance</label>
-                            <select class="form-select" id="remoteConnectionSelect">
-                                <option value="">Select a connection...</option>
-                            </select>
-                        </div>
-
-                        <div class="mb-3 d-none" id="remotePathContainer">
-                            <label for="remotePathSelect" class="form-label">Remote Monitored Path</label>
-                            <select class="form-select" id="remotePathSelect">
-                                <option value="">Select a path...</option>
-                            </select>
-                            <div class="form-text">The file will be placed in the corresponding tier (Hot/Cold) on the remote server.</div>
-                        </div>
-
-                        <div id="remoteMigrationError" class="alert alert-danger d-none mt-3"></div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" id="confirmRemoteMigrationBtn" disabled>
-                            <i class="bi bi-send"></i> Start Migration
-                        </button>
+<!-- Freeze Modal -->
+<div class="modal fade" id="freezeModal" tabindex="-1" aria-labelledby="freezeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="freezeModalLabel">Send to Cold Storage</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Move this file to cold storage?</p>
+                <p><strong>File:</strong> <code id="freezeFileName"></code></p>
+                <div class="mb-3">
+                    <label for="freezeLocationSelect" class="form-label">Storage Location</label>
+                    <select class="form-select" id="freezeLocationSelect">
+                        <option value="">Loading locations...</option>
+                    </select>
+                    <div class="form-text">Select the cold storage location for this file</div>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="freezePinCheckbox">
+                    <label class="form-check-label" for="freezePinCheckbox">
+                        <i class="bi bi-pin-angle"></i> Pin file (prevent automatic thaw)
+                    </label>
+                    <div class="form-text">Pinned files will not be moved back to hot storage during automatic scans
                     </div>
                 </div>
+                <div id="freezeError" class="alert alert-danger d-none mt-3" role="alert"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-info" id="confirmFreezeBtn" disabled>
+                    <i class="bi bi-snow"></i> Send to Fridge
+                </button>
             </div>
         </div>
+    </div>
+</div>
 
-        <!-- Bulk Remote Migration Modal -->
-        <div class="modal fade" id="bulkRemoteMigrationModal" tabindex="-1" aria-labelledby="bulkRemoteMigrationModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="bulkRemoteMigrationModalLabel"><i class="bi bi-hdd-network"></i> Bulk Migrate to Remote</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Migrate <strong id="bulkRemoteMigrationCount">0</strong> files to a remote File Fridge instance?</p>
+<!-- Manage Tags Modal -->
+<div class="modal fade" id="manageTagsModal" tabindex="-1" aria-labelledby="manageTagsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-fullscreen-md-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="manageTagsModalLabel">Manage Tags</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p><strong>File:</strong> <code id="tagFileName"></code></p>
 
-                        <div class="mb-3">
-                            <label for="bulkRemoteConnectionSelect" class="form-label">Remote Instance</label>
-                            <select class="form-select" id="bulkRemoteConnectionSelect">
-                                <option value="">Select a connection...</option>
-                            </select>
-                        </div>
-
-                        <div class="mb-3 d-none" id="bulkRemotePathContainer">
-                            <label for="bulkRemotePathSelect" class="form-label">Remote Monitored Path</label>
-                            <select class="form-select" id="bulkRemotePathSelect">
-                                <option value="">Select a path...</option>
-                            </select>
-                            <div class="form-text">Files will be placed in the corresponding tier (Hot/Cold) on the remote server.</div>
-                        </div>
-
-                        <div class="alert alert-info mt-3">
-                            <i class="bi bi-info-circle"></i>
-                            <small>Files from both hot and cold storage can be migrated. Transfer jobs will be queued and processed automatically.</small>
-                        </div>
-
-                        <div id="bulkRemoteMigrationError" class="alert alert-danger d-none mt-3"></div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-primary" id="confirmBulkRemoteMigrationBtn" disabled>
-                            <i class="bi bi-send"></i> Start Migration
-                        </button>
+                <div class="mb-3">
+                    <label class="form-label">Current Tags</label>
+                    <div id="currentTags" class="mb-2">
+                        <span class="text-muted">Loading...</span>
                     </div>
                 </div>
-            </div>
-        </div>
 
-        <!-- Bulk Remove Tag Modal -->
-        <div class="modal fade" id="bulkRemoveTagModal" tabindex="-1" aria-labelledby="bulkRemoveTagModalLabel" aria-hidden="true">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title" id="bulkRemoveTagModalLabel"><i class="bi bi-tag-x"></i> Remove Tag from Files</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p>Remove a tag from <strong id="bulkRemoveTagCount">0</strong> selected files.</p>
-                        <div class="mb-3">
-                            <label for="bulkRemoveTagSelect" class="form-label">Select Tag to Remove</label>
-                            <select class="form-select" id="bulkRemoveTagSelect">
-                                <option value="">Select a tag...</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="button" class="btn btn-danger" id="confirmBulkRemoveTagBtn" disabled>
-                            <i class="bi bi-tag-x"></i> Remove Tag
+                <div class="mb-3">
+                    <label for="addTagSelect" class="form-label">Add Tag</label>
+                    <div class="input-group">
+                        <select class="form-select" id="addTagSelect">
+                            <option value="">Select a tag...</option>
+                        </select>
+                        <button class="btn btn-primary" type="button" id="addTagBtn" disabled>
+                            <i class="bi bi-plus-circle"></i> Add
                         </button>
                     </div>
+                    <div class="form-text">Select a tag from the list to add it to this file</div>
                 </div>
+
+                <div id="tagError" class="alert alert-danger d-none" role="alert"></div>
+                <div id="tagSuccess" class="alert alert-success d-none" role="alert"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Relocate Modal -->
+<div class="modal fade" id="relocateModal" tabindex="-1" aria-labelledby="relocateModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen-sm-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="relocateModalLabel">Relocate File to Another Cold Storage</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Move this file to a different cold storage location?</p>
+                <p><strong>File:</strong> <code id="relocateFileName"></code></p>
+
+                <div class="mb-3">
+                    <label for="relocateCurrentLocation" class="form-label">Current Location</label>
+                    <div id="relocateCurrentLocation" class="form-control-plaintext">
+                        <span class="text-muted">Loading...</span>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="relocateTargetSelect" class="form-label">Target Storage Location</label>
+                    <select class="form-select" id="relocateTargetSelect">
+                        <option value="">Loading locations...</option>
+                    </select>
+                    <div class="form-text">Select the cold storage location to move the file to</div>
+                </div>
+
+                <div id="relocateError" class="alert alert-danger d-none" role="alert"></div>
+                <div id="relocateNoOptions" class="alert alert-warning d-none" role="alert">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    This path only has one cold storage location configured.
+                    Add more storage locations to the path to enable relocation.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmRelocateBtn" disabled>
+                    <i class="bi bi-arrow-right-circle"></i> Relocate File
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Actions Toolbar -->
+<div id="bulk-actions-toolbar" class="bulk-actions-toolbar">
+    <span class="selection-info">
+        <i class="bi bi-check2-square"></i>
+        <span id="selection-count">0 files selected</span>
+    </span>
+    <div class="btn-group" role="group" aria-label="Bulk actions">
+        <button type="button" class="btn btn-warning btn-sm" id="bulk-thaw-btn" title="Thaw selected files">
+            <i class="bi bi-fire"></i> Thaw
+        </button>
+        <button type="button" class="btn btn-info btn-sm" id="bulk-freeze-btn" title="Freeze selected files">
+            <i class="bi bi-snow"></i> Freeze
+        </button>
+        <button type="button" class="btn btn-outline-info btn-sm" id="bulk-migrate-btn"
+            title="Migrate selected files to remote instance">
+            <i class="bi bi-hdd-network"></i> Migrate
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" id="bulk-add-tag-btn" title="Add tag to selected files">
+            <i class="bi bi-tag"></i> Add Tag
+        </button>
+        <button type="button" class="btn btn-outline-primary btn-sm" id="bulk-remove-tag-btn"
+            title="Remove tag from selected files">
+            <i class="bi bi-tag-x"></i> Remove Tag
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" id="bulk-pin-btn" title="Pin selected files">
+            <i class="bi bi-pin"></i> Pin
+        </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="bulk-unpin-btn" title="Unpin selected files">
+            <i class="bi bi-pin-angle"></i> Unpin
+        </button>
+    </div>
+    <button type="button" class="btn btn-link btn-sm text-muted" id="clear-selection-btn">
+        <i class="bi bi-x-lg"></i> Clear
+    </button>
+</div>
+
+<!-- Bulk Thaw Modal -->
+<div class="modal fade" id="bulkThawModal" tabindex="-1" aria-labelledby="bulkThawModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkThawModalLabel"><i class="bi bi-fire"></i> Bulk Thaw Files</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Move <strong id="bulkThawCount">0</strong> files from cold storage back to hot storage?</p>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="bulkThawPinCheckbox">
+                    <label class="form-check-label" for="bulkThawPinCheckbox">
+                        <i class="bi bi-pin-angle"></i> Pin files after thawing
+                    </label>
+                    <div class="form-text">Pinned files will not be moved to cold storage during automatic scans</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-warning" id="confirmBulkThawBtn">
+                    <i class="bi bi-fire"></i> Thaw Files
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Freeze Modal -->
+<div class="modal fade" id="bulkFreezeModal" tabindex="-1" aria-labelledby="bulkFreezeModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkFreezeModalLabel"><i class="bi bi-snow"></i> Bulk Freeze Files</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Move <strong id="bulkFreezeCount">0</strong> files to cold storage?</p>
+                <div class="mb-3">
+                    <label for="bulkFreezeLocationSelect" class="form-label">Storage Location</label>
+                    <select class="form-select" id="bulkFreezeLocationSelect">
+                        <option value="">Loading...</option>
+                    </select>
+                    <div class="form-text">Select the cold storage location for these files</div>
+                </div>
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="bulkFreezePinCheckbox">
+                    <label class="form-check-label" for="bulkFreezePinCheckbox">
+                        <i class="bi bi-pin-angle"></i> Pin files after freezing
+                    </label>
+                    <div class="form-text">Pinned files will not be moved back to hot storage during automatic scans
+                    </div>
+                </div>
+                <div class="alert alert-info mt-3">
+                    <i class="bi bi-info-circle"></i>
+                    <small>Files from paths not associated with the selected storage location will be skipped.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-info" id="confirmBulkFreezeBtn" disabled>
+                    <i class="bi bi-snow"></i> Freeze Files
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Add Tag Modal -->
+<div class="modal fade" id="bulkAddTagModal" tabindex="-1" aria-labelledby="bulkAddTagModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkAddTagModalLabel"><i class="bi bi-tag"></i> Add Tag to Files</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Add a tag to <strong id="bulkAddTagCount">0</strong> selected files.</p>
+                <div class="mb-3">
+                    <label for="bulkAddTagSelect" class="form-label">Select Tag</label>
+                    <select class="form-select" id="bulkAddTagSelect">
+                        <option value="">Select a tag...</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmBulkAddTagBtn" disabled>
+                    <i class="bi bi-tag"></i> Add Tag
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Remote Migration Modal -->
+<div class="modal fade" id="remoteMigrationModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-hdd-network"></i> Migrate to Remote</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Migrate this file to a remote File Fridge instance?</p>
+                <p><strong>File:</strong> <code id="remoteMigrationFileName"></code></p>
+
+                <div class="mb-3">
+                    <label for="remoteConnectionSelect" class="form-label">Remote Instance</label>
+                    <select class="form-select" id="remoteConnectionSelect">
+                        <option value="">Select a connection...</option>
+                    </select>
+                </div>
+
+                <div class="mb-3 d-none" id="remotePathContainer">
+                    <label for="remotePathSelect" class="form-label">Remote Monitored Path</label>
+                    <select class="form-select" id="remotePathSelect">
+                        <option value="">Select a path...</option>
+                    </select>
+                    <div class="form-text">The file will be placed in the corresponding tier (Hot/Cold) on the remote
+                        server.</div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Transfer Mode</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="remoteMigrationStrategy"
+                            id="remoteMigrateCopy" value="COPY" checked>
+                        <label class="form-check-label" for="remoteMigrateCopy">
+                            Copy (Default)
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="remoteMigrationStrategy"
+                            id="remoteMigrateMove" value="MOVE">
+                        <label class="form-check-label" for="remoteMigrateMove">
+                            Move (Delete source after safe verification)
+                        </label>
+                    </div>
+                </div>
+
+                <div id="remoteMigrationError" class="alert alert-danger d-none mt-3"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmRemoteMigrationBtn" disabled>
+                    <i class="bi bi-send"></i> Start Migration
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Remote Migration Modal -->
+<div class="modal fade" id="bulkRemoteMigrationModal" tabindex="-1" aria-labelledby="bulkRemoteMigrationModalLabel"
+    aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkRemoteMigrationModalLabel"><i class="bi bi-hdd-network"></i> Bulk
+                    Migrate to Remote</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Migrate <strong id="bulkRemoteMigrationCount">0</strong> files to a remote File Fridge instance?</p>
+
+                <div class="mb-3">
+                    <label for="bulkRemoteConnectionSelect" class="form-label">Remote Instance</label>
+                    <select class="form-select" id="bulkRemoteConnectionSelect">
+                        <option value="">Select a connection...</option>
+                    </select>
+                </div>
+
+                <div class="mb-3 d-none" id="bulkRemotePathContainer">
+                    <label for="bulkRemotePathSelect" class="form-label">Remote Monitored Path</label>
+                    <select class="form-select" id="bulkRemotePathSelect">
+                        <option value="">Select a path...</option>
+                    </select>
+                    <div class="form-text">Files will be placed in the corresponding tier (Hot/Cold) on the remote
+                        server.</div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Transfer Mode</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="bulkRemoteMigrationStrategy"
+                            id="bulkRemoteMigrateCopy" value="COPY" checked>
+                        <label class="form-check-label" for="bulkRemoteMigrateCopy">
+                            Copy (Default)
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="bulkRemoteMigrationStrategy"
+                            id="bulkRemoteMigrateMove" value="MOVE">
+                        <label class="form-check-label" for="bulkRemoteMigrateMove">
+                            Move (Delete source after safe verification)
+                        </label>
+                    </div>
+                </div>
+
+                <div class="alert alert-info mt-3">
+                    <i class="bi bi-info-circle"></i>
+                    <small>Files from both hot and cold storage can be migrated. Transfer jobs will be queued and
+                        processed automatically.</small>
+                </div>
+
+                <div id="bulkRemoteMigrationError" class="alert alert-danger d-none mt-3"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmBulkRemoteMigrationBtn" disabled>
+                    <i class="bi bi-send"></i> Start Migration
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk Remove Tag Modal -->
+<div class="modal fade" id="bulkRemoveTagModal" tabindex="-1" aria-labelledby="bulkRemoveTagModalLabel"
+    aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkRemoveTagModalLabel"><i class="bi bi-tag-x"></i> Remove Tag from Files
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Remove a tag from <strong id="bulkRemoveTagCount">0</strong> selected files.</p>
+                <div class="mb-3">
+                    <label for="bulkRemoveTagSelect" class="form-label">Select Tag to Remove</label>
+                    <select class="form-select" id="bulkRemoveTagSelect">
+                        <option value="">Select a tag...</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirmBulkRemoveTagBtn" disabled>
+                    <i class="bi bi-tag-x"></i> Remove Tag
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
-    <!-- AG Grid JS -->
-    <script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/dist/ag-grid-community.min.js"></script>
-    <script src="/static/js/files.js"></script>
+<!-- AG Grid JS -->
+<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/dist/ag-grid-community.min.js"></script>
+<script src="/static/js/files.js"></script>
 {% endblock %}
