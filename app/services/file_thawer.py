@@ -68,25 +68,20 @@ class FileThawer:
                     # Ensure destination directory exists
                     original_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    # Handle symlinks and atomic replacement
-                    if original_path.is_symlink():
-                        original_path.unlink()
-                        target_path = original_path
-                    else:
-                        # Decrypt to temporary file first for atomic replacement
-                        target_path = original_path.with_suffix(original_path.suffix + ".tmp")
+                    # Decrypt to temporary file first for atomic replacement
+                    # This avoids following symlinks at original_path and ensures atomicity
+                    target_path = original_path.with_suffix(original_path.suffix + ".tmp")
 
                     try:
-                        # Decrypt to destination/temp
+                        # Decrypt to temp file
                         file_encryption_service.decrypt_file(db, cold_path, target_path)
 
-                        # If we used a temp file, atomically move it to final destination
-                        if target_path != original_path:
-                            target_path.replace(original_path)
+                        # Atomically move it to final destination (replaces existing file/symlink)
+                        target_path.replace(original_path)
 
                     except Exception:
                         # Clean up temp file if decryption failed
-                        if target_path != original_path and target_path.exists():
+                        if target_path.exists():
                             target_path.unlink()
                         raise
 
