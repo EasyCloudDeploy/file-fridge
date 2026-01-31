@@ -670,6 +670,7 @@ class InstanceMetadata(Base):
     ed25519_private_key_encrypted = Column(Text, nullable=True)  # Encrypted signing private key
     x25519_public_key = Column(Text, nullable=True)  # Key exchange public key
     x25519_private_key_encrypted = Column(Text, nullable=True)  # Encrypted key exchange private key
+    file_encryption_root_key_encrypted = Column(Text, nullable=True)  # Persistent master key for file encryption
     current_key_version = Column(Integer, nullable=False, default=1)  # For key rotation
     instance_url = Column(
         String, nullable=True
