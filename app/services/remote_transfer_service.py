@@ -21,11 +21,13 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import (
     FileInventory,
+    FileStatus,
     MonitoredPath,
     RemoteConnection,
     RemoteTransferJob,
     TransferDirection,
     TransferStatus,
+    FileTransferStrategy,
 )
 from app.services.file_metadata import file_metadata_extractor
 from app.utils.remote_signature import get_signed_headers
@@ -57,6 +59,7 @@ class RemoteTransferService:
         remote_connection_id: int,
         remote_monitored_path_id: int,
         direction: TransferDirection = TransferDirection.PUSH,
+        strategy: FileTransferStrategy = FileTransferStrategy.COPY,
     ) -> RemoteTransferJob:
         """Create a new remote transfer job."""
         logger.info(
@@ -136,6 +139,7 @@ class RemoteTransferService:
             storage_type=file_obj.storage_type,
             checksum=checksum,
             direction=direction,
+            strategy=strategy,
         )
 
         db.add(job)
@@ -459,12 +463,6 @@ class RemoteTransferService:
                         signed_headers = await get_signed_headers(
                             db, "POST", url, body_bytes
                         )
-                        import json
-
-                        body_bytes = json.dumps(
-                            json_payload, sort_keys=True, separators=(",", ":")
-                        ).encode("utf-8")
-                        signed_headers = await get_signed_headers(db, "POST", url, body_bytes)
 
                         verify_response = await client.post(
                             url,
@@ -560,22 +558,39 @@ class RemoteTransferService:
         return True
 
     async def _cleanup_after_transfer(
-        self, _db: Session, job: RemoteTransferJob, _conn: RemoteConnection
+        self, db: Session, job: RemoteTransferJob, _conn: RemoteConnection
     ):
         """
-        Optional cleanup after successful transfer.
-
-        This method can be extended to perform actions like:
-        - Deleting the source file after successful transfer
-        - Updating file inventory status
-        - Sending notifications
-        - Logging to audit trail
-
-        Args:
-            _db: Database session (unused, reserved for future use)
-            job: The completed transfer job
-            _conn: The remote connection used (unused, reserved for future use)
+        Cleanup after successful transfer.
+        If the strategy is MOVE, delete the source file safely.
         """
+        if job.strategy == FileTransferStrategy.MOVE:
+            source_path = Path(job.source_path)
+            if source_path.exists():
+                logger.info(
+                    f"Transfer job {job.id} used MOVE strategy. Deleting source file {source_path}"
+                )
+                try:
+                    # Double check existence and accessibility before delete
+                    source_path.unlink()
+
+                    # Update file inventory status
+                    file_obj = (
+                        db.query(FileInventory)
+                        .filter(FileInventory.id == job.file_inventory_id)
+                        .first()
+                    )
+                    if file_obj:
+                        file_obj.status = FileStatus.DELETED
+                        db.commit()
+                        logger.info(f"Marked file {job.file_inventory_id} as DELETED in inventory")
+                except Exception as e:
+                    logger.error(f"Failed to delete source file {source_path} after MOVE: {e}")
+            else:
+                logger.warning(
+                    f"Transfer job {job.id} MOVE task: source file {source_path} already missing"
+                )
+
         logger.debug(f"Cleanup completed for transfer job {job.id}")
 
 

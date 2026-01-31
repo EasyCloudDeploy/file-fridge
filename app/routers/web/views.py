@@ -20,6 +20,7 @@ TEMPLATE_ROUTES = [
     ("/tags", "tags.html", "tags"),
     ("/notifiers", "notifiers.html", "notifiers"),
     ("/settings", "settings.html", "settings"),
+    ("/remote-files/{connection_id}", "remote_files.html", "remote-files"),
     ("/login", "login.html", None),  # Login page (no active page highlight)
 ]
 
@@ -107,3 +108,12 @@ async def cleanup_duplicates_redirect():
 async def thaw_redirect(file_id: int):
     """Legacy thaw redirect."""
     return RedirectResponse(url="/files", status_code=303)
+
+
+@router.get("/remote-files/{connection_id}", response_class=HTMLResponse)
+async def get_remote_files(request: Request, connection_id: int):
+    """Remote files browser page."""
+    return templates.TemplateResponse(
+        "remote_files.html",
+        {"request": request, "active_page": "remote-files", "connection_id": connection_id},
+    )

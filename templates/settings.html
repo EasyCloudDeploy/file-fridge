@@ -156,15 +156,18 @@
                                     <h6 class="alert-heading">
                                         <i class="bi bi-check-circle me-2"></i>Token Generated Successfully
                                     </h6>
-                                    <p class="mb-2 small">Copy this token now. For security reasons, it won't be shown again.</p>
+                                    <p class="mb-2 small">Copy this token now. For security reasons, it won't be shown
+                                        again.</p>
                                     <div class="input-group">
-                                        <input type="text" class="form-control font-monospace small" id="generated-token" readonly>
+                                        <input type="text" class="form-control font-monospace small"
+                                            id="generated-token" readonly>
                                         <button class="btn btn-outline-secondary" type="button" id="copy-token-btn">
                                             <i class="bi bi-clipboard"></i> Copy
                                         </button>
                                     </div>
                                 </div>
-                                <button type="button" class="btn-close ms-2" aria-label="Close" onclick="document.getElementById('token-result').classList.add('d-none')"></button>
+                                <button type="button" class="btn-close ms-2" aria-label="Close"
+                                    onclick="document.getElementById('token-result').classList.add('d-none')"></button>
                             </div>
                         </div>
 
@@ -256,61 +259,6 @@
                 </div>
             </div>
 
-            <!-- Instance Identity Card (QR Code) -->
-            <div id="instance-identity" class="card mb-4">
-                <div class="card-header">
-                    <h5 class="mb-0">
-                        <i class="bi bi-qr-code me-2"></i>Instance Identity
-                    </h5>
-                </div>
-                <div class="card-body">
-                    <div class="alert alert-info d-flex align-items-start" role="alert">
-                        <i class="bi bi-info-circle-fill me-3 fs-4 flex-shrink-0"></i>
-                        <div>
-                            Share your instance identity with other File Fridge servers to allow them to verify your connection.
-                            The QR code contains your instance URL and cryptographic fingerprint.
-                        </div>
-                    </div>
-
-                    <div id="identity-content" class="text-center">
-                        <div class="spinner-border text-primary my-4" role="status">
-                            <span class="visually-hidden">Loading...</span>
-                        </div>
-                    </div>
-
-                    <div id="identity-data" class="d-none">
-                        <div class="row">
-                            <div class="col-md-6 text-center mb-3">
-                                <canvas id="qr-code" class="border rounded p-2 bg-white"></canvas>
-                                <p class="text-muted small mt-2">Scan with another File Fridge instance</p>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold small">Instance Name</label>
-                                    <div class="form-control-plaintext" id="identity-name"></div>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold small">Instance URL</label>
-                                    <div class="form-control-plaintext font-monospace small" id="identity-url"></div>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label fw-bold small">Fingerprint</label>
-                                    <div class="form-control-plaintext font-monospace small text-break" id="identity-fingerprint"></div>
-                                </div>
-                                <button class="btn btn-sm btn-outline-secondary" id="copy-identity-btn">
-                                    <i class="bi bi-clipboard me-1"></i>Copy Identity Info
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div id="identity-error" class="alert alert-warning d-none" role="alert">
-                        <i class="bi bi-exclamation-triangle me-2"></i>
-                        <span id="identity-error-text"></span>
-                    </div>
-                </div>
-            </div>
-
             <div id="remote-connections" class="card mb-4">
                 <div class="card-header d-flex justify-content-between align-items-center">
                     <h5 class="mb-0">
@@ -329,7 +277,12 @@
                             This code rotates hourly.
                         </p>
                         <div class="input-group mb-3">
-                            <input type="text" class="form-control" id="my-connection-code" readonly>
+                            <input type="password" class="form-control font-monospace" id="my-connection-code" readonly
+                                autocomplete="off" spellcheck="false">
+                            <button class="btn btn-outline-secondary" type="button" id="toggle-code-visibility"
+                                title="Show/Hide code">
+                                <i class="bi bi-eye"></i>
+                            </button>
                             <button class="btn btn-outline-secondary" type="button" id="copy-code-btn"
                                 title="Copy to clipboard">
                                 <i class="bi bi-clipboard"></i>
@@ -347,14 +300,17 @@
                                 <tr>
                                     <th>Name</th>
                                     <th>URL</th>
-                                    <th>Created</th>
+                                    <th>Status</th>
+                                    <th>Mode</th>
+                                    <th>Created At</th>
+                                    <th>File Browser</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="remote-connections-list">
                                 <!-- Connections will be loaded here -->
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
+                                    <td colspan="7" class="text-center text-muted py-4">
                                         <output>
                                             <div class="spinner-border spinner-border-sm me-2" aria-label="Loading">
                                             </div>
@@ -519,8 +475,9 @@
                     </div>
                     <div class="mb-3">
                         <label for="connection-code" class="form-label">Connection Code</label>
-                        <input type="text" class="form-control" id="connection-code" name="connection_code" required
-                            placeholder="Paste the code from the remote instance">
+                        <input type="text" class="form-control font-monospace" id="connection-code"
+                            name="connection_code" required placeholder="Paste the code from the remote instance"
+                            autocomplete="off" spellcheck="false">
                     </div>
                     <div class="mb-3">
                         <label for="transfer-mode" class="form-label">Transfer Mode</label>
@@ -698,7 +655,8 @@
             </div>
             <div class="modal-body">
                 <p>Remove transfer record for <strong id="delete-transfer-name"></strong>?</p>
-                <p class="text-muted small">This will only remove the transfer from the list. It will not affect any files.</p>
+                <p class="text-muted small">This will only remove the transfer from the list. It will not affect any
+                    files.</p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -708,41 +666,55 @@
     </div>
 </div>
 
-<!-- Browse Remote Files Modal -->
-<div class="modal fade" id="browseRemoteFilesModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-xl">
+<!-- Connection Details Modal (for pending connections) -->
+<div class="modal fade" id="connectionDetailsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">
-                    <i class="bi bi-folder2-open me-2"></i>Browse Remote Files
+                    <i class="bi bi-info-circle me-2"></i>Connection Details
                 </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <div class="row mb-3">
-                    <div class="col-md-6">
-                        <label for="browse-remote-path-select" class="form-label">Remote Path</label>
-                        <select class="form-select" id="browse-remote-path-select">
-                            <option value="">Select a path...</option>
-                        </select>
-                    </div>
-                    <div class="col-md-6">
-                        <label for="pull-local-path-select" class="form-label">Local Destination Path</label>
-                        <select class="form-select" id="pull-local-path-select">
-                            <option value="">Select local destination...</option>
-                        </select>
-                    </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Instance Name</label>
+                    <p class="form-control-plaintext" id="detail-name"></p>
                 </div>
-                <div id="remote-files-list">
-                    <p class="text-muted text-center py-3">Select a remote path to browse files.</p>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">URL</label>
+                    <p class="form-control-plaintext" id="detail-url"></p>
                 </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Fingerprint</label>
+                    <p class="form-control-plaintext font-monospace small" id="detail-fingerprint"></p>
+                    <small class="text-muted">Verify this fingerprint matches the one shown on the remote
+                        instance.</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Status</label>
+                    <p class="form-control-plaintext" id="detail-status"></p>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Transfer Mode</label>
+                    <p class="form-control-plaintext" id="detail-mode"></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-success" id="accept-from-details-btn">
+                    <i class="bi bi-check-circle me-1"></i>Accept Connection
+                </button>
             </div>
         </div>
     </div>
 </div>
+
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8CdnJMR==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
+    integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8CdnJMR=="
+    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="/static/js/settings.js"></script>
 {% endblock %}

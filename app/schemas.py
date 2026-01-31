@@ -1,6 +1,7 @@
 """Pydantic schemas for API validation."""
 
 import base64
+import enum
 from datetime import datetime
 from typing import List, Optional
 
@@ -43,6 +44,22 @@ class CriteriaUpdate(BaseModel):
     operator: Optional[Operator] = None
     value: Optional[str] = None
     enabled: Optional[bool] = None
+
+
+class FileTransferStrategy(str, enum.Enum):
+    """Strategy for remote file transfer (Copy vs Move)."""
+
+    COPY = "COPY"
+    MOVE = "MOVE"
+
+
+class ConflictResolution(str, enum.Enum):
+    """Strategy for handling duplicate files during transfer."""
+
+    SKIP = "SKIP"  # Skip transfer if file exists
+    OVERWRITE = "OVERWRITE"  # Replace existing file
+    RENAME = "RENAME"  # Add suffix to filename (_1, _2, etc)
+    COMPARE = "COMPARE"  # Compare checksums, skip if identical, otherwise fail
 
 
 class Criteria(CriteriaBase):
@@ -770,6 +787,7 @@ class RemoteConnectionIdentity(BaseModel):
     ed25519_public_key: str = Field(..., description="Base64-encoded Ed25519 public signing key")
     x25519_public_key: str = Field(..., description="Base64-encoded X25519 public key exchange key")
     url: HttpUrl = Field(..., description="Base URL of the remote instance")
+    transfer_mode: Optional[TransferMode] = Field(None, description="Current transfer mode of the instance")
 
     @validator("ed25519_public_key", "x25519_public_key")
     def validate_base64(cls, v):
@@ -785,6 +803,7 @@ class RemoteConnectionCreate(RemoteConnectionBase):
     """Schema for creating a remote connection."""
 
     connection_code: str = Field(..., description="The rotating code from the remote instance")
+    transfer_mode: Optional[TransferMode] = TransferMode.PUSH_ONLY
 
 
 class RemoteConnectionUpdate(BaseModel):
@@ -837,6 +856,18 @@ class RemoteTransferJobBase(BaseModel):
     file_inventory_id: int
     remote_connection_id: int
     remote_monitored_path_id: int
+    strategy: FileTransferStrategy = FileTransferStrategy.COPY
+    conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE
+
+
+class BulkRemoteMigrationRequest(BaseModel):
+    """Request for bulk remote migration."""
+
+    file_ids: List[int] = Field(..., min_length=1, description="List of file inventory IDs")
+    remote_connection_id: int = Field(..., description="Remote connection ID")
+    remote_monitored_path_id: int = Field(..., description="Target remote monitored path ID")
+    strategy: FileTransferStrategy = FileTransferStrategy.COPY
+    conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE
 
 
 class RemoteTransferJob(RemoteTransferJobBase):
@@ -856,6 +887,7 @@ class RemoteTransferJob(RemoteTransferJobBase):
     checksum: Optional[str]
     eta: Optional[float] = None  # Seconds remaining, calculated at runtime
     direction: TransferDirection = TransferDirection.PUSH
+    strategy: FileTransferStrategy = FileTransferStrategy.COPY
 
     class Config:
         from_attributes = True
@@ -867,6 +899,27 @@ class PullTransferRequest(BaseModel):
     remote_connection_id: int
     remote_file_inventory_id: int
     local_monitored_path_id: int
+    strategy: FileTransferStrategy = FileTransferStrategy.COPY
+    conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE
+
+
+class ConflictCheckRequest(BaseModel):
+    """Request to check for file conflicts before transfer."""
+
+    relative_path: str
+    remote_path_id: int
+    storage_type: str
+    source_checksum: Optional[str] = None  # For COMPARE mode
+
+
+class ConflictCheckResponse(BaseModel):
+    """Response indicating if a file conflict exists."""
+
+    exists: bool
+    file_size: Optional[int] = None
+    checksum: Optional[str] = None
+    modified_time: Optional[datetime] = None
+    conflict: bool  # True if exists and checksums differ (or no checksum to compare)
 
 
 class RemoteFileListItem(BaseModel):

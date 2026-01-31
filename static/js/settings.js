@@ -24,7 +24,6 @@ document.addEventListener('DOMContentLoaded', function () {
             // Initial load for remote connections if clicked
             if (sectionId === 'remote-connections') {
                 checkRemoteConfiguration();
-                loadInstanceIdentity();
             }
 
             // Initial load for encryption if clicked
@@ -342,84 +341,6 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    // Load instance identity and generate QR code
-    let qrCodeInstance = null;
-    async function loadInstanceIdentity() {
-        const identityContent = document.getElementById('identity-content');
-        const identityData = document.getElementById('identity-data');
-        const identityError = document.getElementById('identity-error');
-        const identityErrorText = document.getElementById('identity-error-text');
-
-        try {
-            const response = await authenticatedFetch('/api/v1/remote/my-identity');
-            if (response.ok) {
-                const data = await response.json();
-
-                // Hide loading, show data
-                identityContent.classList.add('d-none');
-                identityData.classList.remove('d-none');
-                identityError.classList.add('d-none');
-
-                // Populate identity fields
-                document.getElementById('identity-name').textContent = data.instance_name;
-                document.getElementById('identity-url').textContent = data.url;
-                document.getElementById('identity-fingerprint').textContent = data.fingerprint;
-
-                // Generate QR code
-                const qrCanvas = document.getElementById('qr-code');
-                if (qrCanvas && data.qr_data) {
-                    // Clear previous QR code if it exists
-                    if (qrCodeInstance) {
-                        qrCanvas.innerHTML = '';
-                    }
-
-                    // Generate new QR code
-                    qrCodeInstance = new QRCode(qrCanvas, {
-                        text: data.qr_data,
-                        width: 200,
-                        height: 200,
-                        colorDark: "#000000",
-                        colorLight: "#ffffff",
-                        correctLevel: QRCode.CorrectLevel.M
-                    });
-                }
-
-                // Setup copy button
-                const copyIdentityBtn = document.getElementById('copy-identity-btn');
-                if (copyIdentityBtn) {
-                    copyIdentityBtn.onclick = async function() {
-                        const identityText = `Instance: ${data.instance_name}\nURL: ${data.url}\nFingerprint: ${data.fingerprint}`;
-                        try {
-                            await navigator.clipboard.writeText(identityText);
-                            const originalHtml = this.innerHTML;
-                            this.innerHTML = '<i class="bi bi-check me-1"></i>Copied!';
-                            setTimeout(() => {
-                                this.innerHTML = originalHtml;
-                            }, 2000);
-                        } catch (err) {
-                            console.error('Failed to copy:', err);
-                            alert('Failed to copy to clipboard');
-                        }
-                    };
-                }
-            } else {
-                // Show error
-                identityContent.classList.add('d-none');
-                identityData.classList.add('d-none');
-                identityError.classList.remove('d-none');
-
-                const errorData = await response.json();
-                identityErrorText.textContent = errorData.detail || 'Failed to load instance identity';
-            }
-        } catch (error) {
-            console.error('Error loading instance identity:', error);
-            identityContent.classList.add('d-none');
-            identityData.classList.add('d-none');
-            identityError.classList.remove('d-none');
-            identityErrorText.textContent = 'Failed to connect to server';
-        }
-    }
-
     // Check if remote connections are configured
     async function checkRemoteConfiguration() {
         // Load configuration first
@@ -504,6 +425,21 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    const toggleCodeVisibilityBtn = document.getElementById('toggle-code-visibility');
+    if (toggleCodeVisibilityBtn) {
+        toggleCodeVisibilityBtn.addEventListener('click', function () {
+            const codeInput = document.getElementById('my-connection-code');
+            const icon = this.querySelector('i');
+            if (codeInput.type === 'password') {
+                codeInput.type = 'text';
+                icon.classList.replace('bi-eye', 'bi-eye-slash');
+            } else {
+                codeInput.type = 'password';
+                icon.classList.replace('bi-eye-slash', 'bi-eye');
+            }
+        });
+    }
+
     const refreshCodeBtn = document.getElementById('refresh-code-btn');
     if (refreshCodeBtn) {
         refreshCodeBtn.addEventListener('click', fetchConnectionCode);
@@ -541,7 +477,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 list.innerHTML = '';
 
                 if (connections.length === 0) {
-                    list.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No remote connections found.</td></tr>';
+                    list.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No remote connections found.</td></tr>';
                     return;
                 }
 
@@ -556,6 +492,17 @@ document.addEventListener('DOMContentLoaded', function () {
                     const safeUrl = conn.url.replace(/"/g, '&quot;');
                     const safeMode = (conn.transfer_mode || 'PUSH_ONLY').replace(/"/g, '&quot;');
 
+                    // Build trust status badge
+                    const trustStatus = conn.trust_status || 'PENDING';
+                    let statusBadge = '';
+                    if (trustStatus === 'TRUSTED') {
+                        statusBadge = '<span class="badge bg-success">Trusted</span>';
+                    } else if (trustStatus === 'PENDING') {
+                        statusBadge = '<span class="badge bg-warning">Pending</span>';
+                    } else if (trustStatus === 'REJECTED') {
+                        statusBadge = '<span class="badge bg-danger">Rejected</span>';
+                    }
+
                     // Build mode display
                     const modeLabel = conn.transfer_mode === 'BIDIRECTIONAL' ? 'Bidirectional' : 'Push Only';
                     let modeBadge = '';
@@ -565,27 +512,96 @@ document.addEventListener('DOMContentLoaded', function () {
                         modeBadge = '<span class="badge bg-warning ms-1">Pending Remote</span>';
                     }
 
-                    // Browse button only for effective bidirectional
-                    const browseBtn = conn.effective_bidirectional
-                        ? `<button class="btn btn-sm btn-outline-info browse-remote-btn me-2" data-id="${conn.id}" title="Browse remote files"><i class="bi bi-folder2-open"></i></button>`
-                        : '';
+                    // Browse button - disabled for non-trusted connections
+                    const browseBtn = (trustStatus === 'TRUSTED' && conn.effective_bidirectional)
+                        ? `<button class="btn btn-sm btn-primary browse-remote-btn w-100" data-id="${conn.id}" title="Browse remote files">
+                             <i class="bi bi-folder2-open me-1"></i> Browse Files
+                           </button>`
+                        : `<button class="btn btn-sm btn-outline-secondary w-100" disabled title="${trustStatus === 'PENDING' ? 'Accept connection first' : 'Enable Bidirectional mode on both instances'}">
+                             <i class="bi bi-lock me-1"></i> Locked
+                           </button>`;
+
+                    // Action buttons - different for pending vs trusted connections
+                    let actionButtons = '';
+                    if (trustStatus === 'PENDING') {
+                        const safeFingerprint = (conn.remote_fingerprint || '').replace(/"/g, '&quot;');
+                        actionButtons = `
+                            <button class="btn btn-sm btn-outline-info view-details-btn me-1"
+                                data-id="${conn.id}"
+                                data-name="${safeName}"
+                                data-url="${safeUrl}"
+                                data-fingerprint="${safeFingerprint}"
+                                data-mode="${safeMode}"
+                                data-status="${trustStatus}"
+                                title="View connection details">
+                                <i class="bi bi-info-circle"></i>
+                            </button>
+                            <button class="btn btn-sm btn-success accept-conn-btn me-1" data-id="${conn.id}" data-name="${safeName}" title="Accept connection">
+                                <i class="bi bi-check-circle"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger reject-conn-btn" data-id="${conn.id}" data-name="${safeName}" title="Reject connection">
+                                <i class="bi bi-x-circle"></i>
+                            </button>
+                        `;
+                    } else if (trustStatus === 'TRUSTED') {
+                        actionButtons = `
+                            <button class="btn btn-sm btn-outline-primary edit-conn-btn me-1" data-id="${conn.id}" data-name="${safeName}" data-url="${safeUrl}" data-mode="${safeMode}" title="Edit connection">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger delete-conn-btn" data-id="${conn.id}" data-name="${safeName}" title="Delete connection">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        `;
+                    } else {
+                        // REJECTED - only show delete
+                        actionButtons = `
+                            <button class="btn btn-sm btn-outline-danger delete-conn-btn" data-id="${conn.id}" data-name="${safeName}" title="Delete connection">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        `;
+                    }
 
                     tr.innerHTML = `
                         <td>${escapedName}</td>
                         <td>${escapedUrl}</td>
+                        <td>${statusBadge}</td>
                         <td>${modeLabel}${modeBadge}</td>
                         <td>${date}</td>
-                        <td>
-                            ${browseBtn}
-                            <button class="btn btn-sm btn-outline-primary edit-conn-btn me-2" data-id="${conn.id}" data-name="${safeName}" data-url="${safeUrl}" data-mode="${safeMode}">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger delete-conn-btn" data-id="${conn.id}" data-name="${safeName}">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </td>
+                        <td>${browseBtn}</td>
+                        <td>${actionButtons}</td>
                     `;
                     list.appendChild(tr);
+                });
+
+                // Add view details event listeners
+                document.querySelectorAll('.view-details-btn').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        const id = this.dataset.id;
+                        const name = this.dataset.name;
+                        const url = this.dataset.url;
+                        const fingerprint = this.dataset.fingerprint;
+                        const mode = this.dataset.mode;
+                        const status = this.dataset.status;
+                        showConnectionDetails(id, name, url, fingerprint, mode, status);
+                    });
+                });
+
+                // Add accept event listeners
+                document.querySelectorAll('.accept-conn-btn').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        const id = this.dataset.id;
+                        const name = this.dataset.name;
+                        acceptConnection(id, name);
+                    });
+                });
+
+                // Add reject event listeners
+                document.querySelectorAll('.reject-conn-btn').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        const id = this.dataset.id;
+                        const name = this.dataset.name;
+                        rejectConnection(id, name);
+                    });
                 });
 
                 // Add edit event listeners
@@ -610,15 +626,15 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 // Add browse event listeners
                 document.querySelectorAll('.browse-remote-btn').forEach(btn => {
-                    btn.addEventListener('click', function() {
+                    btn.addEventListener('click', function () {
                         const id = this.dataset.id;
-                        openBrowseRemoteFiles(id);
+                        window.location.href = `/remote-files/${id}`;
                     });
                 });
             }
         } catch (error) {
             console.error('Error loading connections:', error);
-            list.innerHTML = '<tr><td colspan="5" class="text-center text-danger py-4">Failed to load connections.</td></tr>';
+            list.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Failed to load connections.</td></tr>';
         }
     }
 
@@ -729,6 +745,88 @@ document.addEventListener('DOMContentLoaded', function () {
                 setFormButtonLoading('save-connection', false);
             }
         });
+    }
+
+    // Connection details modal
+    let currentDetailConnectionId = null;
+    let currentDetailConnectionName = null;
+    const detailsModal = new bootstrap.Modal(document.getElementById('connectionDetailsModal'));
+
+    function showConnectionDetails(id, name, url, fingerprint, mode, status) {
+        currentDetailConnectionId = id;
+        currentDetailConnectionName = name;
+
+        document.getElementById('detail-name').textContent = name;
+        document.getElementById('detail-url').textContent = url;
+        document.getElementById('detail-fingerprint').textContent = fingerprint || 'N/A';
+        document.getElementById('detail-status').textContent = status;
+        document.getElementById('detail-mode').textContent = mode === 'BIDIRECTIONAL' ? 'Bidirectional' : 'Push Only';
+
+        // Show/hide accept button based on status
+        const acceptBtn = document.getElementById('accept-from-details-btn');
+        if (status === 'PENDING') {
+            acceptBtn.style.display = '';
+        } else {
+            acceptBtn.style.display = 'none';
+        }
+
+        detailsModal.show();
+    }
+
+    // Accept from details modal
+    document.getElementById('accept-from-details-btn').addEventListener('click', async function () {
+        if (currentDetailConnectionId) {
+            detailsModal.hide();
+            await acceptConnection(currentDetailConnectionId, currentDetailConnectionName);
+        }
+    });
+
+    // Accept connection logic
+    async function acceptConnection(id, name) {
+        if (!confirm(`Accept connection from "${name}"?`)) {
+            return;
+        }
+
+        try {
+            const response = await authenticatedFetch(`/api/v1/remote/connections/${id}/trust`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                showToast('Success', `Connection "${name}" has been accepted.`, 'success');
+                loadRemoteConnections();
+            } else {
+                const errorData = await response.json();
+                showToast('Error', errorData.detail || 'Failed to accept connection', 'danger');
+            }
+        } catch (error) {
+            console.error('Error accepting connection:', error);
+            showToast('Error', 'Failed to connect to server.', 'danger');
+        }
+    }
+
+    // Reject connection logic
+    async function rejectConnection(id, name) {
+        if (!confirm(`Reject connection from "${name}"? This can be reversed later.`)) {
+            return;
+        }
+
+        try {
+            const response = await authenticatedFetch(`/api/v1/remote/connections/${id}/reject`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                showToast('Success', `Connection "${name}" has been rejected.`, 'warning');
+                loadRemoteConnections();
+            } else {
+                const errorData = await response.json();
+                showToast('Error', errorData.detail || 'Failed to reject connection', 'danger');
+            }
+        } catch (error) {
+            console.error('Error rejecting connection:', error);
+            showToast('Error', 'Failed to connect to server.', 'danger');
+        }
     }
 
     // Delete connection logic
@@ -984,166 +1082,6 @@ document.addEventListener('DOMContentLoaded', function () {
             setButtonTextLoading(button, false, 'Deleting...', 'Delete');
         }
     });
-
-    // --- Browse Remote Files ---
-
-    let browseConnectionId = null;
-
-    async function openBrowseRemoteFiles(connectionId) {
-        browseConnectionId = connectionId;
-        const modal = document.getElementById('browseRemoteFilesModal');
-        const pathSelect = document.getElementById('browse-remote-path-select');
-        const localSelect = document.getElementById('pull-local-path-select');
-        const filesList = document.getElementById('remote-files-list');
-
-        // Reset state
-        pathSelect.innerHTML = '<option value="">Loading...</option>';
-        localSelect.innerHTML = '<option value="">Loading...</option>';
-        filesList.innerHTML = '<p class="text-muted text-center py-3">Select a remote path to browse files.</p>';
-
-        // Show modal
-        const modalInstance = new bootstrap.Modal(modal);
-        modalInstance.show();
-
-        // Load remote paths and local paths in parallel
-        try {
-            const [remotePaths, localPaths] = await Promise.all([
-                authenticatedFetch(`/api/v1/remote/connections/${connectionId}/paths`).then(r => r.json()),
-                authenticatedFetch('/api/v1/paths').then(r => r.json()),
-            ]);
-
-            pathSelect.innerHTML = '<option value="">Select a path...</option>';
-            remotePaths.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.id;
-                opt.textContent = p.name;
-                pathSelect.appendChild(opt);
-            });
-
-            localSelect.innerHTML = '<option value="">Select local destination...</option>';
-            const localPathList = Array.isArray(localPaths) ? localPaths : (localPaths.items || []);
-            localPathList.forEach(p => {
-                const opt = document.createElement('option');
-                opt.value = p.id;
-                opt.textContent = p.name;
-                localSelect.appendChild(opt);
-            });
-        } catch (error) {
-            console.error('Error loading paths:', error);
-            pathSelect.innerHTML = '<option value="">Failed to load paths</option>';
-            localSelect.innerHTML = '<option value="">Failed to load paths</option>';
-        }
-    }
-
-    // Load files when remote path changes
-    const browsePathSelect = document.getElementById('browse-remote-path-select');
-    if (browsePathSelect) {
-        browsePathSelect.addEventListener('change', async function() {
-            const pathId = this.value;
-            const filesList = document.getElementById('remote-files-list');
-
-            if (!pathId) {
-                filesList.innerHTML = '<p class="text-muted text-center py-3">Select a remote path to browse files.</p>';
-                return;
-            }
-
-            filesList.innerHTML = '<p class="text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Loading files...</p>';
-
-            try {
-                const response = await authenticatedFetch(
-                    `/api/v1/remote/connections/${browseConnectionId}/browse-files?path_id=${pathId}&limit=200`
-                );
-                if (!response.ok) {
-                    const err = await response.json();
-                    filesList.innerHTML = `<div class="alert alert-danger">${escapeHtml(err.detail || 'Failed to browse files')}</div>`;
-                    return;
-                }
-
-                const data = await response.json();
-                if (data.files.length === 0) {
-                    filesList.innerHTML = '<p class="text-muted text-center py-3">No files found in this path.</p>';
-                    return;
-                }
-
-                let html = `<p class="text-muted small mb-2">Showing ${data.files.length} of ${data.total_count} files in "${escapeHtml(data.path_name)}"</p>`;
-                html += '<div class="table-responsive"><table class="table table-sm table-hover">';
-                html += '<thead><tr><th>File</th><th>Size</th><th>Type</th><th>Action</th></tr></thead><tbody>';
-
-                data.files.forEach(file => {
-                    const fileName = file.relative_path || file.file_path.split('/').pop();
-                    const sizeStr = formatFileSize(file.file_size);
-                    html += `<tr>
-                        <td title="${escapeHtml(file.file_path)}">${escapeHtml(fileName)}</td>
-                        <td>${sizeStr}</td>
-                        <td><span class="badge bg-${file.storage_type === 'HOT' ? 'success' : 'info'}">${escapeHtml(file.storage_type)}</span></td>
-                        <td><button class="btn btn-sm btn-outline-primary pull-file-btn" data-inventory-id="${file.inventory_id}" title="Pull this file"><i class="bi bi-download me-1"></i>Pull</button></td>
-                    </tr>`;
-                });
-
-                html += '</tbody></table></div>';
-                filesList.innerHTML = html;
-
-                // Add pull event listeners
-                document.querySelectorAll('.pull-file-btn').forEach(btn => {
-                    btn.addEventListener('click', async function() {
-                        const inventoryId = this.dataset.inventoryId;
-                        const localPathId = document.getElementById('pull-local-path-select').value;
-                        if (!localPathId) {
-                            alert('Please select a local destination path first.');
-                            return;
-                        }
-                        await pullFile(browseConnectionId, inventoryId, localPathId, this);
-                    });
-                });
-            } catch (error) {
-                console.error('Error browsing remote files:', error);
-                filesList.innerHTML = '<div class="alert alert-danger">Failed to connect to remote instance.</div>';
-            }
-        });
-    }
-
-    async function pullFile(connectionId, remoteInventoryId, localPathId, button) {
-        const originalHtml = button.innerHTML;
-        button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-        button.disabled = true;
-
-        try {
-            const response = await authenticatedFetch('/api/v1/remote/pull', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    remote_connection_id: parseInt(connectionId),
-                    remote_file_inventory_id: parseInt(remoteInventoryId),
-                    local_monitored_path_id: parseInt(localPathId),
-                }),
-            });
-
-            if (response.ok) {
-                button.innerHTML = '<i class="bi bi-check me-1"></i>Requested';
-                button.classList.remove('btn-outline-primary');
-                button.classList.add('btn-success');
-                // Refresh transfers list
-                loadRemoteTransfers();
-            } else {
-                const err = await response.json();
-                alert('Pull failed: ' + (err.detail || 'Unknown error'));
-                button.innerHTML = originalHtml;
-                button.disabled = false;
-            }
-        } catch (error) {
-            console.error('Error pulling file:', error);
-            alert('Failed to connect to server.');
-            button.innerHTML = originalHtml;
-            button.disabled = false;
-        }
-    }
-
-    function formatFileSize(bytes) {
-        if (!bytes || bytes === 0) return '0 B';
-        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(1024));
-        return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
-    }
 
     // --- Encryption Management ---
 

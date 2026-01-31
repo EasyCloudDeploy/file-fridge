@@ -1,6 +1,30 @@
 """Main FastAPI application entry point."""
 
 import logging
+import os
+
+# Configure logging BEFORE importing any app modules that create loggers
+# Get config from environment variables directly to avoid circular import
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_FILE_PATH = os.getenv("LOG_FILE_PATH")
+
+handlers = [logging.StreamHandler()]  # Always log to stdout
+
+# Add file logging if LOG_FILE_PATH is set
+if LOG_FILE_PATH:
+    handlers.append(logging.FileHandler(LOG_FILE_PATH, mode="a"))
+
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=handlers,
+    force=True,  # Force reconfiguration even if logging was already initialized
+)
+
+logger = logging.getLogger(__name__)
+logger.info(f"Logging configured: level={LOG_LEVEL}, file={LOG_FILE_PATH or 'stdout only'}")
+
+# Now import everything else after logging is configured
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request, status
@@ -29,21 +53,6 @@ from app.routers.web.views import router as web_router
 from app.security import PermissionChecker, get_current_user
 from app.services.file_cleanup import FileCleanup
 from app.services.scheduler import scheduler_service
-
-# Configure logging
-handlers = [logging.StreamHandler()]  # Always log to stdout
-
-# Add file logging if LOG_FILE_PATH is set
-if settings.log_file_path:
-    handlers.append(logging.FileHandler(settings.log_file_path, mode="a"))
-
-logging.basicConfig(
-    level=getattr(logging, settings.log_level.upper()),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=handlers,
-)
-
-logger = logging.getLogger(__name__)
 
 # Apply filter to uvicorn access logger
 # TODO: Implement RemoteReceiveFilter to reduce log noise from /receive endpoint
@@ -143,13 +152,3 @@ def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "version": settings.app_version, "app_name": settings.app_name}
 
-
-def main():
-    """Main entry point for the application."""
-    import uvicorn
-
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
-
-
-if __name__ == "__main__":
-    main()

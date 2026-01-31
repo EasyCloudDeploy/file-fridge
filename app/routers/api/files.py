@@ -5,6 +5,7 @@ import base64
 import json
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Generator, Optional
 
@@ -122,6 +123,14 @@ def list_files(
     mime_type: Optional[str] = Query(None, description="Filter by MIME type"),
     has_checksum: Optional[bool] = Query(None, description="Filter files with/without checksum"),
     tag_ids: Optional[str] = Query(None, description="Filter by tag IDs (comma-separated)"),
+    is_pinned: Optional[bool] = Query(None, description="Filter by pinned status"),
+    min_size: Optional[int] = Query(None, description="Minimum file size in bytes"),
+    max_size: Optional[int] = Query(None, description="Maximum file size in bytes"),
+    min_mtime: Optional[datetime] = Query(None, description="Minimum modification time"),
+    max_mtime: Optional[datetime] = Query(None, description="Maximum modification time"),
+    storage_location_id: Optional[int] = Query(
+        None, description="Filter by cold storage location ID"
+    ),
     sort_by: str = Query(
         "last_seen",
         description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)",
@@ -200,6 +209,29 @@ def list_files(
                     .filter(FileTag.tag_id.in_(tag_id_list))
                     .distinct()
                 )
+
+            if is_pinned is not None:
+                if is_pinned:
+                    # Filter for files that are in the PinnedFile table
+                    query = query.filter(FileInventory.file_path.in_(db.query(PinnedFile.file_path)))
+                else:
+                    # Filter for files that are NOT in the PinnedFile table
+                    query = query.filter(
+                        FileInventory.file_path.notin_(db.query(PinnedFile.file_path))
+                    )
+
+            if min_size is not None:
+                query = query.filter(FileInventory.file_size >= min_size)
+            if max_size is not None:
+                query = query.filter(FileInventory.file_size <= max_size)
+
+            if min_mtime is not None:
+                query = query.filter(FileInventory.file_mtime >= min_mtime)
+            if max_mtime is not None:
+                query = query.filter(FileInventory.file_mtime <= max_mtime)
+
+            if storage_location_id is not None:
+                query = query.filter(FileInventory.cold_storage_location_id == storage_location_id)
 
             # Get total count first
             total_count = query.count()
@@ -336,6 +368,12 @@ def list_files(
                     "mime_type": mime_type,
                     "has_checksum": has_checksum,
                     "tag_ids": tag_id_list,
+                    "is_pinned": is_pinned,
+                    "min_size": min_size,
+                    "max_size": max_size,
+                    "min_mtime": min_mtime.isoformat() if min_mtime else None,
+                    "max_mtime": max_mtime.isoformat() if max_mtime else None,
+                    "storage_location_id": storage_location_id,
                 },
                 "sort": {"by": sort_by, "order": sort_order},
             }
