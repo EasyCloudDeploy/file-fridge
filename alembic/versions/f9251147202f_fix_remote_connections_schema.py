@@ -28,7 +28,7 @@ def upgrade() -> None:
     # Helper to check if index exists
     def index_exists(table_name, index_name):
         indexes = inspector.get_indexes(table_name)
-        return any(idx['name'] == index_name for idx in indexes)
+        return any(idx["name"] == index_name for idx in indexes)
 
     with op.batch_alter_table("file_inventory", schema=None) as batch_op:
         batch_op.alter_column(
@@ -90,7 +90,7 @@ def upgrade() -> None:
 
     with op.batch_alter_table("remote_connections", schema=None) as batch_op:
         # Check if columns exist before dropping
-        columns = [c['name'] for c in inspector.get_columns("remote_connections")]
+        columns = [c["name"] for c in inspector.get_columns("remote_connections")]
 
         # If we are dropping remote_instance_uuid, any index on it must be dropped too.
         if "remote_instance_uuid" in columns:
