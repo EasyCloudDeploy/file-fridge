@@ -563,15 +563,27 @@ def encrypt_location_job_func(location_id: int):
                 # Encrypt
                 file_encryption_service.encrypt_file(db, source_path, target_path)
 
-                # Update DB and delete original
+                # Update DB (but don't commit until file operations are safe)
                 file.file_path = str(target_path)
                 file.is_encrypted = True
-                db.commit()
 
-                source_path.unlink()
-                success_count += 1
+                # Delete original file
+                try:
+                    source_path.unlink()
+                    # Only commit if deletion succeeded (or file was gone)
+                    db.commit()
+                    success_count += 1
+                except Exception:
+                    # Failed to delete source, rollback DB changes to match filesystem state
+                    # (where source still exists, possibly alongside target)
+                    db.rollback()
+                    # Clean up target if we can't switch over
+                    if target_path.exists():
+                        target_path.unlink()
+                    raise
 
             except Exception:
+                db.rollback()
                 logger.exception(f"Failed to encrypt file {file.id}")
                 # Continue with other files
 
@@ -639,15 +651,25 @@ def decrypt_location_job_func(location_id: int):
                 # Decrypt
                 file_encryption_service.decrypt_file(db, source_path, target_path)
 
-                # Update DB and delete encrypted original
+                # Update DB
                 file.file_path = str(target_path)
                 file.is_encrypted = False
-                db.commit()
 
-                source_path.unlink()
-                success_count += 1
+                try:
+                    # Delete encrypted original
+                    source_path.unlink()
+                    # Commit only after successful filesystem update
+                    db.commit()
+                    success_count += 1
+                except Exception:
+                    db.rollback()
+                    # Clean up target
+                    if target_path.exists():
+                        target_path.unlink()
+                    raise
 
             except Exception:
+                db.rollback()
                 logger.exception(f"Failed to decrypt file {file.id}")
 
         # Update location status
