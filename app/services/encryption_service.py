@@ -30,8 +30,15 @@ class FileEncryptionService:
         """
         Get or create the persistent file encryption root key.
         This key is independent of the instance identity to allow key rotation/restore without data loss.
+        Uses row-level locking to prevent concurrent key generation.
         """
-        metadata = identity_service._load_or_create_identity(db)
+        # First ensure the InstanceMetadata row exists
+        identity_service._load_or_create_identity(db)
+
+        # Re-query with FOR UPDATE lock to prevent concurrent key generation
+        from app.models import InstanceMetadata
+
+        metadata = db.query(InstanceMetadata).with_for_update().first()
 
         if metadata.file_encryption_root_key_encrypted:
             # Decrypt existing key
@@ -44,7 +51,7 @@ class FileEncryptionService:
                 # However, for robustness during migration/dev, we might need a strategy.
                 raise
 
-        # Generate new random 32-byte key
+        # Generate new random 32-byte key (only one worker will reach here due to the lock)
         new_key = os.urandom(32)
         key_b64 = base64.b64encode(new_key).decode("ascii")
 

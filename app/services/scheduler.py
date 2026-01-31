@@ -541,7 +541,7 @@ def encrypt_location_job_func(location_id: int):
             .filter(
                 FileInventory.cold_storage_location_id == location_id,
                 FileInventory.storage_type == StorageType.COLD,
-                not FileInventory.is_encrypted,
+                ~FileInventory.is_encrypted,
             )
             .all()
         )

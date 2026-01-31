@@ -65,29 +65,36 @@ class FileThawer:
                 from app.services.encryption_service import file_encryption_service
 
                 try:
-                    # Ensure destination directory exists
-                    original_path.parent.mkdir(parents=True, exist_ok=True)
+                    # For COPY operations where the original file still exists,
+                    # skip decryption (don't overwrite) and just remove the cold storage copy
+                    if file_record.operation_type.value == "copy" and original_path.exists():
+                        cold_path.unlink()
+                    else:
+                        # Ensure destination directory exists
+                        original_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    # Decrypt to temporary file first for atomic replacement
-                    # This avoids following symlinks at original_path and ensures atomicity
-                    target_path = original_path.with_suffix(original_path.suffix + ".tmp")
+                        # If original is a symlink, remove it first
+                        if original_path.exists() and original_path.is_symlink():
+                            original_path.unlink()
 
-                    try:
-                        # Decrypt to temp file
-                        file_encryption_service.decrypt_file(db, cold_path, target_path)
+                        # Decrypt to temporary file first for atomic replacement
+                        # This avoids following symlinks at original_path and ensures atomicity
+                        target_path = original_path.with_suffix(original_path.suffix + ".tmp")
 
-                        # Atomically move it to final destination (replaces existing file/symlink)
-                        target_path.replace(original_path)
+                        try:
+                            # Decrypt to temp file
+                            file_encryption_service.decrypt_file(db, cold_path, target_path)
 
-                    except Exception:
-                        # Clean up temp file if decryption failed
-                        if target_path.exists():
-                            target_path.unlink()
-                        raise
+                            # Atomically move it to final destination (replaces existing file/symlink)
+                            target_path.replace(original_path)
 
-                    # Remove encrypted file if operation was MOVE or SYMLINK (assuming symlink targeted the encrypted file)
-                    # For COPY, we might want to keep it? The logic below handles unlinking for MOVE.
-                    if file_record.operation_type.value != "copy":
+                        except Exception:
+                            # Clean up temp file if decryption failed
+                            if target_path.exists():
+                                target_path.unlink()
+                            raise
+
+                        # Remove encrypted file from cold storage
                         cold_path.unlink()
 
                 except Exception as e:

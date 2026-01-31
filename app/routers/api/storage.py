@@ -187,6 +187,10 @@ def update_storage_location(
     trigger_decryption_job = False
 
     # Handle Encryption Toggle
+    # Track previous state for rollback if scheduling fails
+    previous_is_encrypted = location.is_encrypted
+    previous_encryption_status = location.encryption_status
+
     if "is_encrypted" in update_data:
         new_encrypted_state = update_data["is_encrypted"]
         if new_encrypted_state != location.is_encrypted:
@@ -258,15 +262,51 @@ def update_storage_location(
 
     # Trigger background jobs after commit
     if trigger_encryption_job:
-        logger.info(
-            f"Encryption enabled for location {location.name}. Queuing background encryption job."
-        )
-        scheduler_service.trigger_encryption_job(location.id)
+        try:
+            scheduler_service.trigger_encryption_job(location.id)
+            logger.info(
+                "Encryption enabled for location %s. Queuing background encryption job.",
+                location.name,
+            )
+        except Exception as e:
+            logger.exception("Failed to schedule encryption job for location %s", location.name)
+            # Rollback encryption state in database
+            try:
+                location.is_encrypted = previous_is_encrypted
+                location.encryption_status = previous_encryption_status
+                db.commit()
+            except Exception:
+                logger.exception(
+                    "Failed to rollback encryption state for location %s", location.name
+                )
+                db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to schedule encryption job: {e!s}",
+            ) from e
     elif trigger_decryption_job:
-        logger.info(
-            f"Encryption disabled for location {location.name}. Queuing background decryption job."
-        )
-        scheduler_service.trigger_decryption_job(location.id)
+        try:
+            scheduler_service.trigger_decryption_job(location.id)
+            logger.info(
+                "Encryption disabled for location %s. Queuing background decryption job.",
+                location.name,
+            )
+        except Exception as e:
+            logger.exception("Failed to schedule decryption job for location %s", location.name)
+            # Rollback encryption state in database
+            try:
+                location.is_encrypted = previous_is_encrypted
+                location.encryption_status = previous_encryption_status
+                db.commit()
+            except Exception:
+                logger.exception(
+                    "Failed to rollback encryption state for location %s", location.name
+                )
+                db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to schedule decryption job: {e!s}",
+            ) from e
 
     return location
 
