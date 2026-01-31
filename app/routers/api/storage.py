@@ -140,7 +140,7 @@ def create_storage_location(location: ColdStorageLocationCreate, db: Session = D
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot create storage location path: {e!s}",
-            )
+            ) from e
 
     if not path_obj.is_dir():
         raise HTTPException(
@@ -182,6 +182,10 @@ def update_storage_location(
 
     update_data = location_update.model_dump(exclude_unset=True)
 
+    # Track if we need to trigger a background job
+    trigger_encryption_job = False
+    trigger_decryption_job = False
+
     # Handle Encryption Toggle
     if "is_encrypted" in update_data:
         new_encrypted_state = update_data["is_encrypted"]
@@ -190,19 +194,11 @@ def update_storage_location(
             if new_encrypted_state:
                 # Enabling encryption
                 location.encryption_status = EncryptionStatus.PENDING
-                logger.info(
-                    f"Encryption enabled for location {location.name}. Queuing background encryption job."
-                )
-                # Trigger job
-                scheduler_service.trigger_encryption_job(location.id)
+                trigger_encryption_job = True
             else:
                 # Disabling encryption
                 location.encryption_status = EncryptionStatus.DECRYPTING
-                logger.info(
-                    f"Encryption disabled for location {location.name}. Queuing background decryption job."
-                )
-                # Trigger job
-                scheduler_service.trigger_decryption_job(location.id)
+                trigger_decryption_job = True
 
     # Check for duplicate name if name is being updated
     if "name" in update_data:
@@ -245,7 +241,7 @@ def update_storage_location(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Cannot create storage location path: {e!s}",
-                )
+                ) from e
 
         if not path_obj.is_dir():
             raise HTTPException(
@@ -259,6 +255,18 @@ def update_storage_location(
 
     db.commit()
     db.refresh(location)
+
+    # Trigger background jobs after commit
+    if trigger_encryption_job:
+        logger.info(
+            f"Encryption enabled for location {location.name}. Queuing background encryption job."
+        )
+        scheduler_service.trigger_encryption_job(location.id)
+    elif trigger_decryption_job:
+        logger.info(
+            f"Encryption disabled for location {location.name}. Queuing background decryption job."
+        )
+        scheduler_service.trigger_decryption_job(location.id)
 
     return location
 
@@ -323,8 +331,9 @@ def delete_storage_location(
             logger.warning(f"Path not found, proceeding with DB deletion: {location.path}")
         except Exception as e:
             logger.exception(
-                f"Error deleting storage directory '{location.path}': {e}. "
-                f"Manual cleanup may be required."
+                f"Error deleting storage directory '{location.path}'. "
+                f"Manual cleanup may be required.",
+                exc_info=e
             )
             # We don't re-raise, to allow DB cleanup to proceed
 
