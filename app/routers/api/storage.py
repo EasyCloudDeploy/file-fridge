@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ColdStorageLocation, FileInventory, FileRecord
+from app.models import ColdStorageLocation, EncryptionStatus, FileInventory, FileRecord
 from app.schemas import ColdStorageLocation as ColdStorageLocationSchema
 from app.schemas import (
     ColdStorageLocationCreate,
@@ -18,6 +18,7 @@ from app.schemas import (
     ColdStorageLocationWithStats,
     StorageStats,
 )
+from app.services.scheduler import scheduler_service
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ def create_storage_location(location: ColdStorageLocationCreate, db: Session = D
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Cannot create storage location path: {e!s}",
-            )
+            ) from e
 
     if not path_obj.is_dir():
         raise HTTPException(
@@ -180,6 +181,28 @@ def update_storage_location(
         )
 
     update_data = location_update.model_dump(exclude_unset=True)
+
+    # Track if we need to trigger a background job
+    trigger_encryption_job = False
+    trigger_decryption_job = False
+
+    # Handle Encryption Toggle
+    # Track previous state for rollback if scheduling fails
+    previous_is_encrypted = location.is_encrypted
+    previous_encryption_status = location.encryption_status
+
+    if "is_encrypted" in update_data:
+        new_encrypted_state = update_data["is_encrypted"]
+        if new_encrypted_state != location.is_encrypted:
+            # State changed
+            if new_encrypted_state:
+                # Enabling encryption
+                location.encryption_status = EncryptionStatus.PENDING
+                trigger_encryption_job = True
+            else:
+                # Disabling encryption
+                location.encryption_status = EncryptionStatus.DECRYPTING
+                trigger_decryption_job = True
 
     # Check for duplicate name if name is being updated
     if "name" in update_data:
@@ -222,7 +245,7 @@ def update_storage_location(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Cannot create storage location path: {e!s}",
-                )
+                ) from e
 
         if not path_obj.is_dir():
             raise HTTPException(
@@ -236,6 +259,54 @@ def update_storage_location(
 
     db.commit()
     db.refresh(location)
+
+    # Trigger background jobs after commit
+    if trigger_encryption_job:
+        try:
+            scheduler_service.trigger_encryption_job(location.id)
+            logger.info(
+                "Encryption enabled for location %s. Queuing background encryption job.",
+                location.name,
+            )
+        except Exception as e:
+            logger.exception("Failed to schedule encryption job for location %s", location.name)
+            # Rollback encryption state in database
+            try:
+                location.is_encrypted = previous_is_encrypted
+                location.encryption_status = previous_encryption_status
+                db.commit()
+            except Exception:
+                logger.exception(
+                    "Failed to rollback encryption state for location %s", location.name
+                )
+                db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to schedule encryption job: {e!s}",
+            ) from e
+    elif trigger_decryption_job:
+        try:
+            scheduler_service.trigger_decryption_job(location.id)
+            logger.info(
+                "Encryption disabled for location %s. Queuing background decryption job.",
+                location.name,
+            )
+        except Exception as e:
+            logger.exception("Failed to schedule decryption job for location %s", location.name)
+            # Rollback encryption state in database
+            try:
+                location.is_encrypted = previous_is_encrypted
+                location.encryption_status = previous_encryption_status
+                db.commit()
+            except Exception:
+                logger.exception(
+                    "Failed to rollback encryption state for location %s", location.name
+                )
+                db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to schedule decryption job: {e!s}",
+            ) from e
 
     return location
 
@@ -300,8 +371,9 @@ def delete_storage_location(
             logger.warning(f"Path not found, proceeding with DB deletion: {location.path}")
         except Exception as e:
             logger.exception(
-                f"Error deleting storage directory '{location.path}': {e}. "
-                f"Manual cleanup may be required."
+                f"Error deleting storage directory '{location.path}'. "
+                f"Manual cleanup may be required.",
+                exc_info=e
             )
             # We don't re-raise, to allow DB cleanup to proceed
 

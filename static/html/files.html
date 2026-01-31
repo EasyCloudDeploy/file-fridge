@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +9,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
 </head>
+
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
@@ -68,21 +70,14 @@
             </div>
         </div>
 
-        <!-- Search and Filters -->
-        <div class="row mb-3">
-            <div class="col-md-6">
+        <div class="row g-3 mb-3">
+            <div class="col-md-6 col-lg-4">
                 <div class="input-group">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
                     <input type="text" class="form-control" id="search_input" placeholder="Search file paths...">
-                    <button class="btn btn-primary" type="button" id="search_btn">
-                        Search
-                    </button>
-                    <button class="btn btn-outline-secondary" type="button" id="clear_search_btn">
-                        Clear
-                    </button>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-3 col-lg-2">
                 <div class="input-group">
                     <label class="input-group-text" for="path_id_filter">Path:</label>
                     <select class="form-select" id="path_id_filter">
@@ -90,7 +85,7 @@
                     </select>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-3 col-lg-2">
                 <div class="input-group">
                     <label class="input-group-text" for="storage_filter">Storage:</label>
                     <select class="form-select" id="storage_filter">
@@ -100,7 +95,7 @@
                     </select>
                 </div>
             </div>
-            <div class="col-md-3">
+            <div class="col-md-3 col-lg-2">
                 <div class="input-group">
                     <label class="input-group-text" for="status_filter">Status:</label>
                     <select class="form-select" id="status_filter">
@@ -111,6 +106,81 @@
                         <option value="missing">Missing</option>
                         <option value="migrating">Migrating</option>
                     </select>
+                </div>
+            </div>
+            <div class="col-md-3 col-lg-2">
+                <div class="btn-group w-100">
+                    <button class="btn btn-primary" type="button" id="search_btn">
+                        Search
+                    </button>
+                    <button class="btn btn-outline-secondary" type="button" id="clear_filters_btn">
+                        Reset
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Advanced Filters -->
+        <div class="row g-3 mb-3">
+            <div class="col-md-3 col-lg-2">
+                <div class="input-group">
+                    <label class="input-group-text" for="extension_filter">Ext:</label>
+                    <input type="text" class="form-control" id="extension_filter" placeholder=".jpg">
+                </div>
+            </div>
+            <div class="col-md-3 col-lg-3">
+                <div class="input-group">
+                    <label class="input-group-text" for="mime_filter">MIME:</label>
+                    <input type="text" class="form-control" id="mime_filter" placeholder="image/*">
+                </div>
+            </div>
+            <div class="col-md-3 col-lg-2">
+                <div class="input-group">
+                    <label class="input-group-text" for="checksum_filter">Checksum:</label>
+                    <select class="form-select" id="checksum_filter">
+                        <option value="">All</option>
+                        <option value="true">With Checksum</option>
+                        <option value="false">Without Checksum</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-3 col-lg-2">
+                <div class="input-group">
+                    <label class="input-group-text" for="pinned_filter">Pinned:</label>
+                    <select class="form-select" id="pinned_filter">
+                        <option value="">All</option>
+                        <option value="true">Pinned Only</option>
+                        <option value="false">Not Pinned</option>
+                    </select>
+                </div>
+            </div>
+            <div class="col-md-3 col-lg-3">
+                <div class="input-group">
+                    <label class="input-group-text" for="location_id_filter">Storage:</label>
+                    <select class="form-select" id="location_id_filter">
+                        <option value="">All Locations</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-md-6 col-lg-4">
+                <div class="input-group">
+                    <span class="input-group-text">Size:</span>
+                    <input type="number" class="form-control" id="min_size_filter" placeholder="Min bytes">
+                    <span class="input-group-text">to</span>
+                    <input type="number" class="form-control" id="max_size_filter" placeholder="Max bytes">
+                </div>
+            </div>
+            <div class="col-md-6 col-lg-6">
+                <div class="input-group">
+                    <span class="input-group-text">Modified:</span>
+                    <input type="datetime-local" class="form-control" id="min_mtime_filter"
+                        title="Min modification time">
+                    <span class="input-group-text">to</span>
+                    <input type="datetime-local" class="form-control" id="max_mtime_filter"
+                        title="Max modification time">
                 </div>
             </div>
         </div>
@@ -131,10 +201,12 @@
             </div>
             <div class="col-md-6 text-end">
                 <div class="btn-group">
-                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="cleanupMissingFiles()" title="Clean up records for files that no longer exist">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="cleanupMissingFiles()"
+                        title="Clean up records for files that no longer exist">
                         <i class="bi bi-trash"></i> Cleanup Missing
                     </button>
-                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()" title="Remove duplicate file records">
+                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()"
+                        title="Remove duplicate file records">
                         <i class="bi bi-files"></i> Remove Duplicates
                     </button>
                 </div>
@@ -219,15 +291,18 @@
                         <p><strong>File:</strong> <code id="thawFileName"></code></p>
                         <div class="mb-3">
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="pin_file" id="pinTemp" value="false" checked>
+                                <input class="form-check-input" type="radio" name="pin_file" id="pinTemp" value="false"
+                                    checked>
                                 <label class="form-check-label" for="pinTemp">
-                                    <strong>Temporary</strong> - Move back, but file may be moved again on next scan if it matches criteria
+                                    <strong>Temporary</strong> - Move back, but file may be moved again on next scan if
+                                    it matches criteria
                                 </label>
                             </div>
                         </div>
                         <div class="mb-3">
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="pin_file" id="pinPermanent" value="true">
+                                <input class="form-check-input" type="radio" name="pin_file" id="pinPermanent"
+                                    value="true">
                                 <label class="form-check-label" for="pinPermanent">
                                     <strong>Pinned</strong> - Move back and exclude from future scans
                                 </label>
@@ -245,7 +320,8 @@
         </div>
 
         <!-- Manage Tags Modal -->
-        <div class="modal fade" id="manageTagsModal" tabindex="-1" aria-labelledby="manageTagsModalLabel" aria-hidden="true">
+        <div class="modal fade" id="manageTagsModal" tabindex="-1" aria-labelledby="manageTagsModalLabel"
+            aria-hidden="true">
             <div class="modal-dialog modal-lg">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -288,7 +364,8 @@
 
     <footer class="mt-5 py-3 bg-light text-center">
         <div class="container">
-            <small class="text-muted"><span id="app-name-footer">File Fridge</span> v<span id="footer-app-version">Loading...</span> - File Cold Storage Management</small>
+            <small class="text-muted"><span id="app-name-footer">File Fridge</span> v<span
+                    id="footer-app-version">Loading...</span> - File Cold Storage Management</small>
         </div>
     </footer>
 
@@ -300,5 +377,5 @@
         document.addEventListener('DOMContentLoaded', loadAppInfo);
     </script>
 </body>
-</html>
 
+</html>

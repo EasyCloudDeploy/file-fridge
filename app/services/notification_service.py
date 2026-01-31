@@ -481,8 +481,8 @@ class NotificationService:
 
         payload = {
             "content": formatted_message,  # Discord
-            "text": formatted_message,     # Slack
-            "message": message,            # Generic
+            "text": formatted_message,  # Slack
+            "message": message,  # Generic
             "level": level.upper(),
             "timestamp": datetime.utcnow().isoformat(),
             "source": "File Fridge",

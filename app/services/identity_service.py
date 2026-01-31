@@ -22,7 +22,6 @@ PRIVATE_KEY_ENCRYPTION = serialization.NoEncryption()  # Encryption is handled b
 class IdentityService:
     """Manages the cryptographic identity of this File Fridge instance."""
 
-    _instance_metadata: InstanceMetadata | None = None
     _signing_private_key: ed25519.Ed25519PrivateKey | None = None
     _kx_private_key: x25519.X25519PrivateKey | None = None
 
@@ -31,9 +30,6 @@ class IdentityService:
         Load the instance metadata from the database, creating it if it doesn't exist.
         This includes generating and storing key pairs if they are missing.
         """
-        if self._instance_metadata:
-            return self._instance_metadata
-
         metadata = db.query(InstanceMetadata).first()
         if not metadata:
             logger.info("No instance metadata found, creating a new identity.")
@@ -54,7 +50,6 @@ class IdentityService:
             logger.warning("Instance identity is incomplete, regenerating keys.")
             self._generate_and_save_keys(db, metadata)
 
-        self._instance_metadata = metadata
         return metadata
 
     def _generate_and_save_keys(self, db: Session, metadata: InstanceMetadata):
@@ -89,9 +84,7 @@ class IdentityService:
 
         # Serialize and store public keys
         metadata.ed25519_public_key = base64.b64encode(
-            signing_public_key.public_bytes(
-                encoding=PUBLIC_KEY_ENCODING, format=PUBLIC_KEY_FORMAT
-            )
+            signing_public_key.public_bytes(encoding=PUBLIC_KEY_ENCODING, format=PUBLIC_KEY_FORMAT)
         ).decode("ascii")
         metadata.x25519_public_key = base64.b64encode(
             kx_public_key.public_bytes(encoding=PUBLIC_KEY_ENCODING, format=PUBLIC_KEY_FORMAT)
@@ -176,6 +169,122 @@ class IdentityService:
         except Exception:
             logger.debug("Signature verification failed.", exc_info=True)
             return False
+
+    def export_keys_pem(self, db: Session) -> dict:
+        """
+        Export all keys (signing and key exchange, public and private) in PEM format.
+        """
+        signing_private = self.get_signing_private_key(db)
+        kx_private = self.get_kx_private_key(db)
+
+        # Signing Keys (Ed25519)
+        signing_priv_pem = signing_private.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("ascii")
+
+        signing_pub_pem = (
+            signing_private.public_key()
+            .public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            .decode("ascii")
+        )
+
+        # Key Exchange Keys (X25519)
+        kx_priv_pem = kx_private.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("ascii")
+
+        kx_pub_pem = (
+            kx_private.public_key()
+            .public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            .decode("ascii")
+        )
+
+        return {
+            "signing_private_key": signing_priv_pem,
+            "signing_public_key": signing_pub_pem,
+            "kx_private_key": kx_priv_pem,
+            "kx_public_key": kx_pub_pem,
+        }
+
+    def import_keys_pem(self, db: Session, signing_key_pem: str, kx_key_pem: str):
+        """
+        Import private keys from PEM format and update the instance identity.
+        Derives public keys automatically.
+        """
+        try:
+            # Load and validate Ed25519 key
+            signing_private = serialization.load_pem_private_key(
+                signing_key_pem.encode("ascii"), password=None
+            )
+            if not isinstance(signing_private, ed25519.Ed25519PrivateKey):
+                msg = "Invalid signing key type. Expected Ed25519PrivateKey."
+                raise ValueError(msg)
+
+            # Load and validate X25519 key
+            kx_private = serialization.load_pem_private_key(
+                kx_key_pem.encode("ascii"), password=None
+            )
+            if not isinstance(kx_private, x25519.X25519PrivateKey):
+                msg = "Invalid key exchange key type. Expected X25519PrivateKey."
+                raise ValueError(msg)
+
+        except Exception as e:
+            logger.exception(f"Failed to load PEM keys: {e}")
+            raise ValueError(f"Invalid PEM key format: {e}") from e
+
+        # Get public keys
+        signing_public = signing_private.public_key()
+        kx_public = kx_private.public_key()
+
+        # Serialize for DB storage (using existing internal format)
+        signing_priv_bytes = signing_private.private_bytes(
+            encoding=PRIVATE_KEY_ENCODING,
+            format=PRIVATE_KEY_FORMAT,
+            encryption_algorithm=PRIVATE_KEY_ENCRYPTION,
+        )
+        kx_priv_bytes = kx_private.private_bytes(
+            encoding=PRIVATE_KEY_ENCODING,
+            format=PRIVATE_KEY_FORMAT,
+            encryption_algorithm=PRIVATE_KEY_ENCRYPTION,
+        )
+
+        # Update Metadata
+        metadata = self._load_or_create_identity(db)
+
+        # Update private keys (encrypted)
+        metadata.ed25519_private_key_encrypted = encryption_manager.encrypt(
+            base64.b64encode(signing_priv_bytes).decode("ascii")
+        )
+        metadata.x25519_private_key_encrypted = encryption_manager.encrypt(
+            base64.b64encode(kx_priv_bytes).decode("ascii")
+        )
+
+        # Update public keys (base64 raw)
+        metadata.ed25519_public_key = base64.b64encode(
+            signing_public.public_bytes(encoding=PUBLIC_KEY_ENCODING, format=PUBLIC_KEY_FORMAT)
+        ).decode("ascii")
+        metadata.x25519_public_key = base64.b64encode(
+            kx_public.public_bytes(encoding=PUBLIC_KEY_ENCODING, format=PUBLIC_KEY_FORMAT)
+        ).decode("ascii")
+
+        db.commit()
+        db.refresh(metadata)
+
+        # Clear cache
+        self._signing_private_key = None
+        self._kx_private_key = None
+
+        logger.info("Successfully imported new instance identity.")
 
 
 identity_service = IdentityService()

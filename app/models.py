@@ -197,6 +197,15 @@ class ScanStatus(str, enum.Enum):
     PENDING = "pending"
 
 
+class EncryptionStatus(str, enum.Enum):
+    """Encryption status for cold storage locations."""
+
+    NONE = "none"  # Not encrypted
+    PENDING = "pending"  # Encryption scheduled
+    ENCRYPTED = "encrypted"  # Fully encrypted
+    DECRYPTING = "decrypting"  # Decryption in progress
+
+
 # Association table for many-to-many relationship between MonitoredPath and ColdStorageLocation
 path_storage_location_association = Table(
     "path_storage_location_association",
@@ -218,6 +227,10 @@ class ColdStorageLocation(Base):
     path = Column(String, nullable=False, unique=True)
     caution_threshold_percent = Column(Integer, nullable=False, default=20)  # Warn at 20% free
     critical_threshold_percent = Column(Integer, nullable=False, default=10)  # Critical at 10% free
+    is_encrypted = Column(Boolean, nullable=False, default=False)
+    encryption_status = Column(
+        SQLEnum(EncryptionStatus), nullable=False, default=EncryptionStatus.NONE
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -376,6 +389,7 @@ class FileInventory(Base):
     cold_storage_location_id = Column(
         Integer, ForeignKey("cold_storage_locations.id"), nullable=True, index=True
     )
+    is_encrypted = Column(Boolean, nullable=False, default=False)
 
     # Composite indexes for common query patterns
     __table_args__ = (
@@ -645,7 +659,7 @@ class User(Base):
     password_hash = Column(String, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_active = Column(Boolean, default=True, nullable=False)
-    roles = Column(JSON, nullable=False, server_default='[]')
+    roles = Column(JSON, nullable=False, server_default="[]")
 
 
 class ServerEncryptionKey(Base):
@@ -670,6 +684,9 @@ class InstanceMetadata(Base):
     ed25519_private_key_encrypted = Column(Text, nullable=True)  # Encrypted signing private key
     x25519_public_key = Column(Text, nullable=True)  # Key exchange public key
     x25519_private_key_encrypted = Column(Text, nullable=True)  # Encrypted key exchange private key
+    file_encryption_root_key_encrypted = Column(
+        Text, nullable=True
+    )  # Persistent master key for file encryption
     current_key_version = Column(Integer, nullable=False, default=1)  # For key rotation
     instance_url = Column(
         String, nullable=True
@@ -698,6 +715,22 @@ class TransferDirection(str, enum.Enum):
 
     PUSH = "PUSH"  # This instance sends to remote
     PULL = "PULL"  # This instance serves file to remote on request
+
+
+class FileTransferStrategy(str, enum.Enum):
+    """Strategy for remote file transfer (Copy vs Move)."""
+
+    COPY = "COPY"
+    MOVE = "MOVE"
+
+
+class ConflictResolution(str, enum.Enum):
+    """Strategy for handling duplicate files during transfer."""
+
+    SKIP = "SKIP"  # Skip transfer if file exists
+    OVERWRITE = "OVERWRITE"  # Replace existing file
+    RENAME = "RENAME"  # Add suffix to filename (_1, _2, etc)
+    COMPARE = "COMPARE"  # Compare checksums, skip if identical, otherwise fail
 
 
 class RemoteConnection(Base):
@@ -787,6 +820,18 @@ class RemoteTransferJob(Base):
         default=TransferDirection.PUSH,
         nullable=False,
         server_default=sa.text("'PUSH'"),
+    )
+    strategy = Column(
+        SQLEnum(FileTransferStrategy),
+        default=FileTransferStrategy.COPY,
+        nullable=False,
+        server_default=sa.text("'COPY'"),
+    )
+    conflict_resolution = Column(
+        SQLEnum(ConflictResolution),
+        default=ConflictResolution.OVERWRITE,
+        nullable=False,
+        server_default=sa.text("'OVERWRITE'"),
     )
 
     file = relationship("FileInventory")
