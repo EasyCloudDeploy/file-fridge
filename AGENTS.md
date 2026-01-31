@@ -22,7 +22,7 @@ This document provides guidelines for **AI agents** (Claude Code, GitHub Copilot
 **Key Files for Context:**
 - `CLAUDE.md` - Comprehensive codebase documentation
 - `README.md` - User-facing documentation
-- `app/models.py` - Database schema (12 models)
+- `app/models.py` - Database schema (24 models)
 - `app/schemas.py` - API contracts (Pydantic)
 - `pyproject.toml` - Project metadata and dependencies
 
@@ -44,16 +44,36 @@ pip install package-name  # FORBIDDEN
 python -m pip install     # FORBIDDEN
 ```
 
-**2. Database Changes - Migrations Required**
-```bash
-# ✅ CORRECT - Always create migrations
-uv run alembic revision --autogenerate -m "Add new column"
-uv run alembic upgrade head
+**2. Database Changes - SQLAlchemy Auto-Sync First**
 
-# ❌ WRONG - Never modify schema directly
-# Making changes to models.py WITHOUT creating a migration
-# Using database.metadata.create_all() in production code
+**Simple schema changes use SQLAlchemy `create_all()` (preferred):**
+- ✅ Adding new tables
+- ✅ Adding new columns to existing tables  
+- ✅ Adding new indexes
+- ✅ Creating relationships/foreign keys
+
+**Complex migrations use Alembic (when needed):**
+- 🔧 Column type conversions (e.g., INTEGER → VARCHAR)
+- 🔧 Column/table renames
+- 🔧 Data migrations or backfills
+- 🔧 Multi-step schema changes
+- 🔧 Changes not supported by SQLite's `ALTER TABLE`
+
+```bash
+# ✅ For simple changes (new tables/columns/indexes):
+# Just update models.py - SQLAlchemy auto-sync handles it on next startup
+uv run python -c "from app.database import init_db; init_db()"  # Test locally
+
+# ✅ For complex migrations only:
+uv run alembic revision --autogenerate -m "Convert column type"
+uv run alembic upgrade head
 ```
+
+**Why this approach?**
+- SQLite supports `CREATE TABLE` and `ALTER TABLE ADD COLUMN` natively
+- SQLAlchemy's `create_all()` is idempotent and handles these automatically
+- Faster iteration during development
+- Alembic reserved for operations SQLite cannot handle natively
 
 **3. Code Quality - Format and Lint**
 ```bash
@@ -79,8 +99,12 @@ uv run ruff check app/ --fix
 **Implementation Steps:**
 1. **Design**: Plan the feature (models, API, services)
 2. **Models**: Update `app/models.py` if database changes needed
-3. **Migration**: Create Alembic migration (if step 2 applies)
+3. **Test Schema Changes** (if step 2 applies):
    ```bash
+   # For new tables/columns/indexes - SQLAlchemy auto-sync
+   uv run python -c "from app.database import init_db; init_db()"
+   
+   # For complex changes (renames, type conversions) - Alembic
    uv run alembic revision --autogenerate -m "Add feature X tables"
    uv run alembic upgrade head
    ```
@@ -393,7 +417,8 @@ def test_mtime_criterion_no_match(db_session):
 **Agent Checklist:**
 - [ ] Read CLAUDE.md for architecture patterns
 - [ ] Check if database changes needed
-- [ ] Create Alembic migration (if DB changes)
+- [ ] Test schema changes locally (SQLAlchemy auto-sync for new tables/columns)
+- [ ] Create Alembic migration only for complex changes (renames, type conversions, data migrations)
 - [ ] Add Pydantic schemas
 - [ ] Implement service function
 - [ ] Add router endpoint
@@ -524,6 +549,52 @@ Can't relocate files. Database problem. What should I do?
 
 ## Project-Specific Agent Knowledge
 
+### Database Workflow Decision Criteria
+
+**When to Use SQLAlchemy Auto-Sync vs Alembic:**
+
+```
+SQLAlchemy Auto-Sync (Simple Changes):
+├── Adding NEW tables → Use init_db()
+├── Adding NEW columns → Use init_db()
+├── Adding NEW indexes → Use init_db()  
+└── Creating relationships/foreign keys → Use init_db()
+
+Alembic Migrations (Complex Changes):
+├── Renaming columns → Alembic required
+├── Renaming tables → Alembic required
+├── Changing column types → Alembic required
+├── Data migrations/backfills → Alembic required
+├── Dropping columns → Alembic required
+└── Multi-step schema changes → Alembic required
+```
+
+**SQLite-Specific Capabilities:**
+
+SQLite natively supports:
+- ✅ `CREATE TABLE` (new tables)
+- ✅ `ALTER TABLE ADD COLUMN` (new columns, with limitations)
+- ✅ `CREATE INDEX` (new indexes)
+
+SQLite does NOT support:
+- ❌ `ALTER TABLE DROP COLUMN` (until very recent versions)
+- ❌ `ALTER TABLE RENAME COLUMN` (before SQLite 3.25.0)
+- ❌ Most other `ALTER TABLE` operations
+
+**Why Auto-Sync Works:**
+SQLAlchemy's `Base.metadata.create_all()` uses `CREATE TABLE IF NOT EXISTS` and handles `ALTER TABLE ADD COLUMN` where supported. For simple additive changes, this is idempotent and production-safe.
+
+**Testing Schema Changes:**
+```bash
+# Test that your model changes work with auto-sync
+uv run python -c "from app.database import init_db; init_db()"
+
+# For complex migrations that require Alembic
+uv run alembic revision --autogenerate -m "Description"
+uv run alembic upgrade head
+uv run alembic downgrade -1  # Test rollback
+```
+
 ### Critical Business Logic
 
 **1. Criteria Matching (INVERSE LOGIC)**
@@ -571,18 +642,18 @@ Symlink created with host path, not container path.
 
 ### Common Pitfalls for Agents
 
-**Pitfall 1: Database Changes Without Migrations**
+**Pitfall 1: Using Alembic When Not Needed**
 ```
-❌ Agent adds column to models.py
-❌ Runs the app (auto-creates with init_db())
-❌ Commits code
+❌ Agent adds new table/column to models.py
+❌ Creates unnecessary Alembic migration
+❌ Commits redundant migration file
 
-Result: Users can't upgrade their databases!
+Result: Cluttered migration history, slower development!
 
-✅ Agent adds column to models.py
-✅ Creates Alembic migration
-✅ Tests migration upgrade/downgrade
-✅ Commits both model change and migration
+✅ Agent adds new table/column to models.py
+✅ Tests with SQLAlchemy auto-sync: uv run python -c "from app.database import init_db; init_db()"
+✅ Only creates Alembic migration for complex changes (renames, type conversions, data backfills)
+✅ Commits model changes (and migration only if needed)
 ```
 
 **Pitfall 2: Using pip Instead of uv**
@@ -644,10 +715,12 @@ Before completing any task, agents should verify:
 - [ ] Does code follow existing patterns?
 
 **Database:**
-- [ ] Did I create an Alembic migration for schema changes?
-- [ ] Did I test the migration upgrade path?
-- [ ] Is the migration reversible (downgrade)?
-- [ ] Did I commit the migration file?
+- [ ] Did I determine if the change needs Alembic or SQLAlchemy auto-sync?
+- [ ] Did I test the schema change locally with `init_db()`?
+- [ ] Did I create an Alembic migration only for complex changes (if needed)?
+- [ ] Did I test the migration upgrade path (if using Alembic)?
+- [ ] Is the migration reversible (downgrade) (if using Alembic)?
+- [ ] Did I commit the migration file (if created)?
 
 **Testing:**
 - [ ] Did I test the changes manually?
