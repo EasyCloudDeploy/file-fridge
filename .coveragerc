@@ -1,0 +1,20 @@
+[run]
+omit =
+    alembic/*
+    app/main.py
+    tests/*
+    */__pycache__/*
+    .venv/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    if self.debug:
+    if settings.debug:
+    raise AssertionError
+    raise NotImplementedError
+    if 0:
+    if __name__ == "__main__":
+    
+ignore_errors = True

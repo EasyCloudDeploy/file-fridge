@@ -45,12 +45,16 @@ dependencies = [
     "typing-extensions>=4.13.2",
 ]
 
-[project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
+    "pytest-factoryboy>=2.6.0",
+    "pytest-cov>=4.1.0",
+    "freezegun>=1.4.0",
+    "responses>=0.25.0",
+    "factory-boy>=3.3.0",
 ]
 
 [build-system]
@@ -70,6 +74,11 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
+    "pytest-factoryboy>=2.6.0",
+    "pytest-cov>=4.1.0",
+    "freezegun>=1.4.0",
+    "responses>=0.25.0",
+    "factory-boy>=3.3.0",
 ]
 
 [tool.black]
@@ -89,4 +98,8 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "unit: marks tests as unit tests",
+    "integration: marks tests as integration tests",
+]
 
