@@ -77,6 +77,11 @@ class FileFreezer:
                 source_path, base_source, base_destination
             )
 
+            # Check encryption
+            encrypt_file = storage_location.is_encrypted
+            if encrypt_file:
+                destination_path = destination_path.with_suffix(destination_path.suffix + ".ffenc")
+
             # Ensure destination directory exists
             destination_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -93,21 +98,38 @@ class FileFreezer:
             db.commit()
 
             try:
-                # Move file using the path's operation type with rollback
-                from app.services.file_mover import move_with_rollback
+                # Handle encryption or regular move
+                if encrypt_file:
+                    from app.services.encryption_service import file_encryption_service
 
-                success, error, checksum_after = move_with_rollback(
-                    source_path,
-                    destination_path,
-                    monitored_path.operation_type,
-                    verify_checksum=True,
-                )
+                    try:
+                        file_encryption_service.encrypt_file(db, source_path, destination_path)
+                        # Delete original if move (not copy)
+                        if monitored_path.operation_type == OperationType.MOVE:
+                            source_path.unlink()
 
-                if not success:
-                    # Rollback status change
-                    locked_file.status = old_status
-                    db.commit()
-                    return False, f"Failed to move file: {error}", None
+                        checksum_after = checksum_verifier.calculate_checksum(destination_path)
+                    except Exception as e:
+                        # Rollback status change
+                        locked_file.status = old_status
+                        db.commit()
+                        return False, f"Failed to encrypt/move file: {e}", None
+                else:
+                    # Move file using the path's operation type with rollback
+                    from app.services.file_mover import move_with_rollback
+
+                    success, error, checksum_after = move_with_rollback(
+                        source_path,
+                        destination_path,
+                        monitored_path.operation_type,
+                        verify_checksum=True,
+                    )
+
+                    if not success:
+                        # Rollback status change
+                        locked_file.status = old_status
+                        db.commit()
+                        return False, f"Failed to move file: {error}", None
 
                 # Create FileRecord entry
                 file_record = FileRecord(
@@ -125,6 +147,8 @@ class FileFreezer:
                 locked_file.storage_type = StorageType.COLD
                 locked_file.cold_storage_location_id = storage_location.id
                 locked_file.status = FileStatus.ACTIVE
+                locked_file.is_encrypted = encrypt_file
+
                 # For SYMLINK operation, the original path stays (symlink points to cold)
                 # For MOVE/COPY, update the file_path to the cold storage location
                 if monitored_path.operation_type != OperationType.SYMLINK:

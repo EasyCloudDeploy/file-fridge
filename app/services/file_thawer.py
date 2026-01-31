@@ -48,11 +48,39 @@ class FileThawer:
             if not cold_path.exists():
                 return False, f"File not found in cold storage: {cold_path}"
 
+            # Check inventory to see if it's encrypted
+            from app.models import FileInventory
+
+            file_inventory = (
+                db.query(FileInventory).filter(FileInventory.file_path == str(cold_path)).first()
+            )
+
+            is_encrypted = file_inventory.is_encrypted if file_inventory else False
+
             # Calculate checksum before move for verification
             checksum_before = checksum_verifier.calculate_checksum(cold_path)
 
-            # If original was a symlink, we need to handle it differently
-            if file_record.operation_type.value == "symlink":
+            # Decrypt if encrypted, otherwise standard move
+            if is_encrypted:
+                from app.services.encryption_service import file_encryption_service
+
+                try:
+                    # Ensure destination directory exists
+                    original_path.parent.mkdir(parents=True, exist_ok=True)
+
+                    # Decrypt to destination
+                    file_encryption_service.decrypt_file(db, cold_path, original_path)
+
+                    # Remove encrypted file if operation was MOVE or SYMLINK (assuming symlink targeted the encrypted file)
+                    # For COPY, we might want to keep it? The logic below handles unlinking for MOVE.
+                    if file_record.operation_type.value != "copy":
+                        cold_path.unlink()
+
+                except Exception as e:
+                    return False, f"Failed to decrypt/thaw file: {e}"
+
+            # If original was a symlink, we need to handle it differently (and not encrypted)
+            elif file_record.operation_type.value == "symlink":
                 # Remove the symlink at original location if it exists
                 if original_path.exists() and original_path.is_symlink():
                     original_path.unlink()
@@ -86,11 +114,11 @@ class FileThawer:
                 except Exception as e:
                     return False, f"Failed to move file back: {e!s}"
 
-            # Verify checksum after move
+            # Verify checksum after move (skip for encrypted files as checksum changes)
             checksum_after = None
             if original_path.exists():
                 checksum_after = checksum_verifier.calculate_checksum(original_path)
-                if checksum_before and checksum_after != checksum_before:
+                if not is_encrypted and checksum_before and checksum_after != checksum_before:
                     logger.error(
                         f"Checksum mismatch after thaw: {checksum_before[:16]}... != {checksum_after[:16]}..."
                     )
@@ -113,16 +141,13 @@ class FileThawer:
 
             db.commit()
 
-            # Get file inventory record for audit logging
-            from app.models import FileInventory
-
-            file_inventory = (
-                db.query(FileInventory)
-                .filter(FileInventory.file_path == str(original_path))
-                .first()
-            )
-
             if file_inventory:
+                # Update inventory status
+                file_inventory.storage_type = StorageType.HOT
+                file_inventory.status = FileStatus.ACTIVE
+                file_inventory.is_encrypted = False
+                file_inventory.file_path = str(original_path)  # Ensure path is updated to hot path
+
                 # Log to audit trail
                 audit_trail_service.log_thaw_operation(
                     db=db,
@@ -135,9 +160,6 @@ class FileThawer:
                     initiated_by=initiated_by or "manual",
                 )
 
-                # Update inventory status
-                file_inventory.storage_type = StorageType.HOT
-                file_inventory.status = FileStatus.ACTIVE
                 db.commit()
 
             logger.info(f"Thawed file: {cold_path} -> {original_path} (pinned: {pin})")

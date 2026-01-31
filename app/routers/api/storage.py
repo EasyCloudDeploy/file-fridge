@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ColdStorageLocation, FileInventory, FileRecord
+from app.models import ColdStorageLocation, EncryptionStatus, FileInventory, FileRecord
 from app.schemas import ColdStorageLocation as ColdStorageLocationSchema
 from app.schemas import (
     ColdStorageLocationCreate,
@@ -18,6 +18,7 @@ from app.schemas import (
     ColdStorageLocationWithStats,
     StorageStats,
 )
+from app.services.scheduler import scheduler_service
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +181,28 @@ def update_storage_location(
         )
 
     update_data = location_update.model_dump(exclude_unset=True)
+
+    # Handle Encryption Toggle
+    if "is_encrypted" in update_data:
+        new_encrypted_state = update_data["is_encrypted"]
+        if new_encrypted_state != location.is_encrypted:
+            # State changed
+            if new_encrypted_state:
+                # Enabling encryption
+                location.encryption_status = EncryptionStatus.PENDING
+                logger.info(
+                    f"Encryption enabled for location {location.name}. Queuing background encryption job."
+                )
+                # Trigger job
+                scheduler_service.trigger_encryption_job(location.id)
+            else:
+                # Disabling encryption
+                location.encryption_status = EncryptionStatus.DECRYPTING
+                logger.info(
+                    f"Encryption disabled for location {location.name}. Queuing background decryption job."
+                )
+                # Trigger job
+                scheduler_service.trigger_decryption_job(location.id)
 
     # Check for duplicate name if name is being updated
     if "name" in update_data:

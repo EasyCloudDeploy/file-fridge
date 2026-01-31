@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, TypeAdapte
 from app.models import (
     CriterionType,
     DispatchStatus,
+    EncryptionStatus,
     FileStatus,
     NotificationLevel,
     NotifierType,
@@ -67,6 +68,9 @@ class ColdStorageLocationBase(BaseModel):
     critical_threshold_percent: int = Field(
         10, ge=0, le=100, description="Critical at this % free space"
     )
+    is_encrypted: bool = Field(
+        False, description="Whether files in this location should be encrypted"
+    )
 
     @validator("critical_threshold_percent")
     @classmethod
@@ -91,12 +95,14 @@ class ColdStorageLocationUpdate(BaseModel):
     path: Optional[str] = Field(None, min_length=1)
     caution_threshold_percent: Optional[int] = Field(None, ge=0, le=100)
     critical_threshold_percent: Optional[int] = Field(None, ge=0, le=100)
+    is_encrypted: Optional[bool] = None
 
 
 class ColdStorageLocation(ColdStorageLocationBase):
     """Schema for cold storage location response."""
 
     id: int
+    encryption_status: EncryptionStatus
     created_at: datetime
     updated_at: Optional[datetime]
 
@@ -223,6 +229,7 @@ class FileInventoryBase(BaseModel):
     file_extension: Optional[str] = None
     mime_type: Optional[str] = None
     status: FileStatus = FileStatus.ACTIVE
+    is_encrypted: bool = False
 
 
 class FileInventoryCreate(FileInventoryBase):
