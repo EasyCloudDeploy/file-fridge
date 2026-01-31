@@ -22,7 +22,7 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-logger.info(f"Logging configured: level={LOG_LEVEL}, file={LOG_FILE_PATH or 'stdout only'}")
+logger.info("Logging configured: level=%s, file=%s", LOG_LEVEL, LOG_FILE_PATH or "stdout only")
 
 # Now import everything else after logging is configured
 from contextlib import asynccontextmanager

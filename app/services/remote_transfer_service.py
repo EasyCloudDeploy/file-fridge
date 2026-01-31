@@ -60,6 +60,7 @@ class RemoteTransferService:
         remote_monitored_path_id: int,
         direction: TransferDirection = TransferDirection.PUSH,
         strategy: FileTransferStrategy = FileTransferStrategy.COPY,
+        conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE,
     ) -> RemoteTransferJob:
         """Create a new remote transfer job."""
         logger.info(
@@ -140,6 +141,7 @@ class RemoteTransferService:
             checksum=checksum,
             direction=direction,
             strategy=strategy,
+            conflict_resolution=conflict_resolution,
         )
 
         db.add(job)
@@ -559,7 +561,7 @@ class RemoteTransferService:
 
     async def _cleanup_after_transfer(
         self, db: Session, job: RemoteTransferJob, _conn: RemoteConnection
-    ):
+    ) -> None:
         """
         Cleanup after successful transfer.
         If the strategy is MOVE, delete the source file safely.
@@ -568,11 +570,11 @@ class RemoteTransferService:
             source_path = Path(job.source_path)
             if source_path.exists():
                 logger.info(
-                    f"Transfer job {job.id} used MOVE strategy. Deleting source file {source_path}"
+                    f"Transfer job {job.id} used MOVE strategy. Removing source file {source_path}"
                 )
                 try:
-                    # Double check existence and accessibility before delete
-                    source_path.unlink()
+                    # Remove file asynchronously
+                    await aiofiles.os.remove(str(source_path))
 
                     # Update file inventory status
                     file_obj = (
@@ -581,11 +583,11 @@ class RemoteTransferService:
                         .first()
                     )
                     if file_obj:
-                        file_obj.status = FileStatus.DELETED
+                        file_obj.status = FileStatus.MOVED
                         db.commit()
-                        logger.info(f"Marked file {job.file_inventory_id} as DELETED in inventory")
+                        logger.info(f"Marked file {job.file_inventory_id} as MOVED in inventory")
                 except Exception as e:
-                    logger.error(f"Failed to delete source file {source_path} after MOVE: {e}")
+                    logger.error(f"Failed to remove source file {source_path} after MOVE: {e}")
             else:
                 logger.warning(
                     f"Transfer job {job.id} MOVE task: source file {source_path} already missing"

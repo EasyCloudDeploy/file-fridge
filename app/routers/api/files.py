@@ -151,6 +151,29 @@ def list_files(
     - Last line: {"type": "complete", "count": N, "duration_ms": N}
     - On error: {"type": "error", "message": "...", "partial_count": N}
     """
+    # Validate query parameters
+    if min_size is not None and min_size < 0:
+        raise HTTPException(
+            status_code=400, detail="min_size must be non-negative (>= 0)"
+        )
+
+    if max_size is not None and max_size < 0:
+        raise HTTPException(
+            status_code=400, detail="max_size must be non-negative (>= 0)"
+        )
+
+    if min_size is not None and max_size is not None and min_size > max_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"min_size ({min_size}) cannot be greater than max_size ({max_size})"
+        )
+
+    if min_mtime is not None and max_mtime is not None and min_mtime > max_mtime:
+        raise HTTPException(
+            status_code=400,
+            detail=f"min_mtime ({min_mtime.isoformat()}) cannot be greater than max_mtime ({max_mtime.isoformat()})"
+        )
+
     from app.models import FileTag
 
     def generate_ndjson() -> Generator[str, None, None]:

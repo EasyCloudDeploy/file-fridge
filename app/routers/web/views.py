@@ -20,7 +20,6 @@ TEMPLATE_ROUTES = [
     ("/tags", "tags.html", "tags"),
     ("/notifiers", "notifiers.html", "notifiers"),
     ("/settings", "settings.html", "settings"),
-    ("/remote-files/{connection_id}", "remote_files.html", "remote-files"),
     ("/login", "login.html", None),  # Login page (no active page highlight)
 ]
 
@@ -111,7 +110,7 @@ async def thaw_redirect(file_id: int):
 
 
 @router.get("/remote-files/{connection_id}", response_class=HTMLResponse)
-async def get_remote_files(request: Request, connection_id: int):
+async def get_remote_files(request: Request, connection_id: int) -> HTMLResponse:
     """Remote files browser page."""
     return templates.TemplateResponse(
         "remote_files.html",

@@ -47,4 +47,4 @@ USER filefridge
 EXPOSE 8000
 
 # Use uvicorn directly for better production deployment
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level ${LOG_LEVEL:-info}"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level ${LOG_LEVEL:-info}"]

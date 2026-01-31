@@ -53,8 +53,10 @@ const columnDefs = [
         cellRenderer: params => {
             const file = params.data;
             return `
-                <button type="button" class="btn btn-sm btn-success" 
-                        onclick="showPullModal(${file.inventory_id}, '${escapeHtml(file.file_path)}')"
+                <button type="button" class="btn btn-sm btn-success"
+                        data-action="pull"
+                        data-inventory-id="${file.inventory_id}"
+                        data-file-path="${file.file_path}"
                         title="Pull file to local storage">
                     <i class="bi bi-cloud-download"></i> Pull
                 </button>
@@ -88,8 +90,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Init AG Grid
     const gridDiv = document.getElementById('filesGrid');
-    agGrid.createGrid(gridDiv, gridOptions);
-    gridApi = gridOptions.api;
+    gridApi = agGrid.createGrid(gridDiv, gridOptions);
 
     // Load initial data
     await Promise.all([
@@ -126,6 +127,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.getElementById('localPathSelect').addEventListener('change', (e) => {
         document.getElementById('confirmPullBtn').disabled = !e.target.value;
     });
+
+    // Event delegation for grid action buttons
+    document.getElementById('filesGrid').addEventListener('click', handleActionClick);
 });
 
 async function loadConnectionDetails() {
@@ -209,7 +213,7 @@ async function loadRemoteFiles() {
         const data = await response.json();
 
         if (data.files && data.files.length > 0) {
-            gridOptions.api.setGridOption('rowData', data.files);
+            gridApi.setGridOption('rowData', data.files);
             gridEl.style.display = 'block';
         } else {
             noFilesEl.style.display = 'block';
@@ -222,7 +226,25 @@ async function loadRemoteFiles() {
     }
 }
 
-// Global scope for the onclick handler
+// Handle action button clicks via event delegation
+function handleActionClick(event) {
+    const button = event.target.closest('[data-action]');
+    if (!button) return;
+
+    const action = button.dataset.action;
+    const inventoryId = parseInt(button.dataset.inventoryId);
+    const filePath = button.dataset.filePath;
+
+    switch (action) {
+        case 'pull':
+            showPullModal(inventoryId, filePath);
+            break;
+        default:
+            console.warn('Unknown action:', action);
+    }
+}
+
+// Global scope for the onclick handler (kept for backwards compatibility)
 window.showPullModal = (inventoryId, filePath) => {
     document.getElementById('pullFileName').textContent = filePath;
     document.getElementById('pullFileName').dataset.inventoryId = inventoryId;

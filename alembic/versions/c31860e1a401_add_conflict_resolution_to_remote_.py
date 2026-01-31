@@ -19,18 +19,31 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Create enum type for PostgreSQL (no-op for SQLite)
+    conflict_resolution_enum = sa.Enum(
+        "SKIP",
+        "OVERWRITE",
+        "RENAME",
+        "COMPARE",
+        name="conflictresolution",
+        create_type=True,
+    )
+
     # Add conflict_resolution column to remote_transfer_jobs table
     op.add_column(
         "remote_transfer_jobs",
         sa.Column(
             "conflict_resolution",
-            sa.String(length=9),
+            conflict_resolution_enum,
             nullable=False,
-            server_default="OVERWRITE"
-        )
+            server_default="OVERWRITE",
+        ),
     )
 
 
 def downgrade() -> None:
     # Remove conflict_resolution column from remote_transfer_jobs table
     op.drop_column("remote_transfer_jobs", "conflict_resolution")
+
+    # Drop enum type for PostgreSQL (no-op for SQLite)
+    sa.Enum(name="conflictresolution").drop(op.get_bind(), checkfirst=True)

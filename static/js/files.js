@@ -886,8 +886,21 @@ function updateFilters() {
     currentStorageLocationId = locationIdSelect && locationIdSelect.value ? parseInt(locationIdSelect.value) : null;
     currentMinSize = minSizeInput && minSizeInput.value ? parseInt(minSizeInput.value) : null;
     currentMaxSize = maxSizeInput && maxSizeInput.value ? parseInt(maxSizeInput.value) : null;
-    currentMinMtime = minMtimeInput && minMtimeInput.value ? minMtimeInput.value : null;
-    currentMaxMtime = maxMtimeInput && maxMtimeInput.value ? maxMtimeInput.value : null;
+
+    // Convert datetime-local values to ISO UTC
+    if (minMtimeInput && minMtimeInput.value) {
+        const date = new Date(minMtimeInput.value);
+        currentMinMtime = !isNaN(date.getTime()) ? date.toISOString() : null;
+    } else {
+        currentMinMtime = null;
+    }
+
+    if (maxMtimeInput && maxMtimeInput.value) {
+        const date = new Date(maxMtimeInput.value);
+        currentMaxMtime = !isNaN(date.getTime()) ? date.toISOString() : null;
+    } else {
+        currentMaxMtime = null;
+    }
 
     // Get selected tag IDs from multi-select
     if (tagSelect) {
@@ -972,8 +985,8 @@ function showThawModal(inventoryId, filePath) {
 async function thawFile() {
     const button = document.getElementById('confirmThawBtn');
     const inventoryId = button.dataset.inventoryId;
-    const pinCheckbox = document.getElementById('thawPinCheckbox');
-    const pin = pinCheckbox ? pinCheckbox.checked : false;
+    const pinRadio = document.querySelector('input[name="pin_file"]:checked');
+    const pin = pinRadio ? pinRadio.value === 'true' : false;
 
     try {
         const response = await authenticatedFetch(`${API_BASE_URL}/files/thaw/${inventoryId}?pin=${pin}`, {
@@ -2430,8 +2443,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const thawModal = document.getElementById('thawModal');
     if (thawModal) {
         thawModal.addEventListener('show.bs.modal', function () {
-            const checkbox = document.getElementById('thawPinCheckbox');
-            if (checkbox) checkbox.checked = false;
+            const tempRadio = document.getElementById('pinTemp');
+            if (tempRadio) tempRadio.checked = true;
         });
     }
 

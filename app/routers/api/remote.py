@@ -36,6 +36,9 @@ from app.schemas import (
     BulkActionResponse,
     BulkActionResult,
     BulkRemoteMigrationRequest,
+    BulkRetryFailure,
+    BulkRetryTransfersRequest,
+    BulkRetryTransfersResponse,
     ConnectionCodeResponse,
     FileTransferStrategy,
     PullTransferRequest,
@@ -426,7 +429,7 @@ def trust_connection(
     connection_id: int,
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
-):
+) -> RemoteConnectionSchema:
     """Manually trust a PENDING remote connection."""
     _ = current_user
     try:
@@ -444,7 +447,7 @@ def reject_connection(
     connection_id: int,
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
-):
+) -> RemoteConnectionSchema:
     """Reject a PENDING remote connection."""
     _ = current_user
     try:
@@ -463,7 +466,7 @@ async def update_connection(
     update_data: RemoteConnectionUpdate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
-):
+) -> RemoteConnectionSchema:
     """Update a remote connection's name and/or transfer mode."""
     _ = current_user
     conn = remote_connection_service.get_connection(db, connection_id)
@@ -584,11 +587,12 @@ async def bulk_migrate_files(
                 migration_data.remote_connection_id,
                 migration_data.remote_monitored_path_id,
                 strategy=migration_data.strategy,
+                conflict_resolution=migration_data.conflict_resolution,
             )
             results.append(BulkActionResult(file_id=file_id, success=True))
             successful += 1
-        except Exception as e:
-            logger.error(f"Failed to create transfer job for file_id={file_id}: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.exception("Failed to create transfer job for file_id=%s", file_id)
             results.append(
                 BulkActionResult(file_id=file_id, success=False, message=str(e))
             )
@@ -660,29 +664,32 @@ def bulk_cancel_transfers(
     return results
 
 
-@router.post("/transfers/bulk/retry", tags=["Remote Connections"])
+@router.post(
+    "/transfers/bulk/retry",
+    response_model=BulkRetryTransfersResponse,
+    tags=["Remote Connections"],
+)
 def bulk_retry_transfers(
-    request: dict,
+    request: BulkRetryTransfersRequest,
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
-):
+) -> BulkRetryTransfersResponse:
     """Retry multiple failed remote transfer jobs."""
     _ = current_user
-    job_ids = request.get("job_ids", [])
-    results = {"succeeded": [], "failed": []}
+    succeeded: List[int] = []
+    failed: List[BulkRetryFailure] = []
 
-    for job_id in job_ids:
+    for job_id in request.job_ids:
         job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
         if not job:
-            results["failed"].append({"id": job_id, "reason": "not found"})
+            failed.append(BulkRetryFailure(id=job_id, reason="not found"))
             continue
 
         # Only allow retrying failed or cancelled jobs
         if job.status not in (TransferStatus.FAILED, TransferStatus.CANCELLED):
-            results["failed"].append({
-                "id": job_id,
-                "reason": f"cannot retry {job.status.value} job"
-            })
+            failed.append(
+                BulkRetryFailure(id=job_id, reason=f"cannot retry {job.status.value} job")
+            )
             continue
 
         # Reset job to pending state
@@ -695,10 +702,10 @@ def bulk_retry_transfers(
         job.end_time = None
         job.current_speed = 0
         job.eta = None
-        results["succeeded"].append(job_id)
+        succeeded.append(job_id)
 
     db.commit()
-    return results
+    return BulkRetryTransfersResponse(succeeded=succeeded, failed=failed)
 
 
 @router.delete("/transfers/{job_id}", tags=["Remote Connections"])

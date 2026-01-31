@@ -376,7 +376,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     // Show configuration message in connections list
                     const list = document.getElementById('remote-connections-list');
                     if (list) {
-                        list.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">Remote connections are disabled until instance URL is configured above.</td></tr>';
+                        list.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Remote connections are disabled until instance URL is configured above.</td></tr>';
                     }
 
                     // Show configuration message in transfers list

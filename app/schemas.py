@@ -1,16 +1,17 @@
 """Pydantic schemas for API validation."""
 
 import base64
-import enum
 from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, TypeAdapter, validator
 
 from app.models import (
+    ConflictResolution,
     CriterionType,
     DispatchStatus,
     FileStatus,
+    FileTransferStrategy,
     NotificationLevel,
     NotifierType,
     OperationType,
@@ -44,22 +45,6 @@ class CriteriaUpdate(BaseModel):
     operator: Optional[Operator] = None
     value: Optional[str] = None
     enabled: Optional[bool] = None
-
-
-class FileTransferStrategy(str, enum.Enum):
-    """Strategy for remote file transfer (Copy vs Move)."""
-
-    COPY = "COPY"
-    MOVE = "MOVE"
-
-
-class ConflictResolution(str, enum.Enum):
-    """Strategy for handling duplicate files during transfer."""
-
-    SKIP = "SKIP"  # Skip transfer if file exists
-    OVERWRITE = "OVERWRITE"  # Replace existing file
-    RENAME = "RENAME"  # Add suffix to filename (_1, _2, etc)
-    COMPARE = "COMPARE"  # Compare checksums, skip if identical, otherwise fail
 
 
 class Criteria(CriteriaBase):
@@ -870,6 +855,26 @@ class BulkRemoteMigrationRequest(BaseModel):
     conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE
 
 
+class BulkRetryTransfersRequest(BaseModel):
+    """Request for bulk retry of failed transfer jobs."""
+
+    job_ids: List[int] = Field(..., min_length=1, description="List of transfer job IDs to retry")
+
+
+class BulkRetryFailure(BaseModel):
+    """Details of a failed retry attempt."""
+
+    id: int = Field(..., description="Transfer job ID")
+    reason: str = Field(..., description="Reason for retry failure")
+
+
+class BulkRetryTransfersResponse(BaseModel):
+    """Response for bulk retry operation."""
+
+    succeeded: List[int] = Field(..., description="List of successfully retried job IDs")
+    failed: List[BulkRetryFailure] = Field(..., description="List of failed retry attempts")
+
+
 class RemoteTransferJob(RemoteTransferJobBase):
     """Schema for remote transfer job response."""
 
@@ -908,7 +913,7 @@ class ConflictCheckRequest(BaseModel):
 
     relative_path: str
     remote_path_id: int
-    storage_type: str
+    storage_type: StorageType
     source_checksum: Optional[str] = None  # For COMPARE mode
 
 
