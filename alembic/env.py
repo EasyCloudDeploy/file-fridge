@@ -1,3 +1,4 @@
+import logging
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, pool
@@ -17,8 +18,11 @@ config = context.config
 # Only configure logging via fileConfig if the main Alembic script is running.
 # When run programmatically (e.g., during app startup), the application's
 # logging configuration should take precedence.
-if config.config_file_name is not None and not hasattr(context, "script_directory"): # Check for programmatic execution
-    fileConfig(config.config_file_name)
+if config.config_file_name is not None:
+    # Check if we are running programmatically (e.g. from the app)
+    # If the root logger already has handlers, we skip reconfiguration
+    if not logging.getLogger().hasHandlers():
+        fileConfig(config.config_file_name)
 
 # add your model's MetaData object here
 # for 'autogenerate' support
