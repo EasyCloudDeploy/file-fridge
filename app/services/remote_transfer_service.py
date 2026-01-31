@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import SessionLocal
 from app.models import (
+    ConflictResolution,
     FileInventory,
     FileStatus,
     FileTransferStrategy,
