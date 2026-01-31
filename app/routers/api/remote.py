@@ -1,10 +1,9 @@
 # ruff: noqa: B008, PLR0913
 import base64
-import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import aiofiles
 import anyio
@@ -16,6 +15,7 @@ from fastapi import (
     Depends,
     Header,
     HTTPException,
+    Query,
     Request,
 )
 from sqlalchemy.orm import Session
@@ -33,7 +33,14 @@ from app.models import (
     TrustStatus,
 )
 from app.schemas import (
+    BulkActionResponse,
+    BulkActionResult,
+    BulkRemoteMigrationRequest,
+    BulkRetryFailure,
+    BulkRetryTransfersRequest,
+    BulkRetryTransfersResponse,
     ConnectionCodeResponse,
+    FileTransferStrategy,
     PullTransferRequest,
     RemoteConnectionCreate,
     RemoteConnectionIdentity,
@@ -42,6 +49,7 @@ from app.schemas import (
 )
 from app.schemas import RemoteConnection as RemoteConnectionSchema
 from app.schemas import RemoteTransferJob as RemoteTransferJobSchema
+from app.schemas import StorageType as StorageTypeSchema
 from app.security import PermissionChecker, get_current_user
 from app.services.identity_service import identity_service
 from app.services.instance_config_service import instance_config_service
@@ -129,22 +137,6 @@ async def _get_found_tmp(db: Session, remote_path_id: int, relative_path: str) -
     raise HTTPException(status_code=404, detail="Temporary file not found")
 
 
-async def _verify_checksum_in_background(found_tmp: Path, checksum: str):
-    """Verify checksum in background and delete file if mismatch."""
-    try:
-        sha256_hash = hashlib.sha256()
-        async with aiofiles.open(found_tmp, "rb") as f:
-            while True:
-                byte_block = await f.read(4096)
-                if not byte_block:
-                    break
-                sha256_hash.update(byte_block)
-        if sha256_hash.hexdigest() != checksum:
-            logger.error(f"Checksum verification failed for {found_tmp}, deleting file")
-            await anyio.to_thread.run_sync(lambda: found_tmp.unlink(missing_ok=True))
-    except Exception:
-        logger.exception(f"Error during checksum verification for {found_tmp}")
-        await anyio.to_thread.run_sync(lambda: found_tmp.unlink(missing_ok=True))
 
 
 async def _decrypt_chunk(
@@ -297,34 +289,6 @@ def get_public_identity(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/my-identity", tags=["Remote Connections"])
-def get_my_identity(
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
-):
-    """
-    Get this instance's identity information for sharing with others.
-    Users share this fingerprint out-of-band to allow remote instances to verify.
-    """
-    _ = current_user
-    instance_url = instance_config_service.get_instance_url(db)
-    if not instance_url:
-        raise HTTPException(
-            status_code=500,
-            detail="Instance URL not configured. Please set FF_INSTANCE_URL environment variable "
-            "or configure it via the UI to enable remote connections.",
-        )
-    instance_name = instance_config_service.get_instance_name(db) or "File Fridge"
-    fingerprint = identity_service.get_instance_fingerprint(db)
-
-    return {
-        "instance_name": instance_name,
-        "fingerprint": fingerprint,
-        "url": instance_url,
-        "qr_data": f"filefridge://{fingerprint}@{instance_url}",
-    }
-
-
 @router.get("/connection-code", response_model=ConnectionCodeResponse, tags=["Remote Connections"])
 def get_connection_code(
     db: Session = Depends(get_db),
@@ -386,7 +350,11 @@ async def connect_with_code(
         # Step 2: Create the connection and send the code for verification
         # The connection code will be verified by the remote during the handshake
         return await remote_connection_service.initiate_connection(
-            db, connection_data.name, remote_identity, connection_data.connection_code
+            db,
+            connection_data.name,
+            remote_identity,
+            connection_data.connection_code,
+            connection_data.transfer_mode,
         )
     except HTTPException:
         raise
@@ -461,11 +429,29 @@ def trust_connection(
     connection_id: int,
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
-):
+) -> RemoteConnectionSchema:
     """Manually trust a PENDING remote connection."""
     _ = current_user
     try:
         return remote_connection_service.trust_connection(db, connection_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+
+
+@router.post(
+    "/connections/{connection_id}/reject",
+    response_model=RemoteConnectionSchema,
+    tags=["Remote Connections"],
+)
+def reject_connection(
+    connection_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+) -> RemoteConnectionSchema:
+    """Reject a PENDING remote connection."""
+    _ = current_user
+    try:
+        return remote_connection_service.reject_connection(db, connection_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -480,7 +466,7 @@ async def update_connection(
     update_data: RemoteConnectionUpdate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
-):
+) -> RemoteConnectionSchema:
     """Update a remote connection's name and/or transfer mode."""
     _ = current_user
     conn = remote_connection_service.get_connection(db, connection_id)
@@ -579,7 +565,50 @@ async def migrate_file(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.get("/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"])
+@router.post(
+    "/migrate/bulk", response_model=BulkActionResponse, tags=["Remote Connections"]
+)
+async def bulk_migrate_files(
+    migration_data: BulkRemoteMigrationRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+):
+    """Trigger bulk file migration to a remote instance."""
+    _ = current_user
+    results = []
+    successful = 0
+    failed = 0
+
+    for file_id in migration_data.file_ids:
+        try:
+            remote_transfer_service.create_transfer_job(
+                db,
+                file_id,
+                migration_data.remote_connection_id,
+                migration_data.remote_monitored_path_id,
+                strategy=migration_data.strategy,
+                conflict_resolution=migration_data.conflict_resolution,
+            )
+            results.append(BulkActionResult(file_id=file_id, success=True))
+            successful += 1
+        except Exception as e:
+            logger.exception("Failed to create transfer job for file_id=%s", file_id)
+            results.append(
+                BulkActionResult(file_id=file_id, success=False, message=str(e))
+            )
+            failed += 1
+
+    return BulkActionResponse(
+        total=len(migration_data.file_ids),
+        successful=successful,
+        failed=failed,
+        results=results,
+    )
+
+
+@router.get(
+    "/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"]
+)
 def list_transfers(
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
@@ -633,6 +662,50 @@ def bulk_cancel_transfers(
         else:
             results["failed"].append(job_id)
     return results
+
+
+@router.post(
+    "/transfers/bulk/retry",
+    response_model=BulkRetryTransfersResponse,
+    tags=["Remote Connections"],
+)
+def bulk_retry_transfers(
+    request: BulkRetryTransfersRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+) -> BulkRetryTransfersResponse:
+    """Retry multiple failed remote transfer jobs."""
+    _ = current_user
+    succeeded: List[int] = []
+    failed: List[BulkRetryFailure] = []
+
+    for job_id in request.job_ids:
+        job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
+        if not job:
+            failed.append(BulkRetryFailure(id=job_id, reason="not found"))
+            continue
+
+        # Only allow retrying failed or cancelled jobs
+        if job.status not in (TransferStatus.FAILED, TransferStatus.CANCELLED):
+            failed.append(
+                BulkRetryFailure(id=job_id, reason=f"cannot retry {job.status.value} job")
+            )
+            continue
+
+        # Reset job to pending state
+        job.status = TransferStatus.PENDING
+        job.progress = 0
+        job.current_size = 0
+        job.retry_count = 0
+        job.error_message = None
+        job.start_time = None
+        job.end_time = None
+        job.current_speed = 0
+        job.eta = None
+        succeeded.append(job_id)
+
+    db.commit()
+    return BulkRetryTransfersResponse(succeeded=succeeded, failed=failed)
 
 
 @router.delete("/transfers/{job_id}", tags=["Remote Connections"])
@@ -840,13 +913,27 @@ async def verify_transfer(
     checksum = data.get("checksum")
 
     found_tmp = await _get_found_tmp(db, remote_path_id, relative_path)
+    final_path = found_tmp.with_suffix("")
 
     if checksum:
-        final_path = found_tmp.with_suffix("")
+        # For safety, we verify the checksum BEFORE returning success
+        # especially important for MOVE operations.
+        logger.info(f"Verifying checksum for {found_tmp}...")
+
+        # We rename it first so we hash the final file
         await anyio.to_thread.run_sync(found_tmp.rename, final_path)
-        background_tasks.add_task(_verify_checksum_in_background, final_path, checksum)
+
+        # Calculate local hash
+        from app.services.file_metadata import file_metadata_extractor
+        local_hash = await anyio.to_thread.run_sync(file_metadata_extractor.compute_sha256, final_path)
+
+        if local_hash != checksum:
+            logger.error(f"Checksum mismatch! Expected {checksum}, got {local_hash}. Deleting {final_path}")
+            await anyio.to_thread.run_sync(final_path.unlink, True)
+            raise HTTPException(status_code=422, detail="Checksum verification failed")
+
+        logger.info(f"Checksum verified for {final_path}")
     else:
-        final_path = found_tmp.with_suffix("")
         await anyio.to_thread.run_sync(found_tmp.rename, final_path)
 
     background_tasks.add_task(scheduler_service.trigger_scan, remote_path_id)
@@ -922,6 +1009,8 @@ def browse_remote_files(
     path_id: int,
     skip: int = 0,
     limit: int = 100,
+    search: Optional[str] = Query(None, description="Search in file path"),
+    storage_type: Optional[StorageTypeSchema] = Query(None, description="Filter by storage type"),
     db: Session = Depends(get_db),
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
@@ -945,6 +1034,13 @@ def browse_remote_files(
         FileInventory.path_id == path_id,
         FileInventory.status == FileStatus.ACTIVE,
     )
+
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(FileInventory.file_path.ilike(search_pattern))
+
+    if storage_type:
+        query = query.filter(FileInventory.storage_type == storage_type)
     total = query.count()
     files = query.offset(skip).limit(limit).all()
 
@@ -958,8 +1054,9 @@ def browse_remote_files(
                 "relative_path": _get_relative_path(f, path),
                 "file_size": f.file_size or 0,
                 "storage_type": f.storage_type.value if f.storage_type else "HOT",
-                "file_mtime": f.file_mtime,
+                "file_mtime": f.file_mtime.isoformat() if f.file_mtime else None,
                 "checksum": f.checksum,
+                "file_extension": f.file_extension,
             }
             for f in files
         ],
@@ -987,6 +1084,8 @@ async def serve_transfer_request(
     data = await request.json()
     file_inventory_id = data.get("file_inventory_id")
     remote_path_id = data.get("remote_monitored_path_id")
+    strategy_val = data.get("strategy", FileTransferStrategy.COPY.value)
+    strategy = FileTransferStrategy(strategy_val)
 
     if not file_inventory_id or not remote_path_id:
         raise HTTPException(
@@ -1006,6 +1105,7 @@ async def serve_transfer_request(
             remote_conn.id,
             remote_path_id,
             direction=TransferDirection.PULL,
+            strategy=strategy,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
@@ -1017,8 +1117,8 @@ async def serve_transfer_request(
 
 
 @router.post("/sync-transfer-mode", tags=["Remote Connections"])
-def sync_transfer_mode(
-    request: dict,
+async def sync_transfer_mode(
+    request: Request,
     db: Session = Depends(get_db),
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
@@ -1026,7 +1126,8 @@ def sync_transfer_mode(
     Receive a transfer mode update notification from a remote instance.
     Called when the remote changes its transfer_mode setting.
     """
-    new_mode = request.get("transfer_mode")
+    data = await request.json()
+    new_mode = data.get("transfer_mode")
     if new_mode not in [m.value for m in TransferMode]:
         raise HTTPException(status_code=400, detail="Invalid transfer mode")
 
@@ -1058,6 +1159,8 @@ async def browse_remote_instance_files(
     path_id: int,
     skip: int = 0,
     limit: int = 100,
+    search: Optional[str] = Query(None),
+    storage_type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -1074,14 +1177,20 @@ async def browse_remote_instance_files(
 
     base_url = f"{conn.url.rstrip('/')}/api/v1/remote/browse-files"
     params = {"path_id": str(path_id), "skip": str(skip), "limit": str(limit)}
-    query_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
-    signed_url = f"{base_url}?{query_string}"
-
-    headers = await get_signed_headers(db, "GET", signed_url, b"")
+    if search:
+        params["search"] = search
+    if storage_type:
+        params["storage_type"] = storage_type
 
     async with httpx.AsyncClient(timeout=get_transfer_timeouts()) as client:
+        # Build client request first to get the canonical URL with params for signing
+        req = httpx.Request("GET", base_url, params=params)
+        headers = await get_signed_headers(db, "GET", str(req.url), b"")
+        req.headers.update(headers)
+
         try:
-            response = await client.get(base_url, params=params, headers=headers)
+            # Use the already built request with signed headers
+            response = await client.send(req)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
@@ -1132,6 +1241,7 @@ async def pull_file(
     payload = {
         "file_inventory_id": pull_data.remote_file_inventory_id,
         "remote_monitored_path_id": pull_data.local_monitored_path_id,
+        "strategy": pull_data.strategy.value,
     }
     body_bytes = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     headers = await get_signed_headers(db, "POST", url, body_bytes)

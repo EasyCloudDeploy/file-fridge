@@ -75,6 +75,7 @@ class RemoteConnectionService:
         name: str,
         remote_identity: RemoteConnectionIdentity,
         connection_code: Optional[str] = None,
+        transfer_mode: TransferMode = TransferMode.PUSH_ONLY,
     ) -> RemoteConnection:
         """
         Create a new trusted remote connection and notify the remote instance.
@@ -97,30 +98,30 @@ class RemoteConnectionService:
             )
 
         # 1. Check if connection already exists
-        existing_conn = self.get_connection_by_fingerprint(db, remote_identity.fingerprint)
-        if existing_conn:
-            if existing_conn.trust_status == TrustStatus.TRUSTED:
-                return existing_conn
-            # If pending or rejected, we can update and proceed
-            existing_conn.name = name
-            existing_conn.url = str(remote_identity.url)
-            existing_conn.trust_status = TrustStatus.TRUSTED
-            db.commit()
-            db.refresh(existing_conn)
-            return existing_conn
+        conn = self.get_connection_by_fingerprint(db, remote_identity.fingerprint)
+        is_new_connection = conn is None
 
-        # 2. Create and save the new connection locally as TRUSTED
-        new_conn = RemoteConnection(
-            name=name,
-            url=str(remote_identity.url),
-            remote_fingerprint=remote_identity.fingerprint,
-            remote_ed25519_public_key=remote_identity.ed25519_public_key,
-            remote_x25519_public_key=remote_identity.x25519_public_key,
-            trust_status=TrustStatus.TRUSTED,
-        )
-        db.add(new_conn)
+        if is_new_connection:
+            # 2. Create and save the new connection locally as TRUSTED
+            conn = RemoteConnection(
+                name=name,
+                url=str(remote_identity.url),
+                remote_fingerprint=remote_identity.fingerprint,
+                remote_ed25519_public_key=remote_identity.ed25519_public_key,
+                remote_x25519_public_key=remote_identity.x25519_public_key,
+                trust_status=TrustStatus.TRUSTED,
+                transfer_mode=transfer_mode,
+            )
+            db.add(conn)
+        else:
+            # Update existing connection info
+            conn.name = name
+            conn.url = str(remote_identity.url)
+            conn.trust_status = TrustStatus.TRUSTED
+            conn.transfer_mode = transfer_mode
+
         db.commit()
-        db.refresh(new_conn)
+        db.refresh(conn)
 
         # 3. Send our identity to the remote to establish a PENDING connection there
         instance_name = instance_config_service.get_instance_name(db) or "File Fridge"
@@ -130,7 +131,7 @@ class RemoteConnectionService:
             "ed25519_public_key": identity_service.get_signing_public_key_str(db),
             "x25519_public_key": identity_service.get_kx_public_key_str(db),
             "url": instance_url,
-            "transfer_mode": new_conn.transfer_mode.value,
+            "transfer_mode": conn.transfer_mode.value,
         }
 
         # Sign the payload
@@ -155,12 +156,21 @@ class RemoteConnectionService:
                 remote_response = response.json()
                 self._verify_remote_response(remote_identity, remote_response)
 
+                # 4. Update remote's transfer mode from their response
+                remote_identity_payload = remote_response.get("identity", {})
+                remote_mode_str = remote_identity_payload.get("transfer_mode")
+                if remote_mode_str in [m.value for m in TransferMode]:
+                    conn.remote_transfer_mode = TransferMode(remote_mode_str)
+                    db.commit()
+                    db.refresh(conn)
+
             except httpx.HTTPStatusError as e:
                 # If we get a 401/403, it's likely a connection code issue
                 if e.response.status_code in (401, 403):
                     # Rollback the local connection since the remote rejected us
-                    db.delete(new_conn)
-                    db.commit()
+                    if is_new_connection:
+                        db.delete(conn)
+                        db.commit()
                     raise ValueError(
                         "Connection rejected by remote instance. "
                         "The connection code may be invalid or expired."
@@ -173,7 +183,7 @@ class RemoteConnectionService:
                 logger.error("Failed to send connection request to remote instance %s: %s", name, e)
                 # Rollback or mark as "local_only"? For now, we'll keep it.
 
-        return new_conn
+        return conn
 
     def _verify_remote_response(self, original_identity, response_data):
         """Verify the signature in the response from a remote instance."""
@@ -274,6 +284,7 @@ class RemoteConnectionService:
             "ed25519_public_key": identity_service.get_signing_public_key_str(db),
             "x25519_public_key": identity_service.get_kx_public_key_str(db),
             "url": instance_url,
+            "transfer_mode": conn.transfer_mode.value,
         }
         message_to_sign = canonical_json_encode(my_identity_payload)
         my_signature = identity_service.sign_message(db, message_to_sign)
@@ -291,6 +302,21 @@ class RemoteConnectionService:
                 conn.trust_status.value,
             )
         conn.trust_status = TrustStatus.TRUSTED
+        db.commit()
+        db.refresh(conn)
+        return conn
+
+    def reject_connection(self, db: Session, connection_id: int) -> RemoteConnection:
+        """Reject a PENDING connection."""
+        conn = self.get_connection(db, connection_id)
+        if not conn:
+            raise ValueError("Connection not found")
+        if conn.trust_status != TrustStatus.PENDING:
+            logger.warning(
+                "Attempted to reject a connection that is not pending (status: %s)",
+                conn.trust_status.value,
+            )
+        conn.trust_status = TrustStatus.REJECTED
         db.commit()
         db.refresh(conn)
         return conn

@@ -701,6 +701,22 @@ class TransferDirection(str, enum.Enum):
     PULL = "PULL"  # This instance serves file to remote on request
 
 
+class FileTransferStrategy(str, enum.Enum):
+    """Strategy for remote file transfer (Copy vs Move)."""
+
+    COPY = "COPY"
+    MOVE = "MOVE"
+
+
+class ConflictResolution(str, enum.Enum):
+    """Strategy for handling duplicate files during transfer."""
+
+    SKIP = "SKIP"  # Skip transfer if file exists
+    OVERWRITE = "OVERWRITE"  # Replace existing file
+    RENAME = "RENAME"  # Add suffix to filename (_1, _2, etc)
+    COMPARE = "COMPARE"  # Compare checksums, skip if identical, otherwise fail
+
+
 class RemoteConnection(Base):
     """Remote File Fridge instance connection."""
 
@@ -788,6 +804,18 @@ class RemoteTransferJob(Base):
         default=TransferDirection.PUSH,
         nullable=False,
         server_default=sa.text("'PUSH'"),
+    )
+    strategy = Column(
+        SQLEnum(FileTransferStrategy),
+        default=FileTransferStrategy.COPY,
+        nullable=False,
+        server_default=sa.text("'COPY'"),
+    )
+    conflict_resolution = Column(
+        SQLEnum(ConflictResolution),
+        default=ConflictResolution.OVERWRITE,
+        nullable=False,
+        server_default=sa.text("'OVERWRITE'"),
     )
 
     file = relationship("FileInventory")

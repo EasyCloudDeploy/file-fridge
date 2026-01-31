@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+
+{% block title %}Remote Files - File Fridge{% endblock %}
+
+{% block extra_head %}
+<!-- AG Grid CSS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-grid.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-theme-quartz.css">
+<style>
+    #filesGrid {
+        height: 70vh;
+        min-height: 400px;
+    }
+
+    .ag-theme-quartz {
+        --ag-font-size: 13px;
+    }
+
+    .file-path-cell {
+        font-family: monospace;
+        font-size: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">
+            <i class="bi bi-hdd-network"></i> Remote File Browser: <span id="remote-instance-name"
+                class="text-primary">Loading...</span>
+        </h1>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/settings#remote-connections">Remote Connections</a></li>
+                <li class="breadcrumb-item active" aria-current="page">Browse Files</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<!-- Search and Filters -->
+<div class="row mb-3 filters-row">
+    <div class="col-12 col-md-6 mb-2 mb-md-0">
+        <div class="input-group">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="search_input" placeholder="Search remote file paths...">
+            <button class="btn btn-primary" type="button" id="search_btn">Search</button>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="input-group">
+            <label class="input-group-text d-none d-sm-flex" for="path_id_filter">Remote Path:</label>
+            <select class="form-select" id="path_id_filter" aria-label="Filter by remote path">
+                <option value="">Select Remote Path...</option>
+            </select>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="input-group">
+            <label class="input-group-text d-none d-sm-flex" for="storage_filter">Storage:</label>
+            <select class="form-select" id="storage_filter" aria-label="Filter by storage">
+                <option value="">All</option>
+                <option value="hot">Hot</option>
+                <option value="cold">Cold</option>
+            </select>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body p-2">
+                <div id="files-loading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading files...</span>
+                    </div>
+                    <p class="text-muted mt-3">Fetching remote files...</p>
+                </div>
+                <div id="filesGrid" class="ag-theme-quartz" style="display: none;"></div>
+                <div id="no-files-message" class="text-center py-5" style="display: none;">
+                    <i class="bi bi-file-earmark-x display-1 text-muted"></i>
+                    <p class="text-muted mt-3">No files found on remote instance for the selected path.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pull Modal -->
+<div class="modal fade" id="pullModal" tabindex="-1" aria-labelledby="pullModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="pullModalLabel"><i class="bi bi-cloud-download"></i> Pull File from Remote
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Pull this file from the remote instance to a local monitored path?</p>
+                <p><strong>File:</strong> <code id="pullFileName" class="text-break"></code></p>
+
+                <div class="mb-3">
+                    <label for="localPathSelect" class="form-label">Local Destination Path</label>
+                    <select class="form-select" id="localPathSelect">
+                        <option value="">Select a local path...</option>
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Transfer Mode</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="pullStrategy" id="pullCopy" value="COPY"
+                            checked>
+                        <label class="form-check-label" for="pullCopy">
+                            Copy (Default)
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="pullStrategy" id="pullMove" value="MOVE">
+                        <label class="form-check-label" for="pullMove">
+                            Move (Delete remote source after safe verification)
+                        </label>
+                    </div>
+                </div>
+
+                <div id="pullError" class="alert alert-danger d-none mt-3"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-success" id="confirmPullBtn" disabled>
+                    <i class="bi bi-download"></i> Start Pull
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pass connection_id to JS -->
+<input type="hidden" id="connection-id" value="{{ connection_id }}">
+{% endblock %}
+
+{% block extra_scripts %}
+<!-- AG Grid JS -->
+<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/dist/ag-grid-community.min.js"></script>
+<script src="/static/js/remote_files.js"></script>
+{% endblock %}

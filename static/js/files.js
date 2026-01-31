@@ -9,6 +9,15 @@ let currentFileStatus = null;
 let currentTagIds = [];
 let currentSortBy = 'last_seen';
 let currentSortOrder = 'desc';
+let currentExtension = '';
+let currentMimeType = '';
+let currentHasChecksum = null;
+let currentIsPinned = null;
+let currentMinSize = null;
+let currentMaxSize = null;
+let currentMinMtime = null;
+let currentMaxMtime = null;
+let currentStorageLocationId = null;
 let totalItems = 0;
 
 // Pagination state
@@ -142,29 +151,30 @@ function actionsCellRenderer(params) {
         </span>`;
     }
 
-    const migrateBtn = `<button type="button" class="btn btn-outline-info" data-action="migrate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Migrate to remote instance">
-        <i class="bi bi-hdd-network"></i>
-    </button>`;
+    const isCold = file.storage_type === 'cold';
+    const primaryAction = isCold ? 'thaw' : 'freeze';
+    const primaryIcon = isCold ? 'bi-fire' : 'bi-snow';
+    const primaryText = isCold ? 'Thaw' : 'Fridge';
+    const primaryClass = isCold ? 'btn-warning' : 'btn-info';
 
-    if (file.storage_type === 'cold') {
-        return `<div class="btn-group btn-group-sm" role="group">
-            <button type="button" class="btn btn-warning" data-action="thaw" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Move file back to hot storage">
-                <i class="bi bi-fire"></i><span class="d-none d-lg-inline"> Thaw</span>
+    return `
+        <div class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn ${primaryClass}" data-action="${primaryAction}" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="${isCold ? 'Move file back to hot storage' : 'Send to cold storage'}">
+                <i class="bi ${primaryIcon}"></i><span class="d-none d-lg-inline"> ${primaryText}</span>
             </button>
-            <button type="button" class="btn btn-outline-primary" data-action="relocate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Move to another cold storage location">
-                <i class="bi bi-arrow-right-circle"></i><span class="d-none d-xl-inline"> Relocate</span>
-            </button>
-            ${migrateBtn}
-        </div>`;
-    }
-
-    // Hot storage files - show freeze button
-    return `<div class="btn-group btn-group-sm" role="group">
-        <button type="button" class="btn btn-sm btn-info" data-action="freeze" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="Send to cold storage">
-            <i class="bi bi-snow"></i><span class="d-none d-lg-inline"> Fridge</span>
-        </button>
-        ${migrateBtn}
-    </div>`;
+            <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" data-bs-boundary="window" data-bs-auto-close="true" aria-expanded="false">
+                    <span class="visually-hidden">Toggle Dropdown</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                    ${isCold ? `<li><button class="dropdown-item" type="button" data-action="relocate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}"><i class="bi bi-arrow-right-circle me-2"></i>Relocate</button></li>` : ''}
+                    <li><button class="dropdown-item" type="button" data-action="migrate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}"><i class="bi bi-hdd-network me-2"></i>Migrate</button></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><button class="dropdown-item" type="button" data-action="manageTags" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}"><i class="bi bi-tags me-2"></i>Manage Tags</button></li>
+                </ul>
+            </div>
+        </div>
+    `;
 }
 
 // AG Grid Column Definitions
@@ -295,6 +305,7 @@ const gridOptions = {
     tooltipShowDelay: 500,
     rowSelection: 'multiple',
     suppressRowClickSelection: true,
+    suppressRowTransform: true,
     overlayLoadingTemplate: '<span class="spinner-border spinner-border-sm text-primary" role="status"></span> Loading...',
     overlayNoRowsTemplate: '<span class="text-muted">No files found</span>'
 };
@@ -330,6 +341,48 @@ function onGridReady(params) {
 
     // Add click handler for action buttons
     document.getElementById('filesGrid').addEventListener('click', handleActionClick);
+
+    // Initialize dropdowns with proper Popper.js config for overflow issues
+    initializeDropdowns();
+
+    // Re-initialize dropdowns when grid updates
+    gridApi.addEventListener('rowDataUpdated', initializeDropdowns);
+    gridApi.addEventListener('modelUpdated', initializeDropdowns);
+}
+
+// Initialize Bootstrap dropdowns with custom Popper.js config
+function initializeDropdowns() {
+    // Use setTimeout to ensure DOM is ready
+    setTimeout(() => {
+        const dropdownToggles = document.querySelectorAll('#filesGrid [data-bs-toggle="dropdown"]');
+        dropdownToggles.forEach(toggle => {
+            // Dispose existing dropdown instance if any
+            const existingInstance = bootstrap.Dropdown.getInstance(toggle);
+            if (existingInstance) {
+                existingInstance.dispose();
+            }
+
+            // Create new dropdown with custom config
+            new bootstrap.Dropdown(toggle, {
+                boundary: 'window',
+                popperConfig: function (defaultConfig) {
+                    return {
+                        ...defaultConfig,
+                        strategy: 'fixed',
+                        modifiers: [
+                            ...defaultConfig.modifiers,
+                            {
+                                name: 'preventOverflow',
+                                options: {
+                                    boundary: 'window'
+                                }
+                            }
+                        ]
+                    };
+                }
+            });
+        });
+    }, 100);
 }
 
 // Handle body scroll for infinite scrolling
@@ -586,6 +639,33 @@ function buildQueryParams() {
     if (currentTagIds.length > 0) {
         params.append('tag_ids', currentTagIds.join(','));
     }
+    if (currentExtension) {
+        params.append('extension', currentExtension);
+    }
+    if (currentMimeType) {
+        params.append('mime_type', currentMimeType);
+    }
+    if (currentHasChecksum !== null) {
+        params.append('has_checksum', currentHasChecksum);
+    }
+    if (currentIsPinned !== null) {
+        params.append('is_pinned', currentIsPinned);
+    }
+    if (currentMinSize !== null) {
+        params.append('min_size', currentMinSize);
+    }
+    if (currentMaxSize !== null) {
+        params.append('max_size', currentMaxSize);
+    }
+    if (currentMinMtime !== null) {
+        params.append('min_mtime', currentMinMtime);
+    }
+    if (currentMaxMtime !== null) {
+        params.append('max_mtime', currentMaxMtime);
+    }
+    if (currentStorageLocationId !== null) {
+        params.append('storage_location_id', currentStorageLocationId);
+    }
 
     return params;
 }
@@ -667,19 +747,65 @@ async function loadFilesList() {
     }
 }
 
-// Search function
-function performSearch() {
-    const searchInput = document.getElementById('search_input');
-    currentSearch = searchInput ? searchInput.value.trim() : '';
-    loadFilesList();
-}
-
-// Clear search
-function clearSearch() {
+// Reset all filters
+function resetFilters() {
+    // Reset search
     const searchInput = document.getElementById('search_input');
     if (searchInput) searchInput.value = '';
     currentSearch = '';
-    loadFilesList();
+
+    // Reset selects
+    const pathSelect = document.getElementById('path_id_filter');
+    if (pathSelect) pathSelect.value = '';
+    currentPathId = null;
+
+    const storageSelect = document.getElementById('storage_filter');
+    if (storageSelect) storageSelect.value = '';
+    currentStorageType = null;
+
+    const statusSelect = document.getElementById('status_filter');
+    if (statusSelect) statusSelect.value = '';
+    currentFileStatus = null;
+
+    const checksumSelect = document.getElementById('checksum_filter');
+    if (checksumSelect) checksumSelect.value = '';
+    currentHasChecksum = null;
+
+    const pinnedSelect = document.getElementById('pinned_filter');
+    if (pinnedSelect) pinnedSelect.value = '';
+    currentIsPinned = null;
+
+    // Reset inputs
+    const extensionInput = document.getElementById('extension_filter');
+    if (extensionInput) extensionInput.value = '';
+    currentExtension = '';
+
+    const mimeInput = document.getElementById('mime_filter');
+    if (mimeInput) mimeInput.value = '';
+    currentMimeType = '';
+
+    const minSizeInput = document.getElementById('min_size_filter');
+    if (minSizeInput) minSizeInput.value = '';
+    currentMinSize = null;
+
+    const maxSizeInput = document.getElementById('max_size_filter');
+    if (maxSizeInput) maxSizeInput.value = '';
+    currentMaxSize = null;
+
+    const minMtimeInput = document.getElementById('min_mtime_filter');
+    if (minMtimeInput) minMtimeInput.value = '';
+    currentMinMtime = null;
+
+    const maxMtimeInput = document.getElementById('max_mtime_filter');
+    if (maxMtimeInput) maxMtimeInput.value = '';
+    currentMaxMtime = null;
+
+    const storageLocationSelect = document.getElementById('location_id_filter');
+    if (storageLocationSelect) storageLocationSelect.value = '';
+    currentStorageLocationId = null;
+
+    // Reset tags
+    clearTagFilter();
 }
 
 // Load paths for filter dropdown
@@ -697,7 +823,7 @@ async function loadPathsForFilter() {
             select.innerHTML = '<option value="">All Paths</option>' +
                 paths.map(p => `<option value="${p.id}" ${currentPathId == p.id ? 'selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
 
-            select.addEventListener('change', function() {
+            select.addEventListener('change', function () {
                 updateFilters();
             });
         }
@@ -711,7 +837,7 @@ async function loadPathsForFilter() {
                 storageSelect.value = currentStorage;
             }
 
-            storageSelect.addEventListener('change', function() {
+            storageSelect.addEventListener('change', function () {
                 updateFilters();
             });
         }
@@ -719,7 +845,7 @@ async function loadPathsForFilter() {
         // Setup status filter
         const statusSelect = document.getElementById('status_filter');
         if (statusSelect) {
-            statusSelect.addEventListener('change', function() {
+            statusSelect.addEventListener('change', function () {
                 updateFilters();
             });
         }
@@ -731,14 +857,50 @@ async function loadPathsForFilter() {
 
 // Update filters and reload files
 function updateFilters() {
+    const searchInput = document.getElementById('search_input');
     const pathSelect = document.getElementById('path_id_filter');
     const storageSelect = document.getElementById('storage_filter');
     const statusSelect = document.getElementById('status_filter');
     const tagSelect = document.getElementById('tag_filter');
+    const extensionInput = document.getElementById('extension_filter');
+    const mimeInput = document.getElementById('mime_filter');
+    const checksumSelect = document.getElementById('checksum_filter');
+    const pinnedSelect = document.getElementById('pinned_filter');
+    const locationIdSelect = document.getElementById('location_id_filter');
+    const minSizeInput = document.getElementById('min_size_filter');
+    const maxSizeInput = document.getElementById('max_size_filter');
+    const minMtimeInput = document.getElementById('min_mtime_filter');
+    const maxMtimeInput = document.getElementById('max_mtime_filter');
 
+    currentSearch = searchInput ? searchInput.value.trim() : '';
     currentPathId = pathSelect && pathSelect.value ? parseInt(pathSelect.value) : null;
     currentStorageType = storageSelect && storageSelect.value ? storageSelect.value : null;
     currentFileStatus = statusSelect && statusSelect.value ? statusSelect.value : null;
+
+    currentExtension = extensionInput ? extensionInput.value.trim() : '';
+    currentMimeType = mimeInput ? mimeInput.value.trim() : '';
+
+    currentHasChecksum = checksumSelect && checksumSelect.value ? checksumSelect.value === 'true' : null;
+    currentIsPinned = pinnedSelect && pinnedSelect.value ? pinnedSelect.value === 'true' : null;
+
+    currentStorageLocationId = locationIdSelect && locationIdSelect.value ? parseInt(locationIdSelect.value) : null;
+    currentMinSize = minSizeInput && minSizeInput.value ? parseInt(minSizeInput.value) : null;
+    currentMaxSize = maxSizeInput && maxSizeInput.value ? parseInt(maxSizeInput.value) : null;
+
+    // Convert datetime-local values to ISO UTC
+    if (minMtimeInput && minMtimeInput.value) {
+        const date = new Date(minMtimeInput.value);
+        currentMinMtime = !isNaN(date.getTime()) ? date.toISOString() : null;
+    } else {
+        currentMinMtime = null;
+    }
+
+    if (maxMtimeInput && maxMtimeInput.value) {
+        const date = new Date(maxMtimeInput.value);
+        currentMaxMtime = !isNaN(date.getTime()) ? date.toISOString() : null;
+    } else {
+        currentMaxMtime = null;
+    }
 
     // Get selected tag IDs from multi-select
     if (tagSelect) {
@@ -767,13 +929,32 @@ async function loadTagsForFilter() {
                     return `<option value="${tag.id}" style="background-color: ${color}20;">${escapeHtml(tag.name)} (${tag.file_count})</option>`;
                 }).join('');
 
-            select.addEventListener('change', function() {
+            select.addEventListener('change', function () {
                 updateFilters();
             });
         }
     } catch (error) {
         console.error('Error loading tags for filter:', error);
         showNotification(`Failed to load tags: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Load storage locations for filter dropdown
+ */
+async function loadStorageLocationsForFilter() {
+    try {
+        const response = await authenticatedFetch(`${API_BASE_URL}/storage/locations`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const locations = await response.json();
+
+        const select = document.getElementById('location_id_filter');
+        if (select) {
+            select.innerHTML = '<option value="">All Locations</option>' +
+                locations.map(loc => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`).join('');
+        }
+    } catch (error) {
+        console.error('Error loading storage locations for filter:', error);
     }
 }
 
@@ -804,8 +985,8 @@ function showThawModal(inventoryId, filePath) {
 async function thawFile() {
     const button = document.getElementById('confirmThawBtn');
     const inventoryId = button.dataset.inventoryId;
-    const pinCheckbox = document.getElementById('thawPinCheckbox');
-    const pin = pinCheckbox ? pinCheckbox.checked : false;
+    const pinRadio = document.querySelector('input[name="pin_file"]:checked');
+    const pin = pinRadio ? pinRadio.value === 'true' : false;
 
     try {
         const response = await authenticatedFetch(`${API_BASE_URL}/files/thaw/${inventoryId}?pin=${pin}`, {
@@ -1385,6 +1566,11 @@ async function showRemoteMigrationModal(fileId, filePath) {
     if (!remoteMigrationModal) {
         remoteMigrationModal = new bootstrap.Modal(modal);
     }
+
+    // Reset strategy to COPY
+    const copyRadio = document.getElementById('remoteMigrateCopy');
+    if (copyRadio) copyRadio.checked = true;
+
     remoteMigrationModal.show();
 
     try {
@@ -1448,6 +1634,8 @@ async function startRemoteMigration() {
     confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Starting...';
     errorEl.classList.add('d-none');
 
+    const strategy = document.querySelector('input[name="remoteMigrationStrategy"]:checked')?.value || 'COPY';
+
     try {
         const response = await authenticatedFetch('/api/v1/remote/migrate', {
             method: 'POST',
@@ -1455,7 +1643,8 @@ async function startRemoteMigration() {
             body: JSON.stringify({
                 file_inventory_id: currentMigrationFileId,
                 remote_connection_id: parseInt(connId),
-                remote_monitored_path_id: parseInt(pathId)
+                remote_monitored_path_id: parseInt(pathId),
+                strategy: strategy
             })
         });
 
@@ -1521,6 +1710,12 @@ function updateBulkActionsToolbar() {
         if (freezeBtn) {
             freezeBtn.disabled = hotFiles.length === 0;
             freezeBtn.title = hotFiles.length === 0 ? 'Select hot storage files to freeze' : `Freeze ${hotFiles.length} file(s)`;
+        }
+
+        const migrateBtn = document.getElementById('bulk-migrate-btn');
+        if (migrateBtn) {
+            migrateBtn.disabled = false;
+            migrateBtn.title = `Migrate ${selectedFiles.length} file(s) to remote instance`;
         }
     } else {
         toolbar.style.display = 'none';
@@ -1892,6 +2087,11 @@ async function showBulkRemoteMigrationModal() {
     if (!bulkRemoteMigrationModal) {
         bulkRemoteMigrationModal = new bootstrap.Modal(modal);
     }
+
+    // Reset strategy to COPY
+    const copyRadio = document.getElementById('bulkRemoteMigrateCopy');
+    if (copyRadio) copyRadio.checked = true;
+
     bulkRemoteMigrationModal.show();
 
     try {
@@ -1979,6 +2179,8 @@ async function executeBulkRemoteMigration() {
 
     errorDiv.classList.add('d-none');
 
+    const strategy = document.querySelector('input[name="bulkRemoteMigrationStrategy"]:checked')?.value || 'COPY';
+
     try {
         const response = await authenticatedFetch(`/api/v1/remote/migrate/bulk`, {
             method: 'POST',
@@ -1986,7 +2188,8 @@ async function executeBulkRemoteMigration() {
             body: JSON.stringify({
                 file_ids: fileIds,
                 remote_connection_id: parseInt(connId),
-                remote_monitored_path_id: parseInt(pathId)
+                remote_monitored_path_id: parseInt(pathId),
+                strategy: strategy
             })
         });
 
@@ -2077,7 +2280,7 @@ async function executeBulkUnpin() {
 // ============================================
 
 // Initialize on page load
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const urlParams = new URLSearchParams(window.location.search);
     currentPathId = urlParams.get('path_id') ? parseInt(urlParams.get('path_id')) : null;
     currentStorageType = urlParams.get('storage_type') || null;
@@ -2094,6 +2297,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadFilesList();
     loadPathsForFilter();
     loadTagsForFilter();
+    loadStorageLocationsForFilter();
 
     // Setup event handlers
     const confirmBtn = document.getElementById('confirmThawBtn');
@@ -2103,26 +2307,84 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const searchInput = document.getElementById('search_input');
     if (searchInput) {
-        searchInput.addEventListener('keypress', function(e) {
+        searchInput.addEventListener('keypress', function (e) {
             if (e.key === 'Enter') {
-                performSearch();
+                updateFilters();
             }
         });
     }
 
     const searchBtn = document.getElementById('search_btn');
     if (searchBtn) {
-        searchBtn.addEventListener('click', performSearch);
+        searchBtn.addEventListener('click', updateFilters);
     }
 
-    const clearBtn = document.getElementById('clear_search_btn');
+    const clearBtn = document.getElementById('clear_filters_btn');
     if (clearBtn) {
-        clearBtn.addEventListener('click', clearSearch);
+        clearBtn.addEventListener('click', resetFilters);
+    }
+
+    // Advanced filters listeners
+    const extensionInput = document.getElementById('extension_filter');
+    if (extensionInput) {
+        extensionInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') updateFilters();
+        });
+        extensionInput.addEventListener('blur', updateFilters);
+    }
+
+    const mimeInput = document.getElementById('mime_filter');
+    if (mimeInput) {
+        mimeInput.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') updateFilters();
+        });
+        mimeInput.addEventListener('blur', updateFilters);
+    }
+
+    const checksumSelect = document.getElementById('checksum_filter');
+    if (checksumSelect) {
+        checksumSelect.addEventListener('change', updateFilters);
+    }
+
+    const pinnedSelect = document.getElementById('pinned_filter');
+    if (pinnedSelect) {
+        pinnedSelect.addEventListener('change', updateFilters);
+    }
+
+    const locationIdSelect = document.getElementById('location_id_filter');
+    if (locationIdSelect) {
+        locationIdSelect.addEventListener('change', updateFilters);
+    }
+
+    const minSizeFilter = document.getElementById('min_size_filter');
+    if (minSizeFilter) {
+        minSizeFilter.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') updateFilters();
+        });
+        minSizeFilter.addEventListener('blur', updateFilters);
+    }
+
+    const maxSizeFilter = document.getElementById('max_size_filter');
+    if (maxSizeFilter) {
+        maxSizeFilter.addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') updateFilters();
+        });
+        maxSizeFilter.addEventListener('blur', updateFilters);
+    }
+
+    const minMtimeFilter = document.getElementById('min_mtime_filter');
+    if (minMtimeFilter) {
+        minMtimeFilter.addEventListener('change', updateFilters);
+    }
+
+    const maxMtimeFilter = document.getElementById('max_mtime_filter');
+    if (maxMtimeFilter) {
+        maxMtimeFilter.addEventListener('change', updateFilters);
     }
 
     const addTagSelect = document.getElementById('addTagSelect');
     if (addTagSelect) {
-        addTagSelect.addEventListener('change', function() {
+        addTagSelect.addEventListener('change', function () {
             const addTagBtn = document.getElementById('addTagBtn');
             if (addTagBtn) {
                 addTagBtn.disabled = !this.value;
@@ -2167,7 +2429,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const remotePathSelect = document.getElementById('remotePathSelect');
     if (remotePathSelect) {
-        remotePathSelect.addEventListener('change', function() {
+        remotePathSelect.addEventListener('change', function () {
             const confirmBtn = document.getElementById('confirmRemoteMigrationBtn');
             if (confirmBtn) confirmBtn.disabled = !this.value;
         });
@@ -2180,9 +2442,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const thawModal = document.getElementById('thawModal');
     if (thawModal) {
-        thawModal.addEventListener('show.bs.modal', function() {
-            const checkbox = document.getElementById('thawPinCheckbox');
-            if (checkbox) checkbox.checked = false;
+        thawModal.addEventListener('show.bs.modal', function () {
+            const tempRadio = document.getElementById('pinTemp');
+            if (tempRadio) tempRadio.checked = true;
         });
     }
 
