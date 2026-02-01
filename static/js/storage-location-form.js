@@ -38,6 +38,9 @@ async function loadLocation() {
         // Populate form fields
         document.getElementById('name').value = location.name;
         document.getElementById('path').value = location.path;
+        document.getElementById('caution_threshold_percent').value = location.caution_threshold_percent || 20;
+        document.getElementById('critical_threshold_percent').value = location.critical_threshold_percent || 10;
+        document.getElementById('is_encrypted').checked = location.is_encrypted || false;
 
     } catch (error) {
         console.error('Error loading storage location:', error);
@@ -62,7 +65,10 @@ async function handleSubmit(event) {
     try {
         const formData = {
             name: document.getElementById('name').value.trim(),
-            path: document.getElementById('path').value.trim()
+            path: document.getElementById('path').value.trim(),
+            caution_threshold_percent: parseInt(document.getElementById('caution_threshold_percent').value),
+            critical_threshold_percent: parseInt(document.getElementById('critical_threshold_percent').value),
+            is_encrypted: document.getElementById('is_encrypted').checked
         };
 
         const url = isEditMode
