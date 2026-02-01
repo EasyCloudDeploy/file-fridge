@@ -34,7 +34,8 @@ class FileFreezer:
         pin: bool = False,
         db: Optional[Session] = None,
         initiated_by: Optional[str] = None,
-    ) -> Tuple[bool, Optional[str], Optional[str]]:
+        matched_criteria_ids: Optional[list] = None,
+    ) -> Tuple[bool, Optional[str], Optional[str], Optional[int]]:
         """
         Move a file from hot storage to cold storage.
 
@@ -45,12 +46,13 @@ class FileFreezer:
             pin: If True, pin the file to exclude from future scans
             db: Database session (required for database updates)
             initiated_by: User or system component that initiated the operation
+            matched_criteria_ids: List of criteria IDs that triggered the freeze
 
         Returns:
-            (success: bool, error_message: Optional[str], cold_storage_path: Optional[str])
+            (success: bool, error_message: Optional[str], cold_storage_path: Optional[str], file_record_id: Optional[int])
         """
         if not db:
-            return False, "Database session required", None
+            return False, "Database session required", None, None
 
         # Lock file record for update
         locked_file = (
@@ -58,24 +60,25 @@ class FileFreezer:
         )
 
         if not locked_file:
-            return False, f"File record not found: {file.id}", None
+            return False, f"File record not found: {file.id}", None, None
 
         try:
             source_path = Path(locked_file.file_path)
 
             # Verify file exists in hot storage
             if locked_file.storage_type != StorageType.HOT:
-                return False, f"File is not in hot storage: {source_path}", None
+                return False, f"File is not in hot storage: {source_path}", None, None
 
             if not storage_location.is_available:
                 return (
                     False,
                     f"Storage location '{storage_location.name}' is offline/unavailable",
                     None,
+                    None,
                 )
 
             if not source_path.exists() and not source_path.is_symlink():
-                return False, f"File not found: {source_path}", None
+                return False, f"File not found: {source_path}", None, None
 
             # Calculate destination path preserving directory structure
             base_source = Path(monitored_path.source_path)
@@ -94,7 +97,7 @@ class FileFreezer:
 
             # Check if destination already exists
             if destination_path.exists():
-                return False, f"Destination already exists: {destination_path}", None
+                return False, f"Destination already exists: {destination_path}", None, None
 
             # Calculate checksum before move for verification
             checksum_before = checksum_verifier.calculate_checksum(source_path)
@@ -120,7 +123,7 @@ class FileFreezer:
                         # Rollback status change
                         locked_file.status = old_status
                         db.commit()
-                        return False, f"Failed to encrypt/move file: {e}", None
+                        return False, f"Failed to encrypt/move file: {e}", None, None
                 else:
                     # Move file using the path's operation type with rollback
                     from app.services.file_mover import move_with_rollback
@@ -136,7 +139,7 @@ class FileFreezer:
                         # Rollback status change
                         locked_file.status = old_status
                         db.commit()
-                        return False, f"Failed to move file: {error}", None
+                        return False, f"Failed to move file: {error}", None, None
 
                 # Create FileRecord entry
                 file_record = FileRecord(
@@ -146,9 +149,13 @@ class FileFreezer:
                     cold_storage_location_id=storage_location.id,
                     file_size=locked_file.file_size,
                     operation_type=monitored_path.operation_type,
-                    criteria_matched="manual_freeze",
+                    criteria_matched=json.dumps(matched_criteria_ids)
+                    if matched_criteria_ids
+                    else "manual_freeze",
                 )
                 db.add(file_record)
+                db.flush()  # Flush to get the ID for the new record
+                file_record_id = file_record.id
 
                 # Update FileInventory
                 locked_file.storage_type = StorageType.COLD
@@ -191,7 +198,7 @@ class FileFreezer:
                     f"Froze file: {source_path} -> {destination_path} "
                     f"(location: {storage_location.name}, pinned: {pin})"
                 )
-                return True, None, str(destination_path)
+                return True, None, str(destination_path), file_record_id
 
             except Exception as move_error:
                 # Rollback status change on failure
@@ -203,4 +210,4 @@ class FileFreezer:
             logger.exception(f"Error freezing file: {e!s}")
             if db:
                 db.rollback()
-            return False, str(e), None
+            return False, str(e), None, None

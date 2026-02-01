@@ -153,25 +153,21 @@ def list_files(
     """
     # Validate query parameters
     if min_size is not None and min_size < 0:
-        raise HTTPException(
-            status_code=400, detail="min_size must be non-negative (>= 0)"
-        )
+        raise HTTPException(status_code=400, detail="min_size must be non-negative (>= 0)")
 
     if max_size is not None and max_size < 0:
-        raise HTTPException(
-            status_code=400, detail="max_size must be non-negative (>= 0)"
-        )
+        raise HTTPException(status_code=400, detail="max_size must be non-negative (>= 0)")
 
     if min_size is not None and max_size is not None and min_size > max_size:
         raise HTTPException(
             status_code=400,
-            detail=f"min_size ({min_size}) cannot be greater than max_size ({max_size})"
+            detail=f"min_size ({min_size}) cannot be greater than max_size ({max_size})",
         )
 
     if min_mtime is not None and max_mtime is not None and min_mtime > max_mtime:
         raise HTTPException(
             status_code=400,
-            detail=f"min_mtime ({min_mtime.isoformat()}) cannot be greater than max_mtime ({max_mtime.isoformat()})"
+            detail=f"min_mtime ({min_mtime.isoformat()}) cannot be greater than max_mtime ({max_mtime.isoformat()})",
         )
 
     from app.models import FileTag
@@ -236,7 +232,9 @@ def list_files(
             if is_pinned is not None:
                 if is_pinned:
                     # Filter for files that are in the PinnedFile table
-                    query = query.filter(FileInventory.file_path.in_(db.query(PinnedFile.file_path)))
+                    query = query.filter(
+                        FileInventory.file_path.in_(db.query(PinnedFile.file_path))
+                    )
                 else:
                     # Filter for files that are NOT in the PinnedFile table
                     query = query.filter(
@@ -596,9 +594,81 @@ def thaw_file(inventory_id: int, pin: bool = False, db: Session = Depends(get_db
     )
 
     if not file_record:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No file record found for inventory entry {inventory_id}",
+        # If no file record, create one on-the-fly for manually added files
+        monitored_path = (
+            db.query(MonitoredPath).filter(MonitoredPath.id == inventory_entry.path_id).first()
+        )
+        if not monitored_path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Monitored path not found for inventory entry {inventory_id}",
+            )
+
+        # Since storage_type == COLD, inventory_entry.file_path is the COLD path
+        cold_path = Path(inventory_entry.file_path)
+
+        # Find which storage location this cold path belongs to
+        found_storage_location = None
+        relative_path = None
+
+        for loc in monitored_path.storage_locations:
+            try:
+                # Try to get relative path from this storage location
+                relative_path = cold_path.relative_to(loc.path)
+                found_storage_location = loc
+                break
+            except ValueError:
+                # Not under this location, try next
+                continue
+
+        if not found_storage_location:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Could not determine storage location for cold path {cold_path}",
+            )
+
+        # Check if storage location is available (both database flag and actual path existence)
+        if not found_storage_location.is_available:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Storage location '{found_storage_location.name}' is offline. Please mount the drive and try again.",
+            )
+
+        # Verify the storage location path actually exists (catches unmounted drives)
+        if not Path(found_storage_location.path).exists():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Storage location '{found_storage_location.name}' at {found_storage_location.path} is not accessible. Please mount the drive and try again.",
+            )
+
+        # Check if the cold file actually exists
+        if not cold_path.exists():
+            # Try with .ffenc extension if it might be encrypted
+            encrypted_path = cold_path.with_suffix(cold_path.suffix + ".ffenc")
+            if encrypted_path.exists():
+                cold_path = encrypted_path
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"File not found in cold storage: {cold_path}",
+                )
+
+        # Compute the hot path by applying the relative path to the monitored source path
+        # Handle .ffenc extension - strip it for the hot path
+        hot_relative_path = relative_path
+        if str(relative_path).endswith(".ffenc"):
+            hot_relative_path = Path(str(relative_path)[:-6])  # Remove .ffenc
+
+        hot_path = Path(monitored_path.source_path) / hot_relative_path
+
+        # Create a temporary FileRecord
+        file_record = FileRecord(
+            path_id=inventory_entry.path_id,
+            original_path=str(hot_path),
+            cold_storage_path=str(cold_path),
+            file_size=inventory_entry.file_size,
+            operation_type=monitored_path.operation_type,
+            cold_storage_location_id=found_storage_location.id,
         )
 
     success, error = FileThawer.thaw_file(file_record, pin=pin, db=db)

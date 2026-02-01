@@ -40,7 +40,7 @@ async function loadLocation() {
         document.getElementById('path').value = location.path;
         document.getElementById('caution_threshold_percent').value = location.caution_threshold_percent || 20;
         document.getElementById('critical_threshold_percent').value = location.critical_threshold_percent || 10;
-        document.getElementById('is_encrypted').checked = location.is_encrypted || false;
+        document.getElementById('is_encrypted').checked = !!location.is_encrypted;
 
     } catch (error) {
         console.error('Error loading storage location:', error);
@@ -54,7 +54,6 @@ async function loadLocation() {
 async function handleSubmit(event) {
     event.preventDefault();
 
-    const form = event.target;
     const submitBtn = document.getElementById('submit-btn');
     const originalText = document.getElementById('submit-text').textContent;
 

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import factory
 import pytest
+from cryptography.fernet import Fernet
 from app.models import (
     ColdStorageLocation,
     ConflictResolution,
@@ -40,10 +41,12 @@ from app.models import (
     Tag,
     TagRule,
     TagRuleCriterionType,
+    TransactionType,
     TransferDirection,
     TransferMode,
     TransferStatus,
     TrustStatus,
+    User,
 )
 from sqlalchemy.orm import Session
 
