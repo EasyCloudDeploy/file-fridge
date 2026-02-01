@@ -1213,6 +1213,74 @@ async function cleanupDuplicates() {
     }
 }
 
+async function cleanupMissingFiles() {
+    if (!confirm('This will remove database records for files that no longer exist on disk. Continue?')) {
+        return;
+    }
+
+    try {
+        let url = `${API_BASE_URL}/cleanup/missing`;
+        if (currentPathId) {
+            url += `?path_id=${currentPathId}`;
+        }
+
+        const response = await authenticatedFetch(url, { method: 'POST' });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const data = await response.json();
+        const message = `Missing files cleanup complete: checked ${data.checked} files, removed ${data.removed} missing file records`;
+        showNotification(message);
+
+        loadFilesList();
+    } catch (error) {
+        console.error('Error cleaning up missing files:', error);
+        showNotification(`Failed to cleanup missing files: ${error.message}`, 'error');
+    }
+}
+
+async function cleanupSymlinks() {
+    if (!confirm('This will clean up symlink inventory entries. Continue?')) {
+        return;
+    }
+
+    try {
+        const url = `${API_BASE_URL}/cleanup/symlinks`;
+        const response = await authenticatedFetch(url, { method: 'POST' });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const data = await response.json();
+        const message = `Symlink cleanup complete: ${data.message || 'Cleanup successful'}`;
+        showNotification(message);
+
+        loadFilesList();
+    } catch (error) {
+        console.error('Error cleaning up symlinks:', error);
+        showNotification(`Failed to cleanup symlinks: ${error.message}`, 'error');
+    }
+}
+
+async function triggerMetadataBackfill() {
+    if (!confirm('This will backfill missing metadata (checksums, MIME types) for files. This may take some time. Continue?')) {
+        return;
+    }
+
+    try {
+        const url = `${API_BASE_URL}/files/metadata/backfill`;
+        const response = await authenticatedFetch(url, { method: 'POST' });
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const data = await response.json();
+        const message = `Metadata backfill started: ${data.message || 'Processing files in background'}`;
+        showNotification(message);
+
+        // Reload after a short delay to show updates
+        setTimeout(() => loadFilesList(), 2000);
+    } catch (error) {
+        console.error('Error triggering metadata backfill:', error);
+        showNotification(`Failed to trigger metadata backfill: ${error.message}`, 'error');
+    }
+}
+
 // Tag Management Functions
 let currentFileId = null;
 let allAvailableTags = [];

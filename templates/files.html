@@ -130,11 +130,60 @@
     </div>
     <div class="col-12 col-md-6 text-md-end">
         <div class="btn-group">
-
+            <button type="button" class="btn btn-outline-primary btn-sm" onclick="triggerMetadataBackfill()"
+                title="Backfill missing metadata for files">
+                <i class="bi bi-arrow-repeat"></i><span class="d-none d-sm-inline ms-1">Metadata Backfill</span>
+            </button>
             <button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()"
                 title="Remove duplicate file records">
                 <i class="bi bi-files"></i><span class="d-none d-sm-inline ms-1">Remove Duplicates</span>
             </button>
+            <button type="button" class="btn btn-outline-danger btn-sm" onclick="cleanupMissingFiles()"
+                title="Remove records for missing files">
+                <i class="bi bi-trash"></i><span class="d-none d-sm-inline ms-1">Remove Missing</span>
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="cleanupSymlinks()"
+                title="Cleanup symlink inventory entries">
+                <i class="bi bi-link-45deg"></i><span class="d-none d-sm-inline ms-1">Cleanup Symlinks</span>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Additional Filters Row -->
+<div class="row mb-3 filters-row">
+    <div class="col-6 col-md-3 mb-2 mb-md-0">
+        <div class="input-group">
+            <label class="input-group-text d-none d-sm-flex" for="status_filter">Status:</label>
+            <select class="form-select" id="status_filter" aria-label="Filter by status">
+                <option value="">All</option>
+                <option value="active">Active</option>
+                <option value="migrating">Migrating</option>
+                <option value="missing">Missing</option>
+                <option value="deleted">Deleted</option>
+            </select>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 mb-2 mb-md-0">
+        <div class="input-group">
+            <label class="input-group-text d-none d-sm-flex" for="location_id_filter">Location:</label>
+            <select class="form-select" id="location_id_filter" aria-label="Filter by storage location">
+                <option value="">All Locations</option>
+            </select>
+        </div>
+    </div>
+    <div class="col-6 col-md-3 mb-2 mb-md-0">
+        <div class="input-group">
+            <label class="input-group-text d-none d-sm-flex" for="extension_filter">Ext:</label>
+            <input type="text" class="form-control" id="extension_filter" placeholder=".pdf, .jpg..."
+                aria-label="Filter by extension">
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="input-group">
+            <label class="input-group-text d-none d-sm-flex" for="mime_filter">MIME:</label>
+            <input type="text" class="form-control" id="mime_filter" placeholder="image/*, video/*..."
+                aria-label="Filter by MIME type">
         </div>
     </div>
 </div>

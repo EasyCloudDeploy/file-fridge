@@ -29,6 +29,28 @@
                                 <small class="form-text text-muted">The absolute file system path to the storage location</small>
                             </div>
 
+                            <div class="mb-3">
+                                <label for="caution_threshold_percent" class="form-label">Caution Threshold (%)</label>
+                                <input type="number" class="form-control" id="caution_threshold_percent" name="caution_threshold_percent" min="0" max="100" value="20">
+                                <small class="form-text text-muted">Show warning when free space drops below this percentage (default: 20%)</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="critical_threshold_percent" class="form-label">Critical Threshold (%)</label>
+                                <input type="number" class="form-control" id="critical_threshold_percent" name="critical_threshold_percent" min="0" max="100" value="10">
+                                <small class="form-text text-muted">Show critical alert when free space drops below this percentage (default: 10%)</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="is_encrypted" name="is_encrypted">
+                                    <label class="form-check-label" for="is_encrypted">
+                                        Enable Encryption
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted">Encrypt files stored in this location for enhanced security</small>
+                            </div>
+
                             <div class="d-flex justify-content-between">
                                 <a href="/storage-locations" class="btn btn-secondary">
                                     <i class="bi bi-x-circle"></i> Cancel
