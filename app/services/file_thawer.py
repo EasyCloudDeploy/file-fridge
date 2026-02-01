@@ -6,9 +6,17 @@ import shutil
 from pathlib import Path
 from typing import Optional, Tuple
 
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
-from app.models import FileRecord, FileStatus, PinnedFile, StorageType
+from app.models import (
+    ColdStorageLocation,
+    FileInventory,
+    FileRecord,
+    FileStatus,
+    PinnedFile,
+    StorageType,
+)
 from app.services.audit_trail_service import audit_trail_service
 from app.services.checksum_verifier import checksum_verifier
 
@@ -44,18 +52,27 @@ class FileThawer:
             cold_path = Path(file_record.cold_storage_path)
             original_path = Path(file_record.original_path)
 
+            # Check storage location availability
+            if file_record.cold_storage_location_id:
+                storage_location = file_record.storage_location
+                if not storage_location:
+                    storage_location = db.query(ColdStorageLocation).get(
+                        file_record.cold_storage_location_id
+                    )
+
+                if storage_location and not storage_location.is_available:
+                    return (
+                        False,
+                        f"Storage location '{storage_location.name}' is offline/unavailable",
+                    )
+
+            # The filename is the single source of truth for encryption status
+            is_encrypted = str(cold_path).endswith(".ffenc")
+            logger.info(f"Thawing file: cold_path='{cold_path}', is_encrypted={is_encrypted}")
+
             # Check if file exists in cold storage
             if not cold_path.exists():
                 return False, f"File not found in cold storage: {cold_path}"
-
-            # Check inventory to see if it's encrypted
-            from app.models import FileInventory
-
-            file_inventory = (
-                db.query(FileInventory).filter(FileInventory.file_path == str(cold_path)).first()
-            )
-
-            is_encrypted = file_inventory.is_encrypted if file_inventory else False
 
             # Calculate checksum before move for verification
             checksum_before = checksum_verifier.calculate_checksum(cold_path)
@@ -78,16 +95,13 @@ class FileThawer:
                             original_path.unlink()
 
                         # Decrypt to temporary file first for atomic replacement
-                        # This avoids following symlinks at original_path and ensures atomicity
                         target_path = original_path.with_suffix(original_path.suffix + ".tmp")
 
                         try:
                             # Decrypt to temp file
                             file_encryption_service.decrypt_file(db, cold_path, target_path)
-
-                            # Atomically move it to final destination (replaces existing file/symlink)
+                            # Atomically move it to final destination
                             target_path.replace(original_path)
-
                         except Exception:
                             # Clean up temp file if decryption failed
                             if target_path.exists():
@@ -99,39 +113,22 @@ class FileThawer:
 
                 except Exception as e:
                     return False, f"Failed to decrypt/thaw file: {e}"
-
-            # If original was a symlink, we need to handle it differently (and not encrypted)
-            elif file_record.operation_type.value == "symlink":
-                # Remove the symlink at original location if it exists
-                if original_path.exists() and original_path.is_symlink():
-                    original_path.unlink()
-                # Move file back from cold storage, preserving timestamps
+            else:
+                # Handle non-encrypted moves (symlink, copy, move)
+                operation = file_record.operation_type.value
                 try:
-                    FileThawer._move_preserving_timestamps(cold_path, original_path)
-                except Exception as e:
-                    return False, f"Failed to move file back: {e!s}"
-            elif file_record.operation_type.value == "copy":
-                # For copy, file is still in original location, just remove from cold storage
-                # Actually, if it was copied, the original should still exist
-                # But if we're thawing, we might want to ensure it's in hot storage
-                if not original_path.exists():
-                    # Original doesn't exist, move from cold storage, preserving timestamps
-                    try:
-                        FileThawer._move_preserving_timestamps(cold_path, original_path)
-                    except Exception as e:
-                        return False, f"Failed to move file back: {e!s}"
-                else:
-                    # Original exists, just remove from cold storage
-                    try:
-                        cold_path.unlink()
-                    except Exception as e:
-                        return False, f"Failed to remove from cold storage: {e!s}"
-            else:  # MOVE
-                # Move file back from cold storage to original location, preserving timestamps
-                try:
-                    # Ensure destination directory exists
                     original_path.parent.mkdir(parents=True, exist_ok=True)
-                    FileThawer._move_preserving_timestamps(cold_path, original_path)
+                    if operation == "symlink":
+                        if original_path.exists() and original_path.is_symlink():
+                            original_path.unlink()
+                        FileThawer._move_preserving_timestamps(cold_path, original_path)
+                    elif operation == "copy":
+                        if not original_path.exists():
+                            FileThawer._move_preserving_timestamps(cold_path, original_path)
+                        else:
+                            cold_path.unlink()
+                    else:  # MOVE
+                        FileThawer._move_preserving_timestamps(cold_path, original_path)
                 except Exception as e:
                     return False, f"Failed to move file back: {e!s}"
 
@@ -145,22 +142,25 @@ class FileThawer:
                     )
                     return False, "Checksum verification failed after thaw"
 
-            # Delete FileRecord entry
-            db.delete(file_record)
+            # Delete FileRecord entry (only if it was persisted)
+            if inspect(file_record).persistent:
+                db.delete(file_record)
 
             # If pinning, add to pinned files
             if pin:
-                # Check if already pinned
-                existing = (
-                    db.query(PinnedFile).filter(PinnedFile.file_path == str(original_path)).first()
-                )
-
-                if not existing:
+                if not db.query(PinnedFile).filter(PinnedFile.file_path == str(original_path)).first():
                     pinned = PinnedFile(path_id=file_record.path_id, file_path=str(original_path))
                     db.add(pinned)
                     logger.info(f"Pinned file: {original_path}")
 
             db.commit()
+            
+            # Find the corresponding inventory entry to update it
+            # The path could be the cold path (for move/copy) or original path (for symlink)
+            file_inventory = db.query(FileInventory).filter(
+                (FileInventory.file_path == str(cold_path)) |
+                (FileInventory.file_path == str(original_path))
+            ).first()
 
             if file_inventory:
                 # Update inventory status

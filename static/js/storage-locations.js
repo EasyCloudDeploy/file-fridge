@@ -61,9 +61,20 @@ function renderStorageLocations() {
             <td>
                 <span class="badge bg-secondary">${location.path_count} paths</span>
             </td>
+            <td>
+                ${location.is_encrypted
+            ? `<span class="badge bg-success" title="Encryption Status: ${location.encryption_status}">
+                        <i class="bi bi-lock-fill"></i> ${location.encryption_status}
+                       </span>`
+            : '<span class="badge bg-light text-dark"><i class="bi bi-unlock"></i> Off</span>'
+        }
+            </td>
             <td><small class="text-muted">${formatDateTime(location.created_at)}</small></td>
             <td>
                 <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-info" onclick="triggerFreeze(${location.id}, '${escapeHtml(location.name)}')" title="Freeze: Scan all associated paths" ${location.path_count === 0 ? 'disabled' : ''}>
+                        <i class="bi bi-snow"></i> Freeze
+                    </button>
                     <a href="/storage-locations/${location.id}/edit" class="btn btn-outline-primary">
                         <i class="bi bi-pencil"></i> Edit
                     </a>
@@ -77,11 +88,65 @@ function renderStorageLocations() {
 }
 
 /**
+ * Trigger "Freeze" (scan) for all paths associated with this storage location
+ */
+async function triggerFreeze(locationId, locationName) {
+    if (!confirm(`This will trigger a scan for all paths using "${locationName}" to move eligible files to cold storage. Proceed?`)) {
+        return;
+    }
+
+    try {
+        // We need to fetch paths to know which ones use this location
+        const response = await authenticatedFetch('/api/v1/paths');
+        if (!response.ok) throw new Error('Failed to load paths');
+
+        const paths = await response.json();
+        const associatedPaths = paths.filter(p =>
+            p.storage_locations && p.storage_locations.some(loc => loc.id === locationId)
+        );
+
+        if (associatedPaths.length === 0) {
+            showAlert('warning', `No active paths are currently using "${locationName}".`);
+            return;
+        }
+
+        let started = 0;
+        let failed = 0;
+
+        for (const path of associatedPaths) {
+            try {
+                const scanResponse = await authenticatedFetch(`/api/v1/paths/${path.id}/scan`, {
+                    method: 'POST'
+                });
+                if (scanResponse.ok) {
+                    started++;
+                } else {
+                    failed++;
+                }
+            } catch (err) {
+                console.error(`Error triggering scan for path ${path.id}:`, err);
+                failed++;
+            }
+        }
+
+        if (started > 0) {
+            showAlert('success', `Started "Freeze" scan for ${started} path(s)${failed > 0 ? ` (${failed} failed)` : ''}.`);
+        } else if (failed > 0) {
+            showAlert('danger', `Failed to start scans for ${failed} path(s).`);
+        }
+
+    } catch (error) {
+        console.error('Error in triggerFreeze:', error);
+        showAlert('danger', `Error initiating freeze: ${error.message}`);
+    }
+}
+
+/**
  * Show delete confirmation modal
  */
 function showDeleteModal(id, name) {
     document.getElementById('location-name-to-delete').textContent = name;
-    
+
     const confirmBtn = document.getElementById('confirm-delete-button');
     const forceCheckbox = document.getElementById('forceDeleteCheckbox');
 

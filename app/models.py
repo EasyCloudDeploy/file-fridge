@@ -231,6 +231,9 @@ class ColdStorageLocation(Base):
     encryption_status = Column(
         SQLEnum(EncryptionStatus), nullable=False, default=EncryptionStatus.NONE
     )
+    is_available = Column(
+        Boolean, default=True, nullable=False
+    )  # Whether the drive is currently connected/online
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
