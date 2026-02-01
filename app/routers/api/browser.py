@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import FileInventory
+from app.models import ColdStorageLocation, FileInventory, MonitoredPath
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
 
@@ -62,6 +62,35 @@ def list_directory(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Path is not a directory: {path}",
             )
+
+        # SECURITY: Validate permissions
+        # If user is not admin, they can only browse configured monitored paths and storage locations
+        if "admin" not in current_user.roles:
+            monitored_paths = db.query(MonitoredPath.source_path).all()
+            storage_paths = db.query(ColdStorageLocation.path).all()
+
+            allowed_bases = [Path(p[0]).resolve() for p in monitored_paths] + [
+                Path(p[0]).resolve() for p in storage_paths
+            ]
+
+            is_allowed = False
+            for base in allowed_bases:
+                try:
+                    # Check if resolved_path is base or a subdirectory of base
+                    resolved_path.relative_to(base)
+                    is_allowed = True
+                    break
+                except ValueError:
+                    continue
+
+            if not is_allowed:
+                logger.warning(
+                    f"Unauthorized directory browse attempt by user {current_user.username}: {path}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: Directory is not within a configured monitored path or storage location",
+                )
 
         # Get inventory status for all files in this directory
         # Build a map of file_path -> inventory_status
