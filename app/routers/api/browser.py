@@ -99,10 +99,16 @@ def list_directory(
         # Build a map of file_path -> inventory_status
         inventory_map: Dict[str, str] = {}
         try:
+            # Prepare path prefix for query (ensure trailing slash to match directory contents)
+            path_prefix = str(resolved_path)
+            if not path_prefix.endswith("/"):
+                path_prefix += "/"
+
             # Query all files in the current directory from inventory
+            # Use startswith for safer and faster prefix matching than LIKE
             inventory_entries = (
                 db.query(FileInventory.file_path, FileInventory.storage_type)
-                .filter(FileInventory.file_path.like(f"{resolved_path}/%"))
+                .filter(FileInventory.file_path.startswith(path_prefix))
                 .all()
             )
 
