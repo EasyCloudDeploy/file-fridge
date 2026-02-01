@@ -204,6 +204,10 @@ def update_storage_location(
                 location.encryption_status = EncryptionStatus.DECRYPTING
                 trigger_decryption_job = True
 
+    if "is_available" in update_data:
+        new_status = "Online" if update_data["is_available"] else "Offline"
+        logger.info(f"Storage location '{location.name}' status changed to {new_status}")
+
     # Check for duplicate name if name is being updated
     if "name" in update_data:
         existing = (
@@ -373,7 +377,7 @@ def delete_storage_location(
             logger.exception(
                 f"Error deleting storage directory '{location.path}'. "
                 f"Manual cleanup may be required.",
-                exc_info=e
+                exc_info=e,
             )
             # We don't re-raise, to allow DB cleanup to proceed
 

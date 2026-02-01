@@ -8,7 +8,7 @@ from typing import Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models import FileRecord, FileStatus, PinnedFile, StorageType
+from app.models import ColdStorageLocation, FileRecord, FileStatus, PinnedFile, StorageType
 from app.services.audit_trail_service import audit_trail_service
 from app.services.checksum_verifier import checksum_verifier
 
@@ -43,6 +43,20 @@ class FileThawer:
         try:
             cold_path = Path(file_record.cold_storage_path)
             original_path = Path(file_record.original_path)
+
+            # Check storage location availability
+            if file_record.cold_storage_location_id:
+                storage_location = file_record.storage_location
+                if not storage_location:
+                    storage_location = db.query(ColdStorageLocation).get(
+                        file_record.cold_storage_location_id
+                    )
+
+                if storage_location and not storage_location.is_available:
+                    return (
+                        False,
+                        f"Storage location '{storage_location.name}' is offline/unavailable",
+                    )
 
             # Check if file exists in cold storage
             if not cold_path.exists():

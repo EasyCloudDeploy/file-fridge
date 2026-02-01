@@ -67,6 +67,13 @@ class FileFreezer:
             if locked_file.storage_type != StorageType.HOT:
                 return False, f"File is not in hot storage: {source_path}", None
 
+            if not storage_location.is_available:
+                return (
+                    False,
+                    f"Storage location '{storage_location.name}' is offline/unavailable",
+                    None,
+                )
+
             if not source_path.exists() and not source_path.is_symlink():
                 return False, f"File not found: {source_path}", None
 

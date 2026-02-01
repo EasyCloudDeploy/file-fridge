@@ -11,10 +11,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import ClassVar, Dict, Iterator, List, Optional, Set
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import engine
 from app.models import (
+    ColdStorageLocation,
     CriterionType,
     FileInventory,
     FileRecord,
@@ -360,8 +362,13 @@ class FileWorkflowService:
                 logger.debug(f"Access error for {file_path}: {e}")
                 continue
 
+        # Check if the primary cold storage location is available
+        # TODO: Support multiple storage locations properly. Currently assumes first one.
+        primary_location = path.storage_locations[0] if path.storage_locations else None
+        is_cold_storage_available = primary_location.is_available if primary_location else True
+
         # Scan cold storage directly (for MOVE operations)
-        if dest_base.exists() and dest_base.is_dir():
+        if is_cold_storage_available and dest_base.exists() and dest_base.is_dir():
             for entry in self._recursive_scandir(dest_base):
                 cold_file_path = Path(entry.path)
                 file_count += 1
@@ -897,10 +904,33 @@ class FileWorkflowService:
         # We give a 1-minute grace period for clock drift/duration
         cutoff = scan_start_time - timedelta(minutes=1)
 
-        missing_query = db.query(FileInventory).filter(
-            FileInventory.path_id == path.id,
-            FileInventory.last_seen < cutoff,
-            FileInventory.status == FileStatus.ACTIVE,
+        # Protect offline files from deletion
+        # Only delete if:
+        # 1. File is HOT (and missing from hot scan)
+        # 2. OR File is COLD AND its storage location is AVAILABLE (and missing from cold scan)
+        missing_query = (
+            db.query(FileInventory)
+            .outerjoin(
+                ColdStorageLocation,
+                FileInventory.cold_storage_location_id == ColdStorageLocation.id,
+            )
+            .filter(
+                FileInventory.path_id == path.id,
+                FileInventory.last_seen < cutoff,
+                FileInventory.status == FileStatus.ACTIVE,
+                or_(
+                    FileInventory.storage_type == StorageType.HOT,
+                    and_(
+                        FileInventory.storage_type == StorageType.COLD,
+                        or_(
+                            ColdStorageLocation.id.is_(
+                                None
+                            ),  # Should not happen for COLD, but safe fallback
+                            ColdStorageLocation.is_available.is_(True),
+                        ),
+                    ),
+                ),
+            )
         )
 
         # Get the count of records to be deleted before deleting them
