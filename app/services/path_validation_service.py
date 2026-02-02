@@ -51,8 +51,9 @@ def validate_path_access(user: User, path: Path, db: Session) -> None:
         safe_username = user.username.replace("\n", "").replace("\r", "")
         safe_path = str(path).replace("\n", "").replace("\r", "")
 
+        # Use structured logging args to avoid F-string log injection hotspots
         logger.warning(
-            f"Unauthorized directory access attempt by user {safe_username}: {safe_path}"
+            "Unauthorized directory access attempt by user %s: %s", safe_username, safe_path
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

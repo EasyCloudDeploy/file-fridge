@@ -134,11 +134,14 @@ def storage_location(db_session: Session):
 def monitored_path_factory(db_session: Session, storage_location: ColdStorageLocation):
     """Factory fixture to create MonitoredPath objects."""
 
-    def _factory(name: str, source_path: str):
+    def _factory(name: str, source_path: str, storage_locations=None):
+        if storage_locations is None:
+            storage_locations = [storage_location]
+
         path = MonitoredPath(
             name=name,
             source_path=source_path,
-            storage_locations=[storage_location],
+            storage_locations=storage_locations,
         )
         db_session.add(path)
         db_session.commit()

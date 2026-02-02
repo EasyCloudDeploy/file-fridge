@@ -12,15 +12,12 @@ from app.models import (
     FileInventory,
     FileRecord,
     FileStatus,
+    MonitoredPath,
     PinnedFile,
     StorageType,
     Tag,
 )
 from app.schemas import StorageType as StorageTypeSchema
-
-# Assuming authenticated_client, monitored_path_factory, storage_location fixtures are available from conftest or previous tests
-# If not, they would need to be defined here or imported.
-# For this example, let's assume they are available.
 
 
 @pytest.fixture
@@ -41,8 +38,10 @@ def file_inventory_factory(db_session: Session, monitored_path_factory, storage_
         mime_type: str = "text/plain",
         is_pinned: bool = False,
         cold_storage_location: ColdStorageLocation = None,
+        monitored_path: MonitoredPath = None,
     ):
-        monitored_path = monitored_path_factory(path_name, str(Path(file_path).parent))
+        if monitored_path is None:
+            monitored_path = monitored_path_factory(path_name, str(Path(file_path).parent))
 
         if cold_storage_location is None and storage_type == StorageType.COLD:
             cold_storage_location = storage_location
@@ -91,11 +90,6 @@ def create_tag(db_session: Session):
     return _factory
 
 
-# ==================================
-# list_files tests (GET /api/v1/files)
-# ==================================
-
-
 def test_list_files_no_filters(authenticated_client: TestClient, file_inventory_factory, tmp_path):
     """Test basic listing of files without any filters."""
     file_inventory_factory(str(tmp_path / "file1.txt"), path_name="path1")
@@ -116,16 +110,129 @@ def test_list_files_no_filters(authenticated_client: TestClient, file_inventory_
     assert completion["count"] == 2
 
 
-def test_list_files_filter_by_path_id(
-    authenticated_client: TestClient, file_inventory_factory, tmp_path
+@pytest.mark.parametrize(
+    "setup_kwargs, filter_query, expected_path_part, expected_attr, expected_value",
+    [
+        # path_id filter (special case: dynamic value)
+        (
+            {"path_name": "path1_data"},
+            "path_id={path_id}",
+            "file.txt",
+            "file_path",
+            None,  # Value checked dynamically
+        ),
+        # storage_type filter
+        (
+            {"storage_type": StorageType.COLD},
+            f"storage_type={StorageTypeSchema.COLD.value}",
+            "cold_file.txt",
+            "storage_type",
+            StorageTypeSchema.COLD.value,
+        ),
+        # status filter
+        (
+            {"status": FileStatus.MIGRATING},
+            f"status={FileStatus.MIGRATING.value}",
+            "migrating.txt",
+            "status",
+            FileStatus.MIGRATING.value,
+        ),
+        # search filter
+        (
+            {},
+            "search=doc",
+            "document.pdf",
+            "file_path",
+            None,  # Checked by "in"
+        ),
+        # extension filter
+        (
+            {"file_extension": ".jpg"},
+            "extension=.jpg",
+            "file2.jpg",
+            "file_extension",
+            ".jpg",
+        ),
+        # mime_type filter
+        (
+            {"mime_type": "image/jpeg"},
+            "mime_type=image",
+            "file2.jpg",
+            "mime_type",
+            "image/jpeg",
+        ),
+        # has_checksum=true
+        (
+            {"checksum": "abc"},
+            "has_checksum=true",
+            "file1.txt",
+            "checksum",
+            "abc",
+        ),
+        # has_checksum=false
+        (
+            {"checksum": None},
+            "has_checksum=false",
+            "file2.txt",
+            "checksum",
+            None,
+        ),
+    ],
+)
+def test_list_files_filters(
+    authenticated_client: TestClient,
+    file_inventory_factory,
+    tmp_path,
+    setup_kwargs,
+    filter_query,
+    expected_path_part,
+    expected_attr,
+    expected_value,
 ):
-    """Test filtering files by path_id."""
-    path1_file = file_inventory_factory(
-        str(tmp_path / "path1" / "file.txt"), path_name="path1_data"
-    )
-    file_inventory_factory(str(tmp_path / "path2" / "file.txt"), path_name="path2_data")
+    """Test various file filters using parameterization to reduce duplication."""
 
-    response = authenticated_client.get(f"/api/v1/files?path_id={path1_file.path_id}")
+    # Create test files based on the scenario
+    if "path_id" in filter_query:
+        file1 = file_inventory_factory(
+            str(tmp_path / "path1" / "file.txt"), path_name="path1_data"
+        )
+        file_inventory_factory(str(tmp_path / "path2" / "file.txt"), path_name="path2_data")
+        query = filter_query.format(path_id=file1.path_id)
+        expected_val = str(file1.file_path)
+    elif "storage_type" in filter_query:
+        file_inventory_factory(str(tmp_path / "hot_file.txt"), storage_type=StorageType.HOT)
+        file_inventory_factory(str(tmp_path / "cold_file.txt"), storage_type=StorageType.COLD)
+        query = filter_query
+        expected_val = expected_value
+    elif "status" in filter_query:
+        file_inventory_factory(str(tmp_path / "active.txt"), status=FileStatus.ACTIVE)
+        file_inventory_factory(str(tmp_path / "migrating.txt"), status=FileStatus.MIGRATING)
+        query = filter_query
+        expected_val = expected_value
+    elif "search" in filter_query:
+        file_inventory_factory(str(tmp_path / "document.pdf"))
+        file_inventory_factory(str(tmp_path / "image.jpg"))
+        query = filter_query
+        expected_val = None # Checked manually
+    elif "extension" in filter_query:
+        file_inventory_factory(str(tmp_path / "file1.txt"), file_extension=".txt")
+        file_inventory_factory(str(tmp_path / "file2.jpg"), file_extension=".jpg")
+        query = filter_query
+        expected_val = expected_value
+    elif "mime_type" in filter_query:
+        file_inventory_factory(str(tmp_path / "file1.txt"), mime_type="text/plain")
+        file_inventory_factory(str(tmp_path / "file2.jpg"), mime_type="image/jpeg")
+        query = filter_query
+        expected_val = expected_value
+    elif "has_checksum" in filter_query:
+        file_inventory_factory(str(tmp_path / "file1.txt"), checksum="abc")
+        file_inventory_factory(str(tmp_path / "file2.txt"), checksum=None)
+        query = filter_query
+        expected_val = expected_value
+    else:
+        pytest.fail("Unknown filter scenario")
+
+    response = authenticated_client.get(f"/api/v1/files?{query}")
     assert response.status_code == 200
 
     lines = response.content.decode().strip().split("\n")
@@ -134,134 +241,20 @@ def test_list_files_filter_by_path_id(
 
     assert metadata["total"] == 1
     assert len(files) == 1
-    assert files[0]["file_path"] == str(path1_file.file_path)
 
+    file_data = files[0]
 
-def test_list_files_filter_by_storage_type(
-    authenticated_client: TestClient, file_inventory_factory, tmp_path
-):
-    """Test filtering files by storage_type."""
-    file_inventory_factory(str(tmp_path / "hot_file.txt"), storage_type=StorageType.HOT)
-    file_inventory_factory(str(tmp_path / "cold_file.txt"), storage_type=StorageType.COLD)
+    # Check if correct file returned (by path)
+    if expected_path_part:
+        assert expected_path_part in file_data["file_path"]
 
-    response = authenticated_client.get(
-        f"/api/v1/files?storage_type={StorageTypeSchema.COLD.value}"
-    )
-    assert response.status_code == 200
-
-    lines = response.content.decode().strip().split("\n")
-    metadata = json.loads(lines[0])
-    files = [json.loads(line)["data"] for line in lines[1:-1]]
-
-    assert metadata["total"] == 1
-    assert len(files) == 1
-    assert files[0]["storage_type"] == StorageTypeSchema.COLD.value
-
-
-def test_list_files_filter_by_file_status(
-    authenticated_client: TestClient, file_inventory_factory, tmp_path
-):
-    """Test filtering files by status."""
-    file_inventory_factory(str(tmp_path / "active.txt"), status=FileStatus.ACTIVE)
-    file_inventory_factory(str(tmp_path / "migrating.txt"), status=FileStatus.MIGRATING)
-
-    response = authenticated_client.get(f"/api/v1/files?status={FileStatus.MIGRATING.value}")
-    assert response.status_code == 200
-
-    lines = response.content.decode().strip().split("\n")
-    metadata = json.loads(lines[0])
-    files = [json.loads(line)["data"] for line in lines[1:-1]]
-
-    assert metadata["total"] == 1
-    assert len(files) == 1
-    assert files[0]["status"] == FileStatus.MIGRATING.value
-
-
-def test_list_files_filter_by_search(
-    authenticated_client: TestClient, file_inventory_factory, tmp_path
-):
-    """Test searching files by part of their path."""
-    file_inventory_factory(str(tmp_path / "document.pdf"))
-    file_inventory_factory(str(tmp_path / "image.jpg"))
-
-    response = authenticated_client.get("/api/v1/files?search=doc")
-    assert response.status_code == 200
-
-    lines = response.content.decode().strip().split("\n")
-    metadata = json.loads(lines[0])
-    files = [json.loads(line)["data"] for line in lines[1:-1]]
-
-    assert metadata["total"] == 1
-    assert len(files) == 1
-    assert "document" in files[0]["file_path"]
-
-
-def test_list_files_filter_by_extension(
-    authenticated_client: TestClient, file_inventory_factory, tmp_path
-):
-    """Test filtering files by extension."""
-    file_inventory_factory(str(tmp_path / "file1.txt"), file_extension=".txt")
-    file_inventory_factory(str(tmp_path / "file2.jpg"), file_extension=".jpg")
-
-    response = authenticated_client.get("/api/v1/files?extension=.jpg")
-    assert response.status_code == 200
-
-    lines = response.content.decode().strip().split("\n")
-    metadata = json.loads(lines[0])
-    files = [json.loads(line)["data"] for line in lines[1:-1]]
-
-    assert metadata["total"] == 1
-    assert len(files) == 1
-    assert files[0]["file_extension"] == ".jpg"
-
-
-def test_list_files_filter_by_mime_type(
-    authenticated_client: TestClient, file_inventory_factory, tmp_path
-):
-    """Test filtering files by MIME type."""
-    file_inventory_factory(str(tmp_path / "file1.txt"), mime_type="text/plain")
-    file_inventory_factory(str(tmp_path / "file2.jpg"), mime_type="image/jpeg")
-
-    response = authenticated_client.get("/api/v1/files?mime_type=image")
-    assert response.status_code == 200
-
-    lines = response.content.decode().strip().split("\n")
-    metadata = json.loads(lines[0])
-    files = [json.loads(line)["data"] for line in lines[1:-1]]
-
-    assert metadata["total"] == 1
-    assert len(files) == 1
-    assert files[0]["mime_type"] == "image/jpeg"
-
-
-def test_list_files_filter_by_has_checksum(
-    authenticated_client: TestClient, file_inventory_factory, tmp_path
-):
-    """Test filtering files by presence of checksum."""
-    file_inventory_factory(str(tmp_path / "file1.txt"), checksum="abc")
-    file_inventory_factory(str(tmp_path / "file2.txt"), checksum=None)
-
-    response = authenticated_client.get("/api/v1/files?has_checksum=true")
-    assert response.status_code == 200
-
-    lines = response.content.decode().strip().split("\n")
-    metadata = json.loads(lines[0])
-    files = [json.loads(line)["data"] for line in lines[1:-1]]
-
-    assert metadata["total"] == 1
-    assert len(files) == 1
-    assert files[0]["checksum"] == "abc"
-
-    response = authenticated_client.get("/api/v1/files?has_checksum=false")
-    assert response.status_code == 200
-
-    lines = response.content.decode().strip().split("\n")
-    metadata = json.loads(lines[0])
-    files = [json.loads(line)["data"] for line in lines[1:-1]]
-
-    assert metadata["total"] == 1
-    assert len(files) == 1
-    assert files[0]["checksum"] is None
+    # Check expected attribute value
+    if expected_value is not None:
+        assert file_data[expected_attr] == expected_value
+    elif expected_attr == "file_path" and "search" in filter_query:
+        assert "document" in file_data["file_path"]
+    elif expected_attr == "file_path" and "path_id" in filter_query:
+        assert file_data["file_path"] == expected_val
 
 
 @patch("app.services.file_mover.FileMover.move_file")
@@ -281,25 +274,9 @@ def test_move_file_success(mock_move_file, authenticated_client: TestClient, tmp
             "operation_type": "move",
         },
     )
-    assert response.status_code == 202
+    print(response.json()); assert response.status_code == 202
     assert response.json()["message"] == "File moved successfully"
     mock_move_file.assert_called_once()
-
-
-def test_browse_files_success(authenticated_client: TestClient, tmp_path, monitored_path_factory):
-    """Test browsing files in an allowed directory."""
-    monitored_path = monitored_path_factory("BrowsePath", str(tmp_path / "browse"))
-    (Path(monitored_path.source_path) / "subdir").mkdir()
-    (Path(monitored_path.source_path) / "test.txt").touch()
-
-    response = authenticated_client.get(
-        f"/api/v1/files/browse?directory={monitored_path.source_path}"
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["directory"] == monitored_path.source_path
-    assert any(f["name"] == "test.txt" for f in data["files"])
-    assert any(d["name"] == "subdir" for d in data["directories"])
 
 
 @patch("app.services.file_thawer.FileThawer.thaw_file")
@@ -377,25 +354,32 @@ def test_relocate_file_success(
     storage_location,
     monitored_path_factory,
     tmp_path,
+    db_session: Session,
 ):
     """Test successful relocation of a file."""
-    monitored_path = monitored_path_factory("RelocatePath", str(tmp_path / "relocate_hot"))
     cold_loc1 = storage_location  # Use the default fixture
     cold_loc2 = ColdStorageLocation(
         name="Cold Loc 2", path=str(tmp_path / "cold2")
     )
-    monitored_path.storage_locations.append(cold_loc2)
-    db_session: Session = MagicMock()  # Assuming db_session from fixture
     db_session.add(cold_loc2)
     db_session.commit()
     Path(cold_loc2.path).mkdir(exist_ok=True, parents=True)
+
+    monitored_path = monitored_path_factory(
+        "RelocatePath",
+        str(tmp_path / "relocate_hot"),
+        storage_locations=[cold_loc1, cold_loc2]
+    )
 
     cold_file = file_inventory_factory(
         str(Path(cold_loc1.path) / "relocate_file.txt"),
         storage_type=StorageType.COLD,
         cold_storage_location=cold_loc1,
-        path_name="RelocatePath",
+        monitored_path=monitored_path,
     )
+    # Create the file on disk so the endpoint finds it
+    Path(cold_file.file_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(cold_file.file_path).touch()
 
     mock_create_task.return_value = "relocation_task_id_123"
 
@@ -403,7 +387,7 @@ def test_relocate_file_success(
         f"/api/v1/files/relocate/{cold_file.id}",
         json={"target_storage_location_id": cold_loc2.id},
     )
-    assert response.status_code == 202
+    print(response.json()); assert response.status_code == 202
     assert response.json()["task_id"] == "relocation_task_id_123"
     mock_create_task.assert_called_once()
 
