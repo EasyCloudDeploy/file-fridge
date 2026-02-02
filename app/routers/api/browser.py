@@ -9,9 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ColdStorageLocation, FileInventory, MonitoredPath
+from app.models import FileInventory
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
+from app.services.path_validation_service import validate_path_access
 
 router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
@@ -50,36 +51,8 @@ def list_directory(
                 detail=f"Invalid directory path: {e!s}",
             ) from e
 
-        # SECURITY: Enforce path restrictions for non-admin users
-        if "admin" not in current_user.roles:
-            monitored_paths = db.query(MonitoredPath.source_path).all()
-            storage_paths = db.query(ColdStorageLocation.path).all()
-
-            allowed_bases = [Path(p[0]).resolve() for p in monitored_paths] + [
-                Path(p[0]).resolve() for p in storage_paths
-            ]
-
-            is_allowed = False
-            for base in allowed_bases:
-                try:
-                    # Check if resolved_path is base or a subdirectory of base
-                    resolved_path.relative_to(base)
-                    is_allowed = True
-                    break
-                except ValueError:
-                    continue
-
-            if not is_allowed:
-                # Sanitize log inputs to prevent log injection
-                safe_username = current_user.username.replace("\n", "").replace("\r", "")
-                safe_path = str(path).replace("\n", "").replace("\r", "")
-                logger.warning(
-                    f"Unauthorized directory browse attempt by user {safe_username}: {safe_path}"
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied: Directory is not within a configured monitored path or storage location",
-                )
+        # SECURITY: Enforce path restrictions
+        validate_path_access(current_user, resolved_path, db)
 
         # Verify path exists and is a directory
         if not resolved_path.exists():

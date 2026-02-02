@@ -5,43 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import ColdStorageLocation, MonitoredPath
-
-
-@pytest.fixture
-def storage_location(db_session: Session):
-    """Fixture for a ColdStorageLocation object."""
-    location = ColdStorageLocation(
-        name="Test Cold Storage",
-        path="/tmp/cold_storage",
-        is_default=True,
-    )
-    db_session.add(location)
-    db_session.commit()
-    db_session.refresh(location)
-    # Create the directory
-    Path(location.path).mkdir(exist_ok=True, parents=True)
-    return location
-
-
-@pytest.fixture
-def monitored_path_factory(db_session: Session, storage_location: ColdStorageLocation):
-    """Factory fixture to create MonitoredPath objects."""
-
-    def _factory(name: str, source_path: str):
-        path = MonitoredPath(
-            name=name,
-            source_path=source_path,
-            storage_locations=[storage_location],
-        )
-        db_session.add(path)
-        db_session.commit()
-        db_session.refresh(path)
-        # Create the directory
-        Path(path.source_path).mkdir(exist_ok=True, parents=True)
-        return path
-
-    return _factory
+from app.models import ColdStorageLocation
 
 
 def test_list_paths(authenticated_client: TestClient, monitored_path_factory):

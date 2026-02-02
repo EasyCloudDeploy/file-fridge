@@ -304,7 +304,11 @@ def test_browse_files_success(authenticated_client: TestClient, tmp_path, monito
 
 @patch("app.services.file_thawer.FileThawer.thaw_file")
 def test_thaw_file_success(
-    mock_thaw_file, authenticated_client: TestClient, file_inventory_factory, tmp_path
+    mock_thaw_file,
+    authenticated_client: TestClient,
+    file_inventory_factory,
+    tmp_path,
+    db_session: Session,
 ):
     """Test successful thaw of a file."""
     cold_file = file_inventory_factory(
@@ -318,8 +322,8 @@ def test_thaw_file_success(
         file_size=cold_file.file_size,
         operation_type="move",
     )
-    cold_file.db_session.add(file_record)
-    cold_file.db_session.commit()
+    db_session.add(file_record)
+    db_session.commit()
 
     mock_thaw_file.return_value = (True, None)
 
@@ -378,7 +382,7 @@ def test_relocate_file_success(
     monitored_path = monitored_path_factory("RelocatePath", str(tmp_path / "relocate_hot"))
     cold_loc1 = storage_location  # Use the default fixture
     cold_loc2 = ColdStorageLocation(
-        name="Cold Loc 2", path=str(tmp_path / "cold2"), is_default=False
+        name="Cold Loc 2", path=str(tmp_path / "cold2")
     )
     monitored_path.storage_locations.append(cold_loc2)
     db_session: Session = MagicMock()  # Assuming db_session from fixture
@@ -418,7 +422,9 @@ def test_metadata_backfill(mock_init, mock_backfill_all, authenticated_client: T
     mock_backfill_all.assert_called_once_with(batch_size=100, compute_checksum=True)
 
 
-def test_pin_file_success(authenticated_client: TestClient, file_inventory_factory, tmp_path):
+def test_pin_file_success(
+    authenticated_client: TestClient, file_inventory_factory, tmp_path, db_session: Session
+):
     """Test pinning a file."""
     file_to_pin = file_inventory_factory(str(tmp_path / "pin_me.txt"))
 
@@ -427,15 +433,15 @@ def test_pin_file_success(authenticated_client: TestClient, file_inventory_facto
     assert response.json()["is_pinned"] is True
 
     # Verify in DB
-    from app.database import SessionLocal
-
-    db = SessionLocal()
-    pinned = db.query(PinnedFile).filter(PinnedFile.file_path == file_to_pin.file_path).first()
+    pinned = (
+        db_session.query(PinnedFile).filter(PinnedFile.file_path == file_to_pin.file_path).first()
+    )
     assert pinned is not None
-    db.close()
 
 
-def test_unpin_file_success(authenticated_client: TestClient, file_inventory_factory, tmp_path):
+def test_unpin_file_success(
+    authenticated_client: TestClient, file_inventory_factory, tmp_path, db_session: Session
+):
     """Test unpinning a file."""
     file_to_unpin = file_inventory_factory(str(tmp_path / "unpin_me.txt"), is_pinned=True)
 
@@ -444,36 +450,46 @@ def test_unpin_file_success(authenticated_client: TestClient, file_inventory_fac
     assert response.json()["is_pinned"] is False
 
     # Verify in DB
-    from app.database import SessionLocal
-
-    db = SessionLocal()
-    pinned = db.query(PinnedFile).filter(PinnedFile.file_path == file_to_unpin.file_path).first()
+    pinned = (
+        db_session.query(PinnedFile)
+        .filter(PinnedFile.file_path == file_to_unpin.file_path)
+        .first()
+    )
     assert pinned is None
-    db.close()
 
 
 @patch("app.services.file_thawer.FileThawer.thaw_file", return_value=(True, None))
 def test_bulk_thaw_files(
-    mock_thaw_file, authenticated_client: TestClient, file_inventory_factory, tmp_path
+    mock_thaw_file,
+    authenticated_client: TestClient,
+    file_inventory_factory,
+    tmp_path,
+    db_session: Session,
 ):
     """Test bulk thawing of files."""
     file1 = file_inventory_factory(str(tmp_path / "bulk_cold_1.txt"), storage_type=StorageType.COLD)
     file2 = file_inventory_factory(str(tmp_path / "bulk_cold_2.txt"), storage_type=StorageType.COLD)
 
-    # Need to mock file records for thawing
-    with patch("app.routers.api.files.FileRecord") as MockFileRecord:
-        MockFileRecord.cold_storage_path = str(file1.file_path)
-        MockFileRecord.return_value = MockFileRecord  # For the query result
-
-        response = authenticated_client.post(
-            "/api/v1/files/bulk/thaw",
-            json={"file_ids": [file1.id, file2.id]},
+    # Create file records
+    for f in [file1, file2]:
+        record = FileRecord(
+            original_path=f"/hot/{f.file_path}",
+            cold_storage_path=f.file_path,
+            file_size=f.file_size,
+            operation_type="move",
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["successful"] == 2
-        assert data["failed"] == 0
-        assert mock_thaw_file.call_count == 2
+        db_session.add(record)
+    db_session.commit()
+
+    response = authenticated_client.post(
+        "/api/v1/files/bulk/thaw",
+        json={"file_ids": [file1.id, file2.id]},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["successful"] == 2
+    assert data["failed"] == 0
+    assert mock_thaw_file.call_count == 2
 
 
 @patch("app.services.file_freezer.FileFreezer.freeze_file", return_value=(True, None, "/cold/path"))
@@ -499,7 +515,9 @@ def test_bulk_freeze_files(
     assert mock_freeze_file.call_count == 2
 
 
-def test_bulk_pin_files(authenticated_client: TestClient, file_inventory_factory, tmp_path):
+def test_bulk_pin_files(
+    authenticated_client: TestClient, file_inventory_factory, tmp_path, db_session: Session
+):
     """Test bulk pinning of files."""
     file1 = file_inventory_factory(str(tmp_path / "bulk_pin_1.txt"))
     file2 = file_inventory_factory(str(tmp_path / "bulk_pin_2.txt"))
@@ -514,19 +532,17 @@ def test_bulk_pin_files(authenticated_client: TestClient, file_inventory_factory
     assert data["failed"] == 0
 
     # Verify in DB
-    from app.database import SessionLocal
-
-    db = SessionLocal()
     pinned_count = (
-        db.query(PinnedFile)
+        db_session.query(PinnedFile)
         .filter(PinnedFile.file_path.in_([str(file1.file_path), str(file2.file_path)]))
         .count()
     )
     assert pinned_count == 2
-    db.close()
 
 
-def test_bulk_unpin_files(authenticated_client: TestClient, file_inventory_factory, tmp_path):
+def test_bulk_unpin_files(
+    authenticated_client: TestClient, file_inventory_factory, tmp_path, db_session: Session
+):
     """Test bulk unpinning of files."""
     file1 = file_inventory_factory(str(tmp_path / "bulk_unpin_1.txt"), is_pinned=True)
     file2 = file_inventory_factory(str(tmp_path / "bulk_unpin_2.txt"), is_pinned=True)
@@ -541,13 +557,9 @@ def test_bulk_unpin_files(authenticated_client: TestClient, file_inventory_facto
     assert data["failed"] == 0
 
     # Verify in DB
-    from app.database import SessionLocal
-
-    db = SessionLocal()
     pinned_count = (
-        db.query(PinnedFile)
+        db_session.query(PinnedFile)
         .filter(PinnedFile.file_path.in_([str(file1.file_path), str(file2.file_path)]))
         .count()
     )
     assert pinned_count == 0
-    db.close()

@@ -35,9 +35,11 @@ from app.schemas import (
 from app.schemas import (
     StorageType as StorageTypeSchema,
 )
+from app.security import get_current_user
 from app.services.file_freezer import FileFreezer
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
+from app.services.path_validation_service import validate_path_access
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 logger = logging.getLogger(__name__)
@@ -491,7 +493,10 @@ def move_file(request: FileMoveRequest, db: Session = Depends(get_db)):
 
 @router.get("/browse")
 def browse_files(
-    directory: str, storage_type: Optional[str] = "hot", db: Session = Depends(get_db)
+    directory: str,
+    storage_type: Optional[str] = "hot",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     """Browse files in a directory. Restricted to configured paths."""
     try:
@@ -504,29 +509,7 @@ def browse_files(
             )
 
         # SECURITY: Validate that the requested path is within a configured monitored path or storage location
-        monitored_paths = db.query(MonitoredPath.source_path).all()
-        storage_paths = db.query(ColdStorageLocation.path).all()
-
-        allowed_bases = [Path(p[0]).resolve() for p in monitored_paths] + [
-            Path(p[0]).resolve() for p in storage_paths
-        ]
-
-        is_allowed = False
-        for base in allowed_bases:
-            try:
-                # Check if resolved_path is base or a subdirectory of base
-                resolved_path.relative_to(base)
-                is_allowed = True
-                break
-            except ValueError:
-                continue
-
-        if not is_allowed:
-            logger.warning(f"Unauthorized directory browse attempt: {directory}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied: Directory is not within a configured monitored path or storage location",
-            )
+        validate_path_access(current_user, resolved_path, db)
 
         if not resolved_path.exists() or not resolved_path.is_dir():
             raise HTTPException(
