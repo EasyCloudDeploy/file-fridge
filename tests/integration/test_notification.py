@@ -1,29 +1,24 @@
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import asyncio
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch, MagicMock
-
-import httpx
-import pytest
 import aiosmtplib
+import pytest
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import Notifier, NotifierType, Notification, NotificationDispatch, NotificationLevel
+from app.models import Notification, NotificationDispatch, Notifier, NotifierType
 from app.services.notification_events import (
-    NotificationEventType,
-    ScanCompletedData,
-    PathCreatedData,
     DiskSpaceCriticalData,
-    ScanErrorData,
+    NotificationEventType,
+    PathCreatedData,
+    ScanCompletedData,
 )
 from app.services.notification_service import NotificationService, rate_limiter
+
 
 # Reset rate limiter for each test
 @pytest.fixture(autouse=True)
 def reset_rate_limiter():
     rate_limiter.last_notification = {}
-    yield
 
 
 @pytest.fixture
@@ -64,16 +59,20 @@ def webhook_notifier(db_session: Session):
 
 
 @patch("aiosmtplib.send", new_callable=AsyncMock)
-async def test_dispatch_event_email_success(
-    mock_send_email, email_notifier, db_session: Session
-):
+async def test_dispatch_event_email_success(mock_send_email, email_notifier, db_session: Session):
     """Test dispatching an event to an email notifier successfully."""
     notification_service = NotificationService()
     event_data = ScanCompletedData(
-        path_id=1, path_name="test_path", files_moved=5, bytes_saved=1024, scan_duration_seconds=10.5
+        path_id=1,
+        path_name="test_path",
+        files_moved=5,
+        bytes_saved=1024,
+        scan_duration_seconds=10.5,
     )
 
-    await notification_service.dispatch_event(db_session, NotificationEventType.SCAN_COMPLETED, event_data)
+    await notification_service.dispatch_event(
+        db_session, NotificationEventType.SCAN_COMPLETED, event_data
+    )
 
     mock_send_email.assert_called_once()
     assert db_session.query(Notification).count() == 1
@@ -100,7 +99,9 @@ async def test_dispatch_event_webhook_success(
     mock_response = MagicMock(status_code=200)
     mock_httpx_post.return_value.__aenter__.return_value = mock_response
 
-    await notification_service.dispatch_event(db_session, NotificationEventType.DISK_SPACE_CRITICAL, event_data)
+    await notification_service.dispatch_event(
+        db_session, NotificationEventType.DISK_SPACE_CRITICAL, event_data
+    )
 
     mock_httpx_post.assert_called_once()
     assert db_session.query(Notification).count() == 1
@@ -109,17 +110,23 @@ async def test_dispatch_event_webhook_success(
     assert dispatch.status == DispatchStatus.SUCCESS
 
 
-@patch("aiosmtplib.send", new_callable=AsyncMock, side_effect=aiosmtplib.SMTPException("SMTP Error"))
-async def test_dispatch_event_email_failure(
-    mock_send_email, email_notifier, db_session: Session
-):
+@patch(
+    "aiosmtplib.send", new_callable=AsyncMock, side_effect=aiosmtplib.SMTPException("SMTP Error")
+)
+async def test_dispatch_event_email_failure(mock_send_email, email_notifier, db_session: Session):
     """Test dispatching an event to an email notifier that fails."""
     notification_service = NotificationService()
     event_data = ScanCompletedData(
-        path_id=1, path_name="test_path", files_moved=5, bytes_saved=1024, scan_duration_seconds=10.5
+        path_id=1,
+        path_name="test_path",
+        files_moved=5,
+        bytes_saved=1024,
+        scan_duration_seconds=10.5,
     )
 
-    await notification_service.dispatch_event(db_session, NotificationEventType.SCAN_COMPLETED, event_data)
+    await notification_service.dispatch_event(
+        db_session, NotificationEventType.SCAN_COMPLETED, event_data
+    )
 
     # Should retry 3 times (default for async_retry)
     assert mock_send_email.call_count == 3
@@ -136,7 +143,7 @@ async def test_dispatch_event_rate_limiting(email_notifier, db_session: Session)
     event_data = PathCreatedData(
         path_id=1, path_name="new_path", source_path="/path/to/new", operation_type="move"
     )
-    
+
     # Subscribe email_notifier to PATH_CREATED for this test
     email_notifier.subscribed_events.append(NotificationEventType.PATH_CREATED.value)
     db_session.commit()
@@ -144,21 +151,33 @@ async def test_dispatch_event_rate_limiting(email_notifier, db_session: Session)
 
     with patch("aiosmtplib.send", new_callable=AsyncMock) as mock_send_email:
         # First dispatch should go through
-        await notification_service.dispatch_event(db_session, NotificationEventType.PATH_CREATED, event_data)
+        await notification_service.dispatch_event(
+            db_session, NotificationEventType.PATH_CREATED, event_data
+        )
         assert mock_send_email.call_count == 1
         assert db_session.query(NotificationDispatch).count() == 1
-        dispatch1 = db_session.query(NotificationDispatch).filter_by(notifier_id=email_notifier.id).first()
+        dispatch1 = (
+            db_session.query(NotificationDispatch).filter_by(notifier_id=email_notifier.id).first()
+        )
         assert dispatch1.status == DispatchStatus.SUCCESS
 
         # Second dispatch (within cooldown period) should be rate-limited
         # Need a new session for dispatch_event to log to
         db_session_2 = SessionLocal()
-        await notification_service.dispatch_event(db_session_2, NotificationEventType.PATH_CREATED, event_data)
+        await notification_service.dispatch_event(
+            db_session_2, NotificationEventType.PATH_CREATED, event_data
+        )
         db_session_2.close()
 
-        assert mock_send_email.call_count == 1 # Still only one actual send attempt
-        assert db_session.query(NotificationDispatch).count() == 2 # But a FAILED dispatch log is recorded
-        dispatch2 = db_session.query(NotificationDispatch).filter(NotificationDispatch.id != dispatch1.id).first()
+        assert mock_send_email.call_count == 1  # Still only one actual send attempt
+        assert (
+            db_session.query(NotificationDispatch).count() == 2
+        )  # But a FAILED dispatch log is recorded
+        dispatch2 = (
+            db_session.query(NotificationDispatch)
+            .filter(NotificationDispatch.id != dispatch1.id)
+            .first()
+        )
         assert dispatch2.status == DispatchStatus.FAILED
         assert "Rate limited" in dispatch2.details
 

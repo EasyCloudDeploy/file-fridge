@@ -373,7 +373,7 @@ def delete_storage_location(
             logger.exception(
                 f"Error deleting storage directory '{location.path}'. "
                 f"Manual cleanup may be required.",
-                exc_info=e
+                exc_info=e,
             )
             # We don't re-raise, to allow DB cleanup to proceed
 
