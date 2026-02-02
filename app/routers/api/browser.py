@@ -70,8 +70,11 @@ def list_directory(
                     continue
 
             if not is_allowed:
+                # Sanitize log inputs to prevent log injection
+                safe_username = current_user.username.replace("\n", "").replace("\r", "")
+                safe_path = str(path).replace("\n", "").replace("\r", "")
                 logger.warning(
-                    f"Unauthorized directory browse attempt by user {current_user.username}: {path}"
+                    f"Unauthorized directory browse attempt by user {safe_username}: {safe_path}"
                 )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
