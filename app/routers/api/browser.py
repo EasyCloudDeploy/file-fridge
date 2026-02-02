@@ -12,6 +12,7 @@ from app.database import get_db
 from app.models import FileInventory
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
+from app.services.path_validation_service import validate_path_access
 
 router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
@@ -49,6 +50,9 @@ def list_directory(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid directory path: {e!s}",
             ) from e
+
+        # SECURITY: Enforce path restrictions
+        validate_path_access(current_user, resolved_path, db)
 
         # Verify path exists and is a directory
         if not resolved_path.exists():

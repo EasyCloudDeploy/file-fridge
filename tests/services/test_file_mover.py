@@ -1,16 +1,14 @@
-
-import os
-import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import call, patch
 
 import pytest
-from app.models import MonitoredPath, OperationType
+
+from app.models import OperationType
 from app.services.file_mover import (
-    move_file,
-    _move,
     _copy,
+    _move,
     _move_and_symlink,
+    move_file,
     move_with_rollback,
     preserve_directory_structure,
 )
@@ -41,7 +39,7 @@ def source_and_dest(tmp_path):
 def test_move_file_operation_move(mock_internal_move, mock_disk_usage, source_and_dest):
     """Test that move_file calls the internal _move function for MOVE operation."""
     source, dest = source_and_dest
-    mock_disk_usage.return_value = (0, 0, source.stat().st_size * 2) # Ample space
+    mock_disk_usage.return_value = (0, 0, source.stat().st_size * 2)  # Ample space
 
     success, error = move_file(source, dest, OperationType.MOVE)
 
@@ -134,9 +132,11 @@ def test_move_cross_filesystem(mock_unlink, mock_copy, mock_rename, source_and_d
     mock_copy.assert_called_once_with(source, dest, None)
     mock_unlink.assert_called_once()
 
+
 # ==================================
 # _copy tests
 # ==================================
+
 
 @patch("app.services.file_mover._copy_with_progress")
 def test_copy(mock_copy_with_progress, source_and_dest):
@@ -163,6 +163,7 @@ def test_copy_exception(mock_copy2, source_and_dest):
 # preserve_directory_structure tests
 # ==================================
 
+
 def test_preserve_directory_structure():
     """Test preserve_directory_structure function."""
     base_source = Path("/data/hot")
@@ -172,6 +173,7 @@ def test_preserve_directory_structure():
     result = preserve_directory_structure(source_path, base_source, base_dest)
 
     assert result == Path("/data/cold/movies/2023/movie.mkv")
+
 
 def test_preserve_directory_structure_no_relation():
     """Test preserve_directory_structure when source is not in base_source."""
@@ -188,6 +190,7 @@ def test_preserve_directory_structure_no_relation():
 # _move_and_symlink tests
 # ==================================
 
+
 @patch("app.services.file_mover._move")
 @patch("pathlib.Path.symlink_to")
 def test_move_and_symlink_file(mock_symlink_to, mock_move, source_and_dest):
@@ -202,6 +205,7 @@ def test_move_and_symlink_file(mock_symlink_to, mock_move, source_and_dest):
     mock_move.assert_called_once_with(source, dest, None)
     mock_symlink_to.assert_called_once()
 
+
 @patch("app.services.file_mover._move")
 @patch("pathlib.Path.symlink_to", side_effect=OSError("Permission denied"))
 @patch("pathlib.Path.rename")
@@ -210,7 +214,7 @@ def test_move_and_symlink_rollback(mock_rename, mock_symlink_to, mock_move, sour
     source, dest = source_and_dest
     mock_move.return_value = (True, None)
     # This is tricky because the 'source' object is patched. We need to mock the destination's rename
-    with patch.object(dest, 'rename') as mock_dest_rename:
+    with patch.object(dest, "rename") as mock_dest_rename:
         success, error = _move_and_symlink(source, dest)
         assert success is False
         assert "Symlink creation failed" in error
@@ -220,6 +224,7 @@ def test_move_and_symlink_rollback(mock_rename, mock_symlink_to, mock_move, sour
 # ==================================
 # move_with_rollback tests
 # ==================================
+
 
 @patch("app.services.file_mover.checksum_verifier")
 @patch("app.services.file_mover._move")
@@ -241,18 +246,19 @@ def test_move_with_rollback_success(mock_move, mock_verifier, source_and_dest):
 @patch("app.services.file_mover.checksum_verifier")
 @patch("app.services.file_mover._move")
 @patch("pathlib.Path.unlink")
-def test_move_with_rollback_checksum_mismatch(mock_unlink, mock_move, mock_verifier, source_and_dest):
+def test_move_with_rollback_checksum_mismatch(
+    mock_unlink, mock_move, mock_verifier, source_and_dest
+):
     """Test move_with_rollback with checksum mismatch triggers rollback."""
     source, dest = source_and_dest
     mock_move.return_value = (True, None)
     mock_verifier.calculate_checksum.side_effect = ["checksum1", "checksum2"]
-    
+
     # We need to make the destination file exist for the unlink call
-    with patch.object(dest, 'exists', return_value=True):
-         with patch.object(dest, 'unlink') as mock_dest_unlink:
+    with patch.object(dest, "exists", return_value=True):
+        with patch.object(dest, "unlink") as mock_dest_unlink:
             success, error, checksum = move_with_rollback(source, dest, OperationType.MOVE)
             assert success is False
             assert "Checksum verification failed" in error
             assert checksum == "checksum1"
             mock_dest_unlink.assert_called_once()
-

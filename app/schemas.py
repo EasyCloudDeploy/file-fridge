@@ -779,7 +779,9 @@ class RemoteConnectionIdentity(BaseModel):
     ed25519_public_key: str = Field(..., description="Base64-encoded Ed25519 public signing key")
     x25519_public_key: str = Field(..., description="Base64-encoded X25519 public key exchange key")
     url: HttpUrl = Field(..., description="Base URL of the remote instance")
-    transfer_mode: Optional[TransferMode] = Field(None, description="Current transfer mode of the instance")
+    transfer_mode: Optional[TransferMode] = Field(
+        None, description="Current transfer mode of the instance"
+    )
 
     @validator("ed25519_public_key", "x25519_public_key")
     def validate_base64(cls, v):
