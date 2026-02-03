@@ -40,10 +40,12 @@ from app.models import (
     Tag,
     TagRule,
     TagRuleCriterionType,
+    TransactionType,
     TransferDirection,
     TransferMode,
     TransferStatus,
     TrustStatus,
+    User,
 )
 from sqlalchemy.orm import Session
 
