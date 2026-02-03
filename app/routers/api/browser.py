@@ -17,6 +17,11 @@ router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_log_input(input_str: str) -> str:
+    """Sanitize input string for logging to prevent log injection."""
+    return input_str.replace("\n", "\\n").replace("\r", "\\r")
+
+
 @router.get("/list", response_model=BrowserResponse)
 def list_directory(  # noqa: PLR0912, PLR0915
     path: str = Query("/", description="Directory path to browse"),
@@ -45,9 +50,10 @@ def list_directory(  # noqa: PLR0912, PLR0915
         try:
             resolved_path = Path(path).resolve()
         except (OSError, ValueError) as e:
+            # Don't expose internal path details on error
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid directory path: {e!s}",
+                detail="Invalid directory path",
             ) from e
 
         # SECURITY: Validate that the requested path is within a configured monitored path or storage location
@@ -74,9 +80,9 @@ def list_directory(  # noqa: PLR0912, PLR0915
                     continue
 
             if not is_allowed:
-                logger.warning(
-                    f"Unauthorized directory browse attempt by {current_user.username}: {path}"
-                )
+                user_log = _sanitize_log_input(current_user.username)
+                path_log = _sanitize_log_input(path)
+                logger.warning(f"Unauthorized directory browse attempt by {user_log}: {path_log}")
                 raise HTTPException(  # noqa: TRY301
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Access denied: Directory is not within a configured monitored path or storage location",
@@ -86,13 +92,13 @@ def list_directory(  # noqa: PLR0912, PLR0915
         if not resolved_path.exists():
             raise HTTPException(  # noqa: TRY301
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Directory does not exist: {path}",
+                detail="Directory does not exist",
             )
 
         if not resolved_path.is_dir():
             raise HTTPException(  # noqa: TRY301
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path is not a directory: {path}",
+                detail="Path is not a directory",
             )
 
         # Get inventory status for all files in this directory
@@ -100,9 +106,14 @@ def list_directory(  # noqa: PLR0912, PLR0915
         inventory_map: Dict[str, str] = {}
         try:
             # Query all files in the current directory from inventory
+            # Use startswith for safer prefix matching than LIKE
+            prefix = str(resolved_path)
+            if not prefix.endswith("/"):
+                prefix += "/"
+
             inventory_entries = (
                 db.query(FileInventory.file_path, FileInventory.storage_type)
-                .filter(FileInventory.file_path.like(f"{resolved_path}/%"))
+                .filter(FileInventory.file_path.startswith(prefix))
                 .all()
             )
 
@@ -163,8 +174,9 @@ def list_directory(  # noqa: PLR0912, PLR0915
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error browsing directory {path}")
+        # Don't leak internal path in exception details
+        logger.exception(f"Error browsing directory {_sanitize_log_input(path)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {e!s}",
+            detail="Error browsing directory",
         ) from e
