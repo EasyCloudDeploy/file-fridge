@@ -2,6 +2,7 @@
 """API routes for file system browsing."""
 
 import logging
+import sys
 from pathlib import Path
 from typing import Dict, List
 
@@ -15,6 +16,27 @@ from app.security import get_current_user
 
 router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
+
+
+def get_system_roots() -> List[Path]:
+    """Get the system root paths safely."""
+    roots = []
+    if sys.platform == "win32":
+        # On Windows, list available drives
+        import string
+        from ctypes import windll
+
+        drives = []
+        bitmask = windll.kernel32.GetLogicalDrives()
+        for letter in string.ascii_uppercase:
+            if bitmask & 1:
+                drives.append(Path(f"{letter}:\\"))
+            bitmask >>= 1
+        roots.extend(drives)
+    else:
+        # On Linux/Unix, root is just /
+        roots.append(Path("/"))
+    return roots
 
 
 @router.get("/list", response_model=BrowserResponse)
@@ -62,10 +84,8 @@ def list_directory(
 
         if "admin" in current_user.roles:
             # Admins are allowed everything.
-            # We add the root directory to allowed_paths to unify the logic.
-            # This ensures that even for admins, we are "checking against a whitelist"
-            # which helps satisfy static analysis tools (security hotspots).
-            allowed_paths.append(Path(resolved_path.root))
+            # checking against system roots which are constant/trusted sources.
+            allowed_paths.extend(get_system_roots())
         else:
             # Non-admins: Add monitored paths
             monitored_paths = db.query(MonitoredPath.source_path).all()
