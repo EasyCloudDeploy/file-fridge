@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import FileInventory
+from app.models import ColdStorageLocation, FileInventory, MonitoredPath
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
 
@@ -26,8 +26,8 @@ def list_directory(
     """
     Browse a directory and return its contents with inventory status.
 
-    This endpoint is unrestricted (admins can browse anywhere) and includes
-    inventory status for files that are tracked in the database.
+    This endpoint restricts access for non-admin users to only paths defined
+    in MonitoredPath or ColdStorageLocation. Admins can browse anywhere.
 
     Args:
         path: Directory path to browse (defaults to root)
@@ -38,7 +38,7 @@ def list_directory(
         BrowserResponse with directory contents and statistics
 
     Raises:
-        HTTPException: 400 if path is invalid, 404 if path doesn't exist
+        HTTPException: 400 if path is invalid, 404 if path doesn't exist, 403 if denied
     """
     try:
         # Resolve the path to handle any '..' or symlinks
@@ -47,20 +47,58 @@ def list_directory(
         except (OSError, ValueError) as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid directory path: {e!s}",
+                detail="Invalid directory path",
             ) from e
+
+        # Check permissions for non-admin users
+        if "admin" not in current_user.roles:
+            # Gather all allowed paths
+            allowed_paths = []
+
+            # Add monitored paths
+            monitored_paths = db.query(MonitoredPath.source_path).all()
+            for mp in monitored_paths:
+                try:
+                    allowed_paths.append(Path(mp.source_path).resolve())
+                except (OSError, ValueError):
+                    pass
+
+            # Add cold storage paths
+            cold_paths = db.query(ColdStorageLocation.path).all()
+            for cp in cold_paths:
+                try:
+                    allowed_paths.append(Path(cp.path).resolve())
+                except (OSError, ValueError):
+                    pass
+
+            # Check if requested path is relative to any allowed path
+            is_allowed = False
+            for allowed_path in allowed_paths:
+                try:
+                    # check if resolved_path is inside allowed_path
+                    if resolved_path == allowed_path or resolved_path.is_relative_to(allowed_path):
+                        is_allowed = True
+                        break
+                except ValueError:
+                    continue
+
+            if not is_allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: You do not have permission to browse this directory",
+                )
 
         # Verify path exists and is a directory
         if not resolved_path.exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Directory does not exist: {path}",
+                detail="Directory does not exist",
             )
 
         if not resolved_path.is_dir():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path is not a directory: {path}",
+                detail="Path is not a directory",
             )
 
         # Get inventory status for all files in this directory
@@ -68,9 +106,10 @@ def list_directory(
         inventory_map: Dict[str, str] = {}
         try:
             # Query all files in the current directory from inventory
+            # Use startswith for security (prevent wildcard injection) and correctness
             inventory_entries = (
                 db.query(FileInventory.file_path, FileInventory.storage_type)
-                .filter(FileInventory.file_path.like(f"{resolved_path}/%"))
+                .filter(FileInventory.file_path.startswith(f"{resolved_path}/"))
                 .all()
             )
 
