@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import FileInventory
+from app.models import ColdStorageLocation, FileInventory, MonitoredPath
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
 
@@ -62,6 +62,43 @@ def list_directory(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Path is not a directory: {path}",
             )
+
+        # Check permissions for non-admin users
+        if "admin" not in current_user.roles:
+            allowed_paths = []
+
+            # Get monitored paths
+            monitored = db.query(MonitoredPath.source_path).all()
+            for p in monitored:
+                try:
+                    allowed_paths.append(Path(p[0]).resolve())
+                except (OSError, ValueError):
+                    continue
+
+            # Get cold storage locations
+            storage = db.query(ColdStorageLocation.path).all()
+            for p in storage:
+                try:
+                    allowed_paths.append(Path(p[0]).resolve())
+                except (OSError, ValueError):
+                    continue
+
+            is_allowed = False
+            for allowed in allowed_paths:
+                # Check if resolved_path is relative to allowed path
+                # This handles both equality and subdirectories
+                try:
+                    resolved_path.relative_to(allowed)
+                    is_allowed = True
+                    break
+                except ValueError:
+                    continue
+
+            if not is_allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: You can only browse monitored paths and cold storage locations.",
+                )
 
         # Get inventory status for all files in this directory
         # Build a map of file_path -> inventory_status
