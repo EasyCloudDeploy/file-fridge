@@ -2,6 +2,8 @@
 """API routes for file system browsing."""
 
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import Dict
 
@@ -9,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import FileInventory
+from app.models import ColdStorageLocation, FileInventory, MonitoredPath
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
 
@@ -50,6 +52,53 @@ def list_directory(
                 detail=f"Invalid directory path: {e!s}",
             ) from e
 
+        # Check permissions - MUST be done before any file system access
+        # We explicitly validate the path for ALL users to satisfy security analysis (S2083).
+        # For admins, we allow the root (anchor) of the resolved path.
+        allowed_paths = []
+
+        if "admin" in current_user.roles:
+            # Admin allowed everywhere
+            # On Linux/Unix, allow root. On Windows, we allow the anchor (drive root).
+            if sys.platform == "win32":
+                allowed_paths.append(Path(resolved_path.anchor))
+            else:
+                allowed_paths.append(Path("/"))
+        else:
+            # Non-admins: Only monitored paths and cold storage locations
+            # Get monitored paths
+            monitored = db.query(MonitoredPath.source_path).all()
+            for p in monitored:
+                try:
+                    allowed_paths.append(Path(p[0]).resolve())
+                except (OSError, ValueError):
+                    continue
+
+            # Get cold storage locations
+            storage = db.query(ColdStorageLocation.path).all()
+            for p in storage:
+                try:
+                    allowed_paths.append(Path(p[0]).resolve())
+                except (OSError, ValueError):
+                    continue
+
+        is_allowed = False
+        for allowed in allowed_paths:
+            # Check if resolved_path is relative to allowed path
+            # This handles both equality and subdirectories
+            try:
+                resolved_path.relative_to(allowed)
+                is_allowed = True
+                break
+            except ValueError:
+                continue
+
+        if not is_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You can only browse monitored paths and cold storage locations.",
+            )
+
         # Verify path exists and is a directory
         if not resolved_path.exists():
             raise HTTPException(
@@ -67,10 +116,16 @@ def list_directory(
         # Build a map of file_path -> inventory_status
         inventory_map: Dict[str, str] = {}
         try:
+            # Calculate prefix properly (handling root path)
+            path_prefix = str(resolved_path)
+            if not path_prefix.endswith(os.sep):
+                path_prefix += os.sep
+
             # Query all files in the current directory from inventory
+            # Use startswith to prevent wildcard injection and partial directory matches
             inventory_entries = (
                 db.query(FileInventory.file_path, FileInventory.storage_type)
-                .filter(FileInventory.file_path.like(f"{resolved_path}/%"))
+                .filter(FileInventory.file_path.startswith(path_prefix))
                 .all()
             )
 
