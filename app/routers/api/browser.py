@@ -2,6 +2,8 @@
 """API routes for file system browsing."""
 
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import Dict
 
@@ -56,8 +58,12 @@ def list_directory(
         allowed_paths = []
 
         if "admin" in current_user.roles:
-            # Admin allowed everywhere: add the root of the requested path
-            allowed_paths.append(Path(resolved_path.anchor))
+            # Admin allowed everywhere
+            # On Linux/Unix, allow root. On Windows, we allow the anchor (drive root).
+            if sys.platform == "win32":
+                allowed_paths.append(Path(resolved_path.anchor))
+            else:
+                allowed_paths.append(Path("/"))
         else:
             # Non-admins: Only monitored paths and cold storage locations
             # Get monitored paths
@@ -110,11 +116,16 @@ def list_directory(
         # Build a map of file_path -> inventory_status
         inventory_map: Dict[str, str] = {}
         try:
+            # Calculate prefix properly (handling root path)
+            path_prefix = str(resolved_path)
+            if not path_prefix.endswith(os.sep):
+                path_prefix += os.sep
+
             # Query all files in the current directory from inventory
             # Use startswith to prevent wildcard injection and partial directory matches
             inventory_entries = (
                 db.query(FileInventory.file_path, FileInventory.storage_type)
-                .filter(FileInventory.file_path.startswith(f"{resolved_path}/"))
+                .filter(FileInventory.file_path.startswith(path_prefix))
                 .all()
             )
 
