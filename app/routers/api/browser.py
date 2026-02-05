@@ -50,20 +50,7 @@ def list_directory(
                 detail=f"Invalid directory path: {e!s}",
             ) from e
 
-        # Verify path exists and is a directory
-        if not resolved_path.exists():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Directory does not exist: {path}",
-            )
-
-        if not resolved_path.is_dir():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path is not a directory: {path}",
-            )
-
-        # Check permissions
+        # Check permissions - MUST be done before any file system access
         # We explicitly validate the path for ALL users to satisfy security analysis (S2083).
         # For admins, we allow the root (anchor) of the resolved path.
         allowed_paths = []
@@ -104,6 +91,19 @@ def list_directory(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied: You can only browse monitored paths and cold storage locations.",
+            )
+
+        # Verify path exists and is a directory
+        if not resolved_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Directory does not exist: {path}",
+            )
+
+        if not resolved_path.is_dir():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Path is not a directory: {path}",
             )
 
         # Get inventory status for all files in this directory
