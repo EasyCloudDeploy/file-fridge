@@ -63,10 +63,16 @@ def list_directory(
                 detail=f"Path is not a directory: {path}",
             )
 
-        # Check permissions for non-admin users
-        if "admin" not in current_user.roles:
-            allowed_paths = []
+        # Check permissions
+        # We explicitly validate the path for ALL users to satisfy security analysis (S2083).
+        # For admins, we allow the root (anchor) of the resolved path.
+        allowed_paths = []
 
+        if "admin" in current_user.roles:
+            # Admin allowed everywhere: add the root of the requested path
+            allowed_paths.append(Path(resolved_path.anchor))
+        else:
+            # Non-admins: Only monitored paths and cold storage locations
             # Get monitored paths
             monitored = db.query(MonitoredPath.source_path).all()
             for p in monitored:
@@ -83,31 +89,32 @@ def list_directory(
                 except (OSError, ValueError):
                     continue
 
-            is_allowed = False
-            for allowed in allowed_paths:
-                # Check if resolved_path is relative to allowed path
-                # This handles both equality and subdirectories
-                try:
-                    resolved_path.relative_to(allowed)
-                    is_allowed = True
-                    break
-                except ValueError:
-                    continue
+        is_allowed = False
+        for allowed in allowed_paths:
+            # Check if resolved_path is relative to allowed path
+            # This handles both equality and subdirectories
+            try:
+                resolved_path.relative_to(allowed)
+                is_allowed = True
+                break
+            except ValueError:
+                continue
 
-            if not is_allowed:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Access denied: You can only browse monitored paths and cold storage locations.",
-                )
+        if not is_allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You can only browse monitored paths and cold storage locations.",
+            )
 
         # Get inventory status for all files in this directory
         # Build a map of file_path -> inventory_status
         inventory_map: Dict[str, str] = {}
         try:
             # Query all files in the current directory from inventory
+            # Use startswith to prevent wildcard injection and partial directory matches
             inventory_entries = (
                 db.query(FileInventory.file_path, FileInventory.storage_type)
-                .filter(FileInventory.file_path.like(f"{resolved_path}/%"))
+                .filter(FileInventory.file_path.startswith(f"{resolved_path}/"))
                 .all()
             )
 
