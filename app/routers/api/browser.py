@@ -45,9 +45,10 @@ def list_directory(
         try:
             resolved_path = Path(path).resolve()
         except (OSError, ValueError) as e:
+            # Do not reflect the invalid path in the error message
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid directory path: {e!s}",
+                detail="Invalid directory path",
             ) from e
 
         # Security check: Enforce path restrictions
@@ -100,15 +101,17 @@ def list_directory(
 
         # Verify path exists and is a directory
         if not resolved_path.exists():
+            # Do not reflect the path in the error message
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Directory does not exist: {path}",
+                detail="Directory does not exist",
             )
 
         if not resolved_path.is_dir():
+            # Do not reflect the path in the error message
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path is not a directory: {path}",
+                detail="Path is not a directory",
             )
 
         # Get inventory status for all files in this directory
@@ -179,8 +182,10 @@ def list_directory(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error browsing directory {path}")
+        # Sanitize path before logging
+        safe_path = str(path).replace("\n", "").replace("\r", "")
+        logger.exception(f"Error browsing directory {safe_path}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {e!s}",
+            detail="Error browsing directory",
         ) from e
