@@ -78,8 +78,10 @@ def list_directory(
                     break
 
             if not is_allowed:
+                # Sanitize path for logging to prevent log injection
+                safe_path = str(resolved_path).replace("\n", "").replace("\r", "")
                 logger.warning(
-                    f"Access denied: User {current_user.username} tried to browse {resolved_path}"
+                    f"Access denied: User {current_user.username} tried to browse {safe_path}"
                 )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -106,7 +108,7 @@ def list_directory(
             # Query all files in the current directory from inventory
             inventory_entries = (
                 db.query(FileInventory.file_path, FileInventory.storage_type)
-                .filter(FileInventory.file_path.like(f"{resolved_path}/%"))
+                .filter(FileInventory.file_path.startswith(f"{resolved_path}/"))
                 .all()
             )
 
