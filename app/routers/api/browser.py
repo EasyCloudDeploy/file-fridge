@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import FileInventory
+from app.models import ColdStorageLocation, FileInventory, MonitoredPath
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
 
@@ -49,6 +49,47 @@ def list_directory(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid directory path: {e!s}",
             ) from e
+
+        # Security check: Restrict browsing for non-admins
+        if "admin" not in current_user.roles:
+            allowed = False
+            # Fetch allowed paths (Monitored Paths and Cold Storage Locations)
+            allowed_roots = []
+
+            # Add Monitored Paths
+            for (mp_path,) in db.query(MonitoredPath.source_path).all():
+                try:
+                    allowed_roots.append(Path(mp_path).resolve())
+                except (OSError, ValueError):
+                    continue
+
+            # Add Cold Storage Locations
+            for (csl_path,) in db.query(ColdStorageLocation.path).all():
+                try:
+                    allowed_roots.append(Path(csl_path).resolve())
+                except (OSError, ValueError):
+                    continue
+
+            # Check if resolved_path is relative to any allowed root
+            for root in allowed_roots:
+                try:
+                    resolved_path.relative_to(root)
+                    allowed = True
+                    break
+                except ValueError:
+                    continue
+
+            if not allowed:
+                # Log the denial without exposing potentially dangerous user input directly
+                # We log the user ID which is an integer and safe
+                logger.warning(
+                    "Access denied: User ID %s tried to browse a restricted path.",
+                    current_user.id,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: You can only browse configured monitored paths and storage locations.",
+                )
 
         # Verify path exists and is a directory
         if not resolved_path.exists():
