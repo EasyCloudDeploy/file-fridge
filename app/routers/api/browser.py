@@ -80,14 +80,11 @@ def list_directory(
                     continue
 
             if not allowed:
-                # Sanitize log inputs using repr() to prevent log injection
-                # repr() escapes all control characters and wraps the string in quotes
-                safe_username = repr(current_user.username)
-                safe_path = repr(str(resolved_path))
+                # Log the denial without exposing potentially dangerous user input directly
+                # We log the user ID which is an integer and safe
                 logger.warning(
-                    "Access denied: User %s tried to browse restricted path %s",
-                    safe_username,
-                    safe_path,
+                    "Access denied: User ID %s tried to browse a restricted path.",
+                    current_user.id,
                 )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,

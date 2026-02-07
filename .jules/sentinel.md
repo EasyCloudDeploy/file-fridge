@@ -26,3 +26,7 @@
 **Vulnerability:** Simple string replacement was flagged as insufficient for log injection prevention by SonarCloud.
 **Learning:** repr() is a safer and more robust way to sanitize inputs for logging because it escapes all control characters. Using standard logging formatting instead of f-strings is also preferred.
 **Prevention:** Use repr() for logging untrusted user input.
+## 2026-01-20 - Log Injection via User Input
+**Vulnerability:** Logging any user-controlled input (even with repr()) can trigger security scanners and potentially allow log injection or obfuscation.
+**Learning:** The safest way to prevent log injection is to avoid logging untrusted input entirely. Log trusted identifiers (like User ID) instead.
+**Prevention:** Log IDs or static messages instead of raw user input.
