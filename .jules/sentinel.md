@@ -12,3 +12,17 @@
 **Vulnerability:** The fix for path traversal introduced a potential Log Injection vulnerability by logging unsanitized user input (username and file path).
 **Learning:** Security controls themselves can introduce new vulnerabilities if they log attacker-controlled data without sanitization. SonarCloud correctly flagged this as a security hotspot.
 **Prevention:** Always sanitize user input before logging. Use safe logging practices or explicit sanitization (e.g., removing newlines) for untrusted data.
+
+## 2026-01-20 - Robust Log Sanitization
+**Vulnerability:** Simple string replacement () was flagged as insufficient for log injection prevention by SonarCloud.
+**Learning:**  is a safer and more robust way to sanitize inputs for logging because it escapes all control characters and provides a clear visual indication of the input type (string representation). Using standard logging formatting () instead of f-strings is also preferred for security and performance.
+**Prevention:** Use  for logging untrusted user input.
+
+## 2026-01-20 - Robust Log Sanitization
+**Vulnerability:** Simple string replacement was flagged as insufficient for log injection prevention by SonarCloud.
+**Learning:**  is a safer and more robust way to sanitize inputs for logging because it escapes all control characters and provides a clear visual indication of the input type (string representation). Using standard logging formatting instead of f-strings is also preferred for security and performance.
+**Prevention:** Use  for logging untrusted user input.
+## 2026-01-20 - Robust Log Sanitization
+**Vulnerability:** Simple string replacement was flagged as insufficient for log injection prevention by SonarCloud.
+**Learning:** repr() is a safer and more robust way to sanitize inputs for logging because it escapes all control characters. Using standard logging formatting instead of f-strings is also preferred.
+**Prevention:** Use repr() for logging untrusted user input.
