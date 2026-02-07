@@ -80,8 +80,11 @@ def list_directory(
                     continue
 
             if not allowed:
+                # Sanitize log inputs to prevent log injection
+                safe_username = current_user.username.replace("\n", "").replace("\r", "")
+                safe_path = str(resolved_path).replace("\n", "").replace("\r", "")
                 logger.warning(
-                    f"Access denied: User {current_user.username} tried to browse restricted path {resolved_path}"
+                    f"Access denied: User {safe_username} tried to browse restricted path {safe_path}"
                 )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,

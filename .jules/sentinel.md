@@ -7,3 +7,8 @@
 **Vulnerability:** The `/api/v1/browser/list` endpoint allowed any authenticated user (e.g., 'viewer') to browse the entire server filesystem by manipulating the `path` query parameter. The endpoint relied on path resolution but lacked authorization checks restricting access to configured directories.
 **Learning:** The vulnerability existed because the "viewer" role was granted `browser:read` permission globally, and the implementation assumed that "unrestricted" access for admins meant no checks were needed at all, inadvertently opening it for everyone.
 **Prevention:** Implement "allowlist" logic for file access APIs. Ensure that "read" permissions are scoped to specific resources (e.g., Monitored Paths) rather than being global. Always test path traversal with non-admin users.
+
+## 2026-01-20 - Log Injection in Security Controls
+**Vulnerability:** The fix for path traversal introduced a potential Log Injection vulnerability by logging unsanitized user input (username and file path).
+**Learning:** Security controls themselves can introduce new vulnerabilities if they log attacker-controlled data without sanitization. SonarCloud correctly flagged this as a security hotspot.
+**Prevention:** Always sanitize user input before logging. Use safe logging practices or explicit sanitization (e.g., removing newlines) for untrusted data.
