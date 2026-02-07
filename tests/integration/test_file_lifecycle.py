@@ -3,10 +3,11 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch # Added here
 
 import pytest
 from app.database import SessionLocal
-from app.models import MonitoredPath, ColdStorageLocation, StorageType, FileStatus
+from app.models import MonitoredPath, ColdStorageLocation, StorageType, FileStatus, Criteria
 from app.services.file_workflow_service import file_workflow_service
 
 
@@ -61,11 +62,11 @@ def test_file_lifecycle_move_operation(monitored_path_with_locations, db_session
     time.sleep(0.1) # Ensure mtime is different if possible
 
     # Add a criteria for moving (e.g., mtime > 0 minutes ago, effectively all files)
-    criteria = monitored_path.criteria_class(
+    criteria = Criteria(
         path_id=monitored_path.id,
         criterion_type="mtime",
-        operator=">",
-        value="0",
+        operator="<",
+        value="-1",
         enabled=True,
     )
     db_session.add(criteria)
@@ -137,11 +138,11 @@ def test_file_lifecycle_symlink_operation(monitored_path_with_locations, db_sess
     time.sleep(0.1)
 
     # Add a criteria for moving
-    criteria = monitored_path.criteria_class(
+    criteria = Criteria(
         path_id=monitored_path.id,
         criterion_type="mtime",
-        operator=">",
-        value="0",
+        operator="<",
+        value="-1",
         enabled=True,
     )
     db_session.add(criteria)
@@ -212,11 +213,11 @@ def test_file_lifecycle_copy_operation(monitored_path_with_locations, db_session
     time.sleep(0.1)
 
     # Add a criteria for copying
-    criteria = monitored_path.criteria_class(
+    criteria = Criteria(
         path_id=monitored_path.id,
         criterion_type="mtime",
-        operator=">",
-        value="0",
+        operator="<",
+        value="-1",
         enabled=True,
     )
     db_session.add(criteria)
@@ -303,11 +304,11 @@ def test_file_lifecycle_non_existent_file(monitored_path_with_locations, db_sess
     file_to_disappear.write_text("I will vanish!")
 
     # Add a criteria for moving
-    criteria = monitored_path.criteria_class(
+    criteria = Criteria(
         path_id=monitored_path.id,
         criterion_type="mtime",
-        operator=">",
-        value="0",
+        operator="<",
+        value="-1",
         enabled=True,
     )
     db_session.add(criteria)

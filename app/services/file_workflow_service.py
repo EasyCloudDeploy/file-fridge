@@ -343,10 +343,6 @@ class FileWorkflowService:
                     continue
 
             try:
-                is_active, matched_ids = CriteriaMatcher.match_file(
-                    file_path, path.criteria, actual_file_path
-                )
-
                 if is_active:
                     if is_symlink_to_cold and actual_file_path:
                         files_to_thaw.append((file_path, actual_file_path))

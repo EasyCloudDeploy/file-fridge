@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import factory
 import pytest
+from cryptography.fernet import Fernet # Added here
 from app.models import (
     ColdStorageLocation,
     ConflictResolution,
@@ -40,10 +41,12 @@ from app.models import (
     Tag,
     TagRule,
     TagRuleCriterionType,
+    TransactionType, # Added TransactionType here
     TransferDirection,
     TransferMode,
     TransferStatus,
     TrustStatus,
+    User,
 )
 from sqlalchemy.orm import Session
 
@@ -84,14 +87,15 @@ class MonitoredPathFactory(factory.alchemy.SQLAlchemyModelFactory):
         if not create:
             return
 
+        # Get the session from the factory's meta
+        session = self._meta.sqlalchemy_session
+        
         if extracted:
             for location in extracted:
                 self.storage_locations.append(location)
         else:
             # Default to one storage location if none provided
-            self.storage_locations.append(ColdStorageLocationFactory(sqlalchemy_session=self.session))
-
-
+            self.storage_locations.append(ColdStorageLocationFactory(sqlalchemy_session=session))
 class CriteriaFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
         model = Criteria

@@ -37,7 +37,7 @@ def source_and_dest(tmp_path):
 
 
 @patch("shutil.disk_usage")
-@patch("app.services.file_mover._move")
+@patch("app.services.file_mover._move", return_value=(True, None))
 def test_move_file_operation_move(mock_internal_move, mock_disk_usage, source_and_dest):
     """Test that move_file calls the internal _move function for MOVE operation."""
     source, dest = source_and_dest
@@ -51,7 +51,7 @@ def test_move_file_operation_move(mock_internal_move, mock_disk_usage, source_an
 
 
 @patch("shutil.disk_usage")
-@patch("app.services.file_mover._copy")
+@patch("app.services.file_mover._copy", return_value=(True, None))
 def test_move_file_operation_copy(mock_internal_copy, mock_disk_usage, source_and_dest):
     """Test that move_file calls the internal _copy function for COPY operation."""
     source, dest = source_and_dest
@@ -65,7 +65,7 @@ def test_move_file_operation_copy(mock_internal_copy, mock_disk_usage, source_an
 
 
 @patch("shutil.disk_usage")
-@patch("app.services.file_mover._move_and_symlink")
+@patch("app.services.file_mover._move_and_symlink", return_value=(True, None))
 def test_move_file_operation_symlink(mock_internal_symlink, mock_disk_usage, source_and_dest):
     """Test that move_file calls the internal _move_and_symlink function for SYMLINK operation."""
     source, dest = source_and_dest
@@ -204,17 +204,22 @@ def test_move_and_symlink_file(mock_symlink_to, mock_move, source_and_dest):
 
 @patch("app.services.file_mover._move")
 @patch("pathlib.Path.symlink_to", side_effect=OSError("Permission denied"))
-@patch("pathlib.Path.rename")
-def test_move_and_symlink_rollback(mock_rename, mock_symlink_to, mock_move, source_and_dest):
+def test_move_and_symlink_rollback(mock_symlink_to, mock_move, source_and_dest, mocker): # Added mocker
     """Test that _move_and_symlink rolls back the move if symlink creation fails."""
     source, dest = source_and_dest
     mock_move.return_value = (True, None)
-    # This is tricky because the 'source' object is patched. We need to mock the destination's rename
-    with patch.object(dest, 'rename') as mock_dest_rename:
-        success, error = _move_and_symlink(source, dest)
-        assert success is False
-        assert "Symlink creation failed" in error
-        mock_dest_rename.assert_called_once_with(source)
+
+    # Mock pathlib.Path.rename at the class level
+    # Configure it to do nothing for the initial move,
+    # but track calls for the rollback
+    mock_path_rename = mocker.patch("pathlib.Path.rename", autospec=True)
+
+    success, error = _move_and_symlink(source, dest)
+
+    assert success is False
+    assert "Symlink creation failed" in error
+    # The rollback calls dest.rename(source)
+    mock_path_rename.assert_called_once_with(dest, source)
 
 
 # ==================================
@@ -230,6 +235,8 @@ def test_move_with_rollback_success(mock_move, mock_verifier, source_and_dest):
     mock_verifier.calculate_checksum.side_effect = ["checksum1", "checksum1"]
 
     success, error, checksum = move_with_rollback(source, dest, OperationType.MOVE)
+    if success:
+        dest.touch() # Simulate file creation by _move for checksum calculation
 
     assert success is True
     assert error is None
@@ -240,19 +247,37 @@ def test_move_with_rollback_success(mock_move, mock_verifier, source_and_dest):
 
 @patch("app.services.file_mover.checksum_verifier")
 @patch("app.services.file_mover._move")
-@patch("pathlib.Path.unlink")
-def test_move_with_rollback_checksum_mismatch(mock_unlink, mock_move, mock_verifier, source_and_dest):
+# @patch("pathlib.Path.unlink") # No longer need to patch this decorator, will use mocker.patch
+def test_move_with_rollback_checksum_mismatch(mock_move, mock_verifier, source_and_dest, mocker): # Removed mock_unlink, added mocker
     """Test move_with_rollback with checksum mismatch triggers rollback."""
     source, dest = source_and_dest
     mock_move.return_value = (True, None)
     mock_verifier.calculate_checksum.side_effect = ["checksum1", "checksum2"]
     
-    # We need to make the destination file exist for the unlink call
-    with patch.object(dest, 'exists', return_value=True):
-         with patch.object(dest, 'unlink') as mock_dest_unlink:
-            success, error, checksum = move_with_rollback(source, dest, OperationType.MOVE)
-            assert success is False
-            assert "Checksum verification failed" in error
-            assert checksum == "checksum1"
-            mock_dest_unlink.assert_called_once()
+    # Create the destination file so checksum_verifier doesn't fail immediately
+    dest.touch()
+
+    # Patch Path.exists and Path.unlink at the class level
+    mock_path_exists = mocker.patch("pathlib.Path.exists", autospec=True)
+    mock_path_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
+
+    # Store the original Path.exists method before patching
+    _original_path_exists = Path.exists
+
+    # Configure mock_path_exists to return True for the 'dest' object in rollback check
+    # For any other path, call the *original* Path.exists method using the stored reference
+    def custom_exists_side_effect(path_obj):
+        if path_obj == dest:
+            return True
+        # Call the original, unmocked Path.exists using the stored reference
+        return _original_path_exists(path_obj)
+
+    mock_path_exists.side_effect = custom_exists_side_effect
+
+    success, error, checksum = move_with_rollback(source, dest, OperationType.MOVE)
+    assert success is False
+    assert "Checksum verification failed" in error
+    assert checksum == "checksum1"
+    # Ensure unlink was called on the correct destination path
+    mock_path_unlink.assert_called_once_with(dest)
 

@@ -10,6 +10,7 @@ from typing import Callable, Optional
 
 from app.config import translate_path_for_symlink
 from app.models import MonitoredPath, OperationType
+from app.services.checksum_verifier import checksum_verifier # Moved to module level
 
 logger = logging.getLogger(__name__)
 

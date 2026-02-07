@@ -5,19 +5,24 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, call, ANY
 
 import pytest
-from app.models import MonitoredPath, Criteria, CriterionType, Operator, FileInventory, FileStatus, StorageType, ScanStatus
+from app.models import MonitoredPath, Criteria, CriterionType, Operator, FileInventory, FileStatus, StorageType, ScanStatus, ColdStorageLocation
 from app.services.file_workflow_service import FileWorkflowService
 
 @pytest.fixture
 def monitored_path(db_session):
     """Fixture for a MonitoredPath object."""
+    # Create cold storage location
+    cold_loc = ColdStorageLocation(name="TestColdLoc", path="/tmp/cold")
+    db_session.add(cold_loc)
+    db_session.flush() # Flush to get an ID for cold_loc before creating MonitoredPath
+
     path = MonitoredPath(
         name="Test Path",
         source_path="/tmp/hot",
-        cold_storage_path="/tmp/cold",
         operation_type="move",
         last_scan_status=ScanStatus.SUCCESS,
     )
+    path.storage_locations.append(cold_loc) # Link the cold storage location
     db_session.add(path)
     db_session.commit()
     db_session.refresh(path)
