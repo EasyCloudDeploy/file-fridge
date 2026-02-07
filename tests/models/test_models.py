@@ -1,10 +1,10 @@
-
 import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import factory
 import pytest
+from cryptography.fernet import Fernet  # Added here
 from app.models import (
     ColdStorageLocation,
     ConflictResolution,
@@ -40,10 +40,12 @@ from app.models import (
     Tag,
     TagRule,
     TagRuleCriterionType,
+    TransactionType,  # Added TransactionType here
     TransferDirection,
     TransferMode,
     TransferStatus,
     TrustStatus,
+    User,
 )
 from sqlalchemy.orm import Session
 
@@ -56,7 +58,7 @@ from sqlalchemy.orm import Session
 class ColdStorageLocationFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
         model = ColdStorageLocation
-        sqlalchemy_session = None # Will be set by fixture
+        sqlalchemy_session = None  # Will be set by fixture
 
     id = factory.Sequence(lambda n: n)
     name = factory.Sequence(lambda n: f"Location {n}")
@@ -89,7 +91,8 @@ class MonitoredPathFactory(factory.alchemy.SQLAlchemyModelFactory):
                 self.storage_locations.append(location)
         else:
             # Default to one storage location if none provided
-            self.storage_locations.append(ColdStorageLocationFactory(sqlalchemy_session=self.session))
+            # The session is already set on the factory's Meta class by the fixture
+            self.storage_locations.append(ColdStorageLocationFactory())
 
 
 class CriteriaFactory(factory.alchemy.SQLAlchemyModelFactory):
@@ -98,7 +101,7 @@ class CriteriaFactory(factory.alchemy.SQLAlchemyModelFactory):
         sqlalchemy_session = None
 
     id = factory.Sequence(lambda n: n)
-    path = factory.SubFactory(MonitoredPathFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    path = factory.SubFactory(MonitoredPathFactory)
     path_id = factory.SelfAttribute("path.id")
     criterion_type = CriterionType.SIZE
     operator = Operator.GT
@@ -112,7 +115,7 @@ class FileInventoryFactory(factory.alchemy.SQLAlchemyModelFactory):
         sqlalchemy_session = None
 
     id = factory.Sequence(lambda n: n)
-    path = factory.SubFactory(MonitoredPathFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    path = factory.SubFactory(MonitoredPathFactory)
     path_id = factory.SelfAttribute("path.id")
     file_path = factory.Sequence(lambda n: f"/srv/hot_data_0/file_{n}.txt")
     storage_type = StorageType.HOT
@@ -176,6 +179,20 @@ def set_session_for_factories(db_session: Session):
     TagFactory._meta.sqlalchemy_session = db_session
     UserFactory._meta.sqlalchemy_session = db_session
     RemoteConnectionFactory._meta.sqlalchemy_session = db_session
+    FileRecordFactory._meta.sqlalchemy_session = db_session
+    FileTransactionHistoryFactory._meta.sqlalchemy_session = db_session
+    PinnedFileFactory._meta.sqlalchemy_session = db_session
+    FileTagFactory._meta.sqlalchemy_session = db_session
+    TagRuleFactory._meta.sqlalchemy_session = db_session
+    NotificationFactory._meta.sqlalchemy_session = db_session
+    NotifierFactory._meta.sqlalchemy_session = db_session
+    NotificationDispatchFactory._meta.sqlalchemy_session = db_session
+    ServerEncryptionKeyFactory._meta.sqlalchemy_session = db_session
+    InstanceMetadataFactory._meta.sqlalchemy_session = db_session
+    RemoteTransferJobFactory._meta.sqlalchemy_session = db_session
+    RequestNonceFactory._meta.sqlalchemy_session = db_session
+    SecurityAuditLogFactory._meta.sqlalchemy_session = db_session
+    InstanceKeyHistoryFactory._meta.sqlalchemy_session = db_session
     yield
     # Clean up session after tests
     ColdStorageLocationFactory._meta.sqlalchemy_session = None
@@ -185,6 +202,20 @@ def set_session_for_factories(db_session: Session):
     TagFactory._meta.sqlalchemy_session = None
     UserFactory._meta.sqlalchemy_session = None
     RemoteConnectionFactory._meta.sqlalchemy_session = None
+    FileRecordFactory._meta.sqlalchemy_session = None
+    FileTransactionHistoryFactory._meta.sqlalchemy_session = None
+    PinnedFileFactory._meta.sqlalchemy_session = None
+    FileTagFactory._meta.sqlalchemy_session = None
+    TagRuleFactory._meta.sqlalchemy_session = None
+    NotificationFactory._meta.sqlalchemy_session = None
+    NotifierFactory._meta.sqlalchemy_session = None
+    NotificationDispatchFactory._meta.sqlalchemy_session = None
+    ServerEncryptionKeyFactory._meta.sqlalchemy_session = None
+    InstanceMetadataFactory._meta.sqlalchemy_session = None
+    RemoteTransferJobFactory._meta.sqlalchemy_session = None
+    RequestNonceFactory._meta.sqlalchemy_session = None
+    SecurityAuditLogFactory._meta.sqlalchemy_session = None
+    InstanceKeyHistoryFactory._meta.sqlalchemy_session = None
 
 
 # ==================================
@@ -210,13 +241,15 @@ def test_monitored_path_creation(db_session: Session):
     assert path.name == "My Path"
     assert path.source_path == "/data/hot"
     assert path.operation_type == OperationType.MOVE
-    assert len(path.storage_locations) == 1 # Default one from post_generation
+    assert len(path.storage_locations) == 1  # Default one from post_generation
     assert path.cold_storage_path == path.storage_locations[0].path
 
 
 def test_criteria_creation(db_session: Session):
     path = MonitoredPathFactory()
-    criteria = CriteriaFactory(path=path, criterion_type=CriterionType.MTIME, operator=Operator.LT, value="30")
+    criteria = CriteriaFactory(
+        path=path, criterion_type=CriterionType.MTIME, operator=Operator.LT, value="30"
+    )
     db_session.add(criteria)
     db_session.commit()
     assert criteria.id is not None
@@ -227,7 +260,9 @@ def test_criteria_creation(db_session: Session):
 
 
 def test_file_inventory_creation(db_session: Session):
-    file = FileInventoryFactory(file_path="/data/hot/my_file.txt", storage_type=StorageType.COLD, file_size=2048)
+    file = FileInventoryFactory(
+        file_path="/data/hot/my_file.txt", storage_type=StorageType.COLD, file_size=2048
+    )
     db_session.add(file)
     db_session.commit()
     assert file.id is not None
@@ -256,7 +291,9 @@ def test_user_creation(db_session: Session):
 
 
 def test_remote_connection_creation(db_session: Session):
-    conn = RemoteConnectionFactory(name="My Remote", url="http://myremote.com", trust_status=TrustStatus.PENDING)
+    conn = RemoteConnectionFactory(
+        name="My Remote", url="http://myremote.com", trust_status=TrustStatus.PENDING
+    )
     db_session.add(conn)
     db_session.commit()
     assert conn.id is not None
@@ -297,12 +334,11 @@ class FileRecordFactory(factory.alchemy.SQLAlchemyModelFactory):
         sqlalchemy_session = None
 
     id = factory.Sequence(lambda n: n)
-    path = factory.SubFactory(MonitoredPathFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    path = factory.SubFactory(MonitoredPathFactory)
     path_id = factory.SelfAttribute("path.id")
     original_path = factory.Sequence(lambda n: f"/src/original_{n}.txt")
     cold_storage_path = factory.Sequence(lambda n: f"/dest/cold_{n}.txt")
-    cold_storage_location = factory.SubFactory(ColdStorageLocationFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
-    cold_storage_location_id = factory.SelfAttribute("cold_storage_location.id")
+    cold_storage_location_id = factory.Sequence(lambda n: n)
     file_size = 1000
     operation_type = OperationType.MOVE
     criteria_matched = json.dumps([1, 2])
@@ -316,13 +352,14 @@ def test_file_record_creation(db_session: Session):
     assert file_record.file_size == 1000
     assert json.loads(file_record.criteria_matched) == [1, 2]
 
+
 class FileTransactionHistoryFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
         model = FileTransactionHistory
         sqlalchemy_session = None
 
     id = factory.Sequence(lambda n: n)
-    file = factory.SubFactory(FileInventoryFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    file = factory.SubFactory(FileInventoryFactory)
     file_id = factory.SelfAttribute("file.id")
     transaction_type = TransactionType.FREEZE
     old_storage_type = StorageType.HOT
@@ -339,13 +376,14 @@ def test_file_transaction_history_creation(db_session: Session):
     assert history.transaction_type == TransactionType.FREEZE
     assert history.file_id == history.file.id
 
+
 class PinnedFileFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
         model = PinnedFile
         sqlalchemy_session = None
 
     id = factory.Sequence(lambda n: n)
-    path = factory.SubFactory(MonitoredPathFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    path = factory.SubFactory(MonitoredPathFactory)
     path_id = factory.SelfAttribute("path.id")
     file_path = factory.Sequence(lambda n: f"/pinned/file_{n}.txt")
 
@@ -357,17 +395,19 @@ def test_pinned_file_creation(db_session: Session):
     assert pinned.id is not None
     assert pinned.file_path.startswith("/pinned/file_")
 
+
 class FileTagFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
         model = FileTag
         sqlalchemy_session = None
 
     id = factory.Sequence(lambda n: n)
-    file = factory.SubFactory(FileInventoryFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    file = factory.SubFactory(FileInventoryFactory)
     file_id = factory.SelfAttribute("file.id")
-    tag = factory.SubFactory(TagFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    tag = factory.SubFactory(TagFactory)
     tag_id = factory.SelfAttribute("tag.id")
     tagged_by = "admin"
+
 
 def test_file_tag_creation(db_session: Session):
     file_tag = FileTagFactory()
@@ -377,13 +417,14 @@ def test_file_tag_creation(db_session: Session):
     assert file_tag.file_id == file_tag.file.id
     assert file_tag.tag_id == file_tag.tag.id
 
+
 class TagRuleFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
         model = TagRule
         sqlalchemy_session = None
 
     id = factory.Sequence(lambda n: n)
-    tag = factory.SubFactory(TagFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    tag = factory.SubFactory(TagFactory)
     tag_id = factory.SelfAttribute("tag.id")
     criterion_type = TagRuleCriterionType.EXTENSION
     operator = Operator.EQ
@@ -418,15 +459,27 @@ def test_notification_creation(db_session: Session):
     assert notification.id is not None
     assert notification.level == NotificationLevel.INFO
 
+
+class NotifierFactory(factory.alchemy.SQLAlchemyModelFactory):
+    class Meta:
+        model = Notifier
+        sqlalchemy_session = None
+
+    id = factory.Sequence(lambda n: n)
+    name = factory.Sequence(lambda n: f"Notifier {n}")
+    type = NotifierType.GENERIC_WEBHOOK
+    address = factory.Sequence(lambda n: f"https://example{n}.com/webhook")
+
+
 class NotificationDispatchFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
         model = NotificationDispatch
         sqlalchemy_session = None
 
     id = factory.Sequence(lambda n: n)
-    notification = factory.SubFactory(NotificationFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    notification = factory.SubFactory(NotificationFactory)
     notification_id = factory.SelfAttribute("notification.id")
-    notifier = factory.SubFactory(Notifier, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    notifier = factory.SubFactory(NotifierFactory)
     notifier_id = factory.SelfAttribute("notifier.id")
     status = DispatchStatus.SUCCESS
 
@@ -438,6 +491,7 @@ def test_notification_dispatch_creation(db_session: Session):
     assert dispatch.id is not None
     assert dispatch.notification_id == dispatch.notification.id
     assert dispatch.notifier_id == dispatch.notifier.id
+
 
 class ServerEncryptionKeyFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
@@ -457,6 +511,7 @@ def test_server_encryption_key_creation(db_session: Session):
     assert key.key_value is not None
     assert key.fingerprint is not None
 
+
 class InstanceMetadataFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
         model = InstanceMetadata
@@ -474,15 +529,16 @@ def test_instance_metadata_creation(db_session: Session):
     assert metadata.id is not None
     assert metadata.instance_uuid is not None
 
+
 class RemoteTransferJobFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
         model = RemoteTransferJob
         sqlalchemy_session = None
 
     id = factory.Sequence(lambda n: n)
-    file = factory.SubFactory(FileInventoryFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    file = factory.SubFactory(FileInventoryFactory)
     file_inventory_id = factory.SelfAttribute("file.id")
-    remote_connection = factory.SubFactory(RemoteConnectionFactory, sqlalchemy_session=factory.SelfAttribute("..sqlalchemy_session"))
+    remote_connection = factory.SubFactory(RemoteConnectionFactory)
     remote_connection_id = factory.SelfAttribute("remote_connection.id")
     remote_monitored_path_id = 1
     status = TransferStatus.PENDING
@@ -504,6 +560,7 @@ def test_remote_transfer_job_creation(db_session: Session):
     assert job.status == TransferStatus.PENDING
     assert job.file_inventory_id == job.file.id
 
+
 class RequestNonceFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
         model = RequestNonce
@@ -521,6 +578,7 @@ def test_request_nonce_creation(db_session: Session):
     db_session.commit()
     assert nonce.id is not None
     assert nonce.fingerprint is not None
+
 
 class SecurityAuditLogFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:
@@ -540,6 +598,7 @@ def test_security_audit_log_creation(db_session: Session):
     db_session.commit()
     assert log.id is not None
     assert log.event_type == "LOGIN_SUCCESS"
+
 
 class InstanceKeyHistoryFactory(factory.alchemy.SQLAlchemyModelFactory):
     class Meta:

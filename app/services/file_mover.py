@@ -10,6 +10,7 @@ from typing import Callable, Optional
 
 from app.config import translate_path_for_symlink
 from app.models import MonitoredPath, OperationType
+from app.services.checksum_verifier import checksum_verifier  # Moved to module level
 
 logger = logging.getLogger(__name__)
 
@@ -204,8 +205,6 @@ def move_with_rollback(
     Returns:
         (success, error_message, checksum) tuple
     """
-    from app.services.checksum_verifier import checksum_verifier
-
     # Calculate source checksum for verification
     source_checksum = None
     if verify_checksum:
@@ -230,7 +229,7 @@ def move_with_rollback(
 
         if dest_checksum != source_checksum:
             logger.error(
-                f"Checksum mismatch after move: {source_checksum[:16]}... != {dest_checksum[:16]}..."
+                f"Checksum mismatch after move: {source_checksum[:16] if source_checksum else 'None'}... != {dest_checksum[:16] if dest_checksum else 'None'}..."
             )
             # Rollback: delete destination to avoid inconsistent state
             try:
