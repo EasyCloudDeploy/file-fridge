@@ -1,4 +1,3 @@
-
 import os
 import shutil
 from pathlib import Path
@@ -36,12 +35,13 @@ def source_and_dest(tmp_path):
 # ==================================
 
 
-@patch("shutil.disk_usage")
+@patch("app.services.file_mover.shutil.disk_usage")
 @patch("app.services.file_mover._move", return_value=(True, None))
 def test_move_file_operation_move(mock_internal_move, mock_disk_usage, source_and_dest):
     """Test that move_file calls the internal _move function for MOVE operation."""
     source, dest = source_and_dest
-    mock_disk_usage.return_value = (0, 0, source.stat().st_size * 2) # Ample space
+    # Need enough space for file size + 1MB buffer
+    mock_disk_usage.return_value = (0, 0, source.stat().st_size + 2 * 1024 * 1024)
 
     success, error = move_file(source, dest, OperationType.MOVE)
 
@@ -50,12 +50,13 @@ def test_move_file_operation_move(mock_internal_move, mock_disk_usage, source_an
     mock_internal_move.assert_called_once_with(source, dest, None)
 
 
-@patch("shutil.disk_usage")
+@patch("app.services.file_mover.shutil.disk_usage")
 @patch("app.services.file_mover._copy", return_value=(True, None))
 def test_move_file_operation_copy(mock_internal_copy, mock_disk_usage, source_and_dest):
     """Test that move_file calls the internal _copy function for COPY operation."""
     source, dest = source_and_dest
-    mock_disk_usage.return_value = (0, 0, source.stat().st_size * 2)
+    # Need enough space for file size + 1MB buffer
+    mock_disk_usage.return_value = (0, 0, source.stat().st_size + 2 * 1024 * 1024)
 
     success, error = move_file(source, dest, OperationType.COPY)
 
@@ -64,12 +65,13 @@ def test_move_file_operation_copy(mock_internal_copy, mock_disk_usage, source_an
     mock_internal_copy.assert_called_once_with(source, dest, None)
 
 
-@patch("shutil.disk_usage")
+@patch("app.services.file_mover.shutil.disk_usage")
 @patch("app.services.file_mover._move_and_symlink", return_value=(True, None))
 def test_move_file_operation_symlink(mock_internal_symlink, mock_disk_usage, source_and_dest):
     """Test that move_file calls the internal _move_and_symlink function for SYMLINK operation."""
     source, dest = source_and_dest
-    mock_disk_usage.return_value = (0, 0, source.stat().st_size * 2)
+    # Need enough space for file size + 1MB buffer
+    mock_disk_usage.return_value = (0, 0, source.stat().st_size + 2 * 1024 * 1024)
 
     success, error = move_file(source, dest, OperationType.SYMLINK)
 
@@ -78,7 +80,7 @@ def test_move_file_operation_symlink(mock_internal_symlink, mock_disk_usage, sou
     mock_internal_symlink.assert_called_once_with(source, dest, None)
 
 
-@patch("shutil.disk_usage")
+@patch("app.services.file_mover.shutil.disk_usage")
 def test_move_file_not_enough_space(mock_disk_usage, source_and_dest):
     """Test that move_file fails if there is not enough disk space."""
     source, dest = source_and_dest
@@ -134,9 +136,11 @@ def test_move_cross_filesystem(mock_unlink, mock_copy, mock_rename, source_and_d
     mock_copy.assert_called_once_with(source, dest, None)
     mock_unlink.assert_called_once()
 
+
 # ==================================
 # _copy tests
 # ==================================
+
 
 @patch("app.services.file_mover._copy_with_progress")
 def test_copy(mock_copy_with_progress, source_and_dest):
@@ -163,6 +167,7 @@ def test_copy_exception(mock_copy2, source_and_dest):
 # preserve_directory_structure tests
 # ==================================
 
+
 def test_preserve_directory_structure():
     """Test preserve_directory_structure function."""
     base_source = Path("/data/hot")
@@ -172,6 +177,7 @@ def test_preserve_directory_structure():
     result = preserve_directory_structure(source_path, base_source, base_dest)
 
     assert result == Path("/data/cold/movies/2023/movie.mkv")
+
 
 def test_preserve_directory_structure_no_relation():
     """Test preserve_directory_structure when source is not in base_source."""
@@ -188,6 +194,7 @@ def test_preserve_directory_structure_no_relation():
 # _move_and_symlink tests
 # ==================================
 
+
 @patch("app.services.file_mover._move")
 @patch("pathlib.Path.symlink_to")
 def test_move_and_symlink_file(mock_symlink_to, mock_move, source_and_dest):
@@ -202,9 +209,12 @@ def test_move_and_symlink_file(mock_symlink_to, mock_move, source_and_dest):
     mock_move.assert_called_once_with(source, dest, None)
     mock_symlink_to.assert_called_once()
 
+
 @patch("app.services.file_mover._move")
 @patch("pathlib.Path.symlink_to", side_effect=OSError("Permission denied"))
-def test_move_and_symlink_rollback(mock_symlink_to, mock_move, source_and_dest, mocker): # Added mocker
+def test_move_and_symlink_rollback(
+    mock_symlink_to, mock_move, source_and_dest, mocker
+):  # Added mocker
     """Test that _move_and_symlink rolls back the move if symlink creation fails."""
     source, dest = source_and_dest
     mock_move.return_value = (True, None)
@@ -226,6 +236,7 @@ def test_move_and_symlink_rollback(mock_symlink_to, mock_move, source_and_dest, 
 # move_with_rollback tests
 # ==================================
 
+
 @patch("app.services.file_mover.checksum_verifier")
 @patch("app.services.file_mover._move")
 def test_move_with_rollback_success(mock_move, mock_verifier, source_and_dest):
@@ -235,8 +246,6 @@ def test_move_with_rollback_success(mock_move, mock_verifier, source_and_dest):
     mock_verifier.calculate_checksum.side_effect = ["checksum1", "checksum1"]
 
     success, error, checksum = move_with_rollback(source, dest, OperationType.MOVE)
-    if success:
-        dest.touch() # Simulate file creation by _move for checksum calculation
 
     assert success is True
     assert error is None
@@ -247,29 +256,28 @@ def test_move_with_rollback_success(mock_move, mock_verifier, source_and_dest):
 
 @patch("app.services.file_mover.checksum_verifier")
 @patch("app.services.file_mover._move")
-# @patch("pathlib.Path.unlink") # No longer need to patch this decorator, will use mocker.patch
-def test_move_with_rollback_checksum_mismatch(mock_move, mock_verifier, source_and_dest, mocker): # Removed mock_unlink, added mocker
+def test_move_with_rollback_checksum_mismatch(
+    mock_move, mock_verifier, source_and_dest, mocker
+):  # Removed mock_unlink, added mocker
     """Test move_with_rollback with checksum mismatch triggers rollback."""
     source, dest = source_and_dest
     mock_move.return_value = (True, None)
     mock_verifier.calculate_checksum.side_effect = ["checksum1", "checksum2"]
-    
+
     # Create the destination file so checksum_verifier doesn't fail immediately
     dest.touch()
+
+    # Capture the real Path.exists BEFORE patching
+    _original_path_exists = Path.exists
 
     # Patch Path.exists and Path.unlink at the class level
     mock_path_exists = mocker.patch("pathlib.Path.exists", autospec=True)
     mock_path_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
 
-    # Store the original Path.exists method before patching
-    _original_path_exists = Path.exists
-
-    # Configure mock_path_exists to return True for the 'dest' object in rollback check
-    # For any other path, call the *original* Path.exists method using the stored reference
+    # Return True for the dest path in rollback check; delegate to the real method otherwise
     def custom_exists_side_effect(path_obj):
         if path_obj == dest:
             return True
-        # Call the original, unmocked Path.exists using the stored reference
         return _original_path_exists(path_obj)
 
     mock_path_exists.side_effect = custom_exists_side_effect
@@ -280,4 +288,3 @@ def test_move_with_rollback_checksum_mismatch(mock_move, mock_verifier, source_a
     assert checksum == "checksum1"
     # Ensure unlink was called on the correct destination path
     mock_path_unlink.assert_called_once_with(dest)
-
