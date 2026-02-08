@@ -1,4 +1,4 @@
-# ruff: noqa: B008
+# ruff: noqa: B008, PLR0912, PLR0915, TRY301
 """API routes for file system browsing."""
 
 import logging
@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import FileInventory
+from app.models import ColdStorageLocation, FileInventory, MonitoredPath
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
 
@@ -26,8 +26,8 @@ def list_directory(
     """
     Browse a directory and return its contents with inventory status.
 
-    This endpoint is unrestricted (admins can browse anywhere) and includes
-    inventory status for files that are tracked in the database.
+    For admins, this endpoint is unrestricted.
+    For other users, access is restricted to monitored paths and storage locations.
 
     Args:
         path: Directory path to browse (defaults to root)
@@ -41,26 +41,64 @@ def list_directory(
         HTTPException: 400 if path is invalid, 404 if path doesn't exist
     """
     try:
+        if "\0" in path:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid directory path: contains null bytes",
+            )
+
         # Resolve the path to handle any '..' or symlinks
         try:
             resolved_path = Path(path).resolve()
         except (OSError, ValueError) as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid directory path: {e!s}",
+                detail="Invalid directory path",
             ) from e
+
+        # SECURITY CHECK: If user is not admin, restrict browsing to configured paths
+        if "admin" not in current_user.roles:
+            # Get all allowed paths (monitored paths and cold storage locations)
+            monitored_paths = db.query(MonitoredPath.source_path).all()
+            storage_paths = db.query(ColdStorageLocation.path).all()
+
+            allowed_bases = [Path(p[0]).resolve() for p in monitored_paths] + [
+                Path(p[0]).resolve() for p in storage_paths
+            ]
+
+            is_allowed = False
+            for base in allowed_bases:
+                try:
+                    # Check if resolved_path is base or a subdirectory of base
+                    # Note: For Python 3.9+, use resolved_path.is_relative_to(base)
+                    # For compatibility, we use relative_to with try/except
+                    resolved_path.relative_to(base)
+                    is_allowed = True
+                    break
+                except ValueError:
+                    continue
+
+            if not is_allowed:
+                # Do not log user input directly to prevent log injection
+                logger.warning(
+                    f"Unauthorized directory browse attempt detected (User ID: {current_user.id})"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied: Directory is not within a configured monitored path or storage location",
+                )
 
         # Verify path exists and is a directory
         if not resolved_path.exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Directory does not exist: {path}",
+                detail="Directory does not exist",
             )
 
         if not resolved_path.is_dir():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path is not a directory: {path}",
+                detail="Path is not a directory",
             )
 
         # Get inventory status for all files in this directory
@@ -68,9 +106,14 @@ def list_directory(
         inventory_map: Dict[str, str] = {}
         try:
             # Query all files in the current directory from inventory
+            # Use startswith to prevent wildcard injection and match prefix
+            search_prefix = str(resolved_path)
+            if not search_prefix.endswith("/"):
+                search_prefix += "/"
+
             inventory_entries = (
                 db.query(FileInventory.file_path, FileInventory.storage_type)
-                .filter(FileInventory.file_path.like(f"{resolved_path}/%"))
+                .filter(FileInventory.file_path.startswith(search_prefix))
                 .all()
             )
 
@@ -88,8 +131,13 @@ def list_directory(
         items = []
         total_files = 0
         total_dirs = 0
+        max_items = 2000  # Limit to prevent DoS via resource exhaustion
 
-        for item in sorted(resolved_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+        for i, item in enumerate(
+            sorted(resolved_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+        ):
+            if i >= max_items:
+                break
             try:
                 stat_info = item.stat()
                 is_dir = item.is_dir()
@@ -131,8 +179,9 @@ def list_directory(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error browsing directory {path}")
+        # Do not log path directly in exception message to prevent log injection
+        logger.exception("Error browsing directory")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {e!s}",
+            detail="Error browsing directory",
         ) from e
