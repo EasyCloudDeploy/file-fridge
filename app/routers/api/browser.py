@@ -17,11 +17,6 @@ router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
 
 
-def _sanitize_log_input(value: str) -> str:
-    """Sanitize input for logging to prevent log injection."""
-    return value.replace("\n", "").replace("\r", "")
-
-
 @router.get("/list", response_model=BrowserResponse)
 def list_directory(
     path: str = Query("/", description="Directory path to browse"),
@@ -46,6 +41,12 @@ def list_directory(
         HTTPException: 400 if path is invalid, 404 if path doesn't exist
     """
     try:
+        if "\0" in path:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid directory path: contains null bytes",
+            )
+
         # Resolve the path to handle any '..' or symlinks
         try:
             resolved_path = Path(path).resolve()
@@ -78,10 +79,9 @@ def list_directory(
                     continue
 
             if not is_allowed:
-                safe_username = _sanitize_log_input(current_user.username)
-                safe_path = _sanitize_log_input(path)
+                # Do not log user input directly to prevent log injection
                 logger.warning(
-                    f"Unauthorized directory browse attempt by {safe_username}: {safe_path}"
+                    f"Unauthorized directory browse attempt detected (User ID: {current_user.id})"
                 )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -131,8 +131,13 @@ def list_directory(
         items = []
         total_files = 0
         total_dirs = 0
+        max_items = 2000  # Limit to prevent DoS via resource exhaustion
 
-        for item in sorted(resolved_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+        for i, item in enumerate(
+            sorted(resolved_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+        ):
+            if i >= max_items:
+                break
             try:
                 stat_info = item.stat()
                 is_dir = item.is_dir()
@@ -174,8 +179,8 @@ def list_directory(
     except HTTPException:
         raise
     except Exception as e:
-        safe_path = _sanitize_log_input(path)
-        logger.exception(f"Error browsing directory {safe_path}")
+        # Do not log path directly in exception message to prevent log injection
+        logger.exception("Error browsing directory")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error browsing directory",
