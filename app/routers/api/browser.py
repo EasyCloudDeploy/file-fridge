@@ -17,6 +17,11 @@ router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_log_input(value: str) -> str:
+    """Sanitize input for logging to prevent log injection."""
+    return value.replace("\n", "").replace("\r", "")
+
+
 @router.get("/list", response_model=BrowserResponse)
 def list_directory(
     path: str = Query("/", description="Directory path to browse"),
@@ -73,8 +78,10 @@ def list_directory(
                     continue
 
             if not is_allowed:
+                safe_username = _sanitize_log_input(current_user.username)
+                safe_path = _sanitize_log_input(path)
                 logger.warning(
-                    f"Unauthorized directory browse attempt by {current_user.username}: {path}"
+                    f"Unauthorized directory browse attempt by {safe_username}: {safe_path}"
                 )
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -85,13 +92,13 @@ def list_directory(
         if not resolved_path.exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Directory does not exist: {path}",
+                detail="Directory does not exist",
             )
 
         if not resolved_path.is_dir():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path is not a directory: {path}",
+                detail="Path is not a directory",
             )
 
         # Get inventory status for all files in this directory
