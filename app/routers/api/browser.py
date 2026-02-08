@@ -52,7 +52,7 @@ def list_directory(
         except (OSError, ValueError) as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid directory path: {e!s}",
+                detail="Invalid directory path",
             ) from e
 
         # SECURITY CHECK: If user is not admin, restrict browsing to configured paths
@@ -106,9 +106,14 @@ def list_directory(
         inventory_map: Dict[str, str] = {}
         try:
             # Query all files in the current directory from inventory
+            # Use startswith to prevent wildcard injection and match prefix
+            search_prefix = str(resolved_path)
+            if not search_prefix.endswith("/"):
+                search_prefix += "/"
+
             inventory_entries = (
                 db.query(FileInventory.file_path, FileInventory.storage_type)
-                .filter(FileInventory.file_path.like(f"{resolved_path}/%"))
+                .filter(FileInventory.file_path.startswith(search_prefix))
                 .all()
             )
 
@@ -169,8 +174,9 @@ def list_directory(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error browsing directory {path}")
+        safe_path = _sanitize_log_input(path)
+        logger.exception(f"Error browsing directory {safe_path}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {e!s}",
+            detail="Error browsing directory",
         ) from e
