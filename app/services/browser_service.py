@@ -6,17 +6,17 @@ from sqlalchemy.orm import Session
 from app.models import ColdStorageLocation, MonitoredPath, User
 
 
-def check_browser_permissions(db: Session, current_user: User, resolved_path: Path) -> None:
+def check_path_permission(db: Session, current_user: User, resolved_path: Path) -> None:
     """
-    Check if the current user has permission to browse the resolved path.
+    Check if the current user has permission to access the resolved path.
 
-    Admins have unrestricted access. Other users can only browse paths that
+    Admins have unrestricted access. Other users can only access paths that
     are within monitored paths or cold storage locations.
 
     Args:
         db: Database session
         current_user: Authenticated user
-        resolved_path: The absolute path to browse
+        resolved_path: The absolute path to access
 
     Raises:
         HTTPException(403): If permission is denied.
@@ -54,5 +54,9 @@ def check_browser_permissions(db: Session, current_user: User, resolved_path: Pa
     if not is_allowed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied: You can only browse monitored paths and cold storage locations.",
+            detail=f"Permission denied: You can only access files within monitored paths and cold storage locations. Path: {resolved_path}",
         )
+
+
+# Alias for backward compatibility
+check_browser_permissions = check_path_permission

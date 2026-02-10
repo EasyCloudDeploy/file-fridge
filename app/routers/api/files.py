@@ -23,6 +23,7 @@ from app.models import (
     MonitoredPath,
     PinnedFile,
     StorageType,
+    User,
 )
 from app.schemas import (
     BulkActionResponse,
@@ -38,6 +39,8 @@ from app.schemas import (
 from app.services.file_freezer import FileFreezer
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
+from app.security import get_current_user
+from app.services.browser_service import check_path_permission
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 logger = logging.getLogger(__name__)
@@ -437,10 +440,24 @@ def list_files(
 
 
 @router.post("/move", status_code=status.HTTP_202_ACCEPTED)
-def move_file(request: FileMoveRequest, db: Session = Depends(get_db)):
+def move_file(
+    request: FileMoveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     """Move a file on-demand."""
-    source = Path(request.source_path)
-    destination = Path(request.destination_path)
+    try:
+        source = Path(request.source_path).resolve()
+        destination = Path(request.destination_path).resolve()
+    except (OSError, ValueError) as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid path: {e!s}",
+        ) from e
+
+    # Security check: verify source and destination permissions
+    check_path_permission(db, current_user, source)
+    check_path_permission(db, current_user, destination)
 
     if not source.exists():
         raise HTTPException(
