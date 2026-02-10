@@ -36,11 +36,11 @@ from app.schemas import (
 from app.schemas import (
     StorageType as StorageTypeSchema,
 )
+from app.security import get_current_user
+from app.services.browser_service import check_path_permission
 from app.services.file_freezer import FileFreezer
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
-from app.security import get_current_user
-from app.services.browser_service import check_path_permission
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 logger = logging.getLogger(__name__)

@@ -1,9 +1,12 @@
+import logging
 from pathlib import Path
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models import ColdStorageLocation, MonitoredPath, User
+
+logger = logging.getLogger(__name__)
 
 
 def check_path_permission(db: Session, current_user: User, resolved_path: Path) -> None:
@@ -52,9 +55,13 @@ def check_path_permission(db: Session, current_user: User, resolved_path: Path) 
             continue
 
     if not is_allowed:
+        logger.warning(
+            f"Permission denied for user {current_user.username}: "
+            f"Access attempted to {resolved_path} which is not in allowed paths."
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Permission denied: You can only access files within monitored paths and cold storage locations. Path: {resolved_path}",
+            detail="Permission denied",
         )
 
 
