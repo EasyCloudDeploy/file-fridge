@@ -1,4 +1,4 @@
-# ruff: noqa: B008
+# ruff: noqa: B008, PLR0912, TRY301
 """API routes for file system browsing."""
 
 import logging
@@ -9,9 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import FileInventory
+from app.models import FileInventory, User
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
+from app.services.browser_service import check_browser_permissions
 
 router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
@@ -21,24 +22,24 @@ logger = logging.getLogger(__name__)
 def list_directory(
     path: str = Query("/", description="Directory path to browse"),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Browse a directory and return its contents with inventory status.
 
-    This endpoint is unrestricted (admins can browse anywhere) and includes
-    inventory status for files that are tracked in the database.
+    This endpoint restricts non-admin users to browsing only monitored paths
+    and cold storage locations. Admins can browse the entire filesystem.
 
     Args:
         path: Directory path to browse (defaults to root)
         db: Database session
-        current_user: Authenticated user (admin access required)
+        current_user: Authenticated user
 
     Returns:
         BrowserResponse with directory contents and statistics
 
     Raises:
-        HTTPException: 400 if path is invalid, 404 if path doesn't exist
+        HTTPException: 400 if path is invalid, 404 if path doesn't exist, 403 if denied
     """
     try:
         # Resolve the path to handle any '..' or symlinks
@@ -62,6 +63,9 @@ def list_directory(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Path is not a directory: {path}",
             )
+
+        # Check permissions
+        check_browser_permissions(db, current_user, resolved_path)
 
         # Get inventory status for all files in this directory
         # Build a map of file_path -> inventory_status
