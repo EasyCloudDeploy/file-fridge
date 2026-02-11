@@ -17,16 +17,8 @@ def db_session():
     session.close()
 
 
-def test_escape_like_string():
-    assert escape_like_string("test") == "test"
-    assert escape_like_string("test%") == "test\\%"
-    assert escape_like_string("test_") == "test\\_"
-    assert escape_like_string("test\\") == "test\\\\"
-    assert escape_like_string("test%_\\") == "test\\%\\_\\\\"
-
-
-def test_browser_wildcard_injection(db_session):
-    # Setup data
+@pytest.fixture
+def seeded_session(db_session):
     now = datetime.now()
     files = [
         FileInventory(
@@ -60,14 +52,25 @@ def test_browser_wildcard_injection(db_session):
     ]
     db_session.add_all(files)
     db_session.commit()
+    return db_session
 
+
+def test_escape_like_string():
+    assert escape_like_string("test") == "test"
+    assert escape_like_string("test%") == "test\\%"
+    assert escape_like_string("test_") == "test\\_"
+    assert escape_like_string("test\\") == "test\\\\"
+    assert escape_like_string("test%_\\") == "test\\%\\_\\\\"
+
+
+def test_browser_wildcard_injection(seeded_session):
     # Simulate browsing "/data/project%"
     # Logic from app/routers/api/browser.py
     resolved_path = "/data/project%"
     escaped_path = escape_like_string(resolved_path)
 
     results = (
-        db_session.query(FileInventory.file_path)
+        seeded_session.query(FileInventory.file_path)
         .filter(FileInventory.file_path.like(f"{escaped_path}/%", escape="\\"))
         .all()
     )
@@ -82,42 +85,7 @@ def test_browser_wildcard_injection(db_session):
     assert len(paths) == 1
 
 
-def test_storage_wildcard_injection(db_session):
-    # Setup data
-    now = datetime.now()
-    files = [
-        FileInventory(
-            file_path="/data/project/file1.txt",
-            storage_type=StorageType.HOT,
-            path_id=1,
-            file_size=100,
-            file_mtime=now,
-        ),
-        FileInventory(
-            file_path="/data/project_backup/file2.txt",
-            storage_type=StorageType.HOT,
-            path_id=1,
-            file_size=100,
-            file_mtime=now,
-        ),
-        FileInventory(
-            file_path="/data/project%/file3.txt",
-            storage_type=StorageType.HOT,
-            path_id=1,
-            file_size=100,
-            file_mtime=now,
-        ),
-        FileInventory(
-            file_path="/data/project_matched/file4.txt",
-            storage_type=StorageType.HOT,
-            path_id=1,
-            file_size=100,
-            file_mtime=now,
-        ),
-    ]
-    db_session.add_all(files)
-    db_session.commit()
-
+def test_storage_wildcard_injection(seeded_session):
     # Simulate deleting storage location "/data/project"
     # Logic from app/routers/api/storage.py
     location_path = "/data/project"
@@ -127,7 +95,7 @@ def test_storage_wildcard_injection(db_session):
     escaped_path = escape_like_string(prefix)
 
     results = (
-        db_session.query(FileInventory.file_path)
+        seeded_session.query(FileInventory.file_path)
         .filter(FileInventory.file_path.like(f"{escaped_path}%", escape="\\"))
         .all()
     )
