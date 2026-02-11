@@ -8,6 +8,7 @@ from typing import Dict, Tuple
 from sqlalchemy.orm import Session
 
 from app.models import FileInventory, FileRecord
+from app.utils.db_utils import escape_like_string
 
 logger = logging.getLogger(__name__)
 
@@ -29,10 +30,15 @@ class PathMigrationService:
             Dictionary with file counts and paths
         """
         # Check database records
+        # Ensure path ends with slash to prevent partial matches
+        old_path_prefix = old_path if old_path.endswith("/") else f"{old_path}/"
+        escaped_old_path = escape_like_string(old_path_prefix)
+
         file_records = (
             db.query(FileRecord)
             .filter(
-                FileRecord.path_id == path_id, FileRecord.cold_storage_path.like(f"{old_path}%")
+                FileRecord.path_id == path_id,
+                FileRecord.cold_storage_path.like(f"{escaped_old_path}%", escape="\\"),
             )
             .all()
         )
@@ -41,7 +47,7 @@ class PathMigrationService:
             db.query(FileInventory)
             .filter(
                 FileInventory.path_id == path_id,
-                FileInventory.file_path.like(f"{old_path}%"),
+                FileInventory.file_path.like(f"{escaped_old_path}%", escape="\\"),
                 FileInventory.storage_type == "cold",
             )
             .all()

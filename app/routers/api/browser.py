@@ -13,6 +13,7 @@ from app.models import FileInventory, User
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
 from app.services.browser_service import check_browser_permissions
+from app.utils.db_utils import escape_like_string
 
 router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
@@ -72,9 +73,11 @@ def list_directory(
         inventory_map: Dict[str, str] = {}
         try:
             # Query all files in the current directory from inventory
+            # We must escape the path to prevent wildcard injection (e.g. "path%name")
+            escaped_path = escape_like_string(str(resolved_path))
             inventory_entries = (
                 db.query(FileInventory.file_path, FileInventory.storage_type)
-                .filter(FileInventory.file_path.like(f"{resolved_path}/%"))
+                .filter(FileInventory.file_path.like(f"{escaped_path}/%", escape="\\"))
                 .all()
             )
 

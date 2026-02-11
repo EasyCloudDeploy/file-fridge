@@ -19,6 +19,7 @@ from app.schemas import (
     StorageStats,
 )
 from app.services.scheduler import scheduler_service
+from app.utils.db_utils import escape_like_string
 
 logger = logging.getLogger(__name__)
 
@@ -346,12 +347,18 @@ def delete_storage_location(
 
         # 1. Find all files in this storage location
         # We need to check both FileInventory and FileRecord for paths
+        # Ensure path ends with slash to prevent partial matches (e.g. /data/cold matching /data/cold_backup)
+        location_path = location.path if location.path.endswith("/") else f"{location.path}/"
+        escaped_path = escape_like_string(location_path)
+
         inventory_files = (
-            db.query(FileInventory).filter(FileInventory.file_path.like(f"{location.path}%")).all()
+            db.query(FileInventory)
+            .filter(FileInventory.file_path.like(f"{escaped_path}%", escape="\\"))
+            .all()
         )
         file_records = (
             db.query(FileRecord)
-            .filter(FileRecord.cold_storage_path.like(f"{location.path}%"))
+            .filter(FileRecord.cold_storage_path.like(f"{escaped_path}%", escape="\\"))
             .all()
         )
 
@@ -373,7 +380,7 @@ def delete_storage_location(
             logger.exception(
                 f"Error deleting storage directory '{location.path}'. "
                 f"Manual cleanup may be required.",
-                exc_info=e
+                exc_info=e,
             )
             # We don't re-raise, to allow DB cleanup to proceed
 
