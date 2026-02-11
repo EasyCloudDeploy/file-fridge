@@ -1,25 +1,16 @@
+from datetime import datetime, timezone
+
 import pytest
-from datetime import datetime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from app.models import Base, FileInventory, StorageType
 from app.utils.db_utils import escape_like_string
 
 
-# Setup in-memory DB for testing
-@pytest.fixture
-def db_session():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
-
-
 @pytest.fixture
 def seeded_session(db_session):
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     files = [
         FileInventory(
             file_path="/data/project/file1.txt",

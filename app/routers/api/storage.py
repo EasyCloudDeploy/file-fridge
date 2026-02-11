@@ -353,12 +353,18 @@ def delete_storage_location(
 
         inventory_files = (
             db.query(FileInventory)
-            .filter(FileInventory.file_path.like(f"{escaped_path}%", escape="\\"))
+            .filter(
+                FileInventory.file_path.like(f"{escaped_path}%", escape="\\"),
+                FileInventory.cold_storage_location_id == location_id,
+            )
             .all()
         )
         file_records = (
             db.query(FileRecord)
-            .filter(FileRecord.cold_storage_path.like(f"{escaped_path}%", escape="\\"))
+            .filter(
+                FileRecord.cold_storage_path.like(f"{escaped_path}%", escape="\\"),
+                FileRecord.cold_storage_location_id == location_id,
+            )
             .all()
         )
 
