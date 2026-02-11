@@ -1,10 +1,8 @@
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from app.models import Base, FileInventory, StorageType
+from app.models import FileInventory, StorageType
 from app.utils.db_utils import escape_like_string
 
 
