@@ -13,3 +13,8 @@
 **Vulnerability:** The application used unescaped user input in SQL `LIKE` queries for file path filtering (e.g., `.like(f"{path}%")`). This allowed wildcard injection where `%` in a path could match unintended files. Additionally, missing trailing slashes in prefix queries allowed partial directory matches (e.g., `/data/cold` matching `/data/cold_backup`).
 **Learning:** Even when using an ORM, logic involving `LIKE` operators requires careful handling of wildcards. SQLAlchemy's `startswith()` might not always behave as expected regarding escaping across all drivers/dialects, making explicit `LIKE ... ESCAPE` safer for security-critical logic.
 **Prevention:** Always use `app.utils.db_utils.escape_like_string` when constructing `LIKE` queries with user input. Ensure directory prefix matches always include a trailing slash.
+
+## 2026-02-12 - [HIGH] Sensitive Data Exposure in API Response
+**Vulnerability:** The `Notifier` response schema inherited the `smtp_password` field from `NotifierBase`, causing the API to return the decrypted SMTP password in plaintext when listing or retrieving notifiers. This allowed any user with read access to the notifiers endpoint (e.g., managers) to view sensitive credentials.
+**Learning:** Pydantic models inherit fields from base classes by default. When sharing a base class between request and response schemas, sensitive fields added to the base class will automatically appear in the response unless explicitly excluded.
+**Prevention:** Avoid defining sensitive fields in shared base schemas used for responses. Use separate `Create` and `Update` schemas that include sensitive fields, or ensure the response schema explicitly excludes them. Always review the final JSON output of API endpoints that handle credentials.
