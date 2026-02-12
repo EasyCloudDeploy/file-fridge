@@ -486,7 +486,6 @@ class NotifierBase(BaseModel):
     )
     smtp_port: Optional[int] = Field(587, description="SMTP server port (default: 587)")
     smtp_user: Optional[str] = Field(None, description="SMTP username for authentication")
-    smtp_password: Optional[str] = Field(None, description="SMTP password for authentication")
     smtp_sender: Optional[str] = Field(
         None, description="From address for emails (required for EMAIL type)"
     )
@@ -528,6 +527,8 @@ class NotifierBase(BaseModel):
 
 class NotifierCreate(NotifierBase):
     """Schema for creating a notifier."""
+
+    smtp_password: Optional[str] = Field(None, description="SMTP password for authentication")
 
     @validator("smtp_host")
     @classmethod
