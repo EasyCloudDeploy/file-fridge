@@ -1,6 +1,7 @@
 """Pydantic schemas for API validation."""
 
 import base64
+import re
 from datetime import datetime
 from typing import List, Optional
 
@@ -376,6 +377,16 @@ class TagCreate(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
 
+    @validator("color")
+    @classmethod
+    def validate_color(cls, v):
+        """Validate color format."""
+        if v is None:
+            return v
+        if not re.match(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", v):
+            raise ValueError("Color must be a valid hex code (e.g., #FF0000 or #F00)")
+        return v
+
 
 class TagUpdate(BaseModel):
     """Schema for updating a tag."""
@@ -383,6 +394,16 @@ class TagUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     color: Optional[str] = None
+
+    @validator("color")
+    @classmethod
+    def validate_color(cls, v):
+        """Validate color format."""
+        if v is None:
+            return v
+        if not re.match(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", v):
+            raise ValueError("Color must be a valid hex code (e.g., #FF0000 or #F00)")
+        return v
 
 
 class Tag(BaseModel):
