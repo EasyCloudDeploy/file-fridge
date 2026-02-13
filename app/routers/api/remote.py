@@ -44,6 +44,8 @@ from app.schemas import (
     PullTransferRequest,
     RemoteConnectionCreate,
     RemoteConnectionIdentity,
+    RemoteConnectionRequest,
+    RemoteConnectionResponse,
     RemoteConnectionUpdate,
     RemoteTransferJobBase,
 )
@@ -383,12 +385,19 @@ async def create_connection(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.post("/connection-request", tags=["Remote Connections"])
-async def handle_connection_request(request: Request, db: Session = Depends(get_db)):
+@router.post(
+    "/connection-request", response_model=RemoteConnectionResponse, tags=["Remote Connections"]
+)
+async def handle_connection_request(
+    request_data: RemoteConnectionRequest, db: Session = Depends(get_db)
+):
     """Handles an incoming connection request from a remote instance (unauthenticated)."""
     try:
-        request_data = await request.json()
-        return remote_connection_service.handle_connection_request(db, request_data)
+        # Pass the dictionary from model_dump to the service
+        # Alternatively, we could update the service to accept the model directly.
+        return remote_connection_service.handle_connection_request(
+            db, request_data.model_dump(exclude_unset=True)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 

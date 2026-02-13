@@ -8,7 +8,11 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.models import RemoteConnection, TransferMode, TrustStatus
-from app.schemas import RemoteConnectionIdentity
+from app.schemas import (
+    RemoteConnectionIdentity,
+    RemoteConnectionRequest,
+    RemoteConnectionResponse,
+)
 from app.services.identity_service import identity_service
 
 logger = logging.getLogger(__name__)
@@ -58,8 +62,8 @@ class RemoteConnectionService:
                 )
                 response.raise_for_status()
                 identity_data = response.json()
-                # TODO: Add validation with a Pydantic model
-                return RemoteConnectionIdentity(**identity_data)
+                # Validate with Pydantic model
+                return RemoteConnectionIdentity.model_validate(identity_data)
             except httpx.HTTPError as e:
                 msg = f"Could not fetch identity from remote instance: {e}"
                 logger.exception("Failed to fetch identity from %s", remote_url)
@@ -153,14 +157,14 @@ class RemoteConnectionService:
                 response.raise_for_status()
                 # The response from the remote also contains its signed identity,
                 # which we can verify to prevent man-in-the-middle attacks.
-                remote_response = response.json()
+                remote_response_data = response.json()
+                remote_response = RemoteConnectionResponse.model_validate(remote_response_data)
                 self._verify_remote_response(remote_identity, remote_response)
 
                 # 4. Update remote's transfer mode from their response
-                remote_identity_payload = remote_response.get("identity", {})
-                remote_mode_str = remote_identity_payload.get("transfer_mode")
-                if remote_mode_str in [m.value for m in TransferMode]:
-                    conn.remote_transfer_mode = TransferMode(remote_mode_str)
+                remote_mode = remote_response.identity.transfer_mode
+                if remote_mode:
+                    conn.remote_transfer_mode = remote_mode
                     db.commit()
                     db.refresh(conn)
 
@@ -185,18 +189,21 @@ class RemoteConnectionService:
 
         return conn
 
-    def _verify_remote_response(self, original_identity, response_data):
+    def _verify_remote_response(
+        self,
+        original_identity: RemoteConnectionIdentity,
+        response: RemoteConnectionResponse,
+    ):
         """Verify the signature in the response from a remote instance."""
-        response_identity = response_data.get("identity", {})
-        response_signature_hex = response_data.get("signature")
-
         # Check if the fingerprint matches the one we originally trusted
-        if response_identity.get("fingerprint") != original_identity.fingerprint:
+        if response.identity.fingerprint != original_identity.fingerprint:
             raise ValueError("Man-in-the-middle attack suspected! Fingerprint mismatch.")
 
         # Verify the signature
-        message_to_verify = canonical_json_encode(response_identity)
-        signature = bytes.fromhex(response_signature_hex)
+        # We use model_dump(exclude_unset=True) to get the dict for signing
+        # to ensure we only include fields that were actually present in the response.
+        message_to_verify = canonical_json_encode(response.identity.model_dump(exclude_unset=True))
+        signature = bytes.fromhex(response.signature)
 
         if not identity_service.verify_signature(
             original_identity.ed25519_public_key, signature, message_to_verify
@@ -213,6 +220,12 @@ class RemoteConnectionService:
         If a connection_code is provided in the request, it will be verified
         before proceeding. This allows authenticated connection establishment.
         """
+        # Validate request data with Pydantic model
+        request = RemoteConnectionRequest.model_validate(request_data)
+        identity = request.identity
+        signature_hex = request.signature
+        connection_code = request.connection_code
+
         # Verify instance URL is configured
         from app.services.instance_config_service import instance_config_service
 
@@ -223,13 +236,6 @@ class RemoteConnectionService:
                 "or configure it via the UI to enable remote connections."
             )
 
-        identity = request_data.get("identity", {})
-        signature_hex = request_data.get("signature")
-        connection_code = request_data.get("connection_code")
-
-        if not all([identity, signature_hex]):
-            raise ValueError("Incomplete connection request data.")
-
         # 1. Verify the connection code if provided
         if connection_code:
             from app.utils.remote_auth import remote_auth
@@ -239,37 +245,34 @@ class RemoteConnectionService:
                 raise ValueError("Invalid or expired connection code.")
 
         # 2. Verify the signature
-        message_to_verify = canonical_json_encode(identity)
+        message_to_verify = canonical_json_encode(identity.model_dump(exclude_unset=True))
         signature = bytes.fromhex(signature_hex)
         if not identity_service.verify_signature(
-            identity.get("ed25519_public_key"), signature, message_to_verify
+            identity.ed25519_public_key, signature, message_to_verify
         ):
             raise ValueError("Signature verification failed for connection request.")
 
         # 3. Create or update the connection as PENDING
-        fingerprint = identity.get("fingerprint")
+        fingerprint = identity.fingerprint
         conn = self.get_connection_by_fingerprint(db, fingerprint)
         # Parse remote transfer mode from identity payload
-        remote_mode_str = identity.get("transfer_mode", "PUSH_ONLY")
-        remote_mode = TransferMode.PUSH_ONLY
-        if remote_mode_str in [m.value for m in TransferMode]:
-            remote_mode = TransferMode(remote_mode_str)
+        remote_mode = identity.transfer_mode or TransferMode.PUSH_ONLY
 
         if not conn:
             conn = RemoteConnection(
-                name=identity.get("instance_name"),
-                url=str(identity.get("url")),
+                name=identity.instance_name,
+                url=str(identity.url),
                 remote_fingerprint=fingerprint,
-                remote_ed25519_public_key=identity.get("ed25519_public_key"),
-                remote_x25519_public_key=identity.get("x25519_public_key"),
+                remote_ed25519_public_key=identity.ed25519_public_key,
+                remote_x25519_public_key=identity.x25519_public_key,
                 trust_status=TrustStatus.PENDING,
                 remote_transfer_mode=remote_mode,
             )
             db.add(conn)
         else:
             # Update info but keep trust status as is, unless it was rejected.
-            conn.name = identity.get("instance_name")
-            conn.url = str(identity.get("url"))
+            conn.name = identity.instance_name
+            conn.url = str(identity.url)
             conn.remote_transfer_mode = remote_mode
             if conn.trust_status == TrustStatus.REJECTED:
                 conn.trust_status = TrustStatus.PENDING

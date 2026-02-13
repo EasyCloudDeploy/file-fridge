@@ -779,7 +779,9 @@ class RemoteConnectionIdentity(BaseModel):
     ed25519_public_key: str = Field(..., description="Base64-encoded Ed25519 public signing key")
     x25519_public_key: str = Field(..., description="Base64-encoded X25519 public key exchange key")
     url: HttpUrl = Field(..., description="Base URL of the remote instance")
-    transfer_mode: Optional[TransferMode] = Field(None, description="Current transfer mode of the instance")
+    transfer_mode: Optional[TransferMode] = Field(
+        None, description="Current transfer mode of the instance"
+    )
 
     @validator("ed25519_public_key", "x25519_public_key")
     def validate_base64(cls, v):
@@ -789,6 +791,23 @@ class RemoteConnectionIdentity(BaseModel):
             return v
         except Exception:
             raise ValueError("Invalid base64 encoding")
+
+
+class RemoteConnectionRequest(BaseModel):
+    """Payload for a connection request to a remote instance."""
+
+    identity: RemoteConnectionIdentity
+    signature: str = Field(..., description="Hex-encoded Ed25519 signature of the identity payload")
+    connection_code: Optional[str] = Field(
+        None, description="The rotating code from the remote instance"
+    )
+
+
+class RemoteConnectionResponse(BaseModel):
+    """Response from a remote instance after a connection request."""
+
+    identity: RemoteConnectionIdentity
+    signature: str = Field(..., description="Hex-encoded Ed25519 signature of the identity payload")
 
 
 class RemoteConnectionCreate(RemoteConnectionBase):
