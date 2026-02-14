@@ -5,10 +5,12 @@ import logging
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import EmailStr, HttpUrl, TypeAdapter
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Notifier as NotifierModel
+from app.models import NotifierType
 from app.schemas import (
     Notifier,
     NotifierCreate,
@@ -142,6 +144,38 @@ def update_notifier(
 
     # Update only provided fields
     update_data = notifier_update.model_dump(exclude_unset=True)
+
+    # Security Validation: Validate address if address OR type is being updated
+    # This prevents invalid state like type=WEBHOOK but address=email (if only type is updated)
+    if "address" in update_data or "type" in update_data:
+        new_address = update_data.get("address", db_notifier.address)
+        new_type = update_data.get("type", db_notifier.type)
+
+        if new_type == NotifierType.EMAIL:
+            try:
+                TypeAdapter(EmailStr).validate_python(new_address)
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid email address: {e}",
+                ) from e
+        elif new_type == NotifierType.GENERIC_WEBHOOK:
+            try:
+                # Use TypeAdapter(HttpUrl) for Pydantic V2 compatibility
+                url = TypeAdapter(HttpUrl).validate_python(new_address)
+                if url.scheme != "https":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Webhook URLs must use HTTPS for security",
+                    )
+            except HTTPException:
+                raise
+            except Exception as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid webhook URL: {e}",
+                ) from e
+
     for field, value in update_data.items():
         if field == "smtp_password" and value is not None:
             # Use property setter to encrypt password
