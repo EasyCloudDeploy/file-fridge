@@ -78,11 +78,11 @@ def create_notifier(notifier: NotifierCreate, db: Session = Depends(get_db)):
     # Check for duplicate name
     existing = db.query(NotifierModel).filter(NotifierModel.name == notifier.name).first()
     if existing:
+        # Sanitize error message: Do not reflect user input 'name'
+        logger.info(f"Attempt to create duplicate notifier: {notifier.name}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            # Security Note: This reflects user input 'name'.
-            # Ideally this should be sanitized, but focusing on the critical SSRF/XSS logic below for now.
-            detail=f"Notifier with name '{notifier.name}' already exists",
+            detail="Notifier with this name already exists",
         )
 
     # Create notifier (password will be encrypted via property setter)
@@ -139,9 +139,11 @@ def update_notifier(
             .first()
         )
         if existing:
+            # Sanitize error message: Do not reflect user input 'name'
+            logger.info(f"Attempt to update to duplicate notifier name: {notifier_update.name}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Notifier with name '{notifier_update.name}' already exists",
+                detail="Notifier with this name already exists",
             )
 
     # Update only provided fields
