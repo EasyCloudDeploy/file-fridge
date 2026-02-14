@@ -18,6 +18,7 @@ from app.schemas import (
     TestNotifierResponse,
 )
 from app.services.notification_service import notification_service
+from app.utils.sanitization import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/notifiers", tags=["notifiers"])
@@ -79,7 +80,7 @@ def create_notifier(notifier: NotifierCreate, db: Session = Depends(get_db)):
     existing = db.query(NotifierModel).filter(NotifierModel.name == notifier.name).first()
     if existing:
         # Sanitize error message: Do not reflect user input 'name'
-        logger.info(f"Attempt to create duplicate notifier: {notifier.name}")
+        logger.info(f"Attempt to create duplicate notifier: {sanitize_for_log(notifier.name)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Notifier with this name already exists",
@@ -102,7 +103,7 @@ def create_notifier(notifier: NotifierCreate, db: Session = Depends(get_db)):
     db.add(db_notifier)
     db.commit()
     db.refresh(db_notifier)
-    logger.info(f"Created notifier '{notifier.name}' ({notifier.type})")
+    logger.info(f"Created notifier '{sanitize_for_log(notifier.name)}' ({notifier.type})")
     return db_notifier
 
 
@@ -140,7 +141,9 @@ def update_notifier(
         )
         if existing:
             # Sanitize error message: Do not reflect user input 'name'
-            logger.info(f"Attempt to update to duplicate notifier name: {notifier_update.name}")
+            logger.info(
+                f"Attempt to update to duplicate notifier name: {sanitize_for_log(notifier_update.name)}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Notifier with this name already exists",
@@ -159,7 +162,9 @@ def update_notifier(
             try:
                 TypeAdapter(EmailStr).validate_python(new_address)
             except Exception as e:
-                logger.warning(f"Invalid email address provided for notifier {notifier_id}: {e}")
+                logger.warning(
+                    f"Invalid email address provided for notifier {notifier_id}: {sanitize_for_log(str(e))}"
+                )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid email address format",
@@ -169,7 +174,9 @@ def update_notifier(
                 # Use TypeAdapter(HttpUrl) for Pydantic V2 compatibility
                 url = TypeAdapter(HttpUrl).validate_python(new_address)
                 if url.scheme != "https":
-                    logger.warning(f"Insecure webhook URL provided for notifier {notifier_id}: scheme={url.scheme}")
+                    logger.warning(
+                        f"Insecure webhook URL provided for notifier {notifier_id}: scheme={url.scheme}"
+                    )
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Webhook URLs must use HTTPS for security",
@@ -177,7 +184,9 @@ def update_notifier(
             except HTTPException:
                 raise
             except Exception as e:
-                logger.warning(f"Invalid webhook URL provided for notifier {notifier_id}: {e}")
+                logger.warning(
+                    f"Invalid webhook URL provided for notifier {notifier_id}: {sanitize_for_log(str(e))}"
+                )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Invalid webhook URL format",
@@ -192,7 +201,7 @@ def update_notifier(
 
     db.commit()
     db.refresh(db_notifier)
-    logger.info(f"Updated notifier '{db_notifier.name}'")
+    logger.info(f"Updated notifier '{sanitize_for_log(db_notifier.name)}'")
     return db_notifier
 
 
@@ -218,7 +227,7 @@ def delete_notifier(notifier_id: int, db: Session = Depends(get_db)):
     notifier_name = db_notifier.name
     db.delete(db_notifier)
     db.commit()
-    logger.info(f"Deleted notifier '{notifier_name}'")
+    logger.info(f"Deleted notifier '{sanitize_for_log(notifier_name)}'")
 
 
 @router.post("/{notifier_id}/test", response_model=TestNotifierResponse)
@@ -249,4 +258,6 @@ async def test_notifier(notifier_id: int, db: Session = Depends(get_db)):
     # Send test notification
     success, message = await notification_service.test_notifier(db, notifier_id)
 
-    return TestNotifierResponse(success=success, message=message, notifier_name=notifier.name)
+    return TestNotifierResponse(
+        success=success, message=message, notifier_name=sanitize_for_log(notifier.name)
+    )
