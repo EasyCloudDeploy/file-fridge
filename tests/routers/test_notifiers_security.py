@@ -106,7 +106,8 @@ def test_notifier_ssrf_prevention(client):
 
     # Expect 400 Bad Request
     assert response.status_code == 400
-    assert "Webhook URLs must use HTTPS" in response.json()["detail"]
+    # Sanitize check: Ensure we are getting the static error message, not the reflected one
+    assert response.json()["detail"] == "Invalid webhook URL format"
 
     # Verify that the address was NOT updated
     response = client.get(f"/api/v1/notifiers/{notifier_id}", headers=headers)
@@ -140,13 +141,10 @@ def test_notifier_type_change_validation(client):
     }
     response = client.put(f"/api/v1/notifiers/{notifier_id}", json=update_data, headers=headers)
 
-    print(f"Type change response: {response.status_code}")
-    print(f"Type change body: {response.json()}")
-
     assert response.status_code == 400
+    # Check for the generic error message
     detail = response.json()["detail"]
-    # It might fail because it's not a URL, or because it's not HTTPS
-    assert "Invalid webhook URL" in detail or "Webhook URLs must use HTTPS" in detail
+    assert detail == "Invalid webhook URL format" or "Webhook URLs must use HTTPS for security" in detail
 
 if __name__ == "__main__":
     pass

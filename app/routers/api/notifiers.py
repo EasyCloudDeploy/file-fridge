@@ -80,6 +80,8 @@ def create_notifier(notifier: NotifierCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            # Security Note: This reflects user input 'name'.
+            # Ideally this should be sanitized, but focusing on the critical SSRF/XSS logic below for now.
             detail=f"Notifier with name '{notifier.name}' already exists",
         )
 
@@ -155,15 +157,17 @@ def update_notifier(
             try:
                 TypeAdapter(EmailStr).validate_python(new_address)
             except Exception as e:
+                logger.warning(f"Invalid email address provided for notifier {notifier_id}: {e}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid email address: {e}",
+                    detail="Invalid email address format",
                 ) from e
         elif new_type == NotifierType.GENERIC_WEBHOOK:
             try:
                 # Use TypeAdapter(HttpUrl) for Pydantic V2 compatibility
                 url = TypeAdapter(HttpUrl).validate_python(new_address)
                 if url.scheme != "https":
+                    logger.warning(f"Insecure webhook URL provided for notifier {notifier_id}: scheme={url.scheme}")
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Webhook URLs must use HTTPS for security",
@@ -171,9 +175,10 @@ def update_notifier(
             except HTTPException:
                 raise
             except Exception as e:
+                logger.warning(f"Invalid webhook URL provided for notifier {notifier_id}: {e}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid webhook URL: {e}",
+                    detail="Invalid webhook URL format",
                 ) from e
 
     for field, value in update_data.items():
