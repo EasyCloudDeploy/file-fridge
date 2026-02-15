@@ -1,14 +1,16 @@
+import tempfile
+from pathlib import Path
+
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from pathlib import Path
-import tempfile
 
 from app.main import app
 from app.models import MonitoredPath, OperationType, User
 from app.security import hash_password
 from app.utils.rate_limiter import check_login_rate_limit
+
 
 @pytest.fixture(autouse=True)
 def disable_rate_limit():
@@ -16,6 +18,7 @@ def disable_rate_limit():
     app.dependency_overrides[check_login_rate_limit] = lambda: None
     yield
     app.dependency_overrides.pop(check_login_rate_limit, None)
+
 
 def test_directory_enumeration_vulnerability(client: TestClient, db_session: Session):
     """
@@ -56,7 +59,10 @@ def test_directory_enumeration_vulnerability(client: TestClient, db_session: Ses
 
         # Add ONLY allowed_dir to monitored paths
         monitored_path = MonitoredPath(
-            name="Allowed Path", source_path=str(allowed_dir), operation_type=OperationType.MOVE, enabled=True
+            name="Allowed Path",
+            source_path=str(allowed_dir),
+            operation_type=OperationType.MOVE,
+            enabled=True,
         )
         db_session.add(monitored_path)
         db_session.commit()
@@ -66,12 +72,11 @@ def test_directory_enumeration_vulnerability(client: TestClient, db_session: Ses
         response_exists = client.get(f"/api/v1/browser/list?path={forbidden_dir}", headers=headers)
 
         # 2. Access non-existing forbidden file/directory
-        # Expectation: 404 Not Found (because it doesn't exist)
+        # Expectation: 403 Forbidden (preventing enumeration)
         non_existent_path = forbidden_dir / "does_not_exist"
-        response_not_exists = client.get(f"/api/v1/browser/list?path={non_existent_path}", headers=headers)
-
-        print(f"Existing forbidden path status: {response_exists.status_code}")
-        print(f"Non-existing forbidden path status: {response_not_exists.status_code}")
+        response_not_exists = client.get(
+            f"/api/v1/browser/list?path={non_existent_path}", headers=headers
+        )
 
         # Vulnerability check: Both status codes should be 403 Forbidden.
         assert response_exists.status_code == status.HTTP_403_FORBIDDEN
