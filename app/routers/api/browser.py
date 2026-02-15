@@ -52,6 +52,9 @@ def list_directory(
                 detail=f"Invalid directory path: {e!s}",
             ) from e
 
+        # Check permissions
+        check_browser_permissions(db, current_user, resolved_path)
+
         # Verify path exists and is a directory
         if not resolved_path.exists():
             raise HTTPException(
@@ -64,9 +67,6 @@ def list_directory(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Path is not a directory: {path}",
             )
-
-        # Check permissions
-        check_browser_permissions(db, current_user, resolved_path)
 
         # Get inventory status for all files in this directory
         # Build a map of file_path -> inventory_status
