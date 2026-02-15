@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/notifiers", tags=["notifiers"])
 
 
-def _validate_notifier_config(notifier_id: Optional[int], address: str, notifier_type: NotifierType) -> None:
+def _validate_notifier_config(
+    notifier_id: Optional[int], address: str, notifier_type: NotifierType
+) -> None:
     """
     Validate notifier configuration to prevent security issues.
 
@@ -51,9 +53,7 @@ def _validate_notifier_config(notifier_id: Optional[int], address: str, notifier
             # Use TypeAdapter(HttpUrl) for Pydantic V2 compatibility
             url = TypeAdapter(HttpUrl).validate_python(address)
             if url.scheme != "https":
-                logger.warning(
-                    f"Insecure webhook URL provided for {context}: scheme={url.scheme}"
-                )
+                logger.warning(f"Insecure webhook URL provided for {context}: scheme={url.scheme}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Webhook URLs must use HTTPS for security",
