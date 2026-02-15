@@ -2,7 +2,7 @@
 """API endpoints for notifier management."""
 
 import logging
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import EmailStr, HttpUrl, TypeAdapter
@@ -22,6 +22,52 @@ from app.utils.sanitization import sanitize_for_log
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/notifiers", tags=["notifiers"])
+
+
+def _validate_notifier_config(notifier_id: Optional[int], address: str, notifier_type: NotifierType) -> None:
+    """
+    Validate notifier configuration to prevent security issues.
+
+    Ensures:
+    - Emails are valid email addresses.
+    - Webhooks use HTTPS to prevent SSRF.
+    """
+    context = f"notifier {notifier_id}" if notifier_id else "new notifier"
+
+    if notifier_type == NotifierType.EMAIL:
+        try:
+            TypeAdapter(EmailStr).validate_python(address)
+        except Exception as e:
+            logger.warning(
+                f"Invalid email address provided for {context}: {sanitize_for_log(str(e))}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid email address format",
+            ) from e
+
+    elif notifier_type == NotifierType.GENERIC_WEBHOOK:
+        try:
+            # Use TypeAdapter(HttpUrl) for Pydantic V2 compatibility
+            url = TypeAdapter(HttpUrl).validate_python(address)
+            if url.scheme != "https":
+                logger.warning(
+                    f"Insecure webhook URL provided for {context}: scheme={url.scheme}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Webhook URLs must use HTTPS for security",
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(
+                f"Invalid webhook URL provided for {context}: {sanitize_for_log(str(e))}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid webhook URL format",
+            ) from e
 
 
 @router.get("", response_model=List[Notifier])
@@ -85,6 +131,11 @@ def create_notifier(notifier: NotifierCreate, db: Session = Depends(get_db)):
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Notifier with this name already exists",
         )
+
+    # Validate configuration (SSRF Prevention)
+    # Note: Pydantic schema validation happens first, but we double-check here for consistency
+    # and to ensure HTTPS enforcement is robust.
+    _validate_notifier_config(None, notifier.address, notifier.type)
 
     # Create notifier (password will be encrypted via property setter)
     db_notifier = NotifierModel(
@@ -157,40 +208,7 @@ def update_notifier(
     if "address" in update_data or "type" in update_data:
         new_address = update_data.get("address", db_notifier.address)
         new_type = update_data.get("type", db_notifier.type)
-
-        if new_type == NotifierType.EMAIL:
-            try:
-                TypeAdapter(EmailStr).validate_python(new_address)
-            except Exception as e:
-                logger.warning(
-                    f"Invalid email address provided for notifier {notifier_id}: {sanitize_for_log(str(e))}"
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid email address format",
-                ) from e
-        elif new_type == NotifierType.GENERIC_WEBHOOK:
-            try:
-                # Use TypeAdapter(HttpUrl) for Pydantic V2 compatibility
-                url = TypeAdapter(HttpUrl).validate_python(new_address)
-                if url.scheme != "https":
-                    logger.warning(
-                        f"Insecure webhook URL provided for notifier {notifier_id}: scheme={url.scheme}"
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Webhook URLs must use HTTPS for security",
-                    )
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.warning(
-                    f"Invalid webhook URL provided for notifier {notifier_id}: {sanitize_for_log(str(e))}"
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid webhook URL format",
-                ) from e
+        _validate_notifier_config(notifier_id, new_address, new_type)
 
     for field, value in update_data.items():
         if field == "smtp_password" and value is not None:
