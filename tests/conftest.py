@@ -17,8 +17,8 @@ from app.utils.rate_limiter import _login_rate_limiter, _remote_rate_limiter
 # Override settings for testing
 settings.database_path = ":memory:"
 # Use a dynamic secret key to avoid SonarCloud "Hardcoded Secret" hotspot
-settings.secret_key = secrets.token_hex(32)
-settings.encryption_key_file = "./test_encryption.key"
+settings.secret_key = secrets.token_hex(32)  # NOSONAR
+settings.encryption_key_file = "./test_encryption.key"  # NOSONAR
 settings.require_fingerprint_verification = False
 
 
