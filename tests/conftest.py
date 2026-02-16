@@ -1,4 +1,4 @@
-
+import secrets
 from pathlib import Path
 
 import pytest
@@ -16,7 +16,8 @@ from app.utils.rate_limiter import _login_rate_limiter, _remote_rate_limiter
 
 # Override settings for testing
 settings.database_path = ":memory:"
-settings.secret_key = "test-secret-key"
+# Use a dynamic secret key to avoid SonarCloud "Hardcoded Secret" hotspot
+settings.secret_key = secrets.token_hex(32)
 settings.encryption_key_file = "./test_encryption.key"
 settings.require_fingerprint_verification = False
 
@@ -129,6 +130,7 @@ def storage_location(db_session):
 @pytest.fixture
 def monitored_path_factory(db_session, storage_location):
     """Factory fixture to create MonitoredPath objects."""
+
     def _factory(name: str, source_path: str):
         path = MonitoredPath(
             name=name,
@@ -141,4 +143,5 @@ def monitored_path_factory(db_session, storage_location):
         # Create the directory
         Path(path.source_path).mkdir(exist_ok=True, parents=True)
         return path
+
     return _factory
