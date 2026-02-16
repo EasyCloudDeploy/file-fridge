@@ -14,14 +14,6 @@ from app.models import ColdStorageLocation, MonitoredPath, User
 from app.security import hash_password
 from app.utils.rate_limiter import _login_rate_limiter, _remote_rate_limiter
 
-# Override settings for testing
-settings.database_path = ":memory:"
-# Use a dynamic secret key to avoid SonarCloud "Hardcoded Secret" hotspot
-settings.secret_key = secrets.token_hex(32)  # NOSONAR
-settings.encryption_key_file = "./test_encryption.key"  # NOSONAR
-settings.require_fingerprint_verification = False
-
-
 # Use an in-memory SQLite database for tests
 engine = create_engine(
     "sqlite:///:memory:",
@@ -29,6 +21,17 @@ engine = create_engine(
     poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def configure_test_settings():
+    """Override settings for the test session."""
+    # Set secure random values for sensitive settings to appease security scanners
+    # and ensure tests run with valid configuration.
+    settings.database_path = ":memory:"
+    settings.secret_key = secrets.token_hex(32)
+    settings.encryption_key_file = "./test_encryption.key"
+    settings.require_fingerprint_verification = False
 
 
 # Override the get_db dependency to use the test database
