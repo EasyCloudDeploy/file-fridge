@@ -18,3 +18,8 @@
 **Vulnerability:** The `/api/v1/browser/list` endpoint checked for file existence before checking user permissions. This allowed an attacker to distinguish between existing and non-existing files/directories outside their allowed scope by observing the difference between 403 Forbidden and 404 Not Found responses.
 **Learning:** Security checks (authorization) must always be performed *before* any resource access or existence checks. The order of operations in API handlers is critical for preventing side-channel attacks like enumeration.
 **Prevention:** Always place permission checks at the very beginning of the request handling logic, before interacting with the resource (database, filesystem, etc.). Ensure that access denied responses are identical regardless of resource existence.
+
+## 2026-02-16 - Rate Limit Bypass via Header Spoofing
+**Vulnerability:** The rate limiter blindly trusted `X-Forwarded-For` (IP spoofing) and `X-Instance-UUID` (limit bypass) headers without validation.
+**Learning:** Application-level header parsing for IP detection is error-prone. Custom headers for rate limiting (like UUIDs) can introduce bypass vectors if not authenticated.
+**Prevention:** Rely exclusively on the ASGI server (Uvicorn) to resolve client IPs via standard middleware configuration (e.g., `--proxy-headers`). Avoid using unauthenticated headers as keys for security controls.

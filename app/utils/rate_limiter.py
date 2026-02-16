@@ -60,17 +60,12 @@ _login_rate_limiter = RateLimiter(requests_per_minute=5)
 
 def get_rate_limit_key(request: Request) -> str:
     """Extract rate limit key from request."""
-    # Use remote instance UUID for authenticated remote connections
-    x_instance_uuid = request.headers.get("X-Instance-UUID")
-    if x_instance_uuid:
-        return f"remote:{x_instance_uuid}"
-
-    # Use IP address for other requests
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        client_ip = forwarded.split(",")[0].strip()
-    else:
-        client_ip = request.client.host if request.client else "unknown"
+    # SECURITY: Always use the client host IP as reported by the ASGI server.
+    # We do NOT manually parse X-Forwarded-For because it can be spoofed.
+    # Proper IP resolution behind proxies must be handled by the ASGI server configuration
+    # (e.g., uvicorn --proxy-headers) to populate request.client.host correctly.
+    # We also do not use X-Instance-UUID as it can be rotated by an attacker to bypass limits.
+    client_ip = request.client.host if request.client else "unknown"
     return f"ip:{client_ip}"
 
 
