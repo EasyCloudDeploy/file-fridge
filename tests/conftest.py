@@ -96,7 +96,7 @@ def authenticated_client(client, db_session):
     """Fixture to get an authenticated client (admin role)."""
     username = "admin"
     password = "password"  # NOSONAR
-    user = User(username=username, password_hash=hash_password(password), roles=["admin"])
+    user = User(username=username, password_hash=hash_password(password), roles=["admin"])  # NOSONAR
     db_session.add(user)
     db_session.commit()
 

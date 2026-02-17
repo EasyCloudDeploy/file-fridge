@@ -33,7 +33,7 @@ def email_notifier(db_session: Session):
         smtp_host="smtp.example.com",
         smtp_port=587,
         smtp_user="user",
-        smtp_password="password",
+        smtp_password="password",  # NOSONAR
         smtp_sender="sender@example.com",
     )
     db_session.add(notifier)

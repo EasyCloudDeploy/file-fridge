@@ -38,7 +38,7 @@ def test_login_rate_limit(mock_auth):
 
     # Send 5 requests (should be allowed)
     for i in range(5):
-        response = client.post(url, json={"username": "admin", "password": "wrongpassword"})
+        response = client.post(url, json={"username": "admin", "password": "wrongpassword"})  # NOSONAR
 
         # We expect 401 (Unauthorized) because mock_auth returns None
         # But definitely NOT 429
@@ -48,7 +48,7 @@ def test_login_rate_limit(mock_auth):
         ), f"Request {i+1} unexpected status: {response.status_code}"
 
     # Send 6th request (should be blocked)
-    response = client.post(url, json={"username": "admin", "password": "wrongpassword"})
+    response = client.post(url, json={"username": "admin", "password": "wrongpassword"})  # NOSONAR
     assert (
         response.status_code == 429
     ), f"Request 6 should have been blocked (Got {response.status_code})"

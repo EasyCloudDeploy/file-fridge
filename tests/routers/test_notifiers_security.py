@@ -12,7 +12,7 @@ from app.models import User
 from app.security import hash_password  # NOSONAR
 
 # Set required environment variables for testing
-os.environ["SECRET_KEY"] = "test-secret-key"
+os.environ["SECRET_KEY"] = "test-secret-key"  # NOSONAR
 os.environ["DATABASE_PATH"] = ":memory:"
 
 # Setup in-memory DB

@@ -140,7 +140,7 @@ class UserFactory(factory.alchemy.SQLAlchemyModelFactory):
 
     id = factory.Sequence(lambda n: n)
     username = factory.Sequence(lambda n: f"user{n}")
-    password_hash = "hashed_password"
+    password_hash = "hashed_password"  # NOSONAR
     is_active = True
     roles = ["user"]
 
@@ -301,28 +301,28 @@ def test_remote_connection_creation(db_session: Session):
 
 
 @patch("app.models.encryption_manager")
-def test_notifier_smtp_password_encryption_decryption(mock_encryption_manager, db_session: Session):
-    """Test the encryption/decryption of SMTP password on Notifier model."""
-    mock_encryption_manager.encrypt.return_value = "encrypted_password"
-    mock_encryption_manager.decrypt.return_value = "plaintext_password"
+def test_notifier_smtp_password_encryption_decryption(mock_encryption_manager, db_session: Session):  # NOSONAR
+    """Test the encryption/decryption of SMTP password on Notifier model."""  # NOSONAR
+    mock_encryption_manager.encrypt.return_value = "encrypted_password"  # NOSONAR
+    mock_encryption_manager.decrypt.return_value = "plaintext_password"  # NOSONAR
 
     notifier = Notifier(
         name="Test Email",
         type=NotifierType.EMAIL,
         address="test@example.com",
-        smtp_password="plaintext_password",
+        smtp_password="plaintext_password",  # NOSONAR
     )
     db_session.add(notifier)
     db_session.commit()
     db_session.refresh(notifier)
 
     # Test setter (encryption)
-    mock_encryption_manager.encrypt.assert_called_once_with("plaintext_password")
-    assert notifier.smtp_password_encrypted == "encrypted_password"
+    mock_encryption_manager.encrypt.assert_called_once_with("plaintext_password")  # NOSONAR
+    assert notifier.smtp_password_encrypted == "encrypted_password"  # NOSONAR
 
     # Test getter (decryption)
-    assert notifier.smtp_password == "plaintext_password"
-    mock_encryption_manager.decrypt.assert_called_once_with("encrypted_password")
+    assert notifier.smtp_password == "plaintext_password"  # NOSONAR
+    mock_encryption_manager.decrypt.assert_called_once_with("encrypted_password")  # NOSONAR
 
 
 class FileRecordFactory(factory.alchemy.SQLAlchemyModelFactory):
