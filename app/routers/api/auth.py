@@ -145,9 +145,7 @@ def change_password(
         ) from None
 
 
-@router.post(
-    "/login", response_model=schemas.Token, dependencies=[Depends(check_login_rate_limit)]
-)
+@router.post("/login", response_model=schemas.Token, dependencies=[Depends(check_login_rate_limit)])
 def login(credentials: schemas.UserLogin, db: Session = Depends(get_db)):
     """
     Authenticate a user and return an access token.

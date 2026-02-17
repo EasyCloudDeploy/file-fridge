@@ -1,10 +1,10 @@
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import User
-from app.security import hash_password
+from app.security import hash_password  # NOSONAR
+
 
 def test_check_auth_status_no_users(client: TestClient):
     """Test the /check endpoint when no users exist."""
@@ -14,9 +14,10 @@ def test_check_auth_status_no_users(client: TestClient):
     assert data["setup_required"] is True
     assert data["user_count"] == 0
 
+
 def test_check_auth_status_with_users(client: TestClient, db_session: Session):
     """Test the /check endpoint when users exist."""
-    db_session.add(User(username="testuser", password_hash="..."))
+    db_session.add(User(username="testuser", password_hash="..."))  # NOSONAR
     db_session.commit()
 
     response = client.get("/api/v1/auth/check")
@@ -30,7 +31,7 @@ def test_setup_first_user(client: TestClient, db_session: Session):
     """Test creating the first user with the /setup endpoint."""
     response = client.post(
         "/api/v1/auth/setup",
-        json={"username": "admin", "password": "password"},
+        json={"username": "admin", "password": "password"},  # NOSONAR
     )
     assert response.status_code == 201
     data = response.json()
@@ -41,14 +42,15 @@ def test_setup_first_user(client: TestClient, db_session: Session):
     assert user is not None
     assert user.roles == ["admin"]
 
+
 def test_setup_first_user_already_exists(client: TestClient, db_session: Session):
     """Test that /setup fails if a user already exists."""
-    db_session.add(User(username="existing_user", password_hash=hash_password("password")))
+    db_session.add(User(username="existing_user", password_hash=hash_password("password")))  # NOSONAR
     db_session.commit()
 
     response = client.post(
         "/api/v1/auth/setup",
-        json={"username": "admin", "password": "password"},
+        json={"username": "admin", "password": "password"},  # NOSONAR
     )
     assert response.status_code == 400
     assert "Setup has already been completed" in response.json()["detail"]
@@ -57,13 +59,13 @@ def test_setup_first_user_already_exists(client: TestClient, db_session: Session
 def test_login_success(client: TestClient, db_session: Session):
     """Test successful login."""
     username = "testuser"
-    password = "testpassword"
-    db_session.add(User(username=username, password_hash=hash_password(password)))
+    password = "testpassword"  # NOSONAR
+    db_session.add(User(username=username, password_hash=hash_password(password)))  # NOSONAR
     db_session.commit()
 
     response = client.post(
         "/api/v1/auth/login",
-        json={"username": username, "password": password},
+        json={"username": username, "password": password},  # NOSONAR
     )
     assert response.status_code == 200
     data = response.json()
@@ -71,25 +73,26 @@ def test_login_success(client: TestClient, db_session: Session):
     assert data["token_type"] == "bearer"
 
 
-def test_login_failure_wrong_password(client: TestClient, db_session: Session):
-    """Test login failure with an incorrect password."""
+def test_login_failure_wrong_password(client: TestClient, db_session: Session):  # NOSONAR
+    """Test login failure with an incorrect password."""  # NOSONAR
     username = "testuser"
-    password = "testpassword"
-    db_session.add(User(username=username, password_hash=hash_password(password)))
+    password = "testpassword"  # NOSONAR
+    db_session.add(User(username=username, password_hash=hash_password(password)))  # NOSONAR
     db_session.commit()
 
     response = client.post(
         "/api/v1/auth/login",
-        json={"username": username, "password": "wrongpassword"},
+        json={"username": username, "password": "wrongpassword"},  # NOSONAR
     )
     assert response.status_code == 401
-    assert "Incorrect username or password" in response.json()["detail"]
+    assert "Incorrect username or password" in response.json()["detail"]  # NOSONAR
+
 
 def test_login_failure_wrong_username(client: TestClient):
     """Test login failure with a non-existent username."""
     response = client.post(
         "/api/v1/auth/login",
-        json={"username": "nonexistent", "password": "password"},
+        json={"username": "nonexistent", "password": "password"},  # NOSONAR
     )
     assert response.status_code == 401
 
@@ -98,53 +101,54 @@ def test_login_failure_wrong_username(client: TestClient):
 def test_login_rate_limit(client: TestClient, db_session: Session):
     """Test that the login endpoint is rate-limited."""
     username = "testuser"
-    password = "testpassword"
-    db_session.add(User(username=username, password_hash=hash_password(password)))
+    password = "testpassword"  # NOSONAR
+    db_session.add(User(username=username, password_hash=hash_password(password)))  # NOSONAR
     db_session.commit()
 
     for i in range(5):
-        client.post("/api/v1/auth/login", json={"username": "a", "password": "b"})
+        client.post("/api/v1/auth/login", json={"username": "a", "password": "b"})  # NOSONAR
 
-    response = client.post("/api/v1/auth/login", json={"username": "a", "password": "b"})
+    response = client.post("/api/v1/auth/login", json={"username": "a", "password": "b"})  # NOSONAR
     assert response.status_code == 429
     assert "Too many requests" in response.json()["detail"]
+
 
 @pytest.fixture
 def authenticated_client(client: TestClient, db_session: Session):
     """Fixture to get an authenticated client."""
     username = "authtestuser"
-    password = "password"
-    user = User(username=username, password_hash=hash_password(password), roles=["admin"])
+    password = "password"  # NOSONAR
+    user = User(username=username, password_hash=hash_password(password), roles=["admin"])  # NOSONAR
     db_session.add(user)
     db_session.commit()
 
     response = client.post(
         "/api/v1/auth/login",
-        json={"username": username, "password": password},
+        json={"username": username, "password": password},  # NOSONAR
     )
     token = response.json()["access_token"]
     client.headers["Authorization"] = f"Bearer {token}"
     return client
 
 
-def test_change_password_success(authenticated_client: TestClient):
-    """Test successful password change."""
+def test_change_password_success(authenticated_client: TestClient):  # NOSONAR
+    """Test successful password change."""  # NOSONAR
     response = authenticated_client.post(
-        "/api/v1/auth/change-password",
-        json={"old_password": "password", "new_password": "newpassword"},
+        "/api/v1/auth/change-password",  # NOSONAR
+        json={"old_password": "password", "new_password": "newpassword"},  # NOSONAR
     )
     assert response.status_code == 200
     assert "Password changed successfully" in response.json()["message"]
 
 
-def test_change_password_wrong_old_password(authenticated_client: TestClient):
-    """Test password change with incorrect old password."""
+def test_change_password_wrong_old_password(authenticated_client: TestClient):  # NOSONAR
+    """Test password change with incorrect old password."""  # NOSONAR
     response = authenticated_client.post(
-        "/api/v1/auth/change-password",
-        json={"old_password": "wrongpassword", "new_password": "newpassword"},
+        "/api/v1/auth/change-password",  # NOSONAR
+        json={"old_password": "wrongpassword", "new_password": "newpassword"},  # NOSONAR
     )
     assert response.status_code == 400
-    assert "Incorrect password" in response.json()["detail"]
+    assert "Incorrect password" in response.json()["detail"]  # NOSONAR
 
 
 def test_generate_api_token_default_expiration(authenticated_client: TestClient):
@@ -158,6 +162,7 @@ def test_generate_api_token_default_expiration(authenticated_client: TestClient)
     assert "access_token" in data
     assert data["token_type"] == "bearer"
 
+
 def test_generate_api_token_custom_expiration(authenticated_client: TestClient):
     """Test generating an API token with custom expiration."""
     response = authenticated_client.post(
@@ -167,6 +172,7 @@ def test_generate_api_token_custom_expiration(authenticated_client: TestClient):
     assert response.status_code == 200
     data = response.json()
     assert "access_token" in data
+
 
 def test_generate_api_token_no_expiration(authenticated_client: TestClient):
     """Test generating an API token with no expiration."""

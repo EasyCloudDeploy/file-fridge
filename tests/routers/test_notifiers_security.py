@@ -1,6 +1,5 @@
-
 import os
-import sys
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -10,11 +9,10 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.main import app
 from app.models import User
-from app.security import hash_password
-from app.config import settings
+from app.security import hash_password  # NOSONAR
 
 # Set required environment variables for testing
-os.environ["SECRET_KEY"] = "test-secret-key"
+os.environ["SECRET_KEY"] = "test-secret-key"  # NOSONAR
 os.environ["DATABASE_PATH"] = ":memory:"
 
 # Setup in-memory DB
@@ -25,12 +23,14 @@ engine = create_engine(
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+
 def override_get_db():
     try:
         db = TestingSessionLocal()
         yield db
     finally:
         db.close()
+
 
 @pytest.fixture(scope="module")
 def client():
@@ -43,10 +43,7 @@ def client():
     # Create admin user
     db = TestingSessionLocal()
     user = User(
-        username="admin",
-        password_hash=hash_password("admin123"),
-        is_active=True,
-        roles=["admin"]
+        username="admin", password_hash=hash_password("admin123"), is_active=True, roles=["admin"]  # NOSONAR
     )
     db.add(user)
     db.commit()
@@ -59,9 +56,10 @@ def client():
     Base.metadata.drop_all(bind=engine)
     app.dependency_overrides.pop(get_db, None)
 
+
 def test_create_notifier_ssrf_prevention(client):
     # Login
-    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})  # NOSONAR
     assert response.status_code == 200
     token = response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -72,7 +70,7 @@ def test_create_notifier_ssrf_prevention(client):
         "type": "generic_webhook",
         "address": "http://localhost:8080/internal",
         "enabled": True,
-        "subscribed_events": ["SCAN_COMPLETED"]
+        "subscribed_events": ["SCAN_COMPLETED"],
     }
     response = client.post("/api/v1/notifiers", json=insecure_notifier, headers=headers)
 
@@ -108,9 +106,10 @@ def test_create_notifier_ssrf_prevention(client):
     else:
         pytest.fail(f"Unexpected status code: {response.status_code}")
 
+
 def test_notifier_ssrf_prevention(client):
     # Login (reuse token if possible, but simple login again is robust)
-    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})  # NOSONAR
     token = response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -120,16 +119,14 @@ def test_notifier_ssrf_prevention(client):
         "type": "generic_webhook",
         "address": "https://example.com/webhook",
         "enabled": True,
-        "subscribed_events": ["SCAN_COMPLETED"]
+        "subscribed_events": ["SCAN_COMPLETED"],
     }
     response = client.post("/api/v1/notifiers", json=valid_notifier, headers=headers)
     assert response.status_code == 201
     notifier_id = response.json()["id"]
 
     # Attempt to update to HTTP (SSRF Attempt)
-    update_data = {
-        "address": "http://localhost:8080/internal-service"
-    }
+    update_data = {"address": "http://localhost:8080/internal-service"}
     response = client.put(f"/api/v1/notifiers/{notifier_id}", json=update_data, headers=headers)
 
     # Expect 400 Bad Request
@@ -144,9 +141,10 @@ def test_notifier_ssrf_prevention(client):
     assert response.status_code == 200
     assert response.json()["address"] == "https://example.com/webhook"
 
+
 def test_notifier_type_change_validation(client):
     # Login
-    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})  # NOSONAR
     token = response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -158,7 +156,7 @@ def test_notifier_type_change_validation(client):
         "enabled": True,
         "subscribed_events": ["SCAN_COMPLETED"],
         "smtp_host": "smtp.example.com",
-        "smtp_sender": "sender@example.com"
+        "smtp_sender": "sender@example.com",
     }
     response = client.post("/api/v1/notifiers", json=email_notifier, headers=headers)
     assert response.status_code == 201
@@ -166,12 +164,13 @@ def test_notifier_type_change_validation(client):
 
     # Update type to WEBHOOK (without changing address)
     # This should FAIL because "user@example.com" is not a valid HTTPS URL
-    update_data = {
-        "type": "generic_webhook"
-    }
+    update_data = {"type": "generic_webhook"}
     response = client.put(f"/api/v1/notifiers/{notifier_id}", json=update_data, headers=headers)
 
     assert response.status_code == 400
     # Check for the generic error message
     detail = response.json()["detail"]
-    assert detail == "Invalid webhook URL format" or "Webhook URLs must use HTTPS for security" in detail
+    assert (
+        detail == "Invalid webhook URL format"
+        or "Webhook URLs must use HTTPS for security" in detail
+    )

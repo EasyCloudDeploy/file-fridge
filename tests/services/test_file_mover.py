@@ -1,15 +1,14 @@
-import os
-import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import call, patch
 
 import pytest
-from app.models import MonitoredPath, OperationType
+
+from app.models import OperationType
 from app.services.file_mover import (
-    move_file,
-    _move,
     _copy,
+    _move,
     _move_and_symlink,
+    move_file,
     move_with_rollback,
     preserve_directory_structure,
 )

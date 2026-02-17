@@ -96,7 +96,7 @@ def import_identity(
         identity_service.import_keys_pem(db, request.signing_private_key, request.kx_private_key)
 
     except ValueError as e:
-        db.rollback() # Rollback deletion if import fails
+        db.rollback()  # Rollback deletion if import fails
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
