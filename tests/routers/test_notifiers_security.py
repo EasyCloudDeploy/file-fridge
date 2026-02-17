@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.main import app
 from app.models import User
-from app.security import hash_password
+from app.security import hash_password  # NOSONAR
 
 # Set required environment variables for testing
 os.environ["SECRET_KEY"] = "test-secret-key"
@@ -43,7 +43,7 @@ def client():
     # Create admin user
     db = TestingSessionLocal()
     user = User(
-        username="admin", password_hash=hash_password("admin123"), is_active=True, roles=["admin"]
+        username="admin", password_hash=hash_password("admin123"), is_active=True, roles=["admin"]  # NOSONAR
     )
     db.add(user)
     db.commit()
@@ -59,7 +59,7 @@ def client():
 
 def test_create_notifier_ssrf_prevention(client):
     # Login
-    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})  # NOSONAR
     assert response.status_code == 200
     token = response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
@@ -109,7 +109,7 @@ def test_create_notifier_ssrf_prevention(client):
 
 def test_notifier_ssrf_prevention(client):
     # Login (reuse token if possible, but simple login again is robust)
-    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})  # NOSONAR
     token = response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 
@@ -144,7 +144,7 @@ def test_notifier_ssrf_prevention(client):
 
 def test_notifier_type_change_validation(client):
     # Login
-    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})  # NOSONAR
     token = response.json()["access_token"]
     headers = {"Authorization": f"Bearer {token}"}
 

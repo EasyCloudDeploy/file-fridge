@@ -14,7 +14,6 @@ def storage_location(db_session: Session):
     location = ColdStorageLocation(
         name="Test Cold Storage",
         path="/tmp/cold_storage",
-        is_default=True,
     )
     db_session.add(location)
     db_session.commit()

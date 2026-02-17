@@ -378,7 +378,7 @@ def test_relocate_file_success(
     monitored_path = monitored_path_factory("RelocatePath", str(tmp_path / "relocate_hot"))
     cold_loc1 = storage_location  # Use the default fixture
     cold_loc2 = ColdStorageLocation(
-        name="Cold Loc 2", path=str(tmp_path / "cold2"), is_default=False
+        name="Cold Loc 2", path=str(tmp_path / "cold2")
     )
     monitored_path.storage_locations.append(cold_loc2)
     db_session: Session = MagicMock()  # Assuming db_session from fixture

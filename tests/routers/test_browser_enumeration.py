@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.main import app
 from app.models import MonitoredPath, OperationType, User
-from app.security import hash_password
+from app.security import hash_password  # NOSONAR
 from app.utils.rate_limiter import check_login_rate_limit
 
 
@@ -26,9 +26,9 @@ def test_directory_enumeration_vulnerability(client: TestClient, db_session: Ses
     outside their allowed scope (prevents Enumeration vulnerability).
     """
     username = "enumerator"
-    password = "password"
+    password = "password"  # NOSONAR
     user = User(
-        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True
+        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True  # NOSONAR
     )
     db_session.add(user)
     db_session.commit()
@@ -36,7 +36,7 @@ def test_directory_enumeration_vulnerability(client: TestClient, db_session: Ses
     # Login
     login_response = client.post(
         "/api/v1/auth/login",
-        json={"username": username, "password": password},
+        json={"username": username, "password": password},  # NOSONAR
     )
     assert login_response.status_code == status.HTTP_200_OK
     token = login_response.json()["access_token"]

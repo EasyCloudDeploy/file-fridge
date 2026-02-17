@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.main import app
 from app.models import ColdStorageLocation, MonitoredPath, OperationType, User
-from app.security import hash_password
+from app.security import hash_password  # NOSONAR
 from app.utils.rate_limiter import check_login_rate_limit
 
 
@@ -26,9 +26,9 @@ def test_path_traversal_viewer_forbidden(client: TestClient, db_session: Session
     """
     # 1. Create a viewer user
     username = "viewer"
-    password = "password"
+    password = "password"  # NOSONAR
     user = User(
-        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True
+        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True  # NOSONAR
     )
     db_session.add(user)
     db_session.commit()
@@ -36,7 +36,7 @@ def test_path_traversal_viewer_forbidden(client: TestClient, db_session: Session
     # 2. Login
     login_response = client.post(
         "/api/v1/auth/login",
-        json={"username": username, "password": password},
+        json={"username": username, "password": password},  # NOSONAR
     )
     assert login_response.status_code == status.HTTP_200_OK
     token = login_response.json()["access_token"]
@@ -55,9 +55,9 @@ def test_path_traversal_attempt_with_dots(client: TestClient, db_session: Sessio
     Test that a viewer cannot use '..' to traverse out of an allowed path.
     """
     username = "viewer_dots"
-    password = "password"
+    password = "password"  # NOSONAR
     user = User(
-        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True
+        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True  # NOSONAR
     )
     db_session.add(user)
 
@@ -70,7 +70,7 @@ def test_path_traversal_attempt_with_dots(client: TestClient, db_session: Sessio
 
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": username, "password": password},
+            json={"username": username, "password": password},  # NOSONAR
         )
         assert login_response.status_code == status.HTTP_200_OK
         token = login_response.json()["access_token"]
@@ -92,9 +92,9 @@ def test_viewer_access_allowed_path(client: TestClient, db_session: Session):
     """
     # 1. Create a viewer user
     username = "viewer_allowed"
-    password = "password"
+    password = "password"  # NOSONAR
     user = User(
-        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True
+        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True  # NOSONAR
     )
     db_session.add(user)
 
@@ -112,7 +112,7 @@ def test_viewer_access_allowed_path(client: TestClient, db_session: Session):
         # 3. Login
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": username, "password": password},
+            json={"username": username, "password": password},  # NOSONAR
         )
         assert login_response.status_code == status.HTTP_200_OK
         token = login_response.json()["access_token"]
@@ -132,9 +132,9 @@ def test_access_cold_storage_location(client: TestClient, db_session: Session):
     Test that a viewer can access a ColdStorageLocation.
     """
     username = "viewer_cold"
-    password = "password"
+    password = "password"  # NOSONAR
     user = User(
-        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True
+        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True  # NOSONAR
     )
     db_session.add(user)
 
@@ -147,7 +147,7 @@ def test_access_cold_storage_location(client: TestClient, db_session: Session):
 
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": username, "password": password},
+            json={"username": username, "password": password},  # NOSONAR
         )
         assert login_response.status_code == status.HTTP_200_OK
         token = login_response.json()["access_token"]
@@ -164,9 +164,9 @@ def test_access_subdirectory_monitored_path(client: TestClient, db_session: Sess
     Test that a viewer can access a subdirectory of a MonitoredPath.
     """
     username = "viewer_subdir"
-    password = "password"
+    password = "password"  # NOSONAR
     user = User(
-        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True
+        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True  # NOSONAR
     )
     db_session.add(user)
 
@@ -183,7 +183,7 @@ def test_access_subdirectory_monitored_path(client: TestClient, db_session: Sess
 
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": username, "password": password},
+            json={"username": username, "password": password},  # NOSONAR
         )
         assert login_response.status_code == status.HTTP_200_OK
         token = login_response.json()["access_token"]
@@ -200,9 +200,9 @@ def test_access_sibling_directory_denied(client: TestClient, db_session: Session
     Test that a viewer is denied access to a sibling directory of a monitored path.
     """
     username = "viewer_sibling"
-    password = "password"
+    password = "password"  # NOSONAR
     user = User(
-        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True
+        username=username, password_hash=hash_password(password), roles=["viewer"], is_active=True  # NOSONAR
     )
     db_session.add(user)
 
@@ -224,7 +224,7 @@ def test_access_sibling_directory_denied(client: TestClient, db_session: Session
 
         login_response = client.post(
             "/api/v1/auth/login",
-            json={"username": username, "password": password},
+            json={"username": username, "password": password},  # NOSONAR
         )
         assert login_response.status_code == status.HTTP_200_OK
         token = login_response.json()["access_token"]
@@ -245,9 +245,9 @@ def test_admin_access_root(client: TestClient, db_session: Session):
     """
     # 1. Create an admin user
     username = "admin"
-    password = "password"
+    password = "password"  # NOSONAR
     user = User(
-        username=username, password_hash=hash_password(password), roles=["admin"], is_active=True
+        username=username, password_hash=hash_password(password), roles=["admin"], is_active=True  # NOSONAR
     )
     db_session.add(user)
     db_session.commit()
@@ -255,7 +255,7 @@ def test_admin_access_root(client: TestClient, db_session: Session):
     # 2. Login
     login_response = client.post(
         "/api/v1/auth/login",
-        json={"username": username, "password": password},
+        json={"username": username, "password": password},  # NOSONAR
     )
     assert login_response.status_code == status.HTTP_200_OK
     token = login_response.json()["access_token"]

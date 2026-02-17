@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
 
 import pytest
+import time
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -118,7 +119,7 @@ def mock_get_signed_headers():
 # ==================================
 
 
-@patch("app.services.instance_config_service.get_instance_url", return_value="http://localhost")
+@patch("app.routers.api.remote.instance_config_service.get_instance_url", return_value="http://localhost")
 def test_get_remote_status_configured(mock_get_url, authenticated_client: TestClient):
     """Test get_remote_status when configured."""
     response = authenticated_client.get("/api/v1/remote/status")
@@ -126,10 +127,10 @@ def test_get_remote_status_configured(mock_get_url, authenticated_client: TestCl
     assert response.json()["configured"] is True
 
 
-@patch("app.services.remote_connection_service.get_remote_identity", new_callable=AsyncMock)
-@patch("app.services.remote_connection_service.initiate_connection", new_callable=AsyncMock)
-@patch("app.services.remote_auth.get_code_with_expiry")
-@patch("app.services.instance_config_service.get_instance_url", return_value="http://localhost")
+@patch("app.routers.api.remote.remote_connection_service.get_remote_identity", new_callable=AsyncMock)
+@patch("app.routers.api.remote.remote_connection_service.initiate_connection", new_callable=AsyncMock)
+@patch("app.routers.api.remote.remote_auth.get_code_with_expiry")
+@patch("app.routers.api.remote.instance_config_service.get_instance_url", return_value="http://localhost")
 def test_connect_with_code_success(
     mock_get_url,
     mock_get_code,
@@ -169,7 +170,7 @@ def test_connect_with_code_success(
     mock_initiate_connection.assert_called_once()
 
 
-@patch("app.services.remote_connection_service.delete_connection", new_callable=AsyncMock)
+@patch("app.routers.api.remote.remote_connection_service.delete_connection", new_callable=AsyncMock)
 def test_delete_connection_success(
     mock_delete_connection, authenticated_client: TestClient, remote_connection_factory
 ):
@@ -183,7 +184,7 @@ def test_delete_connection_success(
     mock_delete_connection.assert_called_once_with(ANY, conn.id)
 
 
-@patch("app.services.remote_connection_service.trust_connection")
+@patch("app.routers.api.remote.remote_connection_service.trust_connection")
 def test_trust_connection_success(
     mock_trust_connection, authenticated_client: TestClient, remote_connection_factory
 ):
@@ -202,7 +203,7 @@ def test_trust_connection_success(
 # ==================================
 
 
-@patch("app.services.remote_transfer_service.create_transfer_job")
+@patch("app.routers.api.remote.remote_transfer_service.create_transfer_job")
 def test_migrate_file_success(
     mock_create_job,
     authenticated_client: TestClient,
@@ -235,7 +236,7 @@ def test_migrate_file_success(
     mock_create_job.assert_called_once()
 
 
-@patch("app.services.remote_transfer_service.create_transfer_job")
+@patch("app.routers.api.remote.remote_transfer_service.create_transfer_job")
 def test_bulk_migrate_files_success(
     mock_create_job,
     authenticated_client: TestClient,
@@ -279,7 +280,7 @@ def test_list_transfers(authenticated_client: TestClient, remote_transfer_job_fa
     assert data[0]["file_name"] == "job2.txt"  # Sorted desc by id
 
 
-@patch("app.services.remote_transfer_service.cancel_transfer", return_value=True)
+@patch("app.routers.api.remote.remote_transfer_service.cancel_transfer", return_value=True)
 def test_cancel_transfer_success(
     mock_cancel_transfer, authenticated_client: TestClient, remote_transfer_job_factory
 ):
@@ -292,7 +293,7 @@ def test_cancel_transfer_success(
     mock_cancel_transfer.assert_called_once_with(ANY, job.id)
 
 
-@patch("app.services.remote_transfer_service.cancel_transfer")
+@patch("app.routers.api.remote.remote_transfer_service.cancel_transfer")
 def test_bulk_cancel_transfers(
     mock_cancel_transfer, authenticated_client: TestClient, remote_transfer_job_factory
 ):
@@ -312,7 +313,7 @@ def test_bulk_cancel_transfers(
     assert mock_cancel_transfer.call_count == 2
 
 
-@patch("app.services.instance_config_service.get_config_info")
+@patch("app.routers.api.remote.instance_config_service.get_config_info")
 def test_get_instance_config(mock_get_config_info, authenticated_client: TestClient):
     """Test retrieving instance config."""
     mock_get_config_info.return_value = {"instance_url": "http://test.com", "instance_name": "Test"}
@@ -321,10 +322,10 @@ def test_get_instance_config(mock_get_config_info, authenticated_client: TestCli
     assert response.json()["instance_url"] == "http://test.com"
 
 
-@patch("app.services.instance_config_service.set_instance_url")
-@patch("app.services.instance_config_service.set_instance_name")
+@patch("app.routers.api.remote.instance_config_service.set_instance_url")
+@patch("app.routers.api.remote.instance_config_service.set_instance_name")
 @patch(
-    "app.services.instance_config_service.get_config_info",
+    "app.routers.api.remote.instance_config_service.get_config_info",
     return_value={"instance_url": "http://new.com"},
 )
 def test_update_instance_config(
@@ -341,10 +342,10 @@ def test_update_instance_config(
     mock_set_name.assert_called_once_with(ANY, "New Name")
 
 
-@patch("app.services.instance_config_service.get_instance_url", return_value="http://localhost")
-@patch("app.services.identity_service.get_instance_fingerprint", return_value="fingerprint")
-@patch("app.services.identity_service.get_signing_public_key_str", return_value="signing_key")
-@patch("app.services.identity_service.get_kx_public_key_str", return_value="kx_key")
+@patch("app.routers.api.remote.instance_config_service.get_instance_url", return_value="http://localhost")
+@patch("app.routers.api.remote.identity_service.get_instance_fingerprint", return_value="fingerprint")
+@patch("app.routers.api.remote.identity_service.get_signing_public_key_str", return_value="signing_key")
+@patch("app.routers.api.remote.identity_service.get_kx_public_key_str", return_value="kx_key")
 def test_get_public_identity(
     mock_kx_key, mock_signing_key, mock_fingerprint, mock_get_url, authenticated_client: TestClient
 ):
@@ -354,8 +355,8 @@ def test_get_public_identity(
     assert response.json()["fingerprint"] == "fingerprint"
 
 
-@patch("app.services.remote_auth.get_code_with_expiry", return_value=("testcode", 3600))
-@patch("app.services.instance_config_service.get_instance_url", return_value="http://localhost")
+@patch("app.routers.api.remote.remote_auth.get_code_with_expiry", return_value=("testcode", 3600))
+@patch("app.routers.api.remote.instance_config_service.get_instance_url", return_value="http://localhost")
 def test_get_connection_code(mock_get_url, mock_get_code, authenticated_client: TestClient):
     """Test retrieving connection code."""
     response = authenticated_client.get("/api/v1/remote/connection-code")
@@ -365,7 +366,7 @@ def test_get_connection_code(mock_get_url, mock_get_code, authenticated_client: 
 
 
 @patch(
-    "app.services.remote_connection_service.get_remote_identity",
+    "app.routers.api.remote.remote_connection_service.get_remote_identity",
     new_callable=AsyncMock,
     return_value={
         "instance_name": "Remote",
@@ -383,7 +384,7 @@ def test_fetch_remote_identity(mock_get_remote_identity, authenticated_client: T
     mock_get_remote_identity.assert_called_once_with("http://remote.com")
 
 
-@patch("app.services.remote_connection_service.handle_connection_request")
+@patch("app.routers.api.remote.remote_connection_service.handle_connection_request")
 def test_handle_connection_request(mock_handle_request, authenticated_client: TestClient):
     """Test handling incoming connection request."""
     mock_handle_request.return_value = {"status": "accepted"}
@@ -393,8 +394,8 @@ def test_handle_connection_request(mock_handle_request, authenticated_client: Te
     mock_handle_request.assert_called_once()
 
 
-@patch("app.services.remote_connection_service.get_connection")
-@patch("app.services.remote_connection_service.notify_transfer_mode_change", new_callable=AsyncMock)
+@patch("app.routers.api.remote.remote_connection_service.get_connection")
+@patch("app.routers.api.remote.remote_connection_service.notify_transfer_mode_change", new_callable=AsyncMock)
 def test_update_connection_success(
     mock_notify_change,
     mock_get_connection,
@@ -415,7 +416,7 @@ def test_update_connection_success(
     mock_notify_change.assert_called_once()
 
 
-@patch("app.services.remote_connection_service.reject_connection")
+@patch("app.routers.api.remote.remote_connection_service.reject_connection")
 def test_reject_connection_success(
     mock_reject_connection, authenticated_client: TestClient, remote_connection_factory
 ):
@@ -429,7 +430,7 @@ def test_reject_connection_success(
     mock_reject_connection.assert_called_once_with(ANY, conn.id)
 
 
-@patch("app.services.remote_connection_service.handle_terminate_connection")
+@patch("app.routers.api.remote.remote_connection_service.handle_terminate_connection")
 def test_terminate_connection(
     mock_terminate_connection, authenticated_client: TestClient, mock_verify_remote_signature
 ):
@@ -444,7 +445,7 @@ def test_terminate_connection(
 
 
 @patch("httpx.AsyncClient.get", new_callable=AsyncMock)
-@patch("app.services.remote_connection_service.get_connection")
+@patch("app.routers.api.remote.remote_connection_service.get_connection")
 def test_get_remote_paths(
     mock_get_connection, mock_httpx_get, authenticated_client: TestClient, remote_connection_factory
 ):
@@ -461,7 +462,7 @@ def test_get_remote_paths(
     mock_httpx_get.assert_called_once()
 
 
-@patch("app.services.remote_transfer_service.cancel_transfer", return_value=True)
+@patch("app.routers.api.remote.remote_transfer_service.cancel_transfer", return_value=True)
 def test_delete_transfer_job(
     mock_cancel_transfer, authenticated_client: TestClient, remote_transfer_job_factory, db_session
 ):
@@ -477,7 +478,7 @@ def test_delete_transfer_job(
     assert deleted_job is None
 
 
-@patch("app.services.remote_transfer_service.cancel_transfer", return_value=True)
+@patch("app.routers.api.remote.remote_transfer_service.cancel_transfer", return_value=True)
 def test_bulk_delete_transfers(
     mock_cancel_transfer, authenticated_client: TestClient, remote_transfer_job_factory, db_session
 ):
@@ -508,7 +509,7 @@ def test_bulk_delete_transfers(
     )
 
 
-@patch("app.services.remote_transfer_service.run_transfer", new_callable=AsyncMock)
+@patch("app.routers.api.remote.remote_transfer_service.run_transfer", new_callable=AsyncMock)
 @patch("app.services.scheduler.scheduler_service.trigger_scan")
 @patch("app.utils.disk_validator.disk_space_validator.validate_disk_space_direct")
 @patch(
@@ -652,7 +653,7 @@ def test_get_transfer_status_completed(
 
 
 @patch("app.routers.api.remote.scheduler_service.trigger_scan")
-@patch("app.services.remote_transfer_service.cancel_transfer", return_value=True)
+@patch("app.routers.api.remote.remote_transfer_service.cancel_transfer", return_value=True)
 def test_bulk_retry_transfers(
     mock_cancel,
     mock_trigger,
@@ -676,8 +677,8 @@ def test_bulk_retry_transfers(
     assert db_session.query(RemoteTransferJob).get(job2.id).status == "COMPLETED"  # Not retried
 
 
-@patch("app.services.remote_transfer_service.create_transfer_job")
-@patch("app.services.remote_connection_service.get_connection")
+@patch("app.routers.api.remote.remote_transfer_service.create_transfer_job")
+@patch("app.routers.api.remote.remote_connection_service.get_connection")
 @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
 def test_pull_file_success(
     mock_httpx_post,
@@ -770,8 +771,8 @@ def test_browse_remote_files(
     assert data["files"][0]["relative_path"] == "relative/path/file.txt"
 
 
-@patch("app.services.remote_transfer_service.create_transfer_job")
-@patch("app.services.remote_transfer_service.run_transfer", new_callable=AsyncMock)
+@patch("app.routers.api.remote.remote_transfer_service.create_transfer_job")
+@patch("app.routers.api.remote.remote_transfer_service.run_transfer", new_callable=AsyncMock)
 @patch("app.routers.api.remote.db.query")
 def test_serve_transfer_request(
     mock_db_query,
