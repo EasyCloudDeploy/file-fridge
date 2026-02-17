@@ -153,4 +153,3 @@ app.include_router(web_router)
 def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "version": settings.app_version, "app_name": settings.app_name}
-

@@ -18,3 +18,8 @@
 **Vulnerability:** The `/api/v1/browser/list` endpoint checked for file existence before checking user permissions. This allowed an attacker to distinguish between existing and non-existing files/directories outside their allowed scope by observing the difference between 403 Forbidden and 404 Not Found responses.
 **Learning:** Security checks (authorization) must always be performed *before* any resource access or existence checks. The order of operations in API handlers is critical for preventing side-channel attacks like enumeration.
 **Prevention:** Always place permission checks at the very beginning of the request handling logic, before interacting with the resource (database, filesystem, etc.). Ensure that access denied responses are identical regardless of resource existence.
+
+## 2026-02-18 - [CRITICAL] Rate Limit Bypass via Header Spoofing
+**Vulnerability:** The application's rate limiter allowed attackers to bypass limits by sending a spoofed `X-Forwarded-For` header or a random `X-Instance-UUID` header. The `get_rate_limit_key` function prioritized these user-controlled headers over the actual client IP, enabling brute-force attacks against the login endpoint.
+**Learning:** Never trust client-supplied headers (like `X-Forwarded-For` or custom IDs) for security-critical logic unless they are strictly validated or come from a trusted source. Applications should rely on the framework's normalized client IP (`request.client.host`), which should be populated correctly by the ASGI server/middleware configuration.
+**Prevention:** In `get_rate_limit_key`, removed the logic that parsed `X-Instance-UUID` and `X-Forwarded-For`, enforcing usage of `request.client.host`.

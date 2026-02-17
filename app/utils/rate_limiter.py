@@ -60,17 +60,10 @@ _login_rate_limiter = RateLimiter(requests_per_minute=5)
 
 def get_rate_limit_key(request: Request) -> str:
     """Extract rate limit key from request."""
-    # Use remote instance UUID for authenticated remote connections
-    x_instance_uuid = request.headers.get("X-Instance-UUID")
-    if x_instance_uuid:
-        return f"remote:{x_instance_uuid}"
-
-    # Use IP address for other requests
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        client_ip = forwarded.split(",")[0].strip()
-    else:
-        client_ip = request.client.host if request.client else "unknown"
+    # Only use client.host to prevent spoofing
+    # Proxies should be configured to set client.host correctly (e.g. uvicorn --proxy-headers)
+    # This mitigates X-Forwarded-For spoofing and X-Instance-UUID bypass
+    client_ip = request.client.host if request.client else "unknown"
     return f"ip:{client_ip}"
 
 

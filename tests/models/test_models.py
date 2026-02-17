@@ -1,23 +1,22 @@
 import json
-from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from datetime import datetime, timezone
+from unittest.mock import patch
 
 import factory
 import pytest
 from cryptography.fernet import Fernet  # Added here
+from sqlalchemy.orm import Session
+
 from app.models import (
     ColdStorageLocation,
-    ConflictResolution,
     Criteria,
     CriterionType,
     DispatchStatus,
-    EncryptionManager,
     EncryptionStatus,
     FileInventory,
     FileRecord,
     FileStatus,
     FileTag,
-    FileTransferStrategy,
     FileTransactionHistory,
     InstanceKeyHistory,
     InstanceMetadata,
@@ -47,8 +46,6 @@ from app.models import (
     TrustStatus,
     User,
 )
-from sqlalchemy.orm import Session
-
 
 # ==================================
 # Factory Definitions
