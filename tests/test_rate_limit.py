@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 # Set SECRET_KEY for testing if not set
 if "SECRET_KEY" not in os.environ:
-    os.environ["SECRET_KEY"] = "test-secret-key-123"
+    os.environ["SECRET_KEY"] = "test-secret-key-123"  # NOSONAR
 
 # Set DATABASE_PATH to memory to avoid touching real DB during import
 os.environ["DATABASE_PATH"] = ":memory:"

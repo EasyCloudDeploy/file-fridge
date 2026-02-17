@@ -13,11 +13,11 @@ def test_login_rate_limit_bypass(client):
 
     # Fill the bucket (limit is 5)
     for _ in range(5):
-        resp = client.post(url, json={"username": "admin", "password": "wrong"})
+        resp = client.post(url, json={"username": "admin", "password": "wrong"})  # NOSONAR
         assert resp.status_code == status.HTTP_401_UNAUTHORIZED
 
     # 6th request should fail (Baseline check)
-    response = client.post(url, json={"username": "admin", "password": "wrong"})
+    response = client.post(url, json={"username": "admin", "password": "wrong"})  # NOSONAR
     assert response.status_code == status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit not working at all!"
 
     # ATTEMPT BYPASS with X-Instance-UUID
@@ -25,7 +25,7 @@ def test_login_rate_limit_bypass(client):
     # instead of "ip:testclient", effectively giving a fresh bucket.
     response = client.post(
         url,
-        json={"username": "admin", "password": "wrong"},
+        json={"username": "admin", "password": "wrong"},  # NOSONAR
         headers={"X-Instance-UUID": "spoofed-uuid-123"}
     )
 
@@ -37,7 +37,7 @@ def test_login_rate_limit_bypass(client):
     # instead of "ip:testclient", effectively giving a fresh bucket.
     response = client.post(
         url,
-        json={"username": "admin", "password": "wrong"},
+        json={"username": "admin", "password": "wrong"},  # NOSONAR
         headers={"X-Forwarded-For": "1.2.3.4"}
     )
 
