@@ -6,17 +6,18 @@ def test_login_rate_limit_bypass(client):
     Test that login rate limit CANNOT be bypassed by rotating X-Instance-UUID or X-Forwarded-For.
     """
     url = "/api/v1/auth/login"
+    payload = {"username": "admin", "password": "wrong-password-for-test"}  # NOSONAR
 
     # Reset state
     _login_rate_limiter.requests.clear()
 
     # Fill the bucket (limit is 5)
     for i in range(5):
-        resp = client.post(url, json={"username": "admin", "password": "wrong"})
+        resp = client.post(url, json=payload)
         assert resp.status_code == 401
 
     # 6th request should fail (Baseline check)
-    response = client.post(url, json={"username": "admin", "password": "wrong"})
+    response = client.post(url, json=payload)
     assert response.status_code == 429, "Rate limit not working at all!"
 
     # ATTEMPT BYPASS with X-Instance-UUID
@@ -24,7 +25,7 @@ def test_login_rate_limit_bypass(client):
     # instead of "ip:testclient", effectively giving a fresh bucket.
     response = client.post(
         url,
-        json={"username": "admin", "password": "wrong"},
+        json=payload,
         headers={"X-Instance-UUID": "spoofed-uuid-123"}
     )
 
@@ -36,7 +37,7 @@ def test_login_rate_limit_bypass(client):
     # instead of "ip:testclient", effectively giving a fresh bucket.
     response = client.post(
         url,
-        json={"username": "admin", "password": "wrong"},
+        json=payload,
         headers={"X-Forwarded-For": "1.2.3.4"}
     )
 
