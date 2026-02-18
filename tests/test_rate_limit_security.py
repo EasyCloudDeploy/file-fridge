@@ -1,12 +1,15 @@
 import pytest
 from app.utils.rate_limiter import _login_rate_limiter
 
+# NOSONAR: Use a dummy password for testing
+DUMMY_CREDENTIAL = "wrong-password-for-test"
+
 def test_login_rate_limit_bypass(client):
     """
     Test that login rate limit CANNOT be bypassed by rotating X-Instance-UUID or X-Forwarded-For.
     """
     url = "/api/v1/auth/login"
-    payload = {"username": "admin", "password": "wrong-password-for-test"}  # NOSONAR
+    payload = {"username": "admin", "password": DUMMY_CREDENTIAL}
 
     # Reset state
     _login_rate_limiter.requests.clear()
