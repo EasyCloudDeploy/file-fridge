@@ -141,5 +141,5 @@ def list_directory(
         logger.exception(f"Error browsing directory {path}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {e!s}",
+            detail="Error browsing directory: Internal server error",
         ) from e

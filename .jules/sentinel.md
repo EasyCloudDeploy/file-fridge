@@ -18,3 +18,8 @@
 **Vulnerability:** The `/api/v1/browser/list` endpoint checked for file existence before checking user permissions. This allowed an attacker to distinguish between existing and non-existing files/directories outside their allowed scope by observing the difference between 403 Forbidden and 404 Not Found responses.
 **Learning:** Security checks (authorization) must always be performed *before* any resource access or existence checks. The order of operations in API handlers is critical for preventing side-channel attacks like enumeration.
 **Prevention:** Always place permission checks at the very beginning of the request handling logic, before interacting with the resource (database, filesystem, etc.). Ensure that access denied responses are identical regardless of resource existence.
+
+## 2026-02-14 - [MEDIUM] Fix Sensitive Information Leak in Error Responses
+**Vulnerability:** The `/api/v1/browser/list` and `/api/v1/files` endpoints were catching generic exceptions and returning the raw exception message (`str(e)`) to the client in the HTTP response. This could expose sensitive internal details like file paths or database errors.
+**Learning:** Broad exception handling that returns the exception message is a common anti-pattern. Developers often do this for debugging convenience but forget to remove it for production.
+**Prevention:** Always catch specific exceptions where possible. for generic `Exception`, log the full error with a stack trace server-side, but return a generic "Internal server error" message to the client.
