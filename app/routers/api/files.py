@@ -428,9 +428,9 @@ def list_files(
                 }
             ) + "\n"
 
-        except Exception as e:
+        except Exception:
             logger.exception("Error streaming files")
-            yield json.dumps({"type": "error", "message": str(e), "partial_count": count}) + "\n"
+            yield json.dumps({"type": "error", "message": "Internal server error", "partial_count": count}) + "\n"
 
     return StreamingResponse(
         generate_ndjson(),
@@ -585,9 +585,10 @@ def browse_files(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception(f"Error browsing directory {directory}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {e!s}",
+            detail="Error browsing directory: Internal server error",
         ) from e
 
 
