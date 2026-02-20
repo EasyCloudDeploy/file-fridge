@@ -376,6 +376,18 @@ class TagCreate(BaseModel):
     description: Optional[str] = None
     color: Optional[str] = None
 
+    @validator("color")
+    @classmethod
+    def validate_color(cls, v):
+        """Validate hex color code to prevent XSS."""
+        if v is None:
+            return v
+        import re
+
+        if not re.match(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", v):
+            raise ValueError("Invalid color format. Must be a hex code (e.g., #FF5733)")
+        return v
+
 
 class TagUpdate(BaseModel):
     """Schema for updating a tag."""
@@ -383,6 +395,18 @@ class TagUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     color: Optional[str] = None
+
+    @validator("color")
+    @classmethod
+    def validate_color(cls, v):
+        """Validate hex color code to prevent XSS."""
+        if v is None:
+            return v
+        import re
+
+        if not re.match(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", v):
+            raise ValueError("Invalid color format. Must be a hex code (e.g., #FF5733)")
+        return v
 
 
 class Tag(BaseModel):
