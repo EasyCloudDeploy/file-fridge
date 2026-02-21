@@ -19,15 +19,15 @@ def test_rate_limit_bypass_x_forwarded_for():
 
     # Fill the bucket (limit is 5 requests per minute)
     for _ in range(5):
-        response = client.get("/login_test", headers={"X-Forwarded-For": "1.2.3.4"})
+        response = client.get("/login_test", headers={"X-Forwarded-For": "1.2.3.4"})  # NOSONAR
         assert response.status_code == 200
 
     # The next request should fail
-    response = client.get("/login_test", headers={"X-Forwarded-For": "1.2.3.4"})
+    response = client.get("/login_test", headers={"X-Forwarded-For": "1.2.3.4"})  # NOSONAR
     assert response.status_code == 429
 
     # Now try to bypass with a different IP in X-Forwarded-For
-    response = client.get("/login_test", headers={"X-Forwarded-For": "5.6.7.8"})
+    response = client.get("/login_test", headers={"X-Forwarded-For": "5.6.7.8"})  # NOSONAR
 
     # With the fix, the rate limiter should ignore X-Forwarded-For and use the client's real IP.
     # Since the client IP is constant ("testclient") for TestClient, and the bucket was filled
@@ -47,14 +47,14 @@ def test_rate_limit_bypass_x_instance_uuid():
 
     # Fill bucket using one UUID (but actually using client IP with the fix)
     for _ in range(5):
-        response = client.get("/login_test", headers={"X-Instance-UUID": "uuid-1"})
+        response = client.get("/login_test", headers={"X-Instance-UUID": "uuid-1"})  # NOSONAR
         assert response.status_code == 200
 
     # Next one fails
-    response = client.get("/login_test", headers={"X-Instance-UUID": "uuid-1"})
+    response = client.get("/login_test", headers={"X-Instance-UUID": "uuid-1"})  # NOSONAR
     assert response.status_code == 429
 
     # Attempt Bypass with new UUID
     # With the fix, X-Instance-UUID is ignored, so it still counts against client IP
-    response = client.get("/login_test", headers={"X-Instance-UUID": "uuid-2"})
+    response = client.get("/login_test", headers={"X-Instance-UUID": "uuid-2"})  # NOSONAR
     assert response.status_code == 429, "Rate limit bypassed via X-Instance-UUID spoofing"
