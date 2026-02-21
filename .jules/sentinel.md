@@ -19,6 +19,7 @@
 **Learning:** Security checks (authorization) must always be performed *before* any resource access or existence checks. The order of operations in API handlers is critical for preventing side-channel attacks like enumeration.
 **Prevention:** Always place permission checks at the very beginning of the request handling logic, before interacting with the resource (database, filesystem, etc.). Ensure that access denied responses are identical regardless of resource existence.
 
+
 ## 2026-02-20 - [HIGH] Fix Stored XSS in Tag Colors
 **Vulnerability:** The application allowed arbitrary strings in the `color` field of Tags. This could lead to Stored XSS if the frontend blindly applies this value to a `style` attribute.
 **Learning:** Pydantic schemas for user-input data that might be used in HTML contexts (like colors, CSS values) must have strict validation.

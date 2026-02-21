@@ -1,6 +1,7 @@
 """Pydantic schemas for API validation."""
 
 import base64
+import re
 from datetime import datetime
 from typing import List, Optional
 
@@ -369,6 +370,16 @@ class PaginatedFileInventory(BaseModel):
     has_prev: bool
 
 
+def validate_hex_color(v: Optional[str]) -> Optional[str]:
+    """Validate hex color code to prevent XSS."""
+    if v is None:
+        return v
+
+    if not re.fullmatch(r"#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})", v):
+        raise ValueError("Invalid color format. Must be a hex code (e.g., #FF5733)")
+    return v
+
+
 class TagCreate(BaseModel):
     """Schema for creating a new tag."""
 
@@ -378,15 +389,9 @@ class TagCreate(BaseModel):
 
     @validator("color")
     @classmethod
-    def validate_color(cls, v):
+    def validate_color(cls, v: Optional[str]) -> Optional[str]:
         """Validate hex color code to prevent XSS."""
-        if v is None:
-            return v
-        import re
-
-        if not re.match(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", v):
-            raise ValueError("Invalid color format. Must be a hex code (e.g., #FF5733)")
-        return v
+        return validate_hex_color(v)
 
 
 class TagUpdate(BaseModel):
@@ -398,15 +403,9 @@ class TagUpdate(BaseModel):
 
     @validator("color")
     @classmethod
-    def validate_color(cls, v):
+    def validate_color(cls, v: Optional[str]) -> Optional[str]:
         """Validate hex color code to prevent XSS."""
-        if v is None:
-            return v
-        import re
-
-        if not re.match(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$", v):
-            raise ValueError("Invalid color format. Must be a hex code (e.g., #FF5733)")
-        return v
+        return validate_hex_color(v)
 
 
 class Tag(BaseModel):
