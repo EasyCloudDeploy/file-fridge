@@ -72,7 +72,6 @@ uv run alembic upgrade head
 **Why this approach?**
 - SQLite supports `CREATE TABLE` and `ALTER TABLE ADD COLUMN` natively
 - SQLAlchemy's `create_all()` is idempotent and handles these automatically
-- Faster iteration during development
 - Alembic reserved for operations SQLite cannot handle natively
 
 **3. Code Quality - Format and Lint**
