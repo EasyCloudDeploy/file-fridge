@@ -1,12 +1,22 @@
-
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call, ANY
 
 import pytest
-from app.models import MonitoredPath, Criteria, CriterionType, Operator, FileInventory, FileStatus, StorageType, ScanStatus, ColdStorageLocation
+from app.models import (
+    MonitoredPath,
+    Criteria,
+    CriterionType,
+    Operator,
+    FileInventory,
+    FileStatus,
+    StorageType,
+    ScanStatus,
+    ColdStorageLocation,
+)
 from app.services.file_workflow_service import FileWorkflowService
+
 
 @pytest.fixture
 def monitored_path(db_session):
@@ -14,7 +24,7 @@ def monitored_path(db_session):
     # Create cold storage location
     cold_loc = ColdStorageLocation(name="TestColdLoc", path="/tmp/cold")
     db_session.add(cold_loc)
-    db_session.flush() # Flush to get an ID for cold_loc before creating MonitoredPath
+    db_session.flush()  # Flush to get an ID for cold_loc before creating MonitoredPath
 
     path = MonitoredPath(
         name="Test Path",
@@ -22,15 +32,17 @@ def monitored_path(db_session):
         operation_type="move",
         last_scan_status=ScanStatus.SUCCESS,
     )
-    path.storage_locations.append(cold_loc) # Link the cold storage location
+    path.storage_locations.append(cold_loc)  # Link the cold storage location
     db_session.add(path)
     db_session.commit()
     db_session.refresh(path)
     return path
 
+
 @pytest.fixture
 def file_inventory(db_session, monitored_path):
     """Fixture for a FileInventory object."""
+
     def _create_inventory(file_path, storage_type, status):
         inventory = FileInventory(
             path_id=monitored_path.id,
@@ -45,6 +57,7 @@ def file_inventory(db_session, monitored_path):
         db_session.commit()
         db_session.refresh(inventory)
         return inventory
+
     return _create_inventory
 
 
@@ -52,7 +65,7 @@ def file_inventory(db_session, monitored_path):
 def test_process_path_scan_already_running(mock_scan_progress, monitored_path, db_session):
     """Test process_path skips if a scan is already running."""
     mock_scan_progress.start_scan.return_value = ("scan123", False)
-    
+
     service = FileWorkflowService()
     result = service.process_path(monitored_path, db_session)
 
@@ -93,7 +106,7 @@ def test_process_path_main_workflow(
     mock_cleanup_duplicates,
     mock_cleanup_missing,
     monitored_path,
-    db_session
+    db_session,
 ):
     """Test the main success workflow of process_path."""
     mock_scan_progress.start_scan.return_value = ("scan123", True)
@@ -111,22 +124,27 @@ def test_process_path_main_workflow(
         "skipped_cold": 2,
         "total_scanned": 17,
     }
-    
+
     mock_process_single_file.return_value = {"success": True}
 
     service = FileWorkflowService()
-    
+
     with patch("app.services.file_workflow_service.ThreadPoolExecutor") as mock_executor:
         # This makes the executor run tasks sequentially in the test
-        mock_executor.return_value.__enter__.return_value.submit = lambda fn, *args, **kwargs: MagicMock(result=lambda: fn(*args, **kwargs))
-        
+        mock_executor.return_value.__enter__.return_value.submit = (
+            lambda fn, *args, **kwargs: MagicMock(result=lambda: fn(*args, **kwargs))
+        )
+
         result = service.process_path(monitored_path, db_session)
 
     assert result["files_found"] == 1
     assert result["files_moved"] == 1
     assert result["files_cleaned"] == 3
     assert result["errors"] == []
-    assert db_session.query(MonitoredPath).get(monitored_path.id).last_scan_status == ScanStatus.SUCCESS
+    assert (
+        db_session.query(MonitoredPath).get(monitored_path.id).last_scan_status
+        == ScanStatus.SUCCESS
+    )
 
     mock_scan_path.assert_called_once_with(monitored_path, db_session)
     mock_process_single_file.assert_called_once_with(file_to_move, [1], monitored_path)
@@ -143,7 +161,7 @@ def test_scan_path(
     mock_match_file,
     monitored_path,
     db_session,
-    tmp_path
+    tmp_path,
 ):
     """Test the _scan_path method."""
     hot_path = tmp_path / "hot"
@@ -153,7 +171,7 @@ def test_scan_path(
 
     monitored_path.source_path = str(hot_path)
     monitored_path.cold_storage_path = str(cold_path)
-    
+
     # File that should be moved to cold
     file_to_freeze = hot_path / "old_file.txt"
     file_to_freeze.touch()
@@ -167,29 +185,45 @@ def test_scan_path(
     cold_file_for_thaw = cold_path / "thaw_me.txt"
     cold_file_for_thaw.touch()
     symlink_to_thaw.symlink_to(cold_file_for_thaw)
-    
+
     # Mock scandir to return our test files
     mock_scandir.side_effect = [
         # First call for hot path
         [
-            MagicMock(path=str(file_to_freeze), is_symlink=lambda: False, stat=lambda **kw: file_to_freeze.stat()),
-            MagicMock(path=str(file_to_keep), is_symlink=lambda: False, stat=lambda **kw: file_to_keep.stat()),
-            MagicMock(path=str(symlink_to_thaw), is_symlink=lambda: True, stat=lambda **kw: symlink_to_thaw.lstat()),
+            MagicMock(
+                path=str(file_to_freeze),
+                is_symlink=lambda: False,
+                stat=lambda **kw: file_to_freeze.stat(),
+            ),
+            MagicMock(
+                path=str(file_to_keep),
+                is_symlink=lambda: False,
+                stat=lambda **kw: file_to_keep.stat(),
+            ),
+            MagicMock(
+                path=str(symlink_to_thaw),
+                is_symlink=lambda: True,
+                stat=lambda **kw: symlink_to_thaw.lstat(),
+            ),
         ],
         # Second call for cold path
         [
-             MagicMock(path=str(cold_file_for_thaw), is_symlink=lambda: False, stat=lambda **kw: cold_file_for_thaw.stat()),
-        ]
+            MagicMock(
+                path=str(cold_file_for_thaw),
+                is_symlink=lambda: False,
+                stat=lambda **kw: cold_file_for_thaw.stat(),
+            ),
+        ],
     ]
-    
+
     # Mock CriteriaMatcher to control which files match
     def match_file_side_effect(file_path, criteria, actual_file_path):
         if file_path == file_to_freeze:
-            return False, [] # Not active -> move to cold
+            return False, []  # Not active -> move to cold
         if file_path == file_to_keep:
-            return True, [1] # Active -> keep in hot
+            return True, [1]  # Active -> keep in hot
         if file_path == symlink_to_thaw:
-            return True, [2] # Active -> thaw from cold
+            return True, [2]  # Active -> thaw from cold
         return True, []
 
     mock_match_file.side_effect = match_file_side_effect
@@ -201,7 +235,7 @@ def test_scan_path(
     assert result["to_hot"] == [(symlink_to_thaw, cold_file_for_thaw)]
     assert result["skipped_hot"] == 1
     assert result["skipped_cold"] == 0
-    
+
     mock_update_inventory.assert_called_once()
 
 
@@ -218,7 +252,7 @@ def test_process_single_file(
     mock_move,
     monitored_path,
     file_inventory,
-    tmp_path
+    tmp_path,
 ):
     """Test the _process_single_file method for a successful move."""
     hot_path = tmp_path / "hot"
@@ -240,35 +274,32 @@ def test_process_single_file(
     result = service._process_single_file(file_to_move, [1], monitored_path)
 
     assert result["success"] is True
-    
+
     # Reload inventory from a new session to check committed state
     new_session = MagicMock()
     reloaded_inventory = new_session.query(FileInventory).get(inventory.id)
     # The above line is just for show, we need to check the real db session
     from app.database import SessionLocal
+
     db = SessionLocal()
     reloaded_inventory = db.query(FileInventory).get(inventory.id)
     assert reloaded_inventory.storage_type == StorageType.COLD
     assert reloaded_inventory.file_path == str(cold_path / "file.txt")
-    
+
     mock_audit_trail.log_freeze_operation.assert_called_once()
 
 
 @patch("app.services.file_workflow_service.checksum_verifier.calculate_checksum")
 @patch("app.services.file_workflow_service.audit_trail_service")
 def test_thaw_single_file(
-    mock_audit_trail,
-    mock_checksum,
-    monitored_path,
-    file_inventory,
-    tmp_path
+    mock_audit_trail, mock_checksum, monitored_path, file_inventory, tmp_path
 ):
     """Test the _thaw_single_file method for a successful thaw."""
     hot_path = tmp_path / "hot"
     hot_path.mkdir()
     cold_path = tmp_path / "cold"
     cold_path.mkdir()
-    
+
     monitored_path.source_path = str(hot_path)
     monitored_path.cold_storage_path = str(cold_path)
 
@@ -280,7 +311,7 @@ def test_thaw_single_file(
     inventory = file_inventory(symlink_path, StorageType.COLD, FileStatus.ACTIVE)
 
     mock_checksum.side_effect = ["checksum1", "checksum1"]
-    
+
     # Since we are using a real file system for this test, we need to ensure the parent dir exists
     symlink_path.parent.mkdir(exist_ok=True, parents=True)
 
@@ -295,10 +326,11 @@ def test_thaw_single_file(
     assert result["success"] is True
     assert not cold_file.exists()
     assert symlink_path.exists() and not symlink_path.is_symlink()
-    
+
     from app.database import SessionLocal
+
     db = SessionLocal()
     reloaded_inventory = db.query(FileInventory).get(inventory.id)
     assert reloaded_inventory.storage_type == StorageType.HOT
-    
+
     mock_audit_trail.log_thaw_operation.assert_called_once()

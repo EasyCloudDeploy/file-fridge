@@ -1,9 +1,8 @@
-
 import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch # Added here
+from unittest.mock import patch  # Added here
 
 import pytest
 from app.database import SessionLocal
@@ -25,7 +24,7 @@ def test_paths(tmp_path):
 def monitored_path_with_locations(db_session, test_paths):
     """Fixture to create a MonitoredPath linked to cold storage locations."""
     hot_path, cold_path = test_paths
-    
+
     # Create cold storage location
     cold_loc = ColdStorageLocation(name="TestColdLoc", path=str(cold_path))
     db_session.add(cold_loc)
@@ -59,7 +58,7 @@ def test_file_lifecycle_move_operation(monitored_path_with_locations, db_session
     file_to_move = hot_path / "test_file_move.txt"
     file_to_move.write_text("This is content for a file to be moved.")
     original_mtime = file_to_move.stat().st_mtime
-    time.sleep(0.1) # Ensure mtime is different if possible
+    time.sleep(0.1)  # Ensure mtime is different if possible
 
     # Add a criteria for moving (e.g., mtime > 0 minutes ago, effectively all files)
     criteria = Criteria(
@@ -83,11 +82,15 @@ def test_file_lifecycle_move_operation(monitored_path_with_locations, db_session
     expected_cold_path = cold_path / "test_file_move.txt"
     assert expected_cold_path.exists()
     assert expected_cold_path.read_text() == "This is content for a file to be moved."
-    assert expected_cold_path.stat().st_mtime == original_mtime # Timestamps preserved
+    assert expected_cold_path.stat().st_mtime == original_mtime  # Timestamps preserved
 
     # Verify inventory updated
     db = SessionLocal()
-    inventory_entry = db.query(file_workflow_service.FileInventory).filter_by(file_path=str(expected_cold_path)).first()
+    inventory_entry = (
+        db.query(file_workflow_service.FileInventory)
+        .filter_by(file_path=str(expected_cold_path))
+        .first()
+    )
     assert inventory_entry is not None
     assert inventory_entry.storage_type == StorageType.COLD
     assert inventory_entry.status == FileStatus.ACTIVE
@@ -97,25 +100,27 @@ def test_file_lifecycle_move_operation(monitored_path_with_locations, db_session
     # For this test, we'll simulate thawing by setting the file back to active
     # and then manually calling _thaw_single_file. In a real scenario, we'd adjust criteria
     # and re-scan, but for direct integration, this is fine.
-    
+
     # Simulate criteria change so file is considered "hot" again
     criteria.operator = "<"
-    criteria.value = "-1000" # Effectively never matches
+    criteria.value = "-1000"  # Effectively never matches
     db_session.commit()
 
     # Manually trigger thaw for the file via service (as it would be done by process_path)
     thaw_results = file_workflow_service._thaw_single_file(
-        symlink_path=expected_cold_path, # In MOVE, the cold path is the "symlink_path" to move from
-        cold_storage_path=expected_cold_path, # In MOVE, this is also the cold path
-        path=monitored_path
+        symlink_path=expected_cold_path,  # In MOVE, the cold path is the "symlink_path" to move from
+        cold_storage_path=expected_cold_path,  # In MOVE, this is also the cold path
+        path=monitored_path,
     )
     assert thaw_results["success"] is True
     assert not expected_cold_path.exists()
-    assert file_to_move.exists() # The original hot path should now have the file
+    assert file_to_move.exists()  # The original hot path should now have the file
 
     # Verify inventory updated after thaw
     db = SessionLocal()
-    inventory_entry = db.query(file_workflow_service.FileInventory).filter_by(file_path=str(file_to_move)).first()
+    inventory_entry = (
+        db.query(file_workflow_service.FileInventory).filter_by(file_path=str(file_to_move)).first()
+    )
     assert inventory_entry is not None
     assert inventory_entry.storage_type == StorageType.HOT
     assert inventory_entry.status == FileStatus.ACTIVE
@@ -165,21 +170,25 @@ def test_file_lifecycle_symlink_operation(monitored_path_with_locations, db_sess
     # Verify inventory updated
     db = SessionLocal()
     # Inventory for symlink operations points to the symlink itself
-    inventory_entry = db.query(file_workflow_service.FileInventory).filter_by(file_path=str(file_to_symlink)).first()
+    inventory_entry = (
+        db.query(file_workflow_service.FileInventory)
+        .filter_by(file_path=str(file_to_symlink))
+        .first()
+    )
     assert inventory_entry is not None
-    assert inventory_entry.storage_type == StorageType.COLD # Symlink is considered "cold"
+    assert inventory_entry.storage_type == StorageType.COLD  # Symlink is considered "cold"
     assert inventory_entry.status == FileStatus.ACTIVE
     db.close()
 
     # 3. Thaw the file back (simulate by re-scanning with non-matching criteria)
     criteria.operator = "<"
-    criteria.value = "-1000" # Effectively never matches
+    criteria.value = "-1000"  # Effectively never matches
     db_session.commit()
-    
+
     # Run scan again to trigger thawing
     results_thaw = file_workflow_service.process_path(monitored_path, db_session)
-    assert results_thaw["files_found"] == 1 # Still sees the symlink
-    assert results_thaw["files_moved"] == 1 # The thaw operation counts as a move
+    assert results_thaw["files_found"] == 1  # Still sees the symlink
+    assert results_thaw["files_moved"] == 1  # The thaw operation counts as a move
     assert results_thaw["errors"] == []
 
     # Verify symlink is gone and original file is back
@@ -190,7 +199,11 @@ def test_file_lifecycle_symlink_operation(monitored_path_with_locations, db_sess
 
     # Verify inventory updated after thaw
     db = SessionLocal()
-    inventory_entry = db.query(file_workflow_service.FileInventory).filter_by(file_path=str(file_to_symlink)).first()
+    inventory_entry = (
+        db.query(file_workflow_service.FileInventory)
+        .filter_by(file_path=str(file_to_symlink))
+        .first()
+    )
     assert inventory_entry is not None
     assert inventory_entry.storage_type == StorageType.HOT
     assert inventory_entry.status == FileStatus.ACTIVE
@@ -241,8 +254,14 @@ def test_file_lifecycle_copy_operation(monitored_path_with_locations, db_session
 
     # Verify inventory updated (hot file should still be hot, cold copy registered as cold)
     db = SessionLocal()
-    hot_inventory = db.query(file_workflow_service.FileInventory).filter_by(file_path=str(file_to_copy)).first()
-    cold_inventory = db.query(file_workflow_service.FileInventory).filter_by(file_path=str(expected_cold_path)).first()
+    hot_inventory = (
+        db.query(file_workflow_service.FileInventory).filter_by(file_path=str(file_to_copy)).first()
+    )
+    cold_inventory = (
+        db.query(file_workflow_service.FileInventory)
+        .filter_by(file_path=str(expected_cold_path))
+        .first()
+    )
 
     assert hot_inventory is not None
     assert hot_inventory.storage_type == StorageType.HOT
@@ -255,7 +274,7 @@ def test_file_lifecycle_copy_operation(monitored_path_with_locations, db_session
 
     # 3. Thaw the file back (simulate by removing the cold copy and updating inventory)
     # For COPY, thawing means deleting the cold copy. The hot file remains untouched.
-    
+
     # We need to explicitly delete the cold file to simulate thawing for COPY operation
     # In a real scenario, changing criteria would cause the service to delete the cold copy
     # We will simulate the deletion and then verify inventory update
@@ -263,16 +282,16 @@ def test_file_lifecycle_copy_operation(monitored_path_with_locations, db_session
 
     # Update criteria so it no longer matches
     criteria.operator = "<"
-    criteria.value = "-1000" # Effectively never matches
+    criteria.value = "-1000"  # Effectively never matches
     db_session.commit()
-    
+
     # Run scan again. The hot file no longer matches, and the cold copy is gone.
     # The scan will clean up the orphaned cold inventory entry.
     results_thaw = file_workflow_service.process_path(monitored_path, db_session)
     # files_found will be 1 (the hot file), files_moved will be 0 as the "thaw" is just cleanup
     assert results_thaw["files_found"] == 1
-    assert results_thaw["files_moved"] == 0 
-    assert results_thaw["files_cleaned"] > 0 # Should clean up the orphaned cold inventory
+    assert results_thaw["files_moved"] == 0
+    assert results_thaw["files_cleaned"] > 0  # Should clean up the orphaned cold inventory
     assert results_thaw["errors"] == []
 
     # Verify hot file still exists
@@ -281,13 +300,19 @@ def test_file_lifecycle_copy_operation(monitored_path_with_locations, db_session
 
     # Verify inventory updated after thaw
     db = SessionLocal()
-    hot_inventory = db.query(file_workflow_service.FileInventory).filter_by(file_path=str(file_to_copy)).first()
-    cold_inventory = db.query(file_workflow_service.FileInventory).filter_by(file_path=str(expected_cold_path)).first()
+    hot_inventory = (
+        db.query(file_workflow_service.FileInventory).filter_by(file_path=str(file_to_copy)).first()
+    )
+    cold_inventory = (
+        db.query(file_workflow_service.FileInventory)
+        .filter_by(file_path=str(expected_cold_path))
+        .first()
+    )
 
     assert hot_inventory is not None
     assert hot_inventory.storage_type == StorageType.HOT
     assert hot_inventory.status == FileStatus.ACTIVE
-    assert cold_inventory is None # Cold inventory entry should be gone
+    assert cold_inventory is None  # Cold inventory entry should be gone
     db.close()
 
 
@@ -315,8 +340,13 @@ def test_file_lifecycle_non_existent_file(monitored_path_with_locations, db_sess
     db_session.commit()
 
     # 2. Mock _process_single_file to simulate file disappearing
-    with patch("app.services.file_workflow_service.FileWorkflowService._process_single_file") as mock_process_single_file:
-        mock_process_single_file.return_value = {"success": True, "skipped": True} # Indicate it was skipped because it disappeared
+    with patch(
+        "app.services.file_workflow_service.FileWorkflowService._process_single_file"
+    ) as mock_process_single_file:
+        mock_process_single_file.return_value = {
+            "success": True,
+            "skipped": True,
+        }  # Indicate it was skipped because it disappeared
 
         # This will be called by _scan_path which will "find" the file
         results = file_workflow_service.process_path(monitored_path, db_session)
@@ -325,5 +355,5 @@ def test_file_lifecycle_non_existent_file(monitored_path_with_locations, db_sess
         file_to_disappear.unlink()
 
         assert results["files_found"] == 1
-        assert results["files_moved"] == 0 # Should not attempt to move if file disappeared
+        assert results["files_moved"] == 0  # Should not attempt to move if file disappeared
         assert results["errors"] == []

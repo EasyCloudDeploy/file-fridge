@@ -338,9 +338,9 @@ class RemoteTransferService:
 
                 # --- Signing and Header construction ---
                 url = f"{conn.url.rstrip('/')}/api/v1/remote/receive"
-                signed_headers = await get_signed_headers(db, "POST", url, final_chunk)
 
-                headers = {
+                # Define logic headers first so they can be signed
+                logic_headers = {
                     "X-Job-ID": str(job.id),
                     "X-Chunk-Index": str(chunk_idx),
                     "X-Is-Final": "true" if is_final else "false",
@@ -349,10 +349,17 @@ class RemoteTransferService:
                     "X-Storage-Type": job.storage_type.value,
                     "X-Encryption-Nonce": nonce.hex() if use_encryption else "",
                     "X-File-Size": str(job.total_size),
-                    **signed_headers,
                 }
                 if use_encryption:
-                    headers["X-Ephemeral-Public-Key"] = ephemeral_pub_key_b64
+                    logic_headers["X-Ephemeral-Public-Key"] = ephemeral_pub_key_b64
+
+                # Get signature including the logic headers
+                signed_headers = await get_signed_headers(
+                    db, "POST", url, final_chunk, extra_headers=logic_headers
+                )
+
+                # Combine all headers
+                headers = {**logic_headers, **signed_headers}
                 # --- End Header Construction ---
 
                 logger.debug(
@@ -462,10 +469,10 @@ class RemoteTransferService:
                             "relative_path": job.relative_path,
                             "remote_path_id": job.remote_monitored_path_id,
                         }
-                        body_bytes = json.dumps(json_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-                        signed_headers = await get_signed_headers(
-                            db, "POST", url, body_bytes
-                        )
+                        body_bytes = json.dumps(
+                            json_payload, sort_keys=True, separators=(",", ":")
+                        ).encode("utf-8")
+                        signed_headers = await get_signed_headers(db, "POST", url, body_bytes)
 
                         verify_response = await client.post(
                             url,
