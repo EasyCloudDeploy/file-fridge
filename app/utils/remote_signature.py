@@ -19,6 +19,19 @@ logger = logging.getLogger(__name__)
 # The maximum age of a request timestamp in seconds
 # This is now configurable via settings.signature_timestamp_tolerance
 
+# Headers that MUST be signed if present in the request to prevent tampering
+SIGNED_LOGIC_HEADERS = {
+    "x-chunk-index",
+    "x-relative-path",
+    "x-remote-path-id",
+    "x-storage-type",
+    "x-job-id",
+    "x-is-final",
+    "x-encryption-nonce",
+    "x-ephemeral-public-key",
+    "x-file-size",
+}
+
 
 def build_message_to_sign(
     method: str,
@@ -28,19 +41,43 @@ def build_message_to_sign(
     timestamp: str,
     fingerprint: str,
     nonce: str,
+    headers: Dict[str, str] = None,
 ) -> bytes:
     """
     Construct a canonical message from request components for signing.
     This ensures both client and server sign the exact same payload.
     The order and format are crucial and must be identical on both ends.
+
+    Args:
+        headers: Optional dictionary of extra headers to include in signature.
+                Keys should be lowercase.
     """
     body_hash = hashlib.sha256(body).hexdigest()
-    return (
-        f"{method.upper()}|{path}|{query_params}|{timestamp}|{fingerprint}|{nonce}|{body_hash}"
-    ).encode()
+    parts = [
+        method.upper(),
+        path,
+        query_params,
+        timestamp,
+        fingerprint,
+        nonce,
+        body_hash,
+    ]
+
+    if headers:
+        # Sort headers by key to ensure deterministic order
+        for key in sorted(headers.keys()):
+            parts.append(f"{key.lower()}={headers[key]}")
+
+    return "|".join(parts).encode()
 
 
-async def get_signed_headers(db: Session, method: str, url: str, content: bytes) -> Dict[str, str]:
+async def get_signed_headers(
+    db: Session,
+    method: str,
+    url: str,
+    content: bytes,
+    extra_headers: Dict[str, str] = None,
+) -> Dict[str, str]:
     """
     Generate the necessary headers for a signed inter-instance request.
     This is the client-side part of the signature process.
@@ -54,8 +91,20 @@ async def get_signed_headers(db: Session, method: str, url: str, content: bytes)
     fingerprint = identity_service.get_instance_fingerprint(db)
     nonce = secrets.token_hex(16)  # 32-char hex string for replay protection
 
+    # Normalize extra headers to lowercase keys for signing
+    headers_to_sign = {}
+    if extra_headers:
+        headers_to_sign = {k.lower(): str(v) for k, v in extra_headers.items()}
+
     message = build_message_to_sign(
-        method, parsed_url.path, parsed_url.query.decode(), content, timestamp, fingerprint, nonce
+        method,
+        parsed_url.path,
+        parsed_url.query.decode(),
+        content,
+        timestamp,
+        fingerprint,
+        nonce,
+        headers_to_sign,
     )
     signature = identity_service.sign_message(db, message)
 
@@ -75,6 +124,7 @@ async def verify_signature_from_components(
     nonce: str,
     request: Request,
     body: bytes,
+    headers: Dict[str, str] = None,
 ) -> RemoteConnection:
     """
     Core verification logic with nonce-based replay protection.
@@ -130,6 +180,7 @@ async def verify_signature_from_components(
         timestamp_str,
         fingerprint,
         nonce,
+        headers,
     )
     signature_bytes = bytes.fromhex(signature_hex)
 
@@ -162,6 +213,20 @@ async def verify_remote_signature(
     It reads the request body, so it cannot be used on endpoints that also need to read the body.
     """
     body = await request.body()
+
+    # Extract critical logic headers that must be signed
+    headers_to_sign = {}
+    for key in request.headers:
+        if key.lower() in SIGNED_LOGIC_HEADERS:
+            headers_to_sign[key.lower()] = request.headers[key]
+
     return await verify_signature_from_components(
-        db, x_fingerprint, x_timestamp, x_signature, x_nonce, request, body
+        db,
+        x_fingerprint,
+        x_timestamp,
+        x_signature,
+        x_nonce,
+        request,
+        body,
+        headers_to_sign,
     )

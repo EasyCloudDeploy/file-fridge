@@ -1,4 +1,3 @@
-
 import pytest
 from fastapi import FastAPI, Request, Depends
 from fastapi.testclient import TestClient
@@ -7,11 +6,14 @@ from app.utils.rate_limiter import check_login_rate_limit, _login_rate_limiter
 # Create a dummy app for testing
 app = FastAPI()
 
+
 @app.get("/login_test", dependencies=[Depends(check_login_rate_limit)])
 def login_test():
     return {"message": "ok"}
 
+
 client = TestClient(app)
+
 
 def test_rate_limit_bypass_x_forwarded_for():
     # Reset the rate limiter
@@ -40,6 +42,7 @@ def test_rate_limit_bypass_x_forwarded_for():
     # The 6th request (with different XFF) should still count against "ip:testclient" and be blocked.
 
     assert response.status_code == 429, "Rate limit bypassed via X-Forwarded-For spoofing"
+
 
 def test_rate_limit_bypass_x_instance_uuid():
     # Reset

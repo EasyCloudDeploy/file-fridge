@@ -139,8 +139,6 @@ async def _get_found_tmp(db: Session, remote_path_id: int, relative_path: str) -
     raise HTTPException(status_code=404, detail="Temporary file not found")
 
 
-
-
 async def _decrypt_chunk(
     chunk: bytes,
     nonce_hex: str,
@@ -574,9 +572,7 @@ async def migrate_file(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.post(
-    "/migrate/bulk", response_model=BulkActionResponse, tags=["Remote Connections"]
-)
+@router.post("/migrate/bulk", response_model=BulkActionResponse, tags=["Remote Connections"])
 async def bulk_migrate_files(
     migration_data: BulkRemoteMigrationRequest,
     db: Session = Depends(get_db),
@@ -602,9 +598,7 @@ async def bulk_migrate_files(
             successful += 1
         except Exception as e:
             logger.exception("Failed to create transfer job for file_id=%s", file_id)
-            results.append(
-                BulkActionResult(file_id=file_id, success=False, message=str(e))
-            )
+            results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
             failed += 1
 
     return BulkActionResponse(
@@ -615,9 +609,7 @@ async def bulk_migrate_files(
     )
 
 
-@router.get(
-    "/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"]
-)
+@router.get("/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"])
 def list_transfers(
     db: Session = Depends(get_db),
     current_user: dict = Depends(PermissionChecker("Remote Connections")),
@@ -934,10 +926,15 @@ async def verify_transfer(
 
         # Calculate local hash
         from app.services.file_metadata import file_metadata_extractor
-        local_hash = await anyio.to_thread.run_sync(file_metadata_extractor.compute_sha256, final_path)
+
+        local_hash = await anyio.to_thread.run_sync(
+            file_metadata_extractor.compute_sha256, final_path
+        )
 
         if local_hash != checksum:
-            logger.error(f"Checksum mismatch! Expected {checksum}, got {local_hash}. Deleting {final_path}")
+            logger.error(
+                f"Checksum mismatch! Expected {checksum}, got {local_hash}. Deleting {final_path}"
+            )
             await anyio.to_thread.run_sync(final_path.unlink, True)
             raise HTTPException(status_code=422, detail="Checksum verification failed")
 
