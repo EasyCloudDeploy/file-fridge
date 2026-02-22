@@ -13,8 +13,8 @@ from app.security import hash_password
 
 # Override settings for testing
 settings.database_path = ":memory:"
-settings.secret_key = "test-secret-key"
-settings.encryption_key_file = "./test_encryption.key"
+settings.secret_key = "test-secret-key"  # NOSONAR
+settings.encryption_key_file = "./test_encryption.key"  # NOSONAR
 settings.require_fingerprint_verification = False
 
 

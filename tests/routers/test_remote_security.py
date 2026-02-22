@@ -1,6 +1,7 @@
+
 import time
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch, ANY
 
 import pytest
 from fastapi import Request, HTTPException
@@ -53,14 +54,13 @@ async def test_header_integrity_vulnerability(
     valid_connection,
 ):
     """
-    Demonstrate that current signature verification does NOT cover X- headers.
-    This test passes if the vulnerability exists (signature verifies despite header tampering).
+    Demonstrate that current signature verification DOES cover X- headers.
+    We verify this by ensuring the signed message changes when a header changes.
     """
     # Setup mocks
     mock_rc_service.get_connection_by_fingerprint.return_value = valid_connection
-    mock_identity.verify_signature.return_value = (
-        True  # Assume valid signature for the base message
-    )
+    # We want verify_signature to succeed so we can inspect the call arguments
+    mock_identity.verify_signature.return_value = True
 
     # Mock database query for nonce check (return None = no replay)
     mock_db.query.return_value.filter.return_value.first.return_value = None
@@ -83,40 +83,51 @@ async def test_header_integrity_vulnerability(
     mock_request.headers = original_headers.copy()
 
     # 1. Verify with original headers
-    try:
-        result = await verify_remote_signature(
-            mock_request,
-            x_fingerprint=fingerprint,
-            x_timestamp=timestamp,
-            x_nonce=nonce,
-            x_signature=signature,
-            db=mock_db,
-        )
-        assert result == valid_connection
-    except Exception as e:
-        pytest.fail(f"Original headers verification FAILED: {e}")
+    await verify_remote_signature(
+        mock_request,
+        x_fingerprint=fingerprint,
+        x_timestamp=timestamp,
+        x_nonce=nonce,
+        x_signature=signature,
+        db=mock_db,
+    )
+
+    # Capture the message signed in the first call
+    # call_args[0] are positional args: (public_key, signature, message)
+    args1 = mock_identity.verify_signature.call_args[0]
+    message1 = args1[2]
+    print(f"Message 1: {message1}")
 
     # 2. Tamper with X-Relative-Path
     tampered_headers = original_headers.copy()
     tampered_headers["X-Relative-Path"] = "CRITICAL_SYSTEM_FILE.txt"
     mock_request.headers = tampered_headers
 
-    # 3. Verify again - Should fail with 401 because signature does not cover modified header
-    try:
-        result = await verify_remote_signature(
-            mock_request,
-            x_fingerprint=fingerprint,
-            x_timestamp=timestamp,
-            x_nonce=nonce,
-            x_signature=signature,
-            db=mock_db,
-        )
-        pytest.fail("Vulnerability still exists: Signature verified despite header tampering!")
-    except HTTPException as e:
-        if e.status_code == 401:
-            print(f"\nSUCCESS: Tampering detected with 401: {e.detail}")
-            # Test passes!
-        else:
-            pytest.fail(f"Verification failed with unexpected status {e.status_code}: {e.detail}")
-    except Exception as e:
-        pytest.fail(f"Verification failed with unexpected error: {e}")
+    # 3. Verify again
+    await verify_remote_signature(
+        mock_request,
+        x_fingerprint=fingerprint,
+        x_timestamp=timestamp,
+        x_nonce=nonce,
+        x_signature=signature,
+        db=mock_db,
+    )
+
+    # Capture the message signed in the second call
+    args2 = mock_identity.verify_signature.call_args[0]
+    message2 = args2[2]
+    print(f"Message 2: {message2}")
+
+    # 4. Assert that the messages are DIFFERENT
+    # If the vulnerability exists (headers ignored), message1 would equal message2
+    assert message1 != message2, "Vulnerability confirmed: Tampered header did not change signed message!"
+
+    # 5. Verify that the tampered header value is actually present in message2
+    assert b"CRITICAL_SYSTEM_FILE.txt" in message2
+
+    # 6. Verify that the original header value is present in message1
+    assert b"safe_file.txt" in message1
+
+    # In a real scenario, since the signature (X-Signature) didn't change but the message did,
+    # the crypto verification would fail. Since we mocked it to True, it passed,
+    # but we proved that the input to the crypto function is correct.
