@@ -41,8 +41,8 @@ def valid_connection():
 
 @patch("app.utils.remote_signature.identity_service")
 @patch("app.utils.remote_signature.remote_connection_service")
-@patch("app.utils.remote_signature.security_audit_service")
-@patch("app.utils.remote_signature.RequestNonce")  # Mock the model class
+@patch("app.services.security_audit_service.security_audit_service")
+@patch("app.models.RequestNonce")  # Mock the model class
 @pytest.mark.asyncio
 async def test_header_integrity_vulnerability(
     mock_request_nonce_model,
@@ -69,7 +69,7 @@ async def test_header_integrity_vulnerability(
     timestamp = str(int(time.time()))
     nonce = "nonce123"
     fingerprint = "fingerprint123"
-    signature = "valid_signature_hex"
+    signature = "deadbeef" * 8
 
     original_headers = {
         "X-Fingerprint": fingerprint,
