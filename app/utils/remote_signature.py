@@ -20,6 +20,17 @@ logger = logging.getLogger(__name__)
 # This is now configurable via settings.signature_timestamp_tolerance
 
 
+def escape_component(s: str) -> str:
+    """
+    Escape delimiters in message components to prevent canonicalization attacks.
+    Replaces '%' with '%25' and '|' with '%7C'.
+    """
+    if not s:
+        return ""
+    # Must replace % first to avoid double escaping
+    return s.replace("%", "%25").replace("|", "%7C")
+
+
 def build_message_to_sign(
     method: str,
     path: str,
@@ -33,10 +44,25 @@ def build_message_to_sign(
     Construct a canonical message from request components for signing.
     This ensures both client and server sign the exact same payload.
     The order and format are crucial and must be identical on both ends.
+
+    Components are escaped to prevent delimiter injection (canonicalization attacks).
     """
     body_hash = hashlib.sha256(body).hexdigest()
+
+    # Escape all string components that might contain delimiters
+    # method, timestamp, fingerprint, nonce, body_hash are typically safe characters
+    # but we escape them for consistency and future-proofing.
+    # path and query_params are critical to escape.
+    e_method = escape_component(method.upper())
+    e_path = escape_component(path)
+    e_query = escape_component(query_params)
+    e_timestamp = escape_component(timestamp)
+    e_fingerprint = escape_component(fingerprint)
+    e_nonce = escape_component(nonce)
+    e_body_hash = escape_component(body_hash)
+
     return (
-        f"{method.upper()}|{path}|{query_params}|{timestamp}|{fingerprint}|{nonce}|{body_hash}"
+        f"{e_method}|{e_path}|{e_query}|{e_timestamp}|{e_fingerprint}|{e_nonce}|{e_body_hash}"
     ).encode()
 
 
