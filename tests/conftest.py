@@ -78,3 +78,12 @@ def client(db_session):
     app.dependency_overrides[get_db] = _override_get_db
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiters():
+    """Reset rate limiters before each test."""
+    from app.utils.rate_limiter import _login_rate_limiter, _remote_rate_limiter
+
+    _login_rate_limiter.requests.clear()
+    _remote_rate_limiter.requests.clear()

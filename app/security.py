@@ -270,6 +270,12 @@ class PermissionChecker:
         return any(p in ["*", required, star_tag] for p in user_permissions)
 
 
+# Generate a dummy hash for timing attack mitigation
+# This hash is generated once at module import time and used when a user is not found.
+# It uses the same work factor as legitimate hashes because hash_password uses defaults.
+_DUMMY_HASH = hash_password("dummy_password_for_timing_mitigation")
+
+
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
     """
     Authenticate a user by username and password.
@@ -284,6 +290,10 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     """
     user = db.query(User).filter(User.username == username).first()
     if not user:
+        # Mitigate timing attacks by verifying against a dummy hash
+        # This ensures the operation takes approximately the same time
+        # regardless of whether the user exists or not.
+        verify_password(password, _DUMMY_HASH)
         return None
 
     if not verify_password(password, user.password_hash):
