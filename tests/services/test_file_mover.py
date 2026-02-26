@@ -288,3 +288,47 @@ def test_move_with_rollback_checksum_mismatch(
     assert checksum == "checksum1"
     # Ensure unlink was called on the correct destination path
     mock_path_unlink.assert_called_once_with(dest)
+
+def test_move_symlink_direct(tmp_path):
+    """Test _move_symlink when it points to an absolute path."""
+    target = tmp_path / "actual_target.txt"
+    target.write_text("data")
+    link = tmp_path / "the_link"
+    link.symlink_to(target)
+    dest = tmp_path / "final_dest.txt"
+    
+    from app.services.file_mover import _move_symlink
+    success, error = _move_symlink(link, dest)
+    
+    assert success is True
+    assert not link.exists()
+    assert dest.exists()
+    assert dest.read_text() == "data"
+
+def test_move_symlink_relative(tmp_path):
+    """Test _move_symlink when it points to a relative path."""
+    subdir = tmp_path / "subdir"
+    subdir.mkdir()
+    target = subdir / "target.txt"
+    target.write_text("relative data")
+    link = subdir / "link_rel"
+    link.symlink_to("target.txt")
+    dest = tmp_path / "moved_relative.txt"
+    
+    from app.services.file_mover import _move_symlink
+    success, error = _move_symlink(link, dest)
+    
+    assert success is True
+    assert not link.exists()
+    assert dest.exists()
+    assert dest.read_text() == "relative data"
+
+@patch("app.services.file_mover.shutil.copy2")
+@patch("app.services.file_mover.os.utime")
+def test_copy_no_progress(mock_utime, mock_copy2, source_and_dest):
+    """Test _copy_with_progress without callback (uses shutil.copy2)."""
+    source, dest = source_and_dest
+    from app.services.file_mover import _copy_with_progress
+    _copy_with_progress(source, dest, None)
+    mock_copy2.assert_called_once()
+    mock_utime.assert_called_once()

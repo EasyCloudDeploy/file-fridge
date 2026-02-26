@@ -574,8 +574,8 @@ class RemoteTransferService:
                     f"Transfer job {job.id} used MOVE strategy. Removing source file {source_path}"
                 )
                 try:
-                    # Remove file asynchronously
-                    await aiofiles.os.remove(str(source_path))
+                    # Remove file
+                    os.remove(str(source_path))
 
                     # Update file inventory status
                     file_obj = (

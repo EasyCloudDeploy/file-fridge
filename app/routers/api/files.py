@@ -974,88 +974,6 @@ def backfill_metadata(
     return {"success": True, "message": "Metadata backfill completed", **result}
 
 
-@router.post("/{inventory_id}/pin", status_code=status.HTTP_200_OK)
-def pin_file(inventory_id: int, db: Session = Depends(get_db)):
-    """
-    Pin a file to exclude it from automatic scan operations.
-
-    Pinned files will not be moved to cold storage or thawed automatically
-    during scheduled scans.
-    """
-    # Get the file from inventory
-    file = db.query(FileInventory).filter(FileInventory.id == inventory_id).first()
-    if not file:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File with inventory id {inventory_id} not found",
-        )
-
-    # Check if already pinned
-    existing_pin = db.query(PinnedFile).filter(PinnedFile.file_path == file.file_path).first()
-
-    if existing_pin:
-        return {
-            "message": "File is already pinned",
-            "inventory_id": inventory_id,
-            "file_path": file.file_path,
-            "is_pinned": True,
-        }
-
-    # Create new pin
-    pinned = PinnedFile(path_id=file.path_id, file_path=file.file_path)
-    db.add(pinned)
-    db.commit()
-
-    logger.info(f"Pinned file: {file.file_path}")
-
-    return {
-        "message": "File pinned successfully",
-        "inventory_id": inventory_id,
-        "file_path": file.file_path,
-        "is_pinned": True,
-    }
-
-
-@router.delete("/{inventory_id}/pin", status_code=status.HTTP_200_OK)
-def unpin_file(inventory_id: int, db: Session = Depends(get_db)):
-    """
-    Remove pin from a file, allowing automatic scan operations.
-
-    The file will be subject to normal scan criteria again and may be
-    moved to cold storage or thawed automatically.
-    """
-    # Get the file from inventory
-    file = db.query(FileInventory).filter(FileInventory.id == inventory_id).first()
-    if not file:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"File with inventory id {inventory_id} not found",
-        )
-
-    # Find and delete the pin
-    pin = db.query(PinnedFile).filter(PinnedFile.file_path == file.file_path).first()
-
-    if not pin:
-        return {
-            "message": "File is not pinned",
-            "inventory_id": inventory_id,
-            "file_path": file.file_path,
-            "is_pinned": False,
-        }
-
-    db.delete(pin)
-    db.commit()
-
-    logger.info(f"Unpinned file: {file.file_path}")
-
-    return {
-        "message": "File unpinned successfully",
-        "inventory_id": inventory_id,
-        "file_path": file.file_path,
-        "is_pinned": False,
-    }
-
-
 # Bulk Operations Endpoints
 
 
@@ -1444,3 +1362,85 @@ def bulk_unpin_files(request: BulkFileActionRequest, db: Session = Depends(get_d
     return BulkActionResponse(
         total=len(request.file_ids), successful=successful, failed=failed, results=results
     )
+
+
+@router.post("/{inventory_id}/pin", status_code=status.HTTP_200_OK)
+def pin_file(inventory_id: int, db: Session = Depends(get_db)):
+    """
+    Pin a file to exclude it from automatic scan operations.
+
+    Pinned files will not be moved to cold storage or thawed automatically
+    during scheduled scans.
+    """
+    # Get the file from inventory
+    file = db.query(FileInventory).filter(FileInventory.id == inventory_id).first()
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File with inventory id {inventory_id} not found",
+        )
+
+    # Check if already pinned
+    existing_pin = db.query(PinnedFile).filter(PinnedFile.file_path == file.file_path).first()
+
+    if existing_pin:
+        return {
+            "message": "File is already pinned",
+            "inventory_id": inventory_id,
+            "file_path": file.file_path,
+            "is_pinned": True,
+        }
+
+    # Create new pin
+    pinned = PinnedFile(path_id=file.path_id, file_path=file.file_path)
+    db.add(pinned)
+    db.commit()
+
+    logger.info(f"Pinned file: {file.file_path}")
+
+    return {
+        "message": "File pinned successfully",
+        "inventory_id": inventory_id,
+        "file_path": file.file_path,
+        "is_pinned": True,
+    }
+
+
+@router.delete("/{inventory_id}/pin", status_code=status.HTTP_200_OK)
+def unpin_file(inventory_id: int, db: Session = Depends(get_db)):
+    """
+    Remove pin from a file, allowing automatic scan operations.
+
+    The file will be subject to normal scan criteria again and may be
+    moved to cold storage or thawed automatically.
+    """
+    # Get the file from inventory
+    file = db.query(FileInventory).filter(FileInventory.id == inventory_id).first()
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File with inventory id {inventory_id} not found",
+        )
+
+    # Find and delete the pin
+    pin = db.query(PinnedFile).filter(PinnedFile.file_path == file.file_path).first()
+
+    if not pin:
+        return {
+            "message": "File is not pinned",
+            "inventory_id": inventory_id,
+            "file_path": file.file_path,
+            "is_pinned": False,
+        }
+
+    db.delete(pin)
+    db.commit()
+
+    logger.info(f"Unpinned file: {file.file_path}")
+
+    return {
+        "message": "File unpinned successfully",
+        "inventory_id": inventory_id,
+        "file_path": file.file_path,
+        "is_pinned": False,
+    }

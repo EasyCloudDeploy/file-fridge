@@ -22,6 +22,7 @@ app.dependency_overrides[get_db] = mock_get_db
 
 client = TestClient(app)
 
+@patch.dict(os.environ, {"DISABLE_RATE_LIMIT": "false"})
 @patch("app.routers.api.auth.authenticate_user")
 def test_login_rate_limit(mock_auth):
     """Test that login endpoint is rate limited to 5 requests per minute."""

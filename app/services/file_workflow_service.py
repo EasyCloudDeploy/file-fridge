@@ -343,6 +343,9 @@ class FileWorkflowService:
                     continue
 
             try:
+                is_active, matched_ids = CriteriaMatcher.match_file(
+                    file_path, path.criteria, actual_file_path
+                )
                 if is_active:
                     if is_symlink_to_cold and actual_file_path:
                         files_to_thaw.append((file_path, actual_file_path))
@@ -567,12 +570,12 @@ class FileWorkflowService:
                     )
 
                     # Update inventory entry
-                    inventory_entry.storage_type = StorageType.COLD
-                    inventory_entry.cold_storage_location_id = storage_location.id
-                    inventory_entry.status = FileStatus.ACTIVE
-                    # For MOVE/SYMLINK, the record logically moves to the cold storage path
+                    # COPY keeps the hot file active; only MOVE/SYMLINK transitions to COLD
                     if path.operation_type in ["move", "symlink"]:
+                        inventory_entry.storage_type = StorageType.COLD
+                        inventory_entry.cold_storage_location_id = storage_location.id
                         inventory_entry.file_path = str(dest_path)
+                    inventory_entry.status = FileStatus.ACTIVE
                     db.commit()
 
                     # Log to audit trail
