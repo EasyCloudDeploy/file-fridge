@@ -23,3 +23,8 @@
 **Vulnerability:** The rate limiting logic in `app/utils/rate_limiter.py` relied on `X-Forwarded-For` and `X-Instance-UUID` headers to identify clients. This allowed attackers to bypass rate limits (e.g., on the login endpoint) by spoofing these headers, as the application trusted them blindly without verifying they came from a trusted proxy.
 **Learning:** Never trust client-provided headers for security-critical controls like rate limiting or authentication unless they are verified. Headers like `X-Forwarded-For` are easily spoofed. Application logic should rely on the `request.client.host` which is populated by the ASGI server (Uvicorn), and proper proxy configuration should be handled at the infrastructure/server level, not the application level.
 **Prevention:** Use `request.client.host` exclusively for IP-based identification in application logic. Configure the ASGI server to handle trusted proxies if necessary.
+
+## 2026-02-12 - [MEDIUM] Fix Authentication Timing Attack
+**Vulnerability:** The `authenticate_user` function returned immediately if a username was not found, while valid usernames triggered a slow bcrypt password verification. This allowed attackers to enumerate valid usernames by measuring response times.
+**Learning:** Security-critical functions like authentication must have constant-time execution paths for both success and failure cases. Even database lookups are negligible compared to password hashing functions like bcrypt.
+**Prevention:** Always perform a dummy password verification (e.g., `verify_password(password, _DUMMY_HASH)`) when a user is not found to simulate the computational cost of a real login attempt.
