@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base, get_db
 from app.main import app
 from app.config import settings
+from app.utils.rate_limiter import _login_rate_limiter, _remote_rate_limiter
 
 # Override settings for testing
 settings.database_path = ":memory:"
@@ -78,3 +79,11 @@ def client(db_session):
     app.dependency_overrides[get_db] = _override_get_db
     with TestClient(app) as test_client:
         yield test_client
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiters():
+    """Reset global rate limiters before each test."""
+    _login_rate_limiter.requests.clear()
+    _remote_rate_limiter.requests.clear()
+    yield

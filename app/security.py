@@ -84,6 +84,11 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(normalized.encode("utf-8"), hashed_password.encode("utf-8"))
 
 
+# Pre-calculated dummy hash for timing attack mitigation
+# This ensures that invalid username lookups take approximately the same time as valid password checks
+_DUMMY_HASH = hash_password("dummy_password_for_timing_mitigation")
+
+
 # Role-based permissions mapping
 # Format: role_name: [tag:action, ...]
 # action can be 'read', 'write', or '*'
@@ -284,6 +289,9 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     """
     user = db.query(User).filter(User.username == username).first()
     if not user:
+        # Prevent timing attacks by performing a dummy verification
+        # This makes the response time consistent regardless of whether the user exists
+        verify_password(password, _DUMMY_HASH)
         return None
 
     if not verify_password(password, user.password_hash):
