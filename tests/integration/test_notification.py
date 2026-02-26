@@ -9,7 +9,7 @@ import aiosmtplib
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import Notifier, NotifierType, Notification, NotificationDispatch, NotificationLevel
+from app.models import Notifier, NotifierType, Notification, NotificationDispatch, NotificationLevel, DispatchStatus
 from app.services.notification_events import (
     NotificationEventType,
     ScanCompletedData,
@@ -98,7 +98,7 @@ async def test_dispatch_event_webhook_success(
         total_bytes=100 * (1024**3),
     )
     mock_response = MagicMock(status_code=200)
-    mock_httpx_post.return_value.__aenter__.return_value = mock_response
+    mock_httpx_post.return_value = mock_response
 
     await notification_service.dispatch_event(db_session, NotificationEventType.DISK_SPACE_CRITICAL, event_data)
 
@@ -138,7 +138,7 @@ async def test_dispatch_event_rate_limiting(email_notifier, db_session: Session)
     )
     
     # Subscribe email_notifier to PATH_CREATED for this test
-    email_notifier.subscribed_events.append(NotificationEventType.PATH_CREATED.value)
+    email_notifier.subscribed_events = list(email_notifier.subscribed_events) + [NotificationEventType.PATH_CREATED.value]
     db_session.commit()
     db_session.refresh(email_notifier)
 
@@ -151,10 +151,7 @@ async def test_dispatch_event_rate_limiting(email_notifier, db_session: Session)
         assert dispatch1.status == DispatchStatus.SUCCESS
 
         # Second dispatch (within cooldown period) should be rate-limited
-        # Need a new session for dispatch_event to log to
-        db_session_2 = SessionLocal()
-        await notification_service.dispatch_event(db_session_2, NotificationEventType.PATH_CREATED, event_data)
-        db_session_2.close()
+        await notification_service.dispatch_event(db_session, NotificationEventType.PATH_CREATED, event_data)
 
         assert mock_send_email.call_count == 1 # Still only one actual send attempt
         assert db_session.query(NotificationDispatch).count() == 2 # But a FAILED dispatch log is recorded
@@ -184,7 +181,7 @@ async def test_test_notifier_webhook_success(
     """Test the test_notifier method for webhook."""
     notification_service = NotificationService()
     mock_response = MagicMock(status_code=200)
-    mock_httpx_post.return_value.__aenter__.return_value = mock_response
+    mock_httpx_post.return_value = mock_response
 
     success, details = await notification_service.test_notifier(db_session, webhook_notifier.id)
 

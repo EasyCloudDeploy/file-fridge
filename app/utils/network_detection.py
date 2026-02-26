@@ -36,26 +36,28 @@ def is_network_mount(path: str) -> bool:
             if str(path_obj).startswith("/Volumes/"):
                 # Get the volume name (first component after /Volumes/)
                 volume_parts = path_obj.parts
-                if len(volume_parts) >= 2:
-                    volume_name = volume_parts[1]  # e.g., "data" from "/Volumes/data/..."
+                if len(volume_parts) >= 3:
+                    volume_name = volume_parts[2]  # e.g., "data" from "/Volumes/data/..."
 
                     # Common local disk names (exclude these)
                     local_disk_names = ["Macintosh HD", "Macintosh HD - Data", "System"]
 
                     # If it's not a known local disk name, it's likely a network mount
-                    if volume_name not in local_disk_names:
-                        # Additional check: compare filesystem IDs with root
-                        # Network mounts typically have different f_fsid than the root filesystem
-                        try:
-                            stat_result = os.statvfs(str(path_obj))
-                            root_stat = os.statvfs("/")
-                            # If filesystem IDs differ, it's a separate mount (likely network)
-                            if stat_result.f_fsid != root_stat.f_fsid:
-                                return True
-                        except Exception:
-                            # If statvfs fails, assume it's a network mount if under /Volumes
-                            # and not a known local disk
+                    if volume_name in local_disk_names:
+                        return False
+
+                    # Additional check: compare filesystem IDs with root
+                    # Network mounts typically have different f_fsid than the root filesystem
+                    try:
+                        stat_result = os.statvfs(str(path_obj))
+                        root_stat = os.statvfs("/")
+                        # If filesystem IDs differ, it's a separate mount (likely network)
+                        if stat_result.f_fsid != root_stat.f_fsid:
                             return True
+                    except Exception:
+                        # If statvfs fails, assume it's a network mount if under /Volumes
+                        # and not a known local disk
+                        return True
 
                 # Fallback: if under /Volumes and we can't determine, assume network mount
                 return True

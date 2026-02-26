@@ -1,5 +1,7 @@
 
 import pytest
+import os
+from unittest.mock import patch
 from fastapi import FastAPI, Request, Depends
 from fastapi.testclient import TestClient
 from app.utils.rate_limiter import check_login_rate_limit, _login_rate_limiter
@@ -13,6 +15,7 @@ def login_test():
 
 client = TestClient(app)
 
+@patch.dict(os.environ, {"DISABLE_RATE_LIMIT": "false"})
 def test_rate_limit_bypass_x_forwarded_for():
     # Reset the rate limiter
     _login_rate_limiter.requests.clear()
@@ -41,6 +44,7 @@ def test_rate_limit_bypass_x_forwarded_for():
 
     assert response.status_code == 429, "Rate limit bypassed via X-Forwarded-For spoofing"
 
+@patch.dict(os.environ, {"DISABLE_RATE_LIMIT": "false"})
 def test_rate_limit_bypass_x_instance_uuid():
     # Reset
     _login_rate_limiter.requests.clear()

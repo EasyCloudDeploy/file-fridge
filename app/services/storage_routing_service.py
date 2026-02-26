@@ -198,9 +198,9 @@ class StorageRoutingService:
             Score (higher is better)
         """
         # Free space score (logarithmic scaling)
-        # 10GB = 50 points, 100GB = 100 points
+        # 10GB = 50 points, 40GB = 100 points (before cap)
         free_space_gb = free_space / (1024**3)
-        space_score = min(50.0, 50.0 * (1 + (free_space_gb / 10.0) ** 0.5))
+        space_score = min(50.0, 50.0 * (free_space_gb / 10.0) ** 0.5)
 
         # Load score (inverse - fewer files is better)
         # 0 files = 30 points, 10000 files = 0 points

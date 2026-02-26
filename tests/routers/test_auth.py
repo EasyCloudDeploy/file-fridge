@@ -109,23 +109,6 @@ def test_login_rate_limit(client: TestClient, db_session: Session):
     assert response.status_code == 429
     assert "Too many requests" in response.json()["detail"]
 
-@pytest.fixture
-def authenticated_client(client: TestClient, db_session: Session):
-    """Fixture to get an authenticated client."""
-    username = "authtestuser"
-    password = "password"
-    user = User(username=username, password_hash=hash_password(password), roles=["admin"])
-    db_session.add(user)
-    db_session.commit()
-
-    response = client.post(
-        "/api/v1/auth/login",
-        json={"username": username, "password": password},
-    )
-    token = response.json()["access_token"]
-    client.headers["Authorization"] = f"Bearer {token}"
-    return client
-
 
 def test_change_password_success(authenticated_client: TestClient):
     """Test successful password change."""

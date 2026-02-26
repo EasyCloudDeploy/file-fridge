@@ -6,6 +6,7 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.config import settings
 
@@ -39,7 +40,12 @@ def ensure_database_directory():
 ensure_database_directory()
 
 # SQLite-specific configuration
-engine = create_engine(settings.database_url, connect_args={"check_same_thread": False})
+# Use StaticPool for :memory: databases so all connections share a single
+# underlying connection and see the same data (critical for tests).
+_engine_kwargs: dict = {"connect_args": {"check_same_thread": False}}
+if settings.database_path == ":memory:":
+    _engine_kwargs["poolclass"] = StaticPool
+engine = create_engine(settings.database_url, **_engine_kwargs)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

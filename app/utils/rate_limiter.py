@@ -1,3 +1,4 @@
+import os
 import time
 from collections import defaultdict
 from functools import wraps
@@ -14,9 +15,13 @@ class RateLimiter:
         self.requests = defaultdict(list)
         self.cleanup_interval = 60  # Clean up old records every minute
         self.last_cleanup = time.time()
+        self.is_testing = os.environ.get("TESTING", "").lower() == "true"
 
     def is_allowed(self, identifier: str) -> bool:
         """Check if request is allowed for given identifier."""
+        if self.is_testing and os.environ.get("DISABLE_RATE_LIMIT", "true").lower() == "true":
+            return True
+
         now = time.time()
 
         # Clean up old records periodically

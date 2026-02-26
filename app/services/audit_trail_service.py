@@ -251,7 +251,7 @@ class AuditTrailService:
         Returns:
             List of failed transaction records
         """
-        query = db.query(FileTransactionHistory).filter(not FileTransactionHistory.success)
+        query = db.query(FileTransactionHistory).filter(FileTransactionHistory.success == False)
 
         if since:
             query = query.filter(FileTransactionHistory.created_at >= since)

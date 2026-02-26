@@ -1,5 +1,6 @@
 
 import time
+from concurrent.futures import Future
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call, ANY
@@ -116,10 +117,18 @@ def test_process_path_main_workflow(
 
     service = FileWorkflowService()
     
+    def _resolved_future(fn, *args, **kwargs):
+        """Return an already-resolved Future so as_completed() doesn't block."""
+        f = Future()
+        try:
+            f.set_result(fn(*args, **kwargs))
+        except Exception as exc:
+            f.set_exception(exc)
+        return f
+
     with patch("app.services.file_workflow_service.ThreadPoolExecutor") as mock_executor:
-        # This makes the executor run tasks sequentially in the test
-        mock_executor.return_value.__enter__.return_value.submit = lambda fn, *args, **kwargs: MagicMock(result=lambda: fn(*args, **kwargs))
-        
+        mock_executor.return_value.__enter__.return_value.submit = _resolved_future
+
         result = service.process_path(monitored_path, db_session)
 
     assert result["files_found"] == 1
@@ -152,8 +161,8 @@ def test_scan_path(
     cold_path.mkdir()
 
     monitored_path.source_path = str(hot_path)
-    monitored_path.cold_storage_path = str(cold_path)
-    
+    monitored_path.storage_locations[0].path = str(cold_path)
+
     # File that should be moved to cold
     file_to_freeze = hot_path / "old_file.txt"
     file_to_freeze.touch()
@@ -218,7 +227,8 @@ def test_process_single_file(
     mock_move,
     monitored_path,
     file_inventory,
-    tmp_path
+    db_session,
+    tmp_path,
 ):
     """Test the _process_single_file method for a successful move."""
     hot_path = tmp_path / "hot"
@@ -237,20 +247,26 @@ def test_process_single_file(
     mock_checksum.return_value = "checksum_before"
 
     service = FileWorkflowService()
-    result = service._process_single_file(file_to_move, [1], monitored_path)
+
+    # Suppress close() so the shared session stays alive across internal calls
+    original_close = db_session.close
+    db_session.close = lambda: None
+    try:
+        with patch(
+            "app.services.file_workflow_service.SessionFactory",
+            side_effect=lambda: db_session,
+        ):
+            result = service._process_single_file(file_to_move, [1], monitored_path)
+    finally:
+        db_session.close = original_close
 
     assert result["success"] is True
-    
-    # Reload inventory from a new session to check committed state
-    new_session = MagicMock()
-    reloaded_inventory = new_session.query(FileInventory).get(inventory.id)
-    # The above line is just for show, we need to check the real db session
-    from app.database import SessionLocal
-    db = SessionLocal()
-    reloaded_inventory = db.query(FileInventory).get(inventory.id)
+
+    db_session.expire_all()
+    reloaded_inventory = db_session.query(FileInventory).get(inventory.id)
     assert reloaded_inventory.storage_type == StorageType.COLD
     assert reloaded_inventory.file_path == str(cold_path / "file.txt")
-    
+
     mock_audit_trail.log_freeze_operation.assert_called_once()
 
 
@@ -261,16 +277,17 @@ def test_thaw_single_file(
     mock_checksum,
     monitored_path,
     file_inventory,
-    tmp_path
+    db_session,
+    tmp_path,
 ):
     """Test the _thaw_single_file method for a successful thaw."""
     hot_path = tmp_path / "hot"
     hot_path.mkdir()
     cold_path = tmp_path / "cold"
     cold_path.mkdir()
-    
+
     monitored_path.source_path = str(hot_path)
-    monitored_path.cold_storage_path = str(cold_path)
+    monitored_path.storage_locations[0].path = str(cold_path)
 
     cold_file = cold_path / "file.txt"
     cold_file.write_text("content")
@@ -280,9 +297,6 @@ def test_thaw_single_file(
     inventory = file_inventory(symlink_path, StorageType.COLD, FileStatus.ACTIVE)
 
     mock_checksum.side_effect = ["checksum1", "checksum1"]
-    
-    # Since we are using a real file system for this test, we need to ensure the parent dir exists
-    symlink_path.parent.mkdir(exist_ok=True, parents=True)
 
     service = FileWorkflowService()
 
@@ -290,15 +304,48 @@ def test_thaw_single_file(
     if symlink_path.is_symlink():
         symlink_path.unlink()
 
-    result = service._thaw_single_file(symlink_path, cold_file, monitored_path)
+    # Suppress close() so the shared session stays alive across internal calls
+    original_close = db_session.close
+    db_session.close = lambda: None
+    try:
+        with patch(
+            "app.services.file_workflow_service.SessionFactory",
+            side_effect=lambda: db_session,
+        ):
+            result = service._thaw_single_file(symlink_path, cold_file, monitored_path)
+    finally:
+        db_session.close = original_close
 
     assert result["success"] is True
     assert not cold_file.exists()
     assert symlink_path.exists() and not symlink_path.is_symlink()
-    
-    from app.database import SessionLocal
-    db = SessionLocal()
-    reloaded_inventory = db.query(FileInventory).get(inventory.id)
+
+    db_session.expire_all()
+    reloaded_inventory = db_session.query(FileInventory).get(inventory.id)
     assert reloaded_inventory.storage_type == StorageType.HOT
-    
+
     mock_audit_trail.log_thaw_operation.assert_called_once()
+
+def test_recursive_scandir(tmp_path):
+    """Test the recursive directory scanning utility."""
+    # Setup nested structure
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "f1.txt").touch()
+    
+    sub = root / "sub"
+    sub.mkdir()
+    (sub / "f2.txt").touch()
+    
+    # Ignored pattern
+    (root / ".DS_Store").touch()
+    
+    service = FileWorkflowService()
+    files = list(service._recursive_scandir(str(root)))
+    
+    # Should find f1.txt and f2.txt, but not .DS_Store
+    names = [Path(f.path).name for f in files]
+    assert "f1.txt" in names
+    assert "f2.txt" in names
+    assert ".DS_Store" not in names
+    assert len(files) == 2

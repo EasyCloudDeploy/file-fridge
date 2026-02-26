@@ -14,78 +14,12 @@ from app.models import (
     FileRecord,
     FileStatus,
     MonitoredPath,
+    OperationType,
     PinnedFile,
     StorageType,
     Tag,
 )
 from app.schemas import StorageType as StorageTypeSchema
-
-# Assuming authenticated_client, monitored_path_factory, storage_location fixtures are available from conftest or previous tests
-# If not, they would need to be defined here or imported.
-# For this example, let's assume they are available.
-
-@pytest.fixture
-def file_inventory_factory(db_session: Session, monitored_path_factory, storage_location):
-    """Factory for creating FileInventory entries."""
-    def _factory(
-        file_path: str,
-        path_name: str = "test_path",
-        storage_type: StorageType = StorageType.HOT,
-        status: FileStatus = FileStatus.ACTIVE,
-        file_size: int = 1024,
-        file_mtime: datetime = datetime.now(timezone.utc),
-        file_atime: datetime = datetime.now(timezone.utc),
-        file_ctime: datetime = datetime.now(timezone.utc),
-        checksum: str = None,
-        file_extension: str = ".txt",
-        mime_type: str = "text/plain",
-        is_pinned: bool = False,
-        cold_storage_location: ColdStorageLocation = None,
-    ):
-        monitored_path = monitored_path_factory(path_name, str(Path(file_path).parent))
-
-        if cold_storage_location is None and storage_type == StorageType.COLD:
-            cold_storage_location = storage_location
-
-        inventory_entry = FileInventory(
-            path_id=monitored_path.id,
-            file_path=file_path,
-            storage_type=storage_type,
-            file_size=file_size,
-            file_mtime=file_mtime,
-            file_atime=file_atime,
-            file_ctime=file_ctime,
-            checksum=checksum,
-            file_extension=file_extension,
-            mime_type=mime_type,
-            status=status,
-            last_seen=datetime.now(timezone.utc),
-            cold_storage_location_id=cold_storage_location.id if cold_storage_location else None,
-        )
-        db_session.add(inventory_entry)
-        db_session.commit()
-        db_session.refresh(inventory_entry)
-
-        if is_pinned:
-            pinned_file = PinnedFile(path_id=monitored_path.id, file_path=file_path)
-            db_session.add(pinned_file)
-            db_session.commit()
-            db_session.refresh(pinned_file)
-        
-        return inventory_entry
-    return _factory
-
-
-@pytest.fixture
-def create_tag(db_session: Session):
-    """Fixture to create a Tag."""
-    def _factory(name: str, color: str = "#FFFFFF"):
-        tag = Tag(name=name, color=color)
-        db_session.add(tag)
-        db_session.commit()
-        db_session.refresh(tag)
-        return tag
-    return _factory
 
 # ==================================
 # list_files tests (GET /api/v1/files)
@@ -275,19 +209,19 @@ def test_browse_files_success(authenticated_client: TestClient, tmp_path, monito
     assert any(d["name"] == "subdir" for d in data["directories"])
 
 @patch("app.services.file_thawer.FileThawer.thaw_file")
-def test_thaw_file_success(mock_thaw_file, authenticated_client: TestClient, file_inventory_factory, tmp_path):
+def test_thaw_file_success(mock_thaw_file, authenticated_client: TestClient, file_inventory_factory, db_session, tmp_path):
     """Test successful thaw of a file."""
     cold_file = file_inventory_factory(str(tmp_path / "cold_file.txt"), storage_type=StorageType.COLD)
-    
-    # We need a corresponding FileRecord for FileThawer to work
+
+    # We need a corresponding FileRecord for the endpoint to find
     file_record = FileRecord(
         original_path=str(tmp_path / "hot_location" / "cold_file.txt"),
         cold_storage_path=str(cold_file.file_path),
         file_size=cold_file.file_size,
-        operation_type="move",
+        operation_type=OperationType.MOVE,
     )
-    cold_file.db_session.add(file_record)
-    cold_file.db_session.commit()
+    db_session.add(file_record)
+    db_session.commit()
 
     mock_thaw_file.return_value = (True, None)
 
@@ -326,23 +260,32 @@ def test_get_freeze_options(authenticated_client: TestClient, file_inventory_fac
 
 
 @patch("app.services.relocation_manager.relocation_manager.create_task")
-def test_relocate_file_success(mock_create_task, authenticated_client: TestClient, file_inventory_factory, storage_location, monitored_path_factory, tmp_path):
+def test_relocate_file_success(mock_create_task, authenticated_client: TestClient, db_session, storage_location, monitored_path_factory, tmp_path):
     """Test successful relocation of a file."""
     monitored_path = monitored_path_factory("RelocatePath", str(tmp_path / "relocate_hot"))
-    cold_loc1 = storage_location # Use the default fixture
-    cold_loc2 = ColdStorageLocation(name="Cold Loc 2", path=str(tmp_path / "cold2"), is_default=False)
+    cold_loc1 = storage_location  # Use the default fixture
+    cold_loc2 = ColdStorageLocation(name="Cold Loc 2", path=str(tmp_path / "cold2"))
     monitored_path.storage_locations.append(cold_loc2)
-    db_session: Session = MagicMock() # Assuming db_session from fixture
     db_session.add(cold_loc2)
     db_session.commit()
+    db_session.refresh(cold_loc2)
     Path(cold_loc2.path).mkdir(exist_ok=True, parents=True)
 
-    cold_file = file_inventory_factory(
-        str(Path(cold_loc1.path) / "relocate_file.txt"),
+    # Create the cold file directly using the monitored_path that has both storage locations
+    cold_file_path = str(Path(cold_loc1.path) / "relocate_file.txt")
+    Path(cold_file_path).touch()
+    from datetime import datetime, timezone
+    cold_file = FileInventory(
+        path_id=monitored_path.id,
+        file_path=cold_file_path,
+        file_size=1024,
+        file_mtime=datetime.now(timezone.utc),
         storage_type=StorageType.COLD,
-        cold_storage_location=cold_loc1,
-        path_name="RelocatePath"
+        cold_storage_location_id=cold_loc1.id,
     )
+    db_session.add(cold_file)
+    db_session.commit()
+    db_session.refresh(cold_file)
 
     mock_create_task.return_value = "relocation_task_id_123"
 
@@ -369,56 +312,58 @@ def test_metadata_backfill(mock_init, mock_backfill_all, authenticated_client: T
     mock_backfill_all.assert_called_once_with(batch_size=100, compute_checksum=True)
 
 
-def test_pin_file_success(authenticated_client: TestClient, file_inventory_factory, tmp_path):
+def test_pin_file_success(authenticated_client: TestClient, file_inventory_factory, db_session, tmp_path):
     """Test pinning a file."""
     file_to_pin = file_inventory_factory(str(tmp_path / "pin_me.txt"))
 
     response = authenticated_client.post(f"/api/v1/files/{file_to_pin.id}/pin")
     assert response.status_code == 200
     assert response.json()["is_pinned"] is True
-    
-    # Verify in DB
-    from app.database import SessionLocal
-    db = SessionLocal()
-    pinned = db.query(PinnedFile).filter(PinnedFile.file_path == file_to_pin.file_path).first()
-    assert pinned is not None
-    db.close()
 
-def test_unpin_file_success(authenticated_client: TestClient, file_inventory_factory, tmp_path):
+    # Verify in DB using the test session
+    db_session.expire_all()
+    pinned = db_session.query(PinnedFile).filter(PinnedFile.file_path == file_to_pin.file_path).first()
+    assert pinned is not None
+
+def test_unpin_file_success(authenticated_client: TestClient, file_inventory_factory, db_session, tmp_path):
     """Test unpinning a file."""
     file_to_unpin = file_inventory_factory(str(tmp_path / "unpin_me.txt"), is_pinned=True)
 
     response = authenticated_client.delete(f"/api/v1/files/{file_to_unpin.id}/pin")
     assert response.status_code == 200
     assert response.json()["is_pinned"] is False
-    
-    # Verify in DB
-    from app.database import SessionLocal
-    db = SessionLocal()
-    pinned = db.query(PinnedFile).filter(PinnedFile.file_path == file_to_unpin.file_path).first()
+
+    # Verify in DB using the test session
+    db_session.expire_all()
+    pinned = db_session.query(PinnedFile).filter(PinnedFile.file_path == file_to_unpin.file_path).first()
     assert pinned is None
-    db.close()
 
 @patch("app.services.file_thawer.FileThawer.thaw_file", return_value=(True, None))
-def test_bulk_thaw_files(mock_thaw_file, authenticated_client: TestClient, file_inventory_factory, tmp_path):
+def test_bulk_thaw_files(mock_thaw_file, authenticated_client: TestClient, file_inventory_factory, db_session, tmp_path):
     """Test bulk thawing of files."""
     file1 = file_inventory_factory(str(tmp_path / "bulk_cold_1.txt"), storage_type=StorageType.COLD)
     file2 = file_inventory_factory(str(tmp_path / "bulk_cold_2.txt"), storage_type=StorageType.COLD)
 
-    # Need to mock file records for thawing
-    with patch("app.routers.api.files.FileRecord") as MockFileRecord:
-        MockFileRecord.cold_storage_path = str(file1.file_path)
-        MockFileRecord.return_value = MockFileRecord # For the query result
-
-        response = authenticated_client.post(
-            "/api/v1/files/bulk/thaw",
-            json={"file_ids": [file1.id, file2.id]},
+    # Create FileRecord entries required by the bulk thaw endpoint
+    for f in (file1, file2):
+        record = FileRecord(
+            original_path=str(tmp_path / "hot" / Path(f.file_path).name),
+            cold_storage_path=f.file_path,
+            file_size=f.file_size,
+            operation_type=OperationType.MOVE,
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["successful"] == 2
-        assert data["failed"] == 0
-        assert mock_thaw_file.call_count == 2
+        db_session.add(record)
+    db_session.commit()
+
+    response = authenticated_client.post(
+        "/api/v1/files/bulk/thaw",
+        json={"file_ids": [file1.id, file2.id]},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["successful"] == 2
+    assert data["failed"] == 0
+    assert mock_thaw_file.call_count == 2
 
 
 @patch("app.services.file_freezer.FileFreezer.freeze_file", return_value=(True, None, "/cold/path"))
@@ -438,7 +383,7 @@ def test_bulk_freeze_files(mock_freeze_file, authenticated_client: TestClient, f
     assert mock_freeze_file.call_count == 2
 
 
-def test_bulk_pin_files(authenticated_client: TestClient, file_inventory_factory, tmp_path):
+def test_bulk_pin_files(authenticated_client: TestClient, file_inventory_factory, db_session, tmp_path):
     """Test bulk pinning of files."""
     file1 = file_inventory_factory(str(tmp_path / "bulk_pin_1.txt"))
     file2 = file_inventory_factory(str(tmp_path / "bulk_pin_2.txt"))
@@ -452,15 +397,15 @@ def test_bulk_pin_files(authenticated_client: TestClient, file_inventory_factory
     assert data["successful"] == 2
     assert data["failed"] == 0
 
-    # Verify in DB
-    from app.database import SessionLocal
-    db = SessionLocal()
-    pinned_count = db.query(PinnedFile).filter(PinnedFile.file_path.in_([str(file1.file_path), str(file2.file_path)])).count()
+    # Verify in DB using the test session
+    db_session.expire_all()
+    pinned_count = db_session.query(PinnedFile).filter(
+        PinnedFile.file_path.in_([str(file1.file_path), str(file2.file_path)])
+    ).count()
     assert pinned_count == 2
-    db.close()
 
 
-def test_bulk_unpin_files(authenticated_client: TestClient, file_inventory_factory, tmp_path):
+def test_bulk_unpin_files(authenticated_client: TestClient, file_inventory_factory, db_session, tmp_path):
     """Test bulk unpinning of files."""
     file1 = file_inventory_factory(str(tmp_path / "bulk_unpin_1.txt"), is_pinned=True)
     file2 = file_inventory_factory(str(tmp_path / "bulk_unpin_2.txt"), is_pinned=True)
@@ -473,10 +418,86 @@ def test_bulk_unpin_files(authenticated_client: TestClient, file_inventory_facto
     data = response.json()
     assert data["successful"] == 2
     assert data["failed"] == 0
-    
-    # Verify in DB
-    from app.database import SessionLocal
-    db = SessionLocal()
-    pinned_count = db.query(PinnedFile).filter(PinnedFile.file_path.in_([str(file1.file_path), str(file2.file_path)])).count()
+
+    # Verify in DB using the test session
+    db_session.expire_all()
+    pinned_count = db_session.query(PinnedFile).filter(
+        PinnedFile.file_path.in_([str(file1.file_path), str(file2.file_path)])
+    ).count()
     assert pinned_count == 0
-    db.close()
+
+def test_list_files_pagination(authenticated_client: TestClient, file_inventory_factory, tmp_path):
+    """Test cursor-based pagination for files."""
+    for i in range(15): # Need more than 10 for pagination
+        file_inventory_factory(str(tmp_path / f"file{i}.txt"), path_name=f"pagination_p{i}")
+    
+    # Get first page
+    response = authenticated_client.get("/api/v1/files?page_size=10")
+    assert response.status_code == 200
+    lines = response.content.decode().strip().split("\n")
+    metadata = json.loads(lines[0])
+    assert metadata["has_more"] is True
+    assert "next_cursor" in metadata
+    
+    # Get second page
+    cursor = metadata["next_cursor"]
+    response = authenticated_client.get(f"/api/v1/files?page_size=10&cursor={cursor}")
+    assert response.status_code == 200
+    lines = response.content.decode().strip().split("\n")
+    metadata2 = json.loads(lines[0])
+    assert metadata2["total"] == 15
+
+def test_list_files_filter_by_tags(authenticated_client: TestClient, file_inventory_factory, create_tag, db_session):
+    """Test filtering files by associated tags."""
+    tag = create_tag("Filter Tag")
+    inv = file_inventory_factory(path="/tmp/tagged_filter.txt")
+    from app.models import FileTag
+    db_session.add(FileTag(file_id=inv.id, tag_id=tag.id))
+    db_session.commit()
+    
+    # Other untagged file
+    file_inventory_factory(path="/tmp/untagged_filter.txt", path_name="p_untagged")
+    
+    response = authenticated_client.get(f"/api/v1/files?tag_ids={tag.id}")
+    assert response.status_code == 200
+    lines = response.content.decode().strip().split("\n")
+    metadata = json.loads(lines[0])
+    assert metadata["total"] == 1
+    
+    files = [json.loads(line)["data"] for line in lines[1:-1]]
+    assert files[0]["id"] == inv.id
+
+def test_get_relocate_tasks(authenticated_client: TestClient, monkeypatch):
+    """Test listing relocation tasks."""
+    from app.services.relocation_manager import relocation_manager
+    monkeypatch.setattr(relocation_manager, "get_recent_tasks", lambda limit: [])
+    
+    response = authenticated_client.get("/api/v1/files/relocate/tasks")
+    assert response.status_code == 200
+    assert response.json()["tasks"] == []
+
+def test_get_relocate_status_not_found(authenticated_client: TestClient):
+    """Test getting relocation status for file without task."""
+    response = authenticated_client.get("/api/v1/files/relocate/12345/status")
+    assert response.status_code == 200
+    assert response.json()["task"] is None
+
+def test_list_files_invalid_params(authenticated_client: TestClient):
+    """Test list_files with invalid query parameters."""
+    # Negative size
+    assert authenticated_client.get("/api/v1/files?min_size=-1").status_code == 400
+    # min > max size
+    assert authenticated_client.get("/api/v1/files?min_size=100&max_size=50").status_code == 400
+    # min > max mtime
+    now = datetime.now(timezone.utc)
+    old = now - timedelta(days=1)
+    from urllib.parse import quote
+    now_str = quote(now.isoformat())
+    old_str = quote(old.isoformat())
+    assert authenticated_client.get(
+        f"/api/v1/files?min_mtime={now_str}&max_mtime={old_str}"
+    ).status_code == 400
+    # Invalid tag_ids (not integers) - this one returns a streamed error JSON
+    response = authenticated_client.get("/api/v1/files?tag_ids=abc")
+    assert response.status_code == 200
+    assert "Invalid tag_ids format" in response.text

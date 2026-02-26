@@ -200,9 +200,9 @@ class RemoteConnectionService:
             raise ValueError("Man-in-the-middle attack suspected! Fingerprint mismatch.")
 
         # Verify the signature
-        # We use model_dump(exclude_unset=True) to get the dict for signing
+        # We use model_dump(mode="json", exclude_unset=True) to get the dict for signing
         # to ensure we only include fields that were actually present in the response.
-        message_to_verify = canonical_json_encode(response.identity.model_dump(exclude_unset=True))
+        message_to_verify = canonical_json_encode(response.identity.model_dump(mode="json", exclude_unset=True))
         signature = bytes.fromhex(response.signature)
 
         if not identity_service.verify_signature(
@@ -245,7 +245,7 @@ class RemoteConnectionService:
                 raise ValueError("Invalid or expired connection code.")
 
         # 2. Verify the signature
-        message_to_verify = canonical_json_encode(identity.model_dump(exclude_unset=True))
+        message_to_verify = canonical_json_encode(identity.model_dump(mode="json", exclude_unset=True))
         signature = bytes.fromhex(signature_hex)
         if not identity_service.verify_signature(
             identity.ed25519_public_key, signature, message_to_verify

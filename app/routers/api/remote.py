@@ -627,35 +627,6 @@ def list_transfers(
     return db.query(RemoteTransferJob).order_by(RemoteTransferJob.id.desc()).all()
 
 
-@router.post("/transfers/{job_id}/cancel", tags=["Remote Connections"])
-def cancel_transfer(
-    job_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
-):
-    """Cancel a remote transfer job."""
-    _ = current_user
-
-    # Check if job exists first
-    job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Transfer job {job_id} not found")
-
-    # Check if job can be cancelled (must be PENDING or IN_PROGRESS)
-    from app.models import TransferStatus
-
-    if job.status not in (TransferStatus.PENDING, TransferStatus.IN_PROGRESS):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Transfer job {job_id} cannot be cancelled (current status: {job.status.value}). Only pending or in-progress transfers can be cancelled.",
-        )
-
-    success = remote_transfer_service.cancel_transfer(db, job_id)
-    if not success:
-        raise HTTPException(status_code=500, detail=f"Failed to cancel transfer job {job_id}")
-    return {"status": "success", "message": f"Transfer {job_id} cancelled"}
-
-
 @router.post("/transfers/bulk/cancel", tags=["Remote Connections"])
 def bulk_cancel_transfers(
     job_ids: List[int],
@@ -717,33 +688,6 @@ def bulk_retry_transfers(
     return BulkRetryTransfersResponse(succeeded=succeeded, failed=failed)
 
 
-@router.delete("/transfers/{job_id}", tags=["Remote Connections"])
-def delete_transfer(
-    job_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
-):
-    """Delete a transfer job record (for failed/completed/cancelled transfers)."""
-    _ = current_user
-
-    job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail=f"Transfer job {job_id} not found")
-
-    # Only allow deletion of terminal state jobs
-    from app.models import TransferStatus
-
-    if job.status in (TransferStatus.PENDING, TransferStatus.IN_PROGRESS):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot delete transfer job {job_id} while it is {job.status.value}. Cancel it first or wait for it to complete.",
-        )
-
-    db.delete(job)
-    db.commit()
-    return {"status": "success", "message": f"Transfer job {job_id} deleted"}
-
-
 @router.post("/transfers/bulk/delete", tags=["Remote Connections"])
 def bulk_delete_transfers(
     job_ids: List[int],
@@ -769,6 +713,62 @@ def bulk_delete_transfers(
 
     db.commit()
     return results
+
+
+@router.post("/transfers/{job_id}/cancel", tags=["Remote Connections"])
+def cancel_transfer(
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+):
+    """Cancel a remote transfer job."""
+    _ = current_user
+
+    # Check if job exists first
+    job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Transfer job {job_id} not found")
+
+    # Check if job can be cancelled (must be PENDING or IN_PROGRESS)
+    from app.models import TransferStatus
+
+    if job.status not in (TransferStatus.PENDING, TransferStatus.IN_PROGRESS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Transfer job {job_id} cannot be cancelled (current status: {job.status.value}). Only pending or in-progress transfers can be cancelled.",
+        )
+
+    success = remote_transfer_service.cancel_transfer(db, job_id)
+    if not success:
+        raise HTTPException(status_code=500, detail=f"Failed to cancel transfer job {job_id}")
+    return {"status": "success", "message": f"Transfer {job_id} cancelled"}
+
+
+@router.delete("/transfers/{job_id}", tags=["Remote Connections"])
+def delete_transfer(
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+):
+    """Delete a transfer job record (for failed/completed/cancelled transfers)."""
+    _ = current_user
+
+    job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Transfer job {job_id} not found")
+
+    # Only allow deletion of terminal state jobs
+    from app.models import TransferStatus
+
+    if job.status in (TransferStatus.PENDING, TransferStatus.IN_PROGRESS):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete transfer job {job_id} while it is {job.status.value}. Cancel it first or wait for it to complete.",
+        )
+
+    db.delete(job)
+    db.commit()
+    return {"status": "success", "message": f"Transfer job {job_id} deleted"}
 
 
 class ReceiveHeader:

@@ -11,20 +11,19 @@ from sqlalchemy import inspect
 @pytest.fixture(autouse=True)
 def clean_database_after_each_test(db_session):
     """Ensure a clean database for each test."""
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.drop_all(bind=engine)  # start each test with no tables
     yield
     Base.metadata.drop_all(bind=engine)
 
 
 def test_init_db_creates_all_tables(db_session):
     """Test that init_db creates all defined tables."""
-    inspector = inspect(engine)
-    assert len(inspector.get_table_names()) == 0
+    assert len(inspect(engine).get_table_names()) == 0
 
     init_db()
 
-    # Get table names after init_db
-    table_names = inspector.get_table_names()
+    # Use a fresh inspector — SQLAlchemy 2.0 caches results per Inspector instance
+    table_names = inspect(engine).get_table_names()
 
     # Assert that some expected tables exist (not exhaustive, but representative)
     assert "monitored_paths" in table_names
