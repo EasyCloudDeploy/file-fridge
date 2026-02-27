@@ -3,7 +3,7 @@
 import hashlib
 import logging
 import time
-from typing import Dict
+from typing import Dict, Union
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
@@ -20,6 +20,17 @@ logger = logging.getLogger(__name__)
 # This is now configurable via settings.signature_timestamp_tolerance
 
 
+def _escape_component(value: Union[str, int, float]) -> str:
+    """
+    Escape special characters to prevent canonicalization attacks.
+    We escape '%' first to prevent double-encoding, then '|' which is our delimiter.
+
+    Accepts various types and casts them to string to maintain robustness with
+    clients sending non-string types (e.g. integer timestamps).
+    """
+    return str(value).replace("%", "%25").replace("|", "%7C")
+
+
 def build_message_to_sign(
     method: str,
     path: str,
@@ -33,10 +44,21 @@ def build_message_to_sign(
     Construct a canonical message from request components for signing.
     This ensures both client and server sign the exact same payload.
     The order and format are crucial and must be identical on both ends.
+
+    Components are escaped to prevent delimiter injection attacks.
     """
     body_hash = hashlib.sha256(body).hexdigest()
+
+    # Escape dynamic components that could be user-controlled or contain delimiters
+    safe_method = _escape_component(method.upper())
+    safe_path = _escape_component(path)
+    safe_query = _escape_component(query_params)
+    safe_timestamp = _escape_component(timestamp)
+    safe_fingerprint = _escape_component(fingerprint)
+    safe_nonce = _escape_component(nonce)
+
     return (
-        f"{method.upper()}|{path}|{query_params}|{timestamp}|{fingerprint}|{nonce}|{body_hash}"
+        f"{safe_method}|{safe_path}|{safe_query}|{safe_timestamp}|{safe_fingerprint}|{safe_nonce}|{body_hash}"
     ).encode()
 
 
