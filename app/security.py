@@ -272,7 +272,7 @@ class PermissionChecker:
 
 # Pre-calculated dummy hash to use when a user is not found,
 # mitigating timing attacks for username enumeration.
-_DUMMY_HASH = "$2b$12$aXRXXuTVS.lcnbfeNczkW.NwAXmXMKVckoMFmBQF7gH65.8.yVaKG"
+_DUMMY_HASH = "$2b$12$aXRXXuTVS.lcnbfeNczkW.NwAXmXMKVckoMFmBQF7gH65.8.yVaKG"  # NOSONAR
 
 
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
