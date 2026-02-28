@@ -270,6 +270,11 @@ class PermissionChecker:
         return any(p in ["*", required, star_tag] for p in user_permissions)
 
 
+# Pre-calculated dummy hash to use when a user is not found,
+# mitigating timing attacks for username enumeration.
+_DUMMY_HASH = "$2b$12$aXRXXuTVS.lcnbfeNczkW.NwAXmXMKVckoMFmBQF7gH65.8.yVaKG"
+
+
 def authenticate_user(db: Session, username: str, password: str) -> Optional[User]:
     """
     Authenticate a user by username and password.
@@ -284,6 +289,8 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     """
     user = db.query(User).filter(User.username == username).first()
     if not user:
+        # Perform a dummy password verification to mitigate timing attacks
+        verify_password(password, _DUMMY_HASH)
         return None
 
     if not verify_password(password, user.password_hash):
