@@ -46,6 +46,9 @@ def _normalize_password(password: str) -> str:
 # HTTP Bearer token scheme for FastAPI
 security = HTTPBearer()
 
+# Pre-calculated bcrypt hash of a dummy string for constant-time authentication
+_DUMMY_HASH = "$2b$12$Zr8cXjlIONlMnZWqdPv/Du2hPURtwVAJ26ytcpDT6aFTC2dgDVgMm"  # NOSONAR
+
 
 def hash_password(password: str) -> str:
     """
@@ -284,6 +287,8 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     """
     user = db.query(User).filter(User.username == username).first()
     if not user:
+        # Prevent timing attacks (username enumeration) by performing a dummy hash verification
+        verify_password(password, _DUMMY_HASH)
         return None
 
     if not verify_password(password, user.password_hash):

@@ -23,3 +23,8 @@
 **Vulnerability:** The rate limiting logic in `app/utils/rate_limiter.py` relied on `X-Forwarded-For` and `X-Instance-UUID` headers to identify clients. This allowed attackers to bypass rate limits (e.g., on the login endpoint) by spoofing these headers, as the application trusted them blindly without verifying they came from a trusted proxy.
 **Learning:** Never trust client-provided headers for security-critical controls like rate limiting or authentication unless they are verified. Headers like `X-Forwarded-For` are easily spoofed. Application logic should rely on the `request.client.host` which is populated by the ASGI server (Uvicorn), and proper proxy configuration should be handled at the infrastructure/server level, not the application level.
 **Prevention:** Use `request.client.host` exclusively for IP-based identification in application logic. Configure the ASGI server to handle trusted proxies if necessary.
+
+## 2026-02-12 - [HIGH] Fix Timing Attack on Login
+**Vulnerability:** The `authenticate_user` function returned immediately if a username was not found in the database. If the user was found, it proceeded to compute a slow bcrypt hash verification. This observable timing difference allowed an attacker to enumerate valid usernames.
+**Learning:** Constant-time comparisons and execution paths are critical for authentication endpoints. Relying on an early exit before an expensive operation leaks state information (user existence).
+**Prevention:** Perform a dummy hash verification with the same computational cost when a user is not found, ensuring the authentication function takes roughly the same amount of time regardless of whether the user exists or not.
