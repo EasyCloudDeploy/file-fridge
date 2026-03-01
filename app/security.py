@@ -47,7 +47,7 @@ def _normalize_password(password: str) -> str:
 security = HTTPBearer()
 
 # Pre-calculated bcrypt hash of a dummy string for constant-time authentication
-_DUMMY_HASH = "$2b$12$Zr8cXjlIONlMnZWqdPv/Du2hPURtwVAJ26ytcpDT6aFTC2dgDVgMm"
+_DUMMY_HASH = "$2b$12$Zr8cXjlIONlMnZWqdPv/Du2hPURtwVAJ26ytcpDT6aFTC2dgDVgMm"  # NOSONAR
 
 
 def hash_password(password: str) -> str:
