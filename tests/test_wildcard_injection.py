@@ -74,6 +74,29 @@ def test_browser_wildcard_injection(seeded_session):
     assert len(paths) == 1
 
 
+def test_files_wildcard_injection_ilike(seeded_session):
+    # Simulate searching for "project%"
+    # Logic from app/routers/api/files.py and app/routers/api/remote.py
+    search_term = "project%"
+    escaped_search = escape_like_string(search_term)
+    search_pattern = f"%{escaped_search}%"
+
+    results = (
+        seeded_session.query(FileInventory.file_path)
+        .filter(FileInventory.file_path.ilike(search_pattern, escape="\\"))
+        .all()
+    )
+
+    paths = [r[0] for r in results]
+
+    # Should match ONLY files containing literal "project%"
+    assert "/data/project%/file3.txt" in paths
+    assert "/data/project/file1.txt" not in paths
+    assert "/data/project_backup/file2.txt" not in paths
+    assert "/data/project_matched/file4.txt" not in paths
+    assert len(paths) == 1
+
+
 def test_storage_wildcard_injection(seeded_session):
     # Simulate deleting storage location "/data/project"
     # Logic from app/routers/api/storage.py
