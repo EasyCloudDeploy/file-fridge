@@ -41,6 +41,7 @@ from app.services.browser_service import check_path_permission
 from app.services.file_freezer import FileFreezer
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
+from app.utils.db_utils import escape_like_string
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
 logger = logging.getLogger(__name__)
@@ -156,25 +157,21 @@ def list_files(
     """
     # Validate query parameters
     if min_size is not None and min_size < 0:
-        raise HTTPException(
-            status_code=400, detail="min_size must be non-negative (>= 0)"
-        )
+        raise HTTPException(status_code=400, detail="min_size must be non-negative (>= 0)")
 
     if max_size is not None and max_size < 0:
-        raise HTTPException(
-            status_code=400, detail="max_size must be non-negative (>= 0)"
-        )
+        raise HTTPException(status_code=400, detail="max_size must be non-negative (>= 0)")
 
     if min_size is not None and max_size is not None and min_size > max_size:
         raise HTTPException(
             status_code=400,
-            detail=f"min_size ({min_size}) cannot be greater than max_size ({max_size})"
+            detail=f"min_size ({min_size}) cannot be greater than max_size ({max_size})",
         )
 
     if min_mtime is not None and max_mtime is not None and min_mtime > max_mtime:
         raise HTTPException(
             status_code=400,
-            detail=f"min_mtime ({min_mtime.isoformat()}) cannot be greater than max_mtime ({max_mtime.isoformat()})"
+            detail=f"min_mtime ({min_mtime.isoformat()}) cannot be greater than max_mtime ({max_mtime.isoformat()})",
         )
 
     from app.models import FileTag
@@ -213,15 +210,19 @@ def list_files(
                 query = query.filter(FileInventory.status == file_status)
 
             if search:
-                search_pattern = f"%{search}%"
-                query = query.filter(FileInventory.file_path.ilike(search_pattern))
+                escaped_search = escape_like_string(search)
+                search_pattern = f"%{escaped_search}%"
+                query = query.filter(FileInventory.file_path.ilike(search_pattern, escape="\\"))
 
             if extension:
                 ext = extension if extension.startswith(".") else f".{extension}"
                 query = query.filter(FileInventory.file_extension == ext.lower())
 
             if mime_type:
-                query = query.filter(FileInventory.mime_type.ilike(f"%{mime_type}%"))
+                escaped_mime = escape_like_string(mime_type)
+                query = query.filter(
+                    FileInventory.mime_type.ilike(f"%{escaped_mime}%", escape="\\")
+                )
 
             if has_checksum is not None:
                 if has_checksum:
@@ -239,7 +240,9 @@ def list_files(
             if is_pinned is not None:
                 if is_pinned:
                     # Filter for files that are in the PinnedFile table
-                    query = query.filter(FileInventory.file_path.in_(db.query(PinnedFile.file_path)))
+                    query = query.filter(
+                        FileInventory.file_path.in_(db.query(PinnedFile.file_path))
+                    )
                 else:
                     # Filter for files that are NOT in the PinnedFile table
                     query = query.filter(
