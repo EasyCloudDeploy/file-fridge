@@ -213,15 +213,14 @@ def list_files(
                 query = query.filter(FileInventory.status == file_status)
 
             if search:
-                search_pattern = f"%{search}%"
-                query = query.filter(FileInventory.file_path.ilike(search_pattern))
+                query = query.filter(FileInventory.file_path.icontains(search))
 
             if extension:
                 ext = extension if extension.startswith(".") else f".{extension}"
                 query = query.filter(FileInventory.file_extension == ext.lower())
 
             if mime_type:
-                query = query.filter(FileInventory.mime_type.ilike(f"%{mime_type}%"))
+                query = query.filter(FileInventory.mime_type.icontains(mime_type))
 
             if has_checksum is not None:
                 if has_checksum:
