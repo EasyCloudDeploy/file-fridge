@@ -1045,8 +1045,7 @@ def browse_remote_files(
     )
 
     if search:
-        search_pattern = f"%{search}%"
-        query = query.filter(FileInventory.file_path.ilike(search_pattern))
+        query = query.filter(FileInventory.file_path.icontains(search))
 
     if storage_type:
         query = query.filter(FileInventory.storage_type == storage_type)
