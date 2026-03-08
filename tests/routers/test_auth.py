@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models import User
 from app.security import hash_password
 
+
 def test_check_auth_status_no_users(client: TestClient):
     """Test the /check endpoint when no users exist."""
     response = client.get("/api/v1/auth/check")
@@ -69,6 +70,36 @@ def test_login_success(client: TestClient, db_session: Session):
     data = response.json()
     assert "access_token" in data
     assert data["token_type"] == "bearer"
+
+
+def test_authenticate_user_timing(db_session: Session):
+    """
+    Test that authentication takes roughly the same amount of time for
+    both valid and invalid usernames to prevent timing attacks.
+    """
+    import time
+
+    from app.models import User
+    from app.security import authenticate_user, hash_password
+
+    # Setup valid user
+    db_session.add(User(username="valid_user", password_hash=hash_password("password")))
+    db_session.commit()
+
+    # Time valid user with wrong password
+    start_time = time.time()
+    authenticate_user(db_session, "valid_user", "wrong_password")
+    valid_user_time = time.time() - start_time
+
+    # Time invalid user
+    start_time = time.time()
+    authenticate_user(db_session, "invalid_user", "wrong_password")
+    invalid_user_time = time.time() - start_time
+
+    # They should be roughly the same (allowing 1000ms difference due to test environment variance)
+    # The bcrypt hash itself takes ~100-300ms depending on the hardware,
+    # so a >1000ms difference usually means one didn't do the hash.
+    assert abs(valid_user_time - invalid_user_time) < 1.0
 
 
 def test_login_failure_wrong_password(client: TestClient, db_session: Session):

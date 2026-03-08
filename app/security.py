@@ -47,6 +47,13 @@ def _normalize_password(password: str) -> str:
 security = HTTPBearer()
 
 
+# Pre-calculated dummy hash for constant-time comparison when user is not found
+# This prevents username enumeration via timing attacks.
+_DUMMY_HASH = bcrypt.hashpw(
+    _normalize_password("dummy_password").encode("utf-8"), bcrypt.gensalt()
+).decode("utf-8")
+
+
 def hash_password(password: str) -> str:
     """
     Hash a password using bcrypt with SHA256 pre-hashing.
@@ -284,6 +291,8 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     """
     user = db.query(User).filter(User.username == username).first()
     if not user:
+        # Prevent timing attacks for username enumeration
+        verify_password(password, _DUMMY_HASH)
         return None
 
     if not verify_password(password, user.password_hash):
