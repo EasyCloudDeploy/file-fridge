@@ -25,6 +25,7 @@
 **Prevention:** Use `request.client.host` exclusively for IP-based identification in application logic. Configure the ASGI server to handle trusted proxies if necessary.
 
 ## 2026-03-08 - [HIGH] Fix Username Enumeration via Timing Attack
+
 **Vulnerability:** The `authenticate_user` function returned early if a username was not found in the database, skipping the bcrypt password verification. This allowed an attacker to enumerate valid usernames by measuring the response time (which would be significantly faster for invalid usernames).
 **Learning:** Security-critical functions like login must execute in near-constant time regardless of whether the provided identity exists or not.
 **Prevention:** Always perform a dummy bcrypt hash verification (or similar computationally expensive operation) when a user is not found, ensuring the total processing time remains consistent.
