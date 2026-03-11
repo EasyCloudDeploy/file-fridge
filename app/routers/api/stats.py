@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models import Criteria, FileInventory, FileRecord, MonitoredPath, PinnedFile, StorageType
 from app.schemas import DetailedStatistics, Statistics
 from app.services.stats_cleanup import stats_cleanup_service
+from app.services.storage_stats import get_file_counts_by_storage
 
 router = APIRouter(prefix="/api/v1/stats", tags=["stats"])
 
@@ -23,19 +24,9 @@ def get_statistics(db: Session = Depends(get_db)):
     total_files = db.query(func.count(FileRecord.id)).scalar() or 0
     total_size = db.query(func.sum(FileRecord.file_size)).scalar() or 0
 
-    total_files_hot = (
-        db.query(func.count(FileInventory.id))
-        .filter(FileInventory.storage_type == StorageType.HOT)
-        .scalar()
-        or 0
-    )
-
-    total_files_cold = (
-        db.query(func.count(FileInventory.id))
-        .filter(FileInventory.storage_type == StorageType.COLD)
-        .scalar()
-        or 0
-    )
+    storage_counts = get_file_counts_by_storage(db)
+    total_files_hot = storage_counts["hot_file_count"]
+    total_files_cold = storage_counts["cold_file_count"]
 
     files_by_path = {}
     paths = db.query(MonitoredPath).all()
@@ -77,19 +68,9 @@ def get_detailed_statistics(days: Optional[int] = None, db: Session = Depends(ge
     total_size_moved = db.query(func.sum(FileRecord.file_size)).scalar() or 0
 
     # Hot/Cold storage from inventory
-    total_files_hot = (
-        db.query(func.count(FileInventory.id))
-        .filter(FileInventory.storage_type == StorageType.HOT)
-        .scalar()
-        or 0
-    )
-
-    total_files_cold = (
-        db.query(func.count(FileInventory.id))
-        .filter(FileInventory.storage_type == StorageType.COLD)
-        .scalar()
-        or 0
-    )
+    storage_counts = get_file_counts_by_storage(db)
+    total_files_hot = storage_counts["hot_file_count"]
+    total_files_cold = storage_counts["cold_file_count"]
 
     total_size_hot = (
         db.query(func.sum(FileInventory.file_size))

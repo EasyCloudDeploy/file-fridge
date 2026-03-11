@@ -13,9 +13,10 @@ from sqlalchemy.orm import Session, selectinload
 
 from app import schemas
 from app.database import get_db
-from app.models import ColdStorageLocation, CriterionType, FileInventory, MonitoredPath, StorageType
+from app.models import ColdStorageLocation, CriterionType, FileInventory, MonitoredPath
 from app.services.scan_progress import scan_progress_manager
 from app.services.scheduler import scheduler_service
+from app.services.storage_stats import get_file_counts_by_storage
 from app.utils.indexing import IndexingManager
 from app.utils.network_detection import check_atime_availability
 
@@ -133,9 +134,12 @@ def list_paths(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
 
     result = []
     for path, file_count in paths_with_counts:
+        storage_counts = get_file_counts_by_storage(db, path.id)
         summary = schemas.MonitoredPathSummary(
             **{k: v for k, v in path.__dict__.items() if not k.startswith("_")},
             file_count=file_count,
+            hot_file_count=storage_counts["hot_file_count"],
+            cold_file_count=storage_counts["cold_file_count"],
             is_path_present=Path(path.source_path).exists(),
         )
         result.append(summary)
@@ -334,25 +338,13 @@ def get_path(path_id: int, db: Session = Depends(get_db)):
         db.query(func.count(FileInventory.id)).filter(FileInventory.path_id == path_id).scalar()
     )
 
-    hot_file_count = (
-        db.query(func.count(FileInventory.id))
-        .filter(FileInventory.path_id == path_id, FileInventory.storage_type == StorageType.HOT)
-        .scalar()
-        or 0
-    )
-
-    cold_file_count = (
-        db.query(func.count(FileInventory.id))
-        .filter(FileInventory.path_id == path_id, FileInventory.storage_type == StorageType.COLD)
-        .scalar()
-        or 0
-    )
+    storage_counts = get_file_counts_by_storage(db, path_id)
 
     return schemas.MonitoredPathSummary(
         **{k: v for k, v in db_path.__dict__.items() if not k.startswith("_")},
         file_count=file_count,
-        hot_file_count=hot_file_count,
-        cold_file_count=cold_file_count,
+        hot_file_count=storage_counts["hot_file_count"],
+        cold_file_count=storage_counts["cold_file_count"],
         is_path_present=Path(db_path.source_path).exists(),
     )
 
