@@ -23,6 +23,18 @@ function updateStats(stats) {
     if (totalFilesEl) {
         totalFilesEl.textContent = stats.total_files_moved || 0;
     }
+
+    // Update hot files
+    const totalFilesHotEl = document.getElementById('totalFilesHot');
+    if (totalFilesHotEl) {
+        totalFilesHotEl.textContent = stats.total_files_hot || 0;
+    }
+
+    // Update cold files
+    const totalFilesColdEl = document.getElementById('totalFilesCold');
+    if (totalFilesColdEl) {
+        totalFilesColdEl.textContent = stats.total_files_cold || 0;
+    }
     
     // Update total size
     const totalSizeEl = document.getElementById('totalSize');

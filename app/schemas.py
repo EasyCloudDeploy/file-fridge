@@ -178,6 +178,8 @@ class MonitoredPathSummary(MonitoredPathBase):
     created_at: datetime
     updated_at: Optional[datetime]
     file_count: int
+    hot_file_count: int = 0
+    cold_file_count: int = 0
     is_path_present: Optional[bool] = None
     storage_locations: List[ColdStorageLocation] = []
 
@@ -288,6 +290,8 @@ class Statistics(BaseModel):
 
     total_files_moved: int
     total_size_moved: int
+    total_files_hot: int
+    total_files_cold: int
     files_by_path: dict
     recent_activity: List[FileRecord]
 

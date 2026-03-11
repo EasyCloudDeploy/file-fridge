@@ -23,6 +23,20 @@ def get_statistics(db: Session = Depends(get_db)):
     total_files = db.query(func.count(FileRecord.id)).scalar() or 0
     total_size = db.query(func.sum(FileRecord.file_size)).scalar() or 0
 
+    total_files_hot = (
+        db.query(func.count(FileInventory.id))
+        .filter(FileInventory.storage_type == StorageType.HOT)
+        .scalar()
+        or 0
+    )
+
+    total_files_cold = (
+        db.query(func.count(FileInventory.id))
+        .filter(FileInventory.storage_type == StorageType.COLD)
+        .scalar()
+        or 0
+    )
+
     files_by_path = {}
     paths = db.query(MonitoredPath).all()
     for path in paths:
@@ -40,6 +54,8 @@ def get_statistics(db: Session = Depends(get_db)):
     return Statistics(
         total_files_moved=total_files,
         total_size_moved=total_size,
+        total_files_hot=total_files_hot,
+        total_files_cold=total_files_cold,
         files_by_path=files_by_path,
         recent_activity=recent_activity,
     )

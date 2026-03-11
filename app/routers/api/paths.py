@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app import schemas
 from app.database import get_db
-from app.models import ColdStorageLocation, CriterionType, FileInventory, MonitoredPath
+from app.models import ColdStorageLocation, CriterionType, FileInventory, MonitoredPath, StorageType
 from app.services.scan_progress import scan_progress_manager
 from app.services.scheduler import scheduler_service
 from app.utils.indexing import IndexingManager
@@ -316,6 +316,8 @@ def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)
     return db_path
 
 
+
+
 @router.get("/{path_id}", response_model=schemas.MonitoredPathSummary)
 def get_path(path_id: int, db: Session = Depends(get_db)):
     """Get a single monitored path with a summary of its contents."""
@@ -332,9 +334,25 @@ def get_path(path_id: int, db: Session = Depends(get_db)):
         db.query(func.count(FileInventory.id)).filter(FileInventory.path_id == path_id).scalar()
     )
 
+    hot_file_count = (
+        db.query(func.count(FileInventory.id))
+        .filter(FileInventory.path_id == path_id, FileInventory.storage_type == StorageType.HOT)
+        .scalar()
+        or 0
+    )
+
+    cold_file_count = (
+        db.query(func.count(FileInventory.id))
+        .filter(FileInventory.path_id == path_id, FileInventory.storage_type == StorageType.COLD)
+        .scalar()
+        or 0
+    )
+
     return schemas.MonitoredPathSummary(
         **{k: v for k, v in db_path.__dict__.items() if not k.startswith("_")},
         file_count=file_count,
+        hot_file_count=hot_file_count,
+        cold_file_count=cold_file_count,
         is_path_present=Path(db_path.source_path).exists(),
     )
 

@@ -381,7 +381,12 @@ async function loadPathDetail(pathId) {
             );
 
             if (!sourceStat) {
-                hotStorageCardBody.innerHTML = '<p class="text-muted">Storage stats not available.</p>';
+                hotStorageCardBody.innerHTML = `
+                    <p class="text-muted">Storage stats not available.</p>
+                    <div class="mt-2 text-muted small">
+                        <i class="bi bi-file-earmark"></i> Hot Files: ${path.hot_file_count || 0}
+                    </div>
+                `;
             } else if (sourceStat.error) {
                 hotStorageCardBody.innerHTML = `
                     <div class="mb-2">
@@ -389,7 +394,11 @@ async function loadPathDetail(pathId) {
                         <div class="alert alert-danger mb-0 py-2">
                             <strong>Error:</strong> ${escapeHtml(sourceStat.error)}
                         </div>
-                    </div>`;
+                    </div>
+                    <div class="mt-2 text-muted small">
+                        <i class="bi bi-file-earmark"></i> Hot Files: ${path.hot_file_count || 0}
+                    </div>
+                `;
             } else {
                 const usedPercent = (sourceStat.used_bytes / sourceStat.total_bytes) * 100;
                 let progressBarClass = 'bg-success';
@@ -412,6 +421,9 @@ async function loadPathDetail(pathId) {
                             <span>Free: ${formatBytes(sourceStat.free_bytes)}</span>
                             <span>Total: ${formatBytes(sourceStat.total_bytes)}</span>
                         </div>
+                        <div class="mt-2 text-muted small">
+                            <i class="bi bi-file-earmark"></i> Hot Files: ${path.hot_file_count || 0}
+                        </div>
                     </div>`;
             }
         }
@@ -420,7 +432,12 @@ async function loadPathDetail(pathId) {
         const storageCardBody = document.getElementById('storage-status-card');
         if (storageCardBody) {
             if (!path.storage_locations || path.storage_locations.length === 0) {
-                storageCardBody.innerHTML = '<p class="text-muted">No storage locations configured.</p>';
+                storageCardBody.innerHTML = `
+                    <p class="text-muted">No storage locations configured.</p>
+                    <div class="mt-2 text-muted small">
+                        <i class="bi bi-file-earmark"></i> Cold Files: ${path.cold_file_count || 0}
+                    </div>
+                `;
             } else {
                 // Find stats for all storage locations
                 const locationStats = path.storage_locations.map(loc => {
@@ -472,7 +489,11 @@ async function loadPathDetail(pathId) {
                                 <span>Total: ${formatBytes(stat.total_bytes)}</span>
                             </div>
                         </div>`;
-                }).join('');
+                }).join('') + `
+                    <div class="mt-2 text-muted small border-top pt-2">
+                        <i class="bi bi-file-earmark"></i> Total Cold Files: ${path.cold_file_count || 0}
+                    </div>
+                `;
             }
         }
         
