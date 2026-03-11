@@ -178,8 +178,8 @@ class MonitoredPathSummary(MonitoredPathBase):
     created_at: datetime
     updated_at: Optional[datetime]
     file_count: int
-    hot_file_count: int = 0
-    cold_file_count: int = 0
+    hot_file_count: int
+    cold_file_count: int
     is_path_present: Optional[bool] = None
     storage_locations: List[ColdStorageLocation] = []
 
