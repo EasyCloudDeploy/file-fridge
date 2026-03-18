@@ -8,8 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-logger = logging.getLogger(__name__)
-
 from app.database import get_db
 from app.models import FileInventory, FileTag, Tag
 from app.schemas import (
@@ -25,6 +23,9 @@ from app.schemas import (
 from app.schemas import (
     Tag as TagSchema,
 )
+from app.utils.sanitization import sanitize_for_log
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/tags", tags=["tags"])
 
@@ -58,9 +59,10 @@ def create_tag(tag: TagCreate, db: Session = Depends(get_db)):
     """Create a new tag."""
     existing_tag = db.query(Tag).filter(Tag.name == tag.name).first()
     if existing_tag:
+        logger.info(f"Attempted to create duplicate tag name: {sanitize_for_log(tag.name)}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Tag with name '{tag.name}' already exists",
+            detail="Tag with this name already exists",
         )
 
     new_tag = Tag(name=tag.name, description=tag.description, color=tag.color)

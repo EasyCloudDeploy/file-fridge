@@ -29,3 +29,8 @@
 **Vulnerability:** The `authenticate_user` function returned early if a username was not found in the database, skipping the bcrypt password verification. This allowed an attacker to enumerate valid usernames by measuring the response time (which would be significantly faster for invalid usernames).
 **Learning:** Security-critical functions like login must execute in near-constant time regardless of whether the provided identity exists or not.
 **Prevention:** Always perform a dummy bcrypt hash verification (or similar computationally expensive operation) when a user is not found, ensuring the total processing time remains consistent.
+
+## 2026-03-18 - [HIGH] Fix Stored XSS / Information Disclosure in API Error Responses
+**Vulnerability:** The tag creation endpoint (`/api/v1/tags`) returned an HTTP error detail containing unsanitized user input (`tag.name`) when attempting to create a duplicate tag, which could result in reflected/stored XSS and information disclosure.
+**Learning:** Any user input reflected in an API response, even within an error message or exception detail, can pose an injection or XSS risk. Input should not be echoed back to the user blindly.
+**Prevention:** Avoid reflecting user input in error messages. Log the event server-side with proper sanitization (e.g., using `sanitize_for_log`) while returning generic error messages to the client.
