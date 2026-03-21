@@ -49,7 +49,7 @@ def list_directory(
         except (OSError, ValueError) as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid directory path: {e!s}",
+                detail="Invalid directory path",
             ) from e
 
         # Check permissions
@@ -59,13 +59,13 @@ def list_directory(
         if not resolved_path.exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Directory does not exist: {path}",
+                detail="Directory does not exist",
             )
 
         if not resolved_path.is_dir():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Path is not a directory: {path}",
+                detail="Path is not a directory",
             )
 
         # Get inventory status for all files in this directory
@@ -141,5 +141,5 @@ def list_directory(
         logger.exception(f"Error browsing directory {path}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {e!s}",
+            detail="Error browsing directory",
         ) from e
