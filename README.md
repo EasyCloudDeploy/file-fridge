@@ -22,6 +22,19 @@ Think of it as a smart assistant that keeps your desk (Hot Storage) clean by mov
 *   **Stay Organized**: Use tags and automated rules to categorize your data across all storage locations.
 *   **Installable PWA**: Install File Fridge as a native app on mobile and desktop for a seamless experience.
 
+## User Interface
+
+Here is a glimpse of what File Fridge looks like:
+
+### Dashboard
+![Dashboard](docs/images/dashboard.png)
+
+### File Inventory
+![File Inventory](docs/images/file_inventory.png)
+
+### Settings
+![Settings](docs/images/settings.png)
+
 ## Progressive Web App (PWA)
 
 File Fridge is a Progressive Web App that can be installed on your devices for a native app-like experience.
