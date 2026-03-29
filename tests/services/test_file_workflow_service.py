@@ -129,6 +129,8 @@ def test_process_path_main_workflow(
     with patch("app.services.file_workflow_service.ThreadPoolExecutor") as mock_executor:
         mock_executor.return_value.__enter__.return_value.submit = _resolved_future
 
+        # Manually set max_concurrent_migrations
+        monitored_path.max_concurrent_migrations = 2
         result = service.process_path(monitored_path, db_session)
 
     assert result["files_found"] == 1
@@ -139,6 +141,9 @@ def test_process_path_main_workflow(
 
     mock_scan_path.assert_called_once_with(monitored_path, db_session)
     mock_process_single_file.assert_called_once_with(file_to_move, [1], monitored_path)
+
+    # Assert ThreadPoolExecutor was called with max_workers=1 (min of max_concurrent_migrations (2) and len(matching_files) (1))
+    mock_executor.assert_called_with(max_workers=1)
 
 
 @patch("app.services.file_workflow_service.CriteriaMatcher.match_file")

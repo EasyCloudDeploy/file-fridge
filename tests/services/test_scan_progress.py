@@ -59,6 +59,31 @@ class TestScanProgressManager:
         assert progress["progress"]["files_moved_to_cold"] == 1
         assert progress["progress"]["percent"] == 100
 
+    def test_update_file_progress_eta_speed(self):
+        """Test calculating ETA and speed."""
+        path_id = 10
+        scan_progress_manager.start_scan(path_id, total_files=1)
+
+        # Mock time so we can guarantee elapsed time
+        with pytest.MonkeyPatch.context() as m:
+            mock_time = 1000.0
+            m.setattr(time, "time", lambda: mock_time)
+
+            scan_progress_manager.start_file_operation(path_id, "big_file.dat", "move_to_cold", 1000)
+
+            # Advance time by 2 seconds, and we transferred 200 bytes
+            mock_time = 1002.0
+            scan_progress_manager.update_file_progress(path_id, "big_file.dat", 200)
+
+            progress = scan_progress_manager.get_progress(path_id)
+            op = progress["current_operations"][0]
+
+            # 200 bytes / 2 seconds = 100 bytes/sec
+            assert op["current_speed"] == 100
+
+            # 800 bytes remaining / 100 bytes/sec = 8 seconds
+            assert op["eta"] == 8
+
     def test_file_operation_failure(self):
         """Test tracking a failed file operation."""
         path_id = 4

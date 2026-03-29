@@ -31,6 +31,7 @@ def test_create_path(mock_add_job, authenticated_client: TestClient, storage_loc
         "source_path": str(source_path),
         "operation_type": "move",
         "check_interval_seconds": 3600,
+        "max_concurrent_migrations": 5,
         "storage_location_ids": [storage_location.id],
     }
 
@@ -201,6 +202,7 @@ def test_update_path_success(authenticated_client: TestClient, monitored_path_fa
         "name": "Updated Path Name",
         "source_path": str(new_hot),
         "check_interval_seconds": 7200,
+        "max_concurrent_migrations": 10,
         "enabled": False
     }
     response = authenticated_client.put(f"/api/v1/paths/{path.id}", json=payload)
@@ -208,6 +210,7 @@ def test_update_path_success(authenticated_client: TestClient, monitored_path_fa
     data = response.json()
     assert data["name"] == "Updated Path Name"
     assert data["check_interval_seconds"] == 7200
+    assert data["max_concurrent_migrations"] == 10
     assert data["enabled"] is False
 
 def test_update_path_storage_locations(authenticated_client: TestClient, monitored_path_factory, db_session, tmp_path, storage_location):
