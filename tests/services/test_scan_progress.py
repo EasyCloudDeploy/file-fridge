@@ -1,8 +1,9 @@
-import pytest
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
-from app.services.scan_progress import scan_progress_manager, ScanProgress, FileOperation
+import pytest
+
+from app.services.scan_progress import scan_progress_manager
 
 
 @pytest.mark.unit
@@ -13,7 +14,6 @@ class TestScanProgressManager:
         with scan_progress_manager._lock:
             scan_progress_manager._scans.clear()
             scan_progress_manager._scans_by_id.clear()
-        yield
 
     def test_start_scan_success(self):
         """Test starting a new scan."""
@@ -21,7 +21,7 @@ class TestScanProgressManager:
         assert started is True
         assert scan_id is not None
         assert scan_progress_manager.is_scan_running(1) is True
-        
+
         # Start same path again should return existing scan_id and started=False
         scan_id2, started2 = scan_progress_manager.start_scan(1, total_files=10)
         assert scan_id2 == scan_id
@@ -31,7 +31,7 @@ class TestScanProgressManager:
         """Test updating the total files count."""
         scan_progress_manager.start_scan(2, total_files=0)
         scan_progress_manager.update_total_files(2, 50)
-        
+
         progress = scan_progress_manager.get_progress(2)
         assert progress["progress"]["total_files"] == 50
 
@@ -39,20 +39,25 @@ class TestScanProgressManager:
         """Test tracking a single file operation from start to finish."""
         path_id = 3
         scan_progress_manager.start_scan(path_id, total_files=1)
-        
+
         # Start op
-        scan_progress_manager.start_file_operation(path_id, "test.dat", "move_to_cold", 1000)
+        operation_id = scan_progress_manager.start_file_operation(
+            path_id, "test.dat", "move_to_cold", 1000
+        )
         progress = scan_progress_manager.get_progress(path_id)
         assert len(progress["current_operations"]) == 1
         assert progress["current_operations"][0]["file_name"] == "test.dat"
-        
+        assert progress["current_operations"][0]["operation_id"] == operation_id
+
         # Update progress
-        scan_progress_manager.update_file_progress(path_id, "test.dat", 400)
+        scan_progress_manager.update_file_progress(path_id, operation_id, 400)
         progress = scan_progress_manager.get_progress(path_id)
         assert progress["current_operations"][0]["percent"] == 40
-        
+
         # Complete
-        scan_progress_manager.complete_file_operation(path_id, "test.dat", "move_to_cold", success=True)
+        scan_progress_manager.complete_file_operation(
+            path_id, operation_id, "move_to_cold", success=True
+        )
         progress = scan_progress_manager.get_progress(path_id)
         assert len(progress["current_operations"]) == 0
         assert progress["progress"]["files_processed"] == 1
@@ -69,11 +74,13 @@ class TestScanProgressManager:
             mock_time = 1000.0
             m.setattr(time, "time", lambda: mock_time)
 
-            scan_progress_manager.start_file_operation(path_id, "big_file.dat", "move_to_cold", 1000)
+            operation_id = scan_progress_manager.start_file_operation(
+                path_id, "big_file.dat", "move_to_cold", 1000
+            )
 
             # Advance time by 2 seconds, and we transferred 200 bytes
             mock_time = 1002.0
-            scan_progress_manager.update_file_progress(path_id, "big_file.dat", 200)
+            scan_progress_manager.update_file_progress(path_id, operation_id, 200)
 
             progress = scan_progress_manager.get_progress(path_id)
             op = progress["current_operations"][0]
@@ -88,10 +95,12 @@ class TestScanProgressManager:
         """Test tracking a failed file operation."""
         path_id = 4
         scan_progress_manager.start_scan(path_id, total_files=1)
-        
-        scan_progress_manager.start_file_operation(path_id, "fail.txt", "copy", 100)
-        scan_progress_manager.complete_file_operation(path_id, "fail.txt", "copy", success=False, error="Access denied")
-        
+
+        operation_id = scan_progress_manager.start_file_operation(path_id, "fail.txt", "copy", 100)
+        scan_progress_manager.complete_file_operation(
+            path_id, operation_id, "copy", success=False, error="Access denied"
+        )
+
         progress = scan_progress_manager.get_progress(path_id)
         assert len(progress["errors"]) == 1
         assert "Access denied" in progress["errors"][0]
@@ -101,7 +110,7 @@ class TestScanProgressManager:
         path_id = 5
         scan_progress_manager.start_scan(path_id)
         scan_progress_manager.finish_scan(path_id, status="completed")
-        
+
         assert scan_progress_manager.is_scan_running(path_id) is False
         progress = scan_progress_manager.get_progress(path_id)
         assert progress["status"] == "completed"
@@ -110,18 +119,18 @@ class TestScanProgressManager:
     def test_get_progress_by_scan_id(self):
         """Test getting progress by scan ID instead of path ID."""
         scan_id, _ = scan_progress_manager.start_scan(6)
-        
+
         progress = scan_progress_manager.get_progress_by_scan_id(scan_id)
         assert progress is not None
         assert progress["scan_id"] == scan_id
-        
+
         assert scan_progress_manager.get_progress_by_scan_id("non-existent") is None
 
     def test_cleanup_old_scans(self):
         """Test the internal cleanup of old scan records."""
         path_id = 7
         scan_id, _ = scan_progress_manager.start_scan(path_id)
-        
+
         # Manually complete it and set old completion time
         with scan_progress_manager._lock:
             progress = scan_progress_manager._scans[path_id]
@@ -129,10 +138,10 @@ class TestScanProgressManager:
             # Set completion time 1 hour ago
             old_time = datetime.now(timezone.utc) - timedelta(hours=1)
             progress.completed_at = old_time.isoformat()
-            
+
             # Set cleanup interval to 30 mins
             scan_progress_manager._cleanup_interval = 1800
-            
+
         scan_progress_manager._cleanup_old_scans()
-        
+
         assert scan_progress_manager.get_progress(path_id) is None
