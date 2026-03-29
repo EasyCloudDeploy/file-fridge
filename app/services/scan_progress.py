@@ -19,6 +19,9 @@ class FileOperation:
     operation: str  # "move_to_cold", "move_to_hot", "copy"
     bytes_total: int
     bytes_transferred: int = 0
+    start_time: float = 0.0
+    current_speed: int = 0  # bytes per second
+    eta: Optional[int] = None  # seconds remaining
 
     @property
     def percent(self) -> int:
@@ -56,6 +59,8 @@ class ScanProgress:
                 "bytes_total": op.bytes_total,
                 "bytes_transferred": op.bytes_transferred,
                 "percent": op.percent,
+                "current_speed": op.current_speed,
+                "eta": op.eta,
             }
             for op in self.current_operations
         ]
@@ -203,7 +208,11 @@ class ScanProgressManager:
 
             # Add to current operations (limit to 5 most recent)
             file_op = FileOperation(
-                file_name=file_name, operation=operation, bytes_total=file_size, bytes_transferred=0
+                file_name=file_name,
+                operation=operation,
+                bytes_total=file_size,
+                bytes_transferred=0,
+                start_time=time.time(),
             )
             progress.current_operations.append(file_op)
             if len(progress.current_operations) > 5:
@@ -228,6 +237,17 @@ class ScanProgressManager:
             for op in progress.current_operations:
                 if op.file_name == file_name:
                     op.bytes_transferred = bytes_transferred
+                    elapsed_time = time.time() - op.start_time
+                    if elapsed_time > 0:
+                        op.current_speed = int(op.bytes_transferred / elapsed_time)
+                        if op.current_speed > 0:
+                            bytes_remaining = op.bytes_total - op.bytes_transferred
+                            op.eta = int(bytes_remaining / op.current_speed)
+                        else:
+                            op.eta = None
+                    else:
+                        op.current_speed = 0
+                        op.eta = None
                     break
 
     def complete_file_operation(

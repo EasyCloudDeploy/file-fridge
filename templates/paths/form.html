@@ -66,6 +66,13 @@
                             </div>
 
                             <div class="mb-3">
+                                <label for="max_concurrent_migrations" class="form-label">Max Concurrent Migrations *</label>
+                                <input type="number" class="form-control" id="max_concurrent_migrations" name="max_concurrent_migrations"
+                                       value="3" min="1" required>
+                                <small class="form-text text-muted">Maximum number of concurrent file operations (minimum 1)</small>
+                            </div>
+
+                            <div class="mb-3">
                                 <div class="form-check">
                                     <input class="form-check-input" type="checkbox" id="enabled" name="enabled" checked>
                                     <label class="form-check-label" for="enabled">

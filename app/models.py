@@ -256,6 +256,9 @@ class MonitoredPath(Base):
     prevent_indexing = Column(
         Boolean, default=True, nullable=False
     )  # Create .noindex file to prevent macOS Spotlight from corrupting timestamps
+    max_concurrent_migrations = Column(
+        Integer, default=3, nullable=False
+    )  # Limit concurrent file operations
     error_message = Column(
         Text, nullable=True
     )  # Error state message (e.g., atime unavailable on network mount)
