@@ -257,7 +257,7 @@ class MonitoredPath(Base):
         Boolean, default=True, nullable=False
     )  # Create .noindex file to prevent macOS Spotlight from corrupting timestamps
     max_concurrent_migrations = Column(
-        Integer, default=3, nullable=False
+        Integer, sa.CheckConstraint("max_concurrent_migrations >= 1", name="chk_max_concurrent_migrations_positive"), default=3, nullable=False
     )  # Limit concurrent file operations
     error_message = Column(
         Text, nullable=True

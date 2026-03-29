@@ -39,6 +39,8 @@ logger = logging.getLogger(__name__)
 # Thread-local session factory for concurrent database access
 SessionFactory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+MAX_CONCURRENT_MIGRATIONS_CAP = 10
+
 
 class FileWorkflowService:
     """Unified service for file scanning, movement, and inventory management."""
@@ -150,7 +152,14 @@ class FileWorkflowService:
                 # Process thawing
                 if files_to_thaw:
                     logger.info(f"Processing {len(files_to_thaw)} files to thaw")
-                    max_workers = min(path.max_concurrent_migrations, len(files_to_thaw))
+                    validated_max = (
+                        path.max_concurrent_migrations
+                        if path.max_concurrent_migrations and path.max_concurrent_migrations > 0
+                        else 1
+                    )
+                    max_workers = max(
+                        1, min(validated_max, len(files_to_thaw), MAX_CONCURRENT_MIGRATIONS_CAP)
+                    )
                     with ThreadPoolExecutor(max_workers=max_workers) as executor:
                         future_to_thaw = {
                             executor.submit(
@@ -175,7 +184,14 @@ class FileWorkflowService:
                 # Process moves to cold storage
                 if matching_files:
                     logger.info(f"Processing {len(matching_files)} files to cold storage")
-                    max_workers = min(path.max_concurrent_migrations, len(matching_files))
+                    validated_max = (
+                        path.max_concurrent_migrations
+                        if path.max_concurrent_migrations and path.max_concurrent_migrations > 0
+                        else 1
+                    )
+                    max_workers = max(
+                        1, min(validated_max, len(matching_files), MAX_CONCURRENT_MIGRATIONS_CAP)
+                    )
                     with ThreadPoolExecutor(max_workers=max_workers) as executor:
                         future_to_file = {
                             executor.submit(
@@ -533,14 +549,14 @@ class FileWorkflowService:
                 # Progress tracking
                 file_name = file_path.name
 
-                def progress_callback(bytes_transferred: int):
-                    scan_progress_manager.update_file_progress(
-                        path.id, file_name, bytes_transferred
-                    )
-
-                scan_progress_manager.start_file_operation(
+                operation_id = scan_progress_manager.start_file_operation(
                     path.id, file_name, "move_to_cold", file_size
                 )
+
+                def progress_callback(bytes_transferred: int):
+                    scan_progress_manager.update_file_progress(
+                        path.id, operation_id, bytes_transferred
+                    )
 
                 # Calculate checksum before move
                 checksum_before = checksum_verifier.calculate_checksum(file_path)
@@ -594,7 +610,7 @@ class FileWorkflowService:
                     result["success"] = True
                     result["file_record_id"] = file_record_id
                     scan_progress_manager.complete_file_operation(
-                        path.id, file_name, "move_to_cold", success=True
+                        path.id, operation_id, "move_to_cold", success=True
                     )
                 else:
                     # Rollback status on failure
@@ -617,7 +633,7 @@ class FileWorkflowService:
 
                     result["error"] = f"Failed to move {file_path}: {error}"
                     scan_progress_manager.complete_file_operation(
-                        path.id, file_name, "move_to_cold", success=False, error=error
+                        path.id, operation_id, "move_to_cold", success=False, error=error
                     )
 
             except Exception as move_error:

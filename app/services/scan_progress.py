@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class FileOperation:
     """Represents a file operation in progress."""
 
+    operation_id: str
     file_name: str
     operation: str  # "move_to_cold", "move_to_hot", "copy"
     bytes_total: int
@@ -54,6 +55,7 @@ class ScanProgress:
         # Convert FileOperation objects to dicts
         data["current_operations"] = [
             {
+                "operation_id": op.operation_id,
                 "file_name": op.file_name,
                 "operation": op.operation,
                 "bytes_total": op.bytes_total,
@@ -189,7 +191,9 @@ class ScanProgressManager:
             if path_id in self._scans:
                 self._scans[path_id].total_files = total_files
 
-    def start_file_operation(self, path_id: int, file_name: str, operation: str, file_size: int):
+    def start_file_operation(
+        self, path_id: int, file_name: str, operation: str, file_size: int
+    ) -> str:
         """
         Start tracking a file operation.
 
@@ -198,6 +202,9 @@ class ScanProgressManager:
             file_name: Name of the file being operated on
             operation: Type of operation (move_to_cold, move_to_hot, copy)
             file_size: Size of the file in bytes
+
+        Returns:
+            The unique operation ID.
         """
         with self._lock:
             if path_id not in self._scans:
@@ -206,8 +213,10 @@ class ScanProgressManager:
 
             progress = self._scans[path_id]
 
+            operation_id = str(uuid.uuid4())
             # Add to current operations (limit to 5 most recent)
             file_op = FileOperation(
+                operation_id=operation_id,
                 file_name=file_name,
                 operation=operation,
                 bytes_total=file_size,
@@ -218,13 +227,15 @@ class ScanProgressManager:
             if len(progress.current_operations) > 5:
                 progress.current_operations.pop(0)
 
-    def update_file_progress(self, path_id: int, file_name: str, bytes_transferred: int):
+            return operation_id
+
+    def update_file_progress(self, path_id: int, operation_id: str, bytes_transferred: int):
         """
         Update progress for a file operation.
 
         Args:
             path_id: The monitored path ID
-            file_name: Name of the file
+            operation_id: The unique operation identifier
             bytes_transferred: Number of bytes transferred so far
         """
         with self._lock:
@@ -235,7 +246,7 @@ class ScanProgressManager:
 
             # Find the operation for this file
             for op in progress.current_operations:
-                if op.file_name == file_name:
+                if op.operation_id == operation_id:
                     op.bytes_transferred = bytes_transferred
                     elapsed_time = time.time() - op.start_time
                     if elapsed_time > 0:
@@ -253,7 +264,7 @@ class ScanProgressManager:
     def complete_file_operation(
         self,
         path_id: int,
-        file_name: str,
+        operation_id: str,
         operation: str,
         success: bool = True,
         error: Optional[str] = None,
@@ -263,7 +274,7 @@ class ScanProgressManager:
 
         Args:
             path_id: The monitored path ID
-            file_name: Name of the file
+            operation_id: The unique operation identifier
             operation: Type of operation that completed
             success: Whether the operation succeeded
             error: Error message if operation failed
@@ -274,9 +285,18 @@ class ScanProgressManager:
 
             progress = self._scans[path_id]
 
+            file_name = next(
+                (
+                    op.file_name
+                    for op in progress.current_operations
+                    if op.operation_id == operation_id
+                ),
+                "Unknown file",
+            )
+
             # Remove from current operations
             progress.current_operations = [
-                op for op in progress.current_operations if op.file_name != file_name
+                op for op in progress.current_operations if op.operation_id != operation_id
             ]
 
             # Update counters

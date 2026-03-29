@@ -25,7 +25,17 @@ def upgrade() -> None:
             "max_concurrent_migrations", sa.Integer(), nullable=False, server_default="3"
         ),
     )
+    # Add a check constraint to ensure values are >= 1
+    # SQLite requires using batch_alter_table for constraints in some modes,
+    # but create_check_constraint works via explicit naming in modern SQLAlchemy/Alembic.
+    with op.batch_alter_table("monitored_paths") as batch_op:
+        batch_op.create_check_constraint(
+            "chk_max_concurrent_migrations_positive",
+            "max_concurrent_migrations >= 1"
+        )
 
 
 def downgrade() -> None:
-    op.drop_column("monitored_paths", "max_concurrent_migrations")
+    with op.batch_alter_table("monitored_paths") as batch_op:
+        batch_op.drop_constraint("chk_max_concurrent_migrations_positive", type_="check")
+        batch_op.drop_column("max_concurrent_migrations")
