@@ -130,6 +130,9 @@ class MonitoredPathBase(BaseModel):
     prevent_indexing: bool = (
         True  # Create .noindex file to prevent macOS Spotlight from corrupting timestamps
     )
+    max_concurrent_migrations: int = Field(
+        3, ge=1, description="Maximum number of concurrent file migrations"
+    )
     error_message: Optional[str] = None  # Error state message
     last_scan_at: Optional[datetime] = None  # When the last scan finished
     last_scan_status: Optional[ScanStatus] = None  # Status of the last scan
@@ -152,6 +155,7 @@ class MonitoredPathUpdate(BaseModel):
     check_interval_seconds: Optional[int] = Field(None, ge=60)
     enabled: Optional[bool] = None
     prevent_indexing: Optional[bool] = None
+    max_concurrent_migrations: Optional[int] = Field(None, ge=1)
     storage_location_ids: Optional[List[int]] = Field(
         None, min_items=1, description="List of cold storage location IDs"
     )

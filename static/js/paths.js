@@ -773,17 +773,41 @@ function updateProgressDisplay(progress) {
         if (progress.current_operations.length === 0) {
             operationsContainer.innerHTML = '<small class="text-muted">No active file operations</small>';
         } else {
-            operationsContainer.innerHTML = progress.current_operations.map(op => `
+            operationsContainer.innerHTML = progress.current_operations.map(op => {
+                let speedText = '';
+                if (op.current_speed && op.current_speed > 0) {
+                    const speedMb = (op.current_speed / (1024 * 1024)).toFixed(2);
+                    speedText = `${speedMb} MB/s`;
+                }
+
+                let etaText = '';
+                if (op.eta !== null && op.eta !== undefined) {
+                    if (op.eta < 60) {
+                        etaText = `${op.eta}s`;
+                    } else {
+                        const mins = Math.floor(op.eta / 60);
+                        const secs = op.eta % 60;
+                        etaText = `${mins}m ${secs}s`;
+                    }
+                }
+
+                let details = '';
+                if (speedText || etaText) {
+                    details = `<small class="text-muted ms-2" style="font-size: 0.7rem;">${speedText}${speedText && etaText ? ' &bull; ' : ''}${etaText ? 'ETA: ' + etaText : ''}</small>`;
+                }
+
+                return `
                 <div class="mb-2">
                     <div class="d-flex justify-content-between align-items-center mb-1">
-                        <small class="text-truncate me-2" style="max-width: 70%;">${escapeHtml(op.file_name)}</small>
+                        <small class="text-truncate me-2" style="max-width: 70%;">${escapeHtml(op.file_name)}${details}</small>
                         <small class="text-muted">${op.percent}%</small>
                     </div>
                     <div class="progress" style="height: 4px;">
                         <div class="progress-bar" role="progressbar" style="width: ${op.percent}%"></div>
                     </div>
                 </div>
-            `).join('');
+                `;
+            }).join('');
         }
     }
 
@@ -984,6 +1008,7 @@ function setupPathForm() {
             storage_location_ids: storageLocationIds,
             operation_type: formData.get('operation_type'),
             check_interval_seconds: parseInt(formData.get('check_interval_seconds')),
+            max_concurrent_migrations: parseInt(formData.get('max_concurrent_migrations')),
             enabled: formData.get('enabled') === 'on',
             prevent_indexing: formData.get('prevent_indexing') === 'on'
         };
@@ -1160,6 +1185,7 @@ async function loadPathForEdit(pathId) {
         document.getElementById('source_path').value = path.source_path;
         document.getElementById('operation_type').value = path.operation_type;
         document.getElementById('check_interval_seconds').value = path.check_interval_seconds;
+        document.getElementById('max_concurrent_migrations').value = path.max_concurrent_migrations;
         document.getElementById('enabled').checked = path.enabled;
         document.getElementById('prevent_indexing').checked = path.prevent_indexing;
 

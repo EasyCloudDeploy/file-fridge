@@ -150,7 +150,7 @@ class FileWorkflowService:
                 # Process thawing
                 if files_to_thaw:
                     logger.info(f"Processing {len(files_to_thaw)} files to thaw")
-                    max_workers = min(2, len(files_to_thaw))
+                    max_workers = min(path.max_concurrent_migrations, len(files_to_thaw))
                     with ThreadPoolExecutor(max_workers=max_workers) as executor:
                         future_to_thaw = {
                             executor.submit(
@@ -175,7 +175,7 @@ class FileWorkflowService:
                 # Process moves to cold storage
                 if matching_files:
                     logger.info(f"Processing {len(matching_files)} files to cold storage")
-                    max_workers = min(3, len(matching_files))
+                    max_workers = min(path.max_concurrent_migrations, len(matching_files))
                     with ThreadPoolExecutor(max_workers=max_workers) as executor:
                         future_to_file = {
                             executor.submit(
