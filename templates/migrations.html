@@ -137,18 +137,33 @@
         return { speed, eta };
     }
 
+    function escapeHtml(unsafe) {
+        return (unsafe || '').toString()
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
     async function loadMigrations() {
         try {
             // Load Active
             const activeResponse = await fetch('/api/v1/migrations/active', {
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                headers: { 'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}` }
             });
+            if (!activeResponse.ok) {
+                throw new Error(`Failed to load active migrations: ${activeResponse.status} ${activeResponse.statusText}`);
+            }
             const activeTasks = await activeResponse.json();
 
             // Load Recent
             const recentResponse = await fetch('/api/v1/migrations/recent', {
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+                headers: { 'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}` }
             });
+            if (!recentResponse.ok) {
+                throw new Error(`Failed to load recent migrations: ${recentResponse.status} ${recentResponse.statusText}`);
+            }
             const recentTasks = await recentResponse.json();
 
             renderActive(activeTasks);
@@ -156,7 +171,7 @@
 
         } catch (error) {
             console.error('Failed to load migrations:', error);
-            showToast('Error', 'Failed to load migrations data', 'error');
+            showToast('Error', error.message || 'Failed to load migrations data', 'error');
         }
     }
 
@@ -182,7 +197,11 @@
             const { speed, eta } = calculateMetrics(task);
             totalSpeed += speed;
 
-            const fileName = task.file_path.split('/').pop() || task.file_path;
+            const safeFilePath = escapeHtml(task.file_path);
+            const fileName = safeFilePath.split('/').pop() || safeFilePath;
+            const safeSource = escapeHtml(task.source_location_name);
+            const safeTarget = escapeHtml(task.target_location_name);
+
             const progress = task.percent_complete || 0;
 
             let statusBadge = '';
@@ -244,25 +263,29 @@
 
         let html = '';
         completedTasks.forEach(task => {
-            const fileName = task.file_path.split('/').pop() || task.file_path;
+            const safeFilePath = escapeHtml(task.file_path);
+            const fileName = safeFilePath.split('/').pop() || safeFilePath;
+            const safeSource = escapeHtml(task.source_location_name);
+            const safeTarget = escapeHtml(task.target_location_name);
+            const safeError = escapeHtml(task.error_message || 'Unknown error');
 
             let statusBadge = '';
             if (task.status === 'completed') statusBadge = '<span class="badge bg-success">Completed</span>';
-            else if (task.status === 'failed') statusBadge = `<span class="badge bg-danger" title="${task.error_message || 'Unknown error'}">Failed</span>`;
+            else if (task.status === 'failed') statusBadge = `<span class="badge bg-danger" title="${safeError}">Failed</span>`;
 
             const timeStr = task.completed_at ? new Date(task.completed_at).toLocaleString() : 'Unknown';
 
             html += `
                 <tr>
                     <td>
-                        <div class="fw-bold text-truncate" style="max-width: 250px;" title="${task.file_path}">
+                        <div class="fw-bold text-truncate" style="max-width: 200px;" title="${safeFilePath}">
                             ${fileName}
                         </div>
                     </td>
                     <td>
-                        <span class="badge bg-secondary">${task.source_location_name}</span>
+                        <span class="badge bg-secondary">${safeSource}</span>
                         <i class="bi bi-arrow-right mx-1"></i>
-                        <span class="badge bg-info">${task.target_location_name}</span>
+                        <span class="badge bg-info">${safeTarget}</span>
                     </td>
                     <td>${formatBytes(task.bytes_total)}</td>
                     <td>${statusBadge}</td>
