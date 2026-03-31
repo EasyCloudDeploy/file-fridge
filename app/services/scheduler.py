@@ -153,7 +153,12 @@ class SchedulerService:
 
     def trigger_scan(self, path_id: int):
         """Manually trigger a scan for a path."""
-        scan_path_job_func(path_id)
+        self.scheduler.add_job(
+            scan_path_job_func,
+            id=f"manual_scan_path_{path_id}",
+            args=[path_id],
+            replace_existing=True,
+        )
 
     def trigger_encryption_job(self, location_id: int):
         """Trigger background job to encrypt all files in a location."""
