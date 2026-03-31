@@ -50,6 +50,7 @@ from app.routers.api import storage as api_storage
 from app.routers.api import tag_rules as api_tag_rules
 from app.routers.api import tags as api_tags
 from app.routers.api import users as api_users
+from app.routers.api import migrations as api_migrations
 from app.routers.web.views import router as web_router
 from app.security import PermissionChecker
 from app.services.file_cleanup import FileCleanup
@@ -141,6 +142,7 @@ app.include_router(api_tag_rules.router, dependencies=[Depends(PermissionChecker
 app.include_router(api_storage.router, dependencies=[Depends(PermissionChecker("storage"))])
 app.include_router(api_notifiers.router, dependencies=[Depends(PermissionChecker("notifiers"))])
 app.include_router(api_encryption.router, dependencies=[Depends(PermissionChecker("Encryption"))])
+app.include_router(api_migrations.router, dependencies=[Depends(PermissionChecker("migrations"))])
 app.include_router(api_users.router)  # Roles handled inside this router
 app.include_router(api_identity.router)  # Permissions handled inside router
 app.include_router(api_remote.router)  # Remote connections has its own internal auth/security logic

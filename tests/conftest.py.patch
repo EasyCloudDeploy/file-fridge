@@ -1,0 +1,20 @@
+--- tests/conftest.py
++++ tests/conftest.py
+@@ -19,7 +19,7 @@
+ from app.database import Base, engine
+ from app.models import (
+     ColdStorageLocation,
+     FileInventory,
+     FileRecord,
+     MonitoredPath,
+     Notifier,
+     OperationType,
+     ServerEncryptionKey,
+     StorageType,
+     Tag,
+     TagRule,
+     TagRuleCriterionType,
+     User,
++    RelocationTask,
+ )
+ from app.schemas import Operator

@@ -881,3 +881,39 @@ class InstanceKeyHistory(Base):
     active = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     retired_at = Column(DateTime(timezone=True), nullable=True)
+
+class RelocationTaskStatus(str, enum.Enum):
+    """Status of file relocation task."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class RelocationTask(Base):
+    """Database model for tracking file relocations between cold storage locations."""
+
+    __tablename__ = "relocation_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(String, nullable=False, unique=True, index=True)
+    inventory_id = Column(Integer, ForeignKey(FILE_INVENTORY_ID_FK), nullable=False, index=True)
+    file_path = Column(String, nullable=False)
+    source_location_id = Column(Integer, ForeignKey("cold_storage_locations.id"), nullable=False)
+    source_location_name = Column(String, nullable=False)
+    target_location_id = Column(Integer, ForeignKey("cold_storage_locations.id"), nullable=False)
+    target_location_name = Column(String, nullable=False)
+    status = Column(SQLEnum(RelocationTaskStatus), nullable=False, default=RelocationTaskStatus.PENDING, index=True)
+    bytes_total = Column(Integer, nullable=False, default=0)
+    bytes_transferred = Column(Integer, nullable=False, default=0)
+    error_message = Column(Text, nullable=True)
+    new_file_path = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    file_inventory = relationship("FileInventory")
+    source_location = relationship("ColdStorageLocation", foreign_keys=[source_location_id])
+    target_location = relationship("ColdStorageLocation", foreign_keys=[target_location_id])
