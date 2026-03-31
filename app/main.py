@@ -35,6 +35,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import settings
 from app.database import SessionLocal, init_db
 from app.database_migrations import run_startup_migrations
+from app.models import FileInventory, FileStatus, RelocationTask, RelocationTaskStatus
 from app.routers.api import auth as api_auth
 from app.routers.api import browser as api_browser
 from app.routers.api import cleanup as api_cleanup
@@ -42,6 +43,7 @@ from app.routers.api import criteria as api_criteria
 from app.routers.api import encryption as api_encryption
 from app.routers.api import files as api_files
 from app.routers.api import identity as api_identity
+from app.routers.api import migrations as api_migrations
 from app.routers.api import notifiers as api_notifiers
 from app.routers.api import paths as api_paths
 from app.routers.api import remote as api_remote
@@ -50,7 +52,6 @@ from app.routers.api import storage as api_storage
 from app.routers.api import tag_rules as api_tag_rules
 from app.routers.api import tags as api_tags
 from app.routers.api import users as api_users
-from app.routers.api import migrations as api_migrations
 from app.routers.web.views import router as web_router
 from app.security import PermissionChecker
 from app.services.file_cleanup import FileCleanup
@@ -90,6 +91,42 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     except Exception as e:
         logger.warning(f"Error during symlink cleanup: {e!s}")
         # Don't fail startup if cleanup fails
+
+    # Reset files stuck in MIGRATING status from interrupted freeze/thaw operations.
+    # RelocationTask-based migrations are recovered separately in relocation_manager._recover_tasks().
+    # Here we handle files whose MIGRATING status was set by the freeze/thaw workflow but never
+    # cleared (e.g., due to an application crash mid-operation).
+    logger.info("Checking for files stuck in MIGRATING status...")
+    try:
+        db = SessionLocal()
+        try:
+            active_relocation_ids = {
+                row[0]
+                for row in db.query(RelocationTask.inventory_id).filter(
+                    RelocationTask.status.in_([RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING])
+                ).all()
+            }
+            stuck_files = (
+                db.query(FileInventory)
+                .filter(FileInventory.status == FileStatus.MIGRATING)
+                .all()
+            )
+            recovered = 0
+            for f in stuck_files:
+                if f.id not in active_relocation_ids:
+                    f.status = FileStatus.ACTIVE
+                    recovered += 1
+            if recovered:
+                db.commit()
+                logger.warning(
+                    f"Reset {recovered} file(s) from MIGRATING to ACTIVE (interrupted freeze/thaw)"
+                )
+            else:
+                logger.info("No stuck MIGRATING files found")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning(f"Error during MIGRATING file recovery: {e}")
 
     logger.info("Starting scheduler...")
     scheduler_service.start()
