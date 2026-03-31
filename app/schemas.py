@@ -928,6 +928,34 @@ class BulkRetryTransfersResponse(BaseModel):
     failed: List[BulkRetryFailure] = Field(..., description="List of failed retry attempts")
 
 
+class RelocationTaskBase(BaseModel):
+    """Base schema for relocation tasks."""
+
+    task_id: str
+    inventory_id: int
+    file_path: str
+    source_location_id: int
+    source_location_name: str
+    target_location_id: int
+    target_location_name: str
+    status: str
+    bytes_total: int
+    bytes_transferred: int
+    error_message: Optional[str] = None
+    new_file_path: Optional[str] = None
+    percent_complete: float = 0.0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RelocationTaskOut(RelocationTaskBase):
+    """Schema for outgoing relocation task data."""
+    id: Optional[int] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
 class RemoteTransferJob(RemoteTransferJobBase):
     """Schema for remote transfer job response."""
 
