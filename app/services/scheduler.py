@@ -151,31 +151,34 @@ class SchedulerService:
             self.scheduler.remove_job(job_id)
             logger.info(f"Removed scheduled job for path {path_id}")
 
-    def trigger_scan(self, path_id: int):
+    def trigger_scan(self, path_id: int) -> None:
         """Manually trigger a scan for a path."""
         self.scheduler.add_job(
             scan_path_job_func,
             id=f"manual_scan_path_{path_id}",
             args=[path_id],
             replace_existing=True,
+            misfire_grace_time=None,
         )
 
-    def trigger_encryption_job(self, location_id: int):
+    def trigger_encryption_job(self, location_id: int) -> None:
         """Trigger background job to encrypt all files in a location."""
         self.scheduler.add_job(
             encrypt_location_job_func,
             id=f"encrypt_location_{location_id}",
             args=[location_id],
             replace_existing=True,
+            misfire_grace_time=None,
         )
 
-    def trigger_decryption_job(self, location_id: int):
+    def trigger_decryption_job(self, location_id: int) -> None:
         """Trigger background job to decrypt all files in a location."""
         self.scheduler.add_job(
             decrypt_location_job_func,
             id=f"decrypt_location_{location_id}",
             args=[location_id],
             replace_existing=True,
+            misfire_grace_time=None,
         )
 
     def _scan_path_job(self, path_id: int):
