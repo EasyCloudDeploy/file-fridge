@@ -88,7 +88,7 @@ class RelocationTaskManager:
             if running_tasks:
                 db.commit()
         except Exception as e:
-            logger.exception("Failed to recover tasks during startup")
+            logger.error(f"Failed to recover tasks during startup: {e}")
         finally:
             db.close()
 
@@ -114,7 +114,7 @@ class RelocationTaskManager:
                     else:
                         task_id = None
                 except Exception as e:
-                    logger.exception("Error querying pending relocation tasks")
+                    logger.error(f"Error querying pending relocation tasks: {e}")
                 finally:
                     db.close()
 
@@ -154,12 +154,13 @@ class RelocationTaskManager:
         """Remove completed/failed tasks older than cleanup interval from database."""
         db = SessionLocal()
         try:
-            cutoff_date = datetime.now(tz=timezone.utc)
+            from datetime import timedelta
+            cutoff_date = datetime.now(tz=timezone.utc) - timedelta(days=1)
             # Find old tasks
-            from sqlalchemy import text
-            db.execute(
-                text("DELETE FROM relocation_tasks WHERE status IN ('completed', 'failed') AND completed_at < datetime('now', '-1 day')")
-            )
+            db.query(RelocationTask).filter(
+                RelocationTask.status.in_([RelocationTaskStatus.COMPLETED, RelocationTaskStatus.FAILED]),
+                RelocationTask.completed_at < cutoff_date
+            ).delete()
             db.commit()
             logger.debug("Cleaned up old relocation tasks")
         except Exception as e:
@@ -261,7 +262,7 @@ class RelocationTaskManager:
                         prog_db.close()
                         last_db_update = now
                     except Exception as e:
-                        pass # Ignore progress update errors
+                        logger.warning(f"Failed to update progress for task {task_id}: {e}")
 
             # Perform the move
             success, error = FileMover.move_file(
@@ -401,25 +402,27 @@ class RelocationTaskManager:
         finally:
             db.close()
 
-    def get_all_active_tasks(self) -> List[dict]:
+    def get_all_active_tasks(self, db: Session = None) -> List[dict]:
         """Get all active (pending or running) tasks."""
-        db = SessionLocal()
+        _db = db or SessionLocal()
         try:
-            tasks = db.query(RelocationTask).filter(
+            tasks = _db.query(RelocationTask).filter(
                 RelocationTask.status.in_([RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING])
             ).all()
             return [serialize_relocation_task(task) for task in tasks]
         finally:
-            db.close()
+            if not db:
+                _db.close()
 
-    def get_recent_tasks(self, limit: int = 20) -> List[dict]:
+    def get_recent_tasks(self, limit: int = 20, db: Session = None) -> List[dict]:
         """Get recent tasks (active and recently completed)."""
-        db = SessionLocal()
+        _db = db or SessionLocal()
         try:
-            tasks = db.query(RelocationTask).order_by(RelocationTask.created_at.desc()).limit(limit).all()
+            tasks = _db.query(RelocationTask).order_by(RelocationTask.created_at.desc()).limit(limit).all()
             return [serialize_relocation_task(task) for task in tasks]
         finally:
-            db.close()
+            if not db:
+                _db.close()
 
 
 # Global singleton instance
