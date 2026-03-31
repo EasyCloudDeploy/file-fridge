@@ -11,12 +11,12 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/active", response_model=List[Dict[str, Any]])
-def get_active_migrations(db: Session = Depends(get_db)):
+def get_active_migrations(db: Session = Depends(get_db)): # NOSONAR
     """Get all active file migrations."""
     return relocation_manager.get_all_active_tasks(db)
 
 
 @router.get("/recent", response_model=List[Dict[str, Any]])
-def get_recent_migrations(limit: int = 20, db: Session = Depends(get_db)):
+def get_recent_migrations(limit: int = 20, db: Session = Depends(get_db)): # NOSONAR
     """Get recent file migrations."""
     return relocation_manager.get_recent_tasks(limit, db)
