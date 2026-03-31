@@ -183,12 +183,12 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
             if "error" not in unique_volumes:
                 unique_volumes["error"] = []
             unique_volumes["error"].append((path_str, "Permission denied"))
-        except Exception as e:
+        except Exception:
             # Handle other potential errors
             logger.exception(f"Error stating path {path_str}")
             if "error" not in unique_volumes:
                 unique_volumes["error"] = []
-            unique_volumes["error"].append((path_str, str(e)))
+            unique_volumes["error"].append((path_str, "An internal error occurred"))
 
     stats_list = []
     for device_id, path_info in unique_volumes.items():

@@ -76,7 +76,7 @@ def get_storage_stats(db: Session = Depends(get_db)):
                     free_bytes=free,
                 )
             )
-        except Exception as e:
+        except Exception:
             logger.exception(f"Error getting disk usage for {path_str}")
             stats_list.append(
                 StorageStats(
@@ -84,7 +84,7 @@ def get_storage_stats(db: Session = Depends(get_db)):
                     total_bytes=0,
                     used_bytes=0,
                     free_bytes=0,
-                    error=str(e),
+                    error="Failed to get disk usage",
                 )
             )
 

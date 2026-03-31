@@ -431,9 +431,9 @@ def list_files(
                 }
             ) + "\n"
 
-        except Exception as e:
+        except Exception:
             logger.exception("Error streaming files")
-            yield json.dumps({"type": "error", "message": str(e), "partial_count": count}) + "\n"
+            yield json.dumps({"type": "error", "message": "An internal error occurred", "partial_count": count}) + "\n"
 
     return StreamingResponse(
         generate_ndjson(),
@@ -1047,9 +1047,9 @@ def bulk_thaw_files(
                 )
                 failed += 1
 
-        except Exception as e:
+        except Exception:
             logger.exception(f"Error thawing file {file_id}")
-            results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
+            results.append(BulkActionResult(file_id=file_id, success=False, message="An internal error occurred"))
             failed += 1
 
     return BulkActionResponse(
@@ -1178,9 +1178,9 @@ def bulk_freeze_files(request: BulkFreezeRequest, db: Session = Depends(get_db))
                 )
                 failed += 1
 
-        except Exception as e:
+        except Exception:
             logger.exception(f"Error freezing file {file_id}")
-            results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
+            results.append(BulkActionResult(file_id=file_id, success=False, message="An internal error occurred"))
             failed += 1
 
     return BulkActionResponse(
@@ -1270,14 +1270,14 @@ def bulk_pin_files(request: BulkFileActionRequest, db: Session = Depends(get_db)
             successful += 1
             seen_paths.add(file_path)
 
-    except Exception as e:
+    except Exception:
         db.rollback()
         logger.exception("Error in bulk pin operation")
         # If the bulk operation fails, we mark everything not yet processed as failed
         processed_count = len(results)
         for i in range(processed_count, len(request.file_ids)):
             file_id = request.file_ids[i]
-            results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
+            results.append(BulkActionResult(file_id=file_id, success=False, message="An internal error occurred"))
             failed += 1
 
     return BulkActionResponse(
@@ -1353,13 +1353,13 @@ def bulk_unpin_files(request: BulkFileActionRequest, db: Session = Depends(get_d
 
             successful += 1
 
-    except Exception as e:
+    except Exception:
         db.rollback()
         logger.exception("Error in bulk unpin operation")
         processed_count = len(results)
         for i in range(processed_count, len(request.file_ids)):
             file_id = request.file_ids[i]
-            results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
+            results.append(BulkActionResult(file_id=file_id, success=False, message="An internal error occurred"))
             failed += 1
 
     return BulkActionResponse(

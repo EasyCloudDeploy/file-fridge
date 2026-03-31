@@ -240,10 +240,10 @@ def bulk_add_tag(request: BulkTagRequest, db: Session = Depends(get_db)):
             )
             successful += 1
 
-        except Exception as e:
+        except Exception:
             db.rollback()
             logger.exception(f"Error adding tag to file {file_id}")
-            results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
+            results.append(BulkActionResult(file_id=file_id, success=False, message="An internal error occurred"))
             failed += 1
 
     return BulkActionResponse(
@@ -312,10 +312,10 @@ def bulk_remove_tag(request: BulkTagRequest, db: Session = Depends(get_db)):
             )
             successful += 1
 
-        except Exception as e:
+        except Exception:
             db.rollback()
             logger.exception(f"Error removing tag from file {file_id}")
-            results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
+            results.append(BulkActionResult(file_id=file_id, success=False, message="An internal error occurred"))
             failed += 1
 
     return BulkActionResponse(

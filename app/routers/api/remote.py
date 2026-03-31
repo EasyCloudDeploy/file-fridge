@@ -597,9 +597,9 @@ async def bulk_migrate_files(
             )
             results.append(BulkActionResult(file_id=file_id, success=True))
             successful += 1
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to create transfer job for file_id=%s", file_id)
-            results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
+            results.append(BulkActionResult(file_id=file_id, success=False, message="An internal error occurred"))
             failed += 1
 
     return BulkActionResponse(
