@@ -184,8 +184,9 @@ class FileWorkflowService:
                             # Check for stop request after each completed thaw
                             if scan_progress_manager.is_stop_requested(path.id):
                                 logger.info(
-                                    f"Stop requested during thaw phase for path {path.id},"
-                                    " cancelling remaining operations"
+                                    "Stop requested during thaw phase for path %s,"
+                                    " cancelling remaining operations",
+                                    path.id
                                 )
                                 for f in future_to_thaw:
                                     f.cancel()
@@ -231,8 +232,9 @@ class FileWorkflowService:
                             # Check for stop request after each completed freeze
                             if scan_progress_manager.is_stop_requested(path.id):
                                 logger.info(
-                                    f"Stop requested during freeze phase for path {path.id},"
-                                    " cancelling remaining operations"
+                                    "Stop requested during freeze phase for path %s,"
+                                    " cancelling remaining operations",
+                                    path.id
                                 )
                                 for f in future_to_file:
                                     f.cancel()
