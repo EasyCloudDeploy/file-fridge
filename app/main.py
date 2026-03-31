@@ -31,6 +31,7 @@ from fastapi import Depends, FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
 from app.database import SessionLocal, init_db
@@ -102,14 +103,16 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
         try:
             active_relocation_ids = {
                 row[0]
-                for row in db.query(RelocationTask.inventory_id).filter(
-                    RelocationTask.status.in_([RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING])
-                ).all()
+                for row in db.query(RelocationTask.inventory_id)
+                .filter(
+                    RelocationTask.status.in_(
+                        [RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING]
+                    )
+                )
+                .all()
             }
             stuck_files = (
-                db.query(FileInventory)
-                .filter(FileInventory.status == FileStatus.MIGRATING)
-                .all()
+                db.query(FileInventory).filter(FileInventory.status == FileStatus.MIGRATING).all()
             )
             recovered = 0
             for f in stuck_files:
@@ -125,7 +128,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
                 logger.info("No stuck MIGRATING files found")
         finally:
             db.close()
-    except Exception as e:
+    except SQLAlchemyError as e:
         logger.warning(f"Error during MIGRATING file recovery: {e}")
 
     logger.info("Starting scheduler...")
@@ -192,4 +195,3 @@ app.include_router(web_router)
 def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "version": settings.app_version, "app_name": settings.app_name}
-
