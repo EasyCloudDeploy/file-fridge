@@ -668,6 +668,15 @@ function startProgressPolling(pathId) {
         progressContainer.style.display = 'block';
     }
 
+    // Show stop button
+    const stopBtn = document.getElementById('stop-scan-btn');
+    if (stopBtn) {
+        stopBtn.style.display = '';
+        stopBtn.disabled = false;
+        stopBtn.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Scan';
+        stopBtn.onclick = () => stopScan(pathId);
+    }
+
     // Clear any existing interval
     if (progressPollingInterval) {
         clearInterval(progressPollingInterval);
@@ -678,6 +687,38 @@ function startProgressPolling(pathId) {
 
     // Also poll immediately
     pollProgress(pathId);
+}
+
+async function stopScan(pathId) {
+    const stopBtn = document.getElementById('stop-scan-btn');
+    if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Stopping...';
+    }
+
+    try {
+        const response = await authenticatedFetch(`${API_BASE_URL}/paths/${pathId}/scan/stop`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            showNotification('Stop requested. Waiting for in-flight operations to finish...', 'info');
+        } else {
+            const error = await response.json();
+            showNotification(error.detail || 'Failed to stop scan', 'error');
+            if (stopBtn) {
+                stopBtn.disabled = false;
+                stopBtn.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Scan';
+            }
+        }
+    } catch (error) {
+        console.error('Error stopping scan:', error);
+        showNotification(`Error stopping scan: ${error.message}`, 'error');
+        if (stopBtn) {
+            stopBtn.disabled = false;
+            stopBtn.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Scan';
+        }
+    }
 }
 
 function stopProgressPolling() {
@@ -698,9 +739,15 @@ async function pollProgress(pathId) {
         const progress = await response.json();
         updateProgressDisplay(progress);
 
-        // Stop polling if scan is complete or failed
-        if (progress.status === 'completed' || progress.status === 'failed') {
+        // Stop polling if scan is complete, failed, or stopped
+        if (progress.status === 'completed' || progress.status === 'failed' || progress.status === 'stopped') {
             stopProgressPolling();
+
+            // Hide stop button
+            const stopBtn = document.getElementById('stop-scan-btn');
+            if (stopBtn) {
+                stopBtn.style.display = 'none';
+            }
 
             // Hide progress after a delay
             setTimeout(() => {
@@ -728,6 +775,9 @@ async function pollProgress(pathId) {
             if (progress.status === 'completed') {
                 const movedCount = progress.progress.files_moved_to_cold + progress.progress.files_moved_to_hot;
                 showNotification(`Scan completed! Processed ${progress.progress.files_processed} files, moved ${movedCount} files.`, 'success');
+            } else if (progress.status === 'stopped') {
+                const movedCount = (progress.progress.files_moved_to_cold || 0) + (progress.progress.files_moved_to_hot || 0);
+                showNotification(`Scan stopped. Processed ${progress.progress.files_processed || 0} files, moved ${movedCount} files before stopping.`, 'warning');
             } else {
                 showNotification('Scan failed. Check errors below.', 'error');
             }
@@ -738,6 +788,27 @@ async function pollProgress(pathId) {
 }
 
 function updateProgressDisplay(progress) {
+    // Update status badge
+    const statusBadge = document.getElementById('scan-status-badge');
+    if (statusBadge) {
+        if (progress.stop_requested && progress.status === 'running') {
+            statusBadge.className = 'badge bg-warning text-dark';
+            statusBadge.textContent = 'Stopping…';
+        } else if (progress.status === 'stopped') {
+            statusBadge.className = 'badge bg-warning text-dark';
+            statusBadge.textContent = 'Stopped';
+        } else if (progress.status === 'completed') {
+            statusBadge.className = 'badge bg-success';
+            statusBadge.textContent = 'Completed';
+        } else if (progress.status === 'failed') {
+            statusBadge.className = 'badge bg-danger';
+            statusBadge.textContent = 'Failed';
+        } else {
+            statusBadge.className = 'badge bg-info';
+            statusBadge.textContent = 'Running';
+        }
+    }
+
     // Update overall progress bar
     const progressBar = document.getElementById('scan-progress-bar');
     if (progressBar) {

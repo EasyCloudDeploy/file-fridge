@@ -38,7 +38,7 @@ class ScanProgress:
 
     scan_id: str
     path_id: int
-    status: str  # "running", "completed", "failed"
+    status: str  # "running", "completed", "failed", "stopped"
     started_at: str
     completed_at: Optional[str] = None
     total_files: int = 0
@@ -48,6 +48,7 @@ class ScanProgress:
     files_skipped: int = 0
     current_operations: List[FileOperation] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
+    stop_requested: bool = False
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -124,7 +125,7 @@ class ScanProgressManager:
             to_remove = []
 
             for scan_id, progress in self._scans_by_id.items():
-                if progress.status in ["completed", "failed"] and progress.completed_at:
+                if progress.status in ["completed", "failed", "stopped"] and progress.completed_at:
                     completed_time = datetime.fromisoformat(progress.completed_at).timestamp()
                     if current_time - completed_time > self._cleanup_interval:
                         to_remove.append(scan_id)
@@ -312,13 +313,34 @@ class ScanProgressManager:
             elif error:
                 progress.errors.append(f"{file_name}: {error}")
 
+    def request_stop(self, path_id: int) -> bool:
+        """
+        Request that the running scan for a path stop after completing in-flight operations.
+
+        Returns:
+            True if a running scan was found and flagged, False if no running scan exists.
+        """
+        with self._lock:
+            if path_id not in self._scans or self._scans[path_id].status != "running":
+                return False
+            self._scans[path_id].stop_requested = True
+            logger.info(f"Stop requested for scan {self._scans[path_id].scan_id} (path {path_id})")
+            return True
+
+    def is_stop_requested(self, path_id: int) -> bool:
+        """Return True if a stop has been requested for the scan on this path."""
+        with self._lock:
+            if path_id not in self._scans:
+                return False
+            return self._scans[path_id].stop_requested
+
     def finish_scan(self, path_id: int, status: str = "completed"):
         """
         Mark a scan as complete.
 
         Args:
             path_id: The monitored path ID
-            status: Final status ("completed" or "failed")
+            status: Final status ("completed", "failed", or "stopped")
         """
         with self._lock:
             if path_id not in self._scans:

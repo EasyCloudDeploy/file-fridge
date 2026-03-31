@@ -181,6 +181,24 @@ class FileWorkflowService:
                             except Exception as e:
                                 results["errors"].append(f"Exception thawing {cold_path}: {e!s}")
 
+                            # Check for stop request after each completed thaw
+                            if scan_progress_manager.is_stop_requested(path.id):
+                                logger.info(
+                                    f"Stop requested during thaw phase for path {path.id},"
+                                    " cancelling remaining operations"
+                                )
+                                for f in future_to_thaw:
+                                    f.cancel()
+                                break
+
+                # Bail out early if stop was requested during thaw phase
+                if scan_progress_manager.is_stop_requested(path.id):
+                    scan_progress_manager.finish_scan(path.id, status="stopped")
+                    path.last_scan_at = datetime.now(tz=timezone.utc)
+                    path.last_scan_status = ScanStatus.STOPPED
+                    db.commit()
+                    return results
+
                 # Process moves to cold storage
                 if matching_files:
                     logger.info(f"Processing {len(matching_files)} files to cold storage")
@@ -209,6 +227,24 @@ class FileWorkflowService:
                                     results["errors"].append(file_result["error"])
                             except Exception as e:
                                 results["errors"].append(f"Exception processing {file_path}: {e!s}")
+
+                            # Check for stop request after each completed freeze
+                            if scan_progress_manager.is_stop_requested(path.id):
+                                logger.info(
+                                    f"Stop requested during freeze phase for path {path.id},"
+                                    " cancelling remaining operations"
+                                )
+                                for f in future_to_file:
+                                    f.cancel()
+                                break
+
+                # Bail out early if stop was requested during freeze phase
+                if scan_progress_manager.is_stop_requested(path.id):
+                    scan_progress_manager.finish_scan(path.id, status="stopped")
+                    path.last_scan_at = datetime.now(tz=timezone.utc)
+                    path.last_scan_status = ScanStatus.STOPPED
+                    db.commit()
+                    return results
 
                 # Reconciliation phase
                 try:
