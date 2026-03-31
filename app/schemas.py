@@ -950,10 +950,22 @@ class RelocationTaskBase(BaseModel):
 
 class RelocationTaskOut(RelocationTaskBase):
     """Schema for outgoing relocation task data."""
+
     id: Optional[int] = None
     created_at: datetime
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+
+
+class FreezingFileSchema(BaseModel):
+    """Schema for files currently being frozen or thawed."""
+
+    inventory_id: int
+    file_path: str
+    operation_type: str
+    source_label: str
+    target_label: str
+    file_size: int
 
 
 class RemoteTransferJob(RemoteTransferJobBase):
