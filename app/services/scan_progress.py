@@ -134,7 +134,7 @@ class ScanProgressManager:
                 progress = self._scans_by_id.pop(scan_id, None)
                 if progress:
                     self._scans.pop(progress.path_id, None)
-                    logger.debug(f"Cleaned up old scan: {scan_id}")
+                    logger.debug("Cleaned up old scan: %s", scan_id)
 
     def is_scan_running(self, path_id: int) -> bool:
         """
@@ -168,7 +168,7 @@ class ScanProgressManager:
             # Check if a scan is already running for this path
             if path_id in self._scans and self._scans[path_id].status == "running":
                 existing_scan = self._scans[path_id]
-                logger.warning(f"Scan already running for path {path_id}: {existing_scan.scan_id}")
+                logger.warning("Scan already running for path %s: %s", path_id, existing_scan.scan_id)
                 return existing_scan.scan_id, False
 
             scan_id = str(uuid.uuid4())
@@ -183,7 +183,7 @@ class ScanProgressManager:
             self._scans[path_id] = progress
             self._scans_by_id[scan_id] = progress
 
-            logger.info(f"Started scan tracking: {scan_id} for path {path_id}, {total_files} files")
+            logger.info("Started scan tracking: %s for path %s, %s files", scan_id, path_id, total_files)
             return scan_id, True
 
     def update_total_files(self, path_id: int, total_files: int):
@@ -209,7 +209,7 @@ class ScanProgressManager:
         """
         with self._lock:
             if path_id not in self._scans:
-                logger.warning(f"No active scan for path {path_id}, starting one")
+                logger.warning("No active scan for path %s, starting one", path_id)
                 self.start_scan(path_id)
 
             progress = self._scans[path_id]
@@ -324,7 +324,7 @@ class ScanProgressManager:
             if path_id not in self._scans or self._scans[path_id].status != "running":
                 return False
             self._scans[path_id].stop_requested = True
-            logger.info(f"Stop requested for scan {self._scans[path_id].scan_id} (path {path_id})")
+            logger.info("Stop requested for scan %s (path %s)", self._scans[path_id].scan_id, path_id)
             return True
 
     def is_stop_requested(self, path_id: int) -> bool:
@@ -342,6 +342,11 @@ class ScanProgressManager:
             path_id: The monitored path ID
             status: Final status ("completed", "failed", or "stopped")
         """
+        allowed_statuses = {"completed", "failed", "stopped"}
+        if status not in allowed_statuses:
+            logger.warning("Invalid status '%s' provided to finish_scan, coercing to 'failed'", status)
+            status = "failed"
+
         with self._lock:
             if path_id not in self._scans:
                 return
@@ -351,7 +356,7 @@ class ScanProgressManager:
             progress.completed_at = datetime.now(tz=timezone.utc).isoformat()
             progress.current_operations = []  # Clear any pending operations
 
-            logger.info(f"Scan {progress.scan_id} finished with status: {status}")
+            logger.info("Scan %s finished with status: %s", progress.scan_id, status)
 
     def get_progress(self, path_id: int) -> Optional[dict]:
         """

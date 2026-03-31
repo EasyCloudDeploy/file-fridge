@@ -147,6 +147,20 @@ def test_process_path_main_workflow(
     mock_executor.assert_called_with(max_workers=1)
 
 
+@patch("app.services.file_workflow_service.scan_progress_manager")
+def test_process_path_stop_requested(mock_scan_progress, monitored_path, db_session):
+    """Test process_path when a stop has been requested."""
+    mock_scan_progress.start_scan.return_value = ("scan123", True)
+    mock_scan_progress.is_stop_requested.return_value = True
+
+    service = FileWorkflowService()
+    service.process_path(monitored_path, db_session)
+
+    mock_scan_progress.finish_scan.assert_called_with(monitored_path.id, status="stopped")
+    db_session.refresh(monitored_path)
+    assert monitored_path.last_scan_status == ScanStatus.STOPPED
+
+
 @patch("app.services.file_workflow_service.CriteriaMatcher.match_file")
 @patch("app.services.file_workflow_service.FileWorkflowService._recursive_scandir")
 @patch("app.services.file_workflow_service.FileWorkflowService._update_file_inventory")
