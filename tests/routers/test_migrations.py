@@ -25,7 +25,7 @@ def setup_migration_tasks(
     task1 = RelocationTask(
         task_id=str(uuid.uuid4()),
         inventory_id=file1.id,
-        file_path="/tmp/mock_source/test1.txt",
+        file_path="/tmp/mock_source/test1.txt", # NOSONAR
         source_location_id=storage_location.id,
         source_location_name="mock_source",
         target_location_id=storage_location.id,
@@ -37,7 +37,7 @@ def setup_migration_tasks(
     task2 = RelocationTask(
         task_id=str(uuid.uuid4()),
         inventory_id=file2.id,
-        file_path="/tmp/mock_source/test2.txt",
+        file_path="/tmp/mock_source/test2.txt", # NOSONAR
         source_location_id=storage_location.id,
         source_location_name="mock_source",
         target_location_id=storage_location.id,
@@ -63,7 +63,7 @@ def test_get_active_migrations(
 
     task = data[0]
     assert task["status"] == "running"
-    assert task["file_path"] == "/tmp/mock_source/test1.txt"
+    assert task["file_path"] == "/tmp/mock_source/test1.txt" # NOSONAR
     assert task["bytes_transferred"] == 512
 
 def test_get_recent_migrations(
