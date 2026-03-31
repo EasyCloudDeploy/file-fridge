@@ -21,6 +21,14 @@
             </div>
         </div>
         <div class="col-md-3">
+            <div class="card bg-warning text-dark">
+                <div class="card-body">
+                    <h5 class="card-title">Active Freeze/Thaw</h5>
+                    <h2 class="card-text" id="freezingCount">-</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
             <div class="card bg-info text-white">
                 <div class="card-body">
                     <h5 class="card-title">Total Speed</h5>
@@ -34,7 +42,10 @@
         <div class="card-header border-bottom-0 pb-0">
             <ul class="nav nav-tabs" id="migrationTabs">
                 <li class="nav-item">
-                    <button class="nav-link active" id="active-tab" data-bs-toggle="tab" data-bs-target="#active-content" type="button" aria-controls="active-content" aria-selected="true">Active (<span id="activeTabCount">0</span>)</button> <!-- NOSONAR -->
+                    <button class="nav-link active" id="active-tab" data-bs-toggle="tab" data-bs-target="#active-content" type="button" aria-controls="active-content" aria-selected="true">Relocations (<span id="activeTabCount">0</span>)</button> <!-- NOSONAR -->
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" id="freezing-tab" data-bs-toggle="tab" data-bs-target="#freezing-content" type="button" aria-controls="freezing-content" aria-selected="false">Freeze/Thaw (<span id="freezingTabCount">0</span>)</button> <!-- NOSONAR -->
                 </li>
                 <li class="nav-item">
                     <button class="nav-link" id="recent-tab" data-bs-toggle="tab" data-bs-target="#recent-content" type="button" aria-controls="recent-content" aria-selected="false">Recent</button> <!-- NOSONAR -->
@@ -44,7 +55,7 @@
 
         <div class="card-body">
             <div class="tab-content" id="migrationTabsContent">
-                <!-- Active Tab -->
+                <!-- Active Relocations Tab -->
                 <div class="tab-pane fade show active" id="active-content" role="tabpanel" aria-labelledby="active-tab">
                     <div class="table-responsive">
                         <table class="table table-hover align-middle">
@@ -61,6 +72,29 @@
                             <tbody id="activeMigrationsBody">
                                 <tr>
                                     <td colspan="6" class="text-center text-muted py-4">
+                                        <div class="spinner-border spinner-border-sm" role="status"></div> Loading... <!-- NOSONAR -->
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Active Freeze/Thaw Tab -->
+                <div class="tab-pane fade" id="freezing-content" role="tabpanel" aria-labelledby="freezing-tab">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr>
+                                    <th>File</th>
+                                    <th>Operation</th>
+                                    <th>Source &rarr; Target</th>
+                                    <th>Size</th>
+                                </tr>
+                            </thead>
+                            <tbody id="freezingFilesBody">
+                                <tr>
+                                    <td colspan="4" class="text-center text-muted py-4">
                                         <div class="spinner-border spinner-border-sm" role="status"></div> Loading... <!-- NOSONAR -->
                                     </td>
                                 </tr>
@@ -148,31 +182,86 @@
 
     async function loadMigrations() {
         try {
-            // Load Active
-            const activeResponse = await fetch('/api/v1/migrations/active', {
-                headers: { 'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}` }
-            });
+            const authHeader = { 'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}` };
+
+            // Load Active Relocations, Freeze/Thaw, and Recent in parallel
+            const [activeResponse, freezingResponse, recentResponse] = await Promise.all([
+                fetch('/api/v1/migrations/active', { headers: authHeader }),
+                fetch('/api/v1/migrations/freezing', { headers: authHeader }),
+                fetch('/api/v1/migrations/recent', { headers: authHeader }),
+            ]);
+
             if (!activeResponse.ok) {
                 throw new Error(`Failed to load active migrations: ${activeResponse.status} ${activeResponse.statusText}`);
             }
-            const activeTasks = await activeResponse.json();
-
-            // Load Recent
-            const recentResponse = await fetch('/api/v1/migrations/recent', {
-                headers: { 'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}` }
-            });
+            if (!freezingResponse.ok) {
+                throw new Error(`Failed to load freeze/thaw operations: ${freezingResponse.status} ${freezingResponse.statusText}`);
+            }
             if (!recentResponse.ok) {
                 throw new Error(`Failed to load recent migrations: ${recentResponse.status} ${recentResponse.statusText}`);
             }
-            const recentTasks = await recentResponse.json();
+
+            const [activeTasks, freezingFiles, recentTasks] = await Promise.all([
+                activeResponse.json(),
+                freezingResponse.json(),
+                recentResponse.json(),
+            ]);
 
             renderActive(activeTasks);
+            renderFreezing(freezingFiles);
             renderRecent(recentTasks);
 
         } catch (error) {
             console.error('Failed to load migrations:', error);
             showToast('Error', error.message || 'Failed to load migrations data', 'error');
         }
+    }
+
+    function renderFreezing(files) {
+        const tbody = document.getElementById('freezingFilesBody');
+        const countEl = document.getElementById('freezingCount');
+        const tabCountEl = document.getElementById('freezingTabCount');
+
+        countEl.textContent = files.length;
+        tabCountEl.textContent = files.length;
+
+        if (files.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No active freeze/thaw operations</td></tr>';
+            return;
+        }
+
+        let html = '';
+        files.forEach(f => {
+            const safeFilePath = escapeHtml(f.file_path);
+            const fileName = safeFilePath.split('/').pop() || safeFilePath;
+            const safeSource = escapeHtml(f.source_label);
+            const safeTarget = escapeHtml(f.target_label);
+            const opBadge = f.operation_type === 'freeze'
+                ? '<span class="badge bg-primary">Freeze</span>'
+                : '<span class="badge bg-warning text-dark">Thaw</span>';
+
+            html += `
+                <tr>
+                    <td>
+                        <div class="fw-bold text-truncate" style="max-width: 200px;" title="${safeFilePath}">
+                            ${fileName}
+                        </div>
+                        <small class="text-muted d-block text-truncate" style="max-width: 200px;" title="${safeFilePath}">
+                            ${safeFilePath}
+                        </small>
+                    </td>
+                    <td>${opBadge}</td>
+                    <td>
+                        <span class="badge bg-secondary">${safeSource}</span>
+                        <i class="bi bi-arrow-right mx-1"></i>
+                        <span class="badge bg-info">${safeTarget}</span>
+                    </td>
+                    <td>${formatBytes(f.file_size)}</td>
+                </tr>
+            `;
+        });
+
+        tbody.innerHTML = html;
     }
 
     function renderActive(tasks) {
