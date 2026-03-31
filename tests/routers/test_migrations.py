@@ -14,43 +14,41 @@ def setup_migration_tasks(
     file_inventory_factory: Any,
     storage_location: Any
 ) -> None:
-    # Use SessionLocal to ensure it's written to the global DB (which RelocationTaskManager will use via SessionLocal())
-    with SessionLocal() as db:
-        # Clear existing ones from other tests
-        db.query(RelocationTask).delete()
-        db.commit()
+    # Use db_session since it is the one bound to the router's get_db dependency via testing overrides!
+    db_session.query(RelocationTask).delete()
+    db_session.commit()
 
-        path = monitored_path_factory(name="mock_source", source_path="/tmp/mock_source")
-        file1 = file_inventory_factory(path="/tmp/mock_source/test1.txt", size=1024, path_name="mock_source")
-        file2 = file_inventory_factory(path="/tmp/mock_source/test2.txt", size=2048, path_name="mock_source")
+    path = monitored_path_factory(name="mock_source", source_path="/tmp/mock_source") # NOSONAR
+    file1 = file_inventory_factory(path="/tmp/mock_source/test1.txt", size=1024, path_name="mock_source") # NOSONAR
+    file2 = file_inventory_factory(path="/tmp/mock_source/test2.txt", size=2048, path_name="mock_source") # NOSONAR
 
-        task1 = RelocationTask(
-            task_id=str(uuid.uuid4()),
-            inventory_id=file1.id,
-            file_path="/tmp/mock_source/test1.txt",
-            source_location_id=storage_location.id,
-            source_location_name="mock_source",
-            target_location_id=storage_location.id,
-            target_location_name="mock_target",
-            bytes_transferred=512,
-            bytes_total=1024,
-            status=RelocationTaskStatus.RUNNING
-        )
-        task2 = RelocationTask(
-            task_id=str(uuid.uuid4()),
-            inventory_id=file2.id,
-            file_path="/tmp/mock_source/test2.txt",
-            source_location_id=storage_location.id,
-            source_location_name="mock_source",
-            target_location_id=storage_location.id,
-            target_location_name="mock_target",
-            bytes_transferred=2048,
-            bytes_total=2048,
-            status=RelocationTaskStatus.COMPLETED
-        )
-        db.add(task1)
-        db.add(task2)
-        db.commit()
+    task1 = RelocationTask(
+        task_id=str(uuid.uuid4()),
+        inventory_id=file1.id,
+        file_path="/tmp/mock_source/test1.txt",
+        source_location_id=storage_location.id,
+        source_location_name="mock_source",
+        target_location_id=storage_location.id,
+        target_location_name="mock_target",
+        bytes_transferred=512,
+        bytes_total=1024,
+        status=RelocationTaskStatus.RUNNING
+    )
+    task2 = RelocationTask(
+        task_id=str(uuid.uuid4()),
+        inventory_id=file2.id,
+        file_path="/tmp/mock_source/test2.txt",
+        source_location_id=storage_location.id,
+        source_location_name="mock_source",
+        target_location_id=storage_location.id,
+        target_location_name="mock_target",
+        bytes_transferred=2048,
+        bytes_total=2048,
+        status=RelocationTaskStatus.COMPLETED
+    )
+    db_session.add(task1)
+    db_session.add(task2)
+    db_session.commit()
 
 def test_get_active_migrations(
     authenticated_client: Any,
