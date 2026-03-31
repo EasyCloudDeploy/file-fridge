@@ -18,6 +18,7 @@ TEMPLATE_ROUTES = [
     ("/storage-locations", "storage/list.html", "storage"),
     ("/storage-locations/new", "storage/form.html", "storage"),
     ("/tags", "tags.html", "tags"),
+    ("/migrations", "migrations.html", "migrations"),
     ("/notifiers", "notifiers.html", "notifiers"),
     ("/settings", "settings.html", "settings"),
     ("/login", "login.html", None),  # Login page (no active page highlight)

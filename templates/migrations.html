@@ -1,0 +1,288 @@
+{% extends "base.html" %}
+
+{% block title %}File Migrations - File Fridge{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2><i class="bi bi-arrow-left-right"></i> File Migrations</h2>
+        <button id="refreshBtn" class="btn btn-primary" onclick="loadMigrations()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Active Migrations</h5>
+                    <h2 class="card-text" id="activeCount">-</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Total Speed</h5>
+                    <h2 class="card-text" id="totalSpeed">-</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header border-bottom-0 pb-0">
+            <ul class="nav nav-tabs" id="migrationTabs" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="active-tab" data-bs-toggle="tab" data-bs-target="#active-content" type="button" role="tab" aria-controls="active-content" aria-selected="true">Active (<span id="activeTabCount">0</span>)</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="recent-tab" data-bs-toggle="tab" data-bs-target="#recent-content" type="button" role="tab" aria-controls="recent-content" aria-selected="false">Recent</button>
+                </li>
+            </ul>
+        </div>
+
+        <div class="card-body">
+            <div class="tab-content" id="migrationTabsContent">
+                <!-- Active Tab -->
+                <div class="tab-pane fade show active" id="active-content" role="tabpanel" aria-labelledby="active-tab">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr>
+                                    <th>File</th>
+                                    <th>Source &rarr; Target</th>
+                                    <th>Progress</th>
+                                    <th>Size</th>
+                                    <th>Speed</th>
+                                    <th>ETA</th>
+                                </tr>
+                            </thead>
+                            <tbody id="activeMigrationsBody">
+                                <tr>
+                                    <td colspan="6" class="text-center text-muted py-4">
+                                        <div class="spinner-border spinner-border-sm" role="status"></div> Loading...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Recent Tab -->
+                <div class="tab-pane fade" id="recent-content" role="tabpanel" aria-labelledby="recent-tab">
+                    <div class="table-responsive">
+                        <table class="table table-hover align-middle">
+                            <thead>
+                                <tr>
+                                    <th>File</th>
+                                    <th>Source &rarr; Target</th>
+                                    <th>Size</th>
+                                    <th>Status</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentMigrationsBody">
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted py-4">
+                                        <div class="spinner-border spinner-border-sm" role="status"></div> Loading...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let refreshInterval;
+
+    function formatBytes(bytes, decimals = 2) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    function formatTime(seconds) {
+        if (!isFinite(seconds) || seconds < 0) return 'Unknown';
+        if (seconds < 60) return Math.floor(seconds) + 's';
+        if (seconds < 3600) return Math.floor(seconds / 60) + 'm ' + Math.floor(seconds % 60) + 's';
+        return Math.floor(seconds / 3600) + 'h ' + Math.floor((seconds % 3600) / 60) + 'm';
+    }
+
+    function calculateMetrics(task) {
+        let speed = 0;
+        let eta = Infinity;
+
+        if (task.started_at && task.bytes_transferred > 0 && task.status === 'running') {
+            const startTime = new Date(task.started_at).getTime();
+            const now = new Date().getTime();
+            const elapsedSeconds = (now - startTime) / 1000;
+
+            if (elapsedSeconds > 0) {
+                speed = task.bytes_transferred / elapsedSeconds;
+                const remainingBytes = task.bytes_total - task.bytes_transferred;
+                eta = remainingBytes / speed;
+            }
+        }
+
+        return { speed, eta };
+    }
+
+    async function loadMigrations() {
+        try {
+            // Load Active
+            const activeResponse = await fetch('/api/v1/migrations/active', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            });
+            const activeTasks = await activeResponse.json();
+
+            // Load Recent
+            const recentResponse = await fetch('/api/v1/migrations/recent', {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+            });
+            const recentTasks = await recentResponse.json();
+
+            renderActive(activeTasks);
+            renderRecent(recentTasks);
+
+        } catch (error) {
+            console.error('Failed to load migrations:', error);
+            showToast('Error', 'Failed to load migrations data', 'error');
+        }
+    }
+
+    function renderActive(tasks) {
+        const tbody = document.getElementById('activeMigrationsBody');
+        const countEl = document.getElementById('activeCount');
+        const tabCountEl = document.getElementById('activeTabCount');
+        const speedEl = document.getElementById('totalSpeed');
+
+        countEl.textContent = tasks.length;
+        tabCountEl.textContent = tasks.length;
+
+        let totalSpeed = 0;
+
+        if (tasks.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-4">No active migrations</td></tr>';
+            speedEl.textContent = '0 B/s';
+            return;
+        }
+
+        let html = '';
+        tasks.forEach(task => {
+            const { speed, eta } = calculateMetrics(task);
+            totalSpeed += speed;
+
+            const fileName = task.file_path.split('/').pop() || task.file_path;
+            const progress = task.percent_complete || 0;
+
+            let statusBadge = '';
+            if (task.status === 'pending') statusBadge = '<span class="badge bg-warning">Pending</span>';
+            else if (task.status === 'running') statusBadge = '<span class="badge bg-primary spinner-grow spinner-grow-sm" role="status"></span>';
+
+            html += `
+                <tr>
+                    <td>
+                        <div class="fw-bold text-truncate" style="max-width: 200px;" title="${task.file_path}">
+                            ${fileName}
+                        </div>
+                        <small class="text-muted d-block text-truncate" style="max-width: 200px;" title="${task.file_path}">
+                            ${task.file_path}
+                        </small>
+                    </td>
+                    <td>
+                        <span class="badge bg-secondary">${task.source_location_name}</span>
+                        <i class="bi bi-arrow-right mx-1"></i>
+                        <span class="badge bg-info">${task.target_location_name}</span>
+                    </td>
+                    <td style="width: 25%;">
+                        <div class="d-flex align-items-center">
+                            <div class="progress flex-grow-1 me-2" style="height: 10px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated"
+                                     role="progressbar"
+                                     style="width: ${progress}%"
+                                     aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100">
+                                </div>
+                            </div>
+                            <span style="min-width: 45px;" class="text-end text-muted small">${progress}%</span>
+                            <div class="ms-2">${statusBadge}</div>
+                        </div>
+                    </td>
+                    <td>
+                        ${formatBytes(task.bytes_transferred)} / ${formatBytes(task.bytes_total)}
+                    </td>
+                    <td>${task.status === 'running' ? formatBytes(speed) + '/s' : '-'}</td>
+                    <td>${task.status === 'running' ? formatTime(eta) : '-'}</td>
+                </tr>
+            `;
+        });
+
+        speedEl.textContent = formatBytes(totalSpeed) + '/s';
+        tbody.innerHTML = html;
+    }
+
+    function renderRecent(tasks) {
+        const tbody = document.getElementById('recentMigrationsBody');
+
+        // Filter out active tasks if we want to show only truly "recent" completed/failed,
+        // but the API might return active ones too. Let's filter out 'pending' and 'running'.
+        const completedTasks = tasks.filter(t => t.status !== 'pending' && t.status !== 'running');
+
+        if (completedTasks.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No recent migrations</td></tr>';
+            return;
+        }
+
+        let html = '';
+        completedTasks.forEach(task => {
+            const fileName = task.file_path.split('/').pop() || task.file_path;
+
+            let statusBadge = '';
+            if (task.status === 'completed') statusBadge = '<span class="badge bg-success">Completed</span>';
+            else if (task.status === 'failed') statusBadge = `<span class="badge bg-danger" title="${task.error_message || 'Unknown error'}">Failed</span>`;
+
+            const timeStr = task.completed_at ? new Date(task.completed_at).toLocaleString() : 'Unknown';
+
+            html += `
+                <tr>
+                    <td>
+                        <div class="fw-bold text-truncate" style="max-width: 250px;" title="${task.file_path}">
+                            ${fileName}
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge bg-secondary">${task.source_location_name}</span>
+                        <i class="bi bi-arrow-right mx-1"></i>
+                        <span class="badge bg-info">${task.target_location_name}</span>
+                    </td>
+                    <td>${formatBytes(task.bytes_total)}</td>
+                    <td>${statusBadge}</td>
+                    <td><small class="text-muted">${timeStr}</small></td>
+                </tr>
+            `;
+        });
+
+        tbody.innerHTML = html;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        loadMigrations();
+        // Auto-refresh every 3 seconds
+        refreshInterval = setInterval(loadMigrations, 3000);
+    });
+
+    // Clean up interval when leaving page (optional for SPA, but good practice)
+    window.addEventListener('beforeunload', () => {
+        if (refreshInterval) clearInterval(refreshInterval);
+    });
+</script>
+{% endblock %}
