@@ -98,6 +98,7 @@ def test_process_path_main_workflow(
 ):
     """Test the main success workflow of process_path."""
     mock_scan_progress.start_scan.return_value = ("scan123", True)
+    mock_scan_progress.is_stop_requested.return_value = False
     mock_cleanup_missing.return_value = {"removed": 1, "errors": []}
     mock_cleanup_duplicates.return_value = {"removed": 1, "errors": []}
     mock_cleanup_symlinks.return_value = {"removed": 1, "errors": []}

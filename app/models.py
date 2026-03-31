@@ -195,6 +195,7 @@ class ScanStatus(str, enum.Enum):
     SUCCESS = "success"
     FAILURE = "failure"
     PENDING = "pending"
+    STOPPED = "stopped"
 
 
 class EncryptionStatus(str, enum.Enum):
@@ -257,7 +258,12 @@ class MonitoredPath(Base):
         Boolean, default=True, nullable=False
     )  # Create .noindex file to prevent macOS Spotlight from corrupting timestamps
     max_concurrent_migrations = Column(
-        Integer, sa.CheckConstraint("max_concurrent_migrations >= 1", name="chk_max_concurrent_migrations_positive"), default=3, nullable=False
+        Integer,
+        sa.CheckConstraint(
+            "max_concurrent_migrations >= 1", name="chk_max_concurrent_migrations_positive"
+        ),
+        default=3,
+        nullable=False,
     )  # Limit concurrent file operations
     error_message = Column(
         Text, nullable=True
@@ -882,6 +888,7 @@ class InstanceKeyHistory(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     retired_at = Column(DateTime(timezone=True), nullable=True)
 
+
 class RelocationTaskStatus(str, enum.Enum):
     """Status of file relocation task."""
 
@@ -904,7 +911,12 @@ class RelocationTask(Base):
     source_location_name = Column(String, nullable=False)
     target_location_id = Column(Integer, ForeignKey("cold_storage_locations.id"), nullable=False)
     target_location_name = Column(String, nullable=False)
-    status = Column(SQLEnum(RelocationTaskStatus), nullable=False, default=RelocationTaskStatus.PENDING, index=True)
+    status = Column(
+        SQLEnum(RelocationTaskStatus),
+        nullable=False,
+        default=RelocationTaskStatus.PENDING,
+        index=True,
+    )
     bytes_total = Column(Integer, nullable=False, default=0)
     bytes_transferred = Column(Integer, nullable=False, default=0)
     error_message = Column(Text, nullable=True)

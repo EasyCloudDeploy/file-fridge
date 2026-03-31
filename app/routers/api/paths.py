@@ -320,8 +320,6 @@ def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)
     return db_path
 
 
-
-
 @router.get("/{path_id}", response_model=schemas.MonitoredPathSummary)
 def get_path(path_id: int, db: Session = Depends(get_db)):
     """Get a single monitored path with a summary of its contents."""
@@ -624,6 +622,38 @@ def get_scan_progress(path_id: int, db: Session = Depends(get_db)):
         progress["path_name"] = path.name
 
     return progress
+
+
+@router.post("/{path_id}/scan/stop", status_code=status.HTTP_200_OK)
+def stop_scan(path_id: int, db: Session = Depends(get_db)):
+    """
+    Request that the currently-running scan for a path stops after completing
+    any in-flight file operations.
+
+    In-progress file moves are allowed to finish so data is never left in a
+    partial state. Pending (not-yet-started) operations are cancelled.
+
+    Returns 404 if the path does not exist, 409 if no scan is running.
+    """
+    path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
+    if not path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Path with id {path_id} not found"
+        )
+
+    flagged = scan_progress_manager.request_stop(path_id)
+    if not flagged:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"No running scan found for path_id={path_id} ({path.name}).",
+        )
+
+    return {
+        "message": f"Stop requested for scan on path_id={path_id} ({path.name}). "
+        "In-flight operations will complete before the scan halts.",
+        "path_id": path_id,
+        "path_name": path.name,
+    }
 
 
 @router.get("/{path_id}/scan-errors", response_model=schemas.PathScanErrors)
