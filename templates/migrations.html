@@ -65,11 +65,14 @@
                                     <th>Operation</th>
                                     <th>Source &rarr; Target</th>
                                     <th>Size</th>
+                                    <th>Progress</th>
+                                    <th>Speed</th>
+                                    <th>ETA</th>
                                 </tr>
                             </thead>
                             <tbody id="freezingFilesBody">
                                 <tr>
-                                    <td colspan="4" class="text-center text-muted py-4">
+                                    <td colspan="7" class="text-center text-muted py-4">
                                         <output class="spinner-border spinner-border-sm"></output> Loading...
                                     </td>
                                 </tr>
@@ -112,13 +115,16 @@
                                     <th>File</th>
                                     <th>Source &rarr; Target</th>
                                     <th>Size</th>
+                                    <th>Progress</th>
+                                    <th>Speed</th>
+                                    <th>ETA</th>
                                     <th>Status</th>
                                     <th>Time</th>
                                 </tr>
                             </thead>
                             <tbody id="recentMigrationsBody">
                                 <tr>
-                                    <td colspan="5" class="text-center text-muted py-4">
+                                    <td colspan="8" class="text-center text-muted py-4">
                                         <output class="spinner-border spinner-border-sm"></output> Loading...
                                     </td>
                                 </tr>
@@ -171,6 +177,33 @@
         return { speed, eta };
     }
 
+    function formatTransferRate(bytesPerSecond) {
+        if (!bytesPerSecond || bytesPerSecond <= 0) return '-';
+        return formatBytes(bytesPerSecond) + '/s';
+    }
+
+    function renderProgressCell(percent, transferredBytes, totalBytes, animated = true) {
+        const safePercent = Math.max(0, Math.min(100, percent || 0));
+        const progressClass = animated
+            ? 'progress-bar progress-bar-striped progress-bar-animated'
+            : 'progress-bar';
+
+        return `
+            <div class="d-flex align-items-center">
+                <div class="progress flex-grow-1 me-2" style="height: 10px;">
+                    <div class="${progressClass}"
+                         role="progressbar"
+                         style="width: ${safePercent}%"
+                         aria-valuenow="${safePercent}" aria-valuemin="0" aria-valuemax="100">
+                    </div>
+                </div>
+                <div class="text-end small text-muted" style="min-width: 120px;">
+                    ${safePercent}%${totalBytes > 0 ? ` (${formatBytes(transferredBytes || 0)} / ${formatBytes(totalBytes)})` : ''}
+                </div>
+            </div>
+        `;
+    }
+
     function escapeHtml(unsafe) {
         return (unsafe || '').toString()
             .replace(/&/g, "&amp;")
@@ -185,26 +218,35 @@
             const authHeader = { 'Authorization': `Bearer ${sessionStorage.getItem('auth_token')}` };
 
             // Load Active Relocations, Freeze/Thaw, and Recent in parallel
-            const [activeResponse, freezingResponse, recentResponse] = await Promise.all([
+            const [activeResult, freezingResult, recentResult] = await Promise.allSettled([
                 fetch('/api/v1/migrations/active', { headers: authHeader }),
                 fetch('/api/v1/migrations/freezing', { headers: authHeader }),
                 fetch('/api/v1/migrations/recent', { headers: authHeader }),
             ]);
 
-            if (!activeResponse.ok) {
-                throw new Error(`Failed to load active migrations: ${activeResponse.status} ${activeResponse.statusText}`);
-            }
-            if (!freezingResponse.ok) {
-                throw new Error(`Failed to load freeze/thaw operations: ${freezingResponse.status} ${freezingResponse.statusText}`);
-            }
-            if (!recentResponse.ok) {
-                throw new Error(`Failed to load recent migrations: ${recentResponse.status} ${recentResponse.statusText}`);
+            async function parseEndpointResult(result, label) {
+                if (result.status !== 'fulfilled') {
+                    console.error(`Failed to load ${label}:`, result.reason);
+                    showToast('Error', `Failed to load ${label}`, 'error');
+                    return [];
+                }
+
+                const response = result.value;
+                if (!response.ok) {
+                    const errorBody = await response.text().catch(() => '');
+                    const details = errorBody || `${response.status} ${response.statusText}`;
+                    console.error(`Failed to load ${label}:`, details);
+                    showToast('Error', `Failed to load ${label}: ${response.status}`, 'error');
+                    return [];
+                }
+
+                return response.json();
             }
 
             const [activeTasks, freezingFiles, recentTasks] = await Promise.all([
-                activeResponse.json(),
-                freezingResponse.json(),
-                recentResponse.json(),
+                parseEndpointResult(activeResult, 'active migrations'),
+                parseEndpointResult(freezingResult, 'freeze/thaw operations'),
+                parseEndpointResult(recentResult, 'recent migrations'),
             ]);
 
             renderActive(activeTasks);
@@ -226,7 +268,7 @@
         tabCountEl.textContent = files.length;
 
         if (files.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-4">No active freeze/thaw operations</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No active freeze/thaw operations</td></tr>';
             return;
         }
 
@@ -239,6 +281,9 @@
             const opBadge = f.operation_type === 'freeze'
                 ? '<span class="badge bg-primary">Freeze</span>'
                 : '<span class="badge bg-warning text-dark">Thaw</span>';
+            const totalBytes = f.total_bytes || f.file_size || 0;
+            const transferredBytes = f.transferred_bytes || 0;
+            const progress = f.percent_complete || 0;
 
             html += `
                 <tr>
@@ -257,6 +302,9 @@
                         <span class="badge bg-info">${safeTarget}</span>
                     </td>
                     <td>${formatBytes(f.file_size)}</td>
+                    <td style="width: 25%;">${renderProgressCell(progress, transferredBytes, totalBytes)}</td>
+                    <td>${formatTransferRate(f.transfer_rate_bytes_per_sec)}</td>
+                    <td>${f.eta_seconds ? formatTime(f.eta_seconds) : '-'}</td>
                 </tr>
             `;
         });
@@ -346,7 +394,11 @@
             file_path: file.file_path,
             source_location_name: file.source_label,
             target_location_name: file.target_label,
-            bytes_total: file.file_size,
+            bytes_total: file.total_bytes || file.file_size,
+            bytes_transferred: file.transferred_bytes || 0,
+            percent_complete: file.percent_complete || 0,
+            transfer_rate_bytes_per_sec: file.transfer_rate_bytes_per_sec || 0,
+            eta_seconds: file.eta_seconds,
             status: 'running_freeze_thaw',
             completed_at: null,
             error_message: null,
@@ -355,7 +407,7 @@
         const recentItems = [...inProgressFreezeThaw, ...completedTasks];
 
         if (recentItems.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-4">No recent migrations</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-4">No recent migrations</td></tr>';
             return;
         }
 
@@ -378,6 +430,13 @@
             const timeStr = task.completed_at
                 ? new Date(task.completed_at).toLocaleString()
                 : 'In Progress';
+            const progress = task.status === 'running_freeze_thaw'
+                ? (task.percent_complete || 0)
+                : (task.status === 'completed' ? 100 : 0);
+            const totalBytes = task.bytes_total || 0;
+            const transferredBytes = task.status === 'running_freeze_thaw'
+                ? (task.bytes_transferred || 0)
+                : totalBytes;
 
             html += `
                 <tr>
@@ -392,6 +451,9 @@
                         <span class="badge bg-info">${safeTarget}</span>
                     </td>
                     <td>${formatBytes(task.bytes_total)}</td>
+                    <td style="width: 25%;">${renderProgressCell(progress, transferredBytes, totalBytes, task.status === 'running_freeze_thaw')}</td>
+                    <td>${task.status === 'running_freeze_thaw' ? formatTransferRate(task.transfer_rate_bytes_per_sec) : '-'}</td>
+                    <td>${task.status === 'running_freeze_thaw' && task.eta_seconds ? formatTime(task.eta_seconds) : '-'}</td>
                     <td>${statusBadge}</td>
                     <td><small class="text-muted">${timeStr}</small></td>
                 </tr>
