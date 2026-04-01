@@ -320,6 +320,13 @@ def test_process_single_file(
     assert reloaded_inventory.file_path == str(cold_path / "file.txt")
 
     mock_audit_trail.log_freeze_operation.assert_called_once()
+    mock_move.assert_called_once_with(
+        file_to_move,
+        cold_path / "file.txt",
+        monitored_path.operation_type,
+        verify_checksum=True,
+        progress_callback=ANY,
+    )
 
 
 @patch("app.services.file_workflow_service.scan_progress_manager")
