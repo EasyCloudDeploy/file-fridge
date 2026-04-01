@@ -30,6 +30,7 @@ from app.services.criteria_matcher import CriteriaMatcher
 from app.services.file_cleanup import FileCleanup
 from app.services.file_mover import FileMover
 from app.services.file_reconciliation import FileReconciliation
+from app.services.file_thawer import FileThawer
 from app.services.scan_progress import scan_progress_manager
 from app.services.storage_routing_service import storage_routing_service
 from app.utils.network_detection import check_atime_availability
@@ -186,7 +187,7 @@ class FileWorkflowService:
                                 logger.info(
                                     "Stop requested during thaw phase for path %s,"
                                     " cancelling remaining operations",
-                                    path.id
+                                    path.id,
                                 )
                                 for f in future_to_thaw:
                                     f.cancel()
@@ -234,7 +235,7 @@ class FileWorkflowService:
                                 logger.info(
                                     "Stop requested during freeze phase for path %s,"
                                     " cancelling remaining operations",
-                                    path.id
+                                    path.id,
                                 )
                                 for f in future_to_file:
                                     f.cancel()
@@ -601,7 +602,11 @@ class FileWorkflowService:
 
                 # Move file with transaction pattern and checksum verification
                 success, error, checksum_after = FileMover.move_with_rollback(
-                    file_path, dest_path, path.operation_type, verify_checksum=True
+                    file_path,
+                    dest_path,
+                    path.operation_type,
+                    verify_checksum=True,
+                    progress_callback=progress_callback,
                 )
 
                 if success:
@@ -700,13 +705,29 @@ class FileWorkflowService:
         }
 
         db = SessionFactory()
+        operation_id = None
+        operation_completed = False
+        file_size = 0
         try:
+            try:
+                file_size = cold_storage_path.stat().st_size
+            except OSError:
+                file_size = 0
+
+            operation_id = scan_progress_manager.start_file_operation(
+                path.id, symlink_path.name, "move_to_hot", file_size
+            )
+
+            def progress_callback(bytes_transferred: int):
+                scan_progress_manager.update_file_progress(path.id, operation_id, bytes_transferred)
+
             # Get file inventory record with lock
             inventory_entry = (
                 db.query(FileInventory)
                 .with_for_update()
                 .filter(
-                    FileInventory.path_id == path.id, FileInventory.file_path == str(symlink_path)
+                    FileInventory.path_id == path.id,
+                    FileInventory.file_path.in_([str(cold_storage_path), str(symlink_path)]),
                 )
                 .first()
             )
@@ -723,7 +744,6 @@ class FileWorkflowService:
 
                     try:
                         symlink_path.parent.mkdir(parents=True, exist_ok=True)
-                        stat_info = cold_storage_path.stat()
 
                         # Calculate checksum before move
                         checksum_before = checksum_verifier.calculate_checksum(cold_storage_path)
@@ -732,12 +752,11 @@ class FileWorkflowService:
                         try:
                             cold_storage_path.rename(symlink_path)
                         except OSError:
-                            shutil.copy2(str(cold_storage_path), str(symlink_path))
-                            os.utime(
-                                str(symlink_path),
-                                ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns),
+                            FileThawer._move_preserving_timestamps(
+                                cold_storage_path,
+                                symlink_path,
+                                progress_callback=progress_callback,
                             )
-                            cold_storage_path.unlink()
 
                         # Verify checksum after move
                         checksum_after = checksum_verifier.calculate_checksum(symlink_path)
@@ -751,6 +770,14 @@ class FileWorkflowService:
                             inventory_entry.status = old_status
                             db.commit()
                             result["error"] = "Checksum verification failed after thaw"
+                            scan_progress_manager.complete_file_operation(
+                                path.id,
+                                operation_id,
+                                "move_to_hot",
+                                success=False,
+                                error=result["error"],
+                            )
+                            operation_completed = True
                             return result
 
                         file_record = (
@@ -763,6 +790,7 @@ class FileWorkflowService:
                             db.delete(file_record)
 
                         # Update inventory
+                        inventory_entry.file_path = str(symlink_path)
                         inventory_entry.storage_type = StorageType.HOT
                         inventory_entry.status = FileStatus.ACTIVE
                         inventory_entry.cold_storage_location_id = None
@@ -781,17 +809,38 @@ class FileWorkflowService:
                         )
 
                         result["success"] = True
+                        scan_progress_manager.update_file_progress(path.id, operation_id, file_size)
+                        scan_progress_manager.complete_file_operation(
+                            path.id, operation_id, "move_to_hot", success=True
+                        )
+                        operation_completed = True
 
                     except Exception as e:
                         # Rollback status on failure
                         inventory_entry.status = old_status
                         db.commit()
                         result["error"] = f"Failed to move file back {cold_storage_path}: {e!s}"
+                        scan_progress_manager.complete_file_operation(
+                            path.id,
+                            operation_id,
+                            "move_to_hot",
+                            success=False,
+                            error=result["error"],
+                        )
+                        operation_completed = True
 
                 except Exception as move_error:
                     # Rollback status on exception
                     inventory_entry.status = old_status
                     db.commit()
+                    scan_progress_manager.complete_file_operation(
+                        path.id,
+                        operation_id,
+                        "move_to_hot",
+                        success=False,
+                        error=str(move_error),
+                    )
+                    operation_completed = True
                     raise move_error
             else:
                 # No inventory record - proceed without tracking
@@ -800,25 +849,40 @@ class FileWorkflowService:
                         symlink_path.unlink()
 
                     symlink_path.parent.mkdir(parents=True, exist_ok=True)
-                    stat_info = cold_storage_path.stat()
 
                     try:
                         cold_storage_path.rename(symlink_path)
                     except OSError:
-                        shutil.copy2(str(cold_storage_path), str(symlink_path))
-                        os.utime(
-                            str(symlink_path),
-                            ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns),
+                        FileThawer._move_preserving_timestamps(
+                            cold_storage_path,
+                            symlink_path,
+                            progress_callback=progress_callback,
                         )
-                        cold_storage_path.unlink()
 
                     result["success"] = True
+                    scan_progress_manager.update_file_progress(path.id, operation_id, file_size)
+                    scan_progress_manager.complete_file_operation(
+                        path.id, operation_id, "move_to_hot", success=True
+                    )
+                    operation_completed = True
 
                 except Exception as e:
                     result["error"] = f"Failed to move file back {cold_storage_path}: {e!s}"
+                    scan_progress_manager.complete_file_operation(
+                        path.id,
+                        operation_id,
+                        "move_to_hot",
+                        success=False,
+                        error=result["error"],
+                    )
+                    operation_completed = True
 
         except Exception as e:
             result["error"] = f"Error thawing {cold_storage_path}: {e!s}"
+            if operation_id is not None and not operation_completed:
+                scan_progress_manager.complete_file_operation(
+                    path.id, operation_id, "move_to_hot", success=False, error=result["error"]
+                )
         finally:
             db.close()
 
