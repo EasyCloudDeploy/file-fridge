@@ -4,7 +4,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -19,11 +19,37 @@ class FileThawer:
     """Handles moving files back from cold storage to hot storage."""
 
     @staticmethod
+    def _temp_destination_for(destination: Path) -> Path:
+        """Create a deterministic temporary destination path in the target directory."""
+        return destination.with_name(f"{destination.name}.tmp")
+
+    @staticmethod
+    def _cleanup_temp_destination(temp_destination: Path, final_destination: Path) -> None:
+        """Best-effort cleanup for staged thaw files."""
+        if temp_destination == final_destination:
+            return
+        if temp_destination.exists():
+            temp_destination.unlink()
+
+    @staticmethod
+    def _finalize_staged_move(
+        source: Path, prepared_destination: Path, final_destination: Path, stat_info: os.stat_result
+    ) -> None:
+        """Finalize a staged copy after checksum verification."""
+        if prepared_destination != final_destination:
+            prepared_destination.replace(final_destination)
+
+        shutil.copystat(str(source), str(final_destination))
+        os.utime(str(final_destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
+        source.unlink()
+
+    @staticmethod
     def thaw_file(
         file_record: FileRecord,
         pin: bool = False,
         db: Optional[Session] = None,
         initiated_by: Optional[str] = None,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> Tuple[bool, Optional[str]]:
         """
         Move a file back from cold storage to hot storage while preserving timestamps.
@@ -43,6 +69,8 @@ class FileThawer:
         try:
             cold_path = Path(file_record.cold_storage_path)
             original_path = Path(file_record.original_path)
+            prepared_path: Optional[Path] = None
+            prepared_stat: Optional[os.stat_result] = None
 
             # Check if file exists in cold storage
             if not cold_path.exists():
@@ -107,7 +135,9 @@ class FileThawer:
                     original_path.unlink()
                 # Move file back from cold storage, preserving timestamps
                 try:
-                    FileThawer._move_preserving_timestamps(cold_path, original_path)
+                    prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
+                        cold_path, original_path, progress_callback
+                    )
                 except Exception as e:
                     return False, f"Failed to move file back: {e!s}"
             elif file_record.operation_type.value == "copy":
@@ -117,7 +147,9 @@ class FileThawer:
                 if not original_path.exists():
                     # Original doesn't exist, move from cold storage, preserving timestamps
                     try:
-                        FileThawer._move_preserving_timestamps(cold_path, original_path)
+                        prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
+                            cold_path, original_path, progress_callback
+                        )
                     except Exception as e:
                         return False, f"Failed to move file back: {e!s}"
                 else:
@@ -131,19 +163,37 @@ class FileThawer:
                 try:
                     # Ensure destination directory exists
                     original_path.parent.mkdir(parents=True, exist_ok=True)
-                    FileThawer._move_preserving_timestamps(cold_path, original_path)
+                    prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
+                        cold_path, original_path, progress_callback
+                    )
                 except Exception as e:
                     return False, f"Failed to move file back: {e!s}"
 
             # Verify checksum after move (skip for encrypted files as checksum changes)
             checksum_after = None
-            if original_path.exists():
-                checksum_after = checksum_verifier.calculate_checksum(original_path)
+            verification_path = prepared_path or original_path
+            if verification_path.exists():
+                checksum_after = checksum_verifier.calculate_checksum(verification_path)
                 if not is_encrypted and checksum_before and checksum_after != checksum_before:
                     logger.error(
                         f"Checksum mismatch after thaw: {checksum_before[:16]}... != {checksum_after[:16]}..."
                     )
+                    if prepared_path is not None:
+                        FileThawer._cleanup_temp_destination(prepared_path, original_path)
                     return False, "Checksum verification failed after thaw"
+
+            if (
+                prepared_path is not None
+                and prepared_stat is not None
+                and prepared_path != original_path
+            ):
+                try:
+                    FileThawer._finalize_staged_move(
+                        cold_path, prepared_path, original_path, prepared_stat
+                    )
+                except Exception as e:
+                    FileThawer._cleanup_temp_destination(prepared_path, original_path)
+                    return False, f"Failed to finalize thawed file: {e!s}"
 
             # Delete FileRecord entry
             db.delete(file_record)
@@ -193,7 +243,11 @@ class FileThawer:
             return False, str(e)
 
     @staticmethod
-    def _move_preserving_timestamps(source: Path, destination: Path) -> None:
+    def _move_preserving_timestamps(
+        source: Path,
+        destination: Path,
+        progress_callback: Optional[Callable[[int], None]] = None,
+    ) -> Tuple[Path, os.stat_result]:
         """Move file while preserving all timestamps (mtime, atime)."""
         # Get original timestamps before moving
         stat_info = source.stat()
@@ -201,14 +255,33 @@ class FileThawer:
         # Try atomic rename first (same filesystem - preserves all timestamps)
         try:
             source.rename(destination)
+            return destination, stat_info
         except OSError:
             # Cross-filesystem move - copy with timestamp preservation
-            # Copy file with metadata (preserves mtime and atime)
-            shutil.copy2(str(source), str(destination))
+            bytes_transferred = 0
+            last_report = 0
+            temp_destination = FileThawer._temp_destination_for(destination)
 
-            # Explicitly set atime and mtime to original values to ensure preservation
-            # Note: ctime cannot be set directly as it's managed by the filesystem
-            os.utime(str(destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
+            if temp_destination.exists():
+                temp_destination.unlink()
 
-            # Remove original file
-            source.unlink()
+            try:
+                with open(source, "rb") as fsrc, open(temp_destination, "wb") as fdst:
+                    while True:
+                        chunk = fsrc.read(64 * 1024)
+                        if not chunk:
+                            break
+                        fdst.write(chunk)
+                        bytes_transferred += len(chunk)
+
+                        if progress_callback and bytes_transferred - last_report >= 1024 * 1024:
+                            progress_callback(bytes_transferred)
+                            last_report = bytes_transferred
+
+                if progress_callback and bytes_transferred > last_report:
+                    progress_callback(bytes_transferred)
+            except Exception:
+                FileThawer._cleanup_temp_destination(temp_destination, destination)
+                raise
+
+            return temp_destination, stat_info
