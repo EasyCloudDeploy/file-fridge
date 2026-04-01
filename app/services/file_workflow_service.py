@@ -719,6 +719,7 @@ class FileWorkflowService:
                 .with_for_update()
                 .filter(
                     FileInventory.path_id == path.id,
+                    FileInventory.storage_type == StorageType.COLD,
                     FileInventory.file_path.in_([str(cold_storage_path), str(symlink_path)]),
                 )
                 .first()

@@ -5,7 +5,9 @@ let dashboardRefreshInterval = null;
 let dashboardRefreshInFlight = false;
 
 document.addEventListener('DOMContentLoaded', function () {
-    refreshDashboard();
+    refreshDashboard().catch(error => {
+        console.error('Initial dashboard refresh failed:', error);
+    });
     startDashboardAutoRefresh();
 });
 
@@ -15,7 +17,9 @@ document.addEventListener('visibilitychange', function () {
         return;
     }
 
-    refreshDashboard();
+    refreshDashboard().catch(error => {
+        console.error('Dashboard refresh after tab visibility change failed:', error);
+    });
     startDashboardAutoRefresh();
 });
 
@@ -28,7 +32,9 @@ function startDashboardAutoRefresh() {
 
     dashboardRefreshInterval = window.setInterval(() => {
         if (!document.hidden) {
-            refreshDashboard();
+            refreshDashboard().catch(error => {
+                console.error('Scheduled dashboard refresh failed:', error);
+            });
         }
     }, DASHBOARD_REFRESH_INTERVAL_MS);
 }
@@ -51,7 +57,10 @@ async function refreshDashboard() {
 
     try {
         await loadDashboardData();
-        if (typeof loadAllStorageStats === 'function') {
+        if (
+            typeof loadHotStorageStats === 'function'
+            && typeof loadColdStorageStats === 'function'
+        ) {
             await Promise.all([loadHotStorageStats(), loadColdStorageStats()]);
         }
     } finally {
@@ -59,10 +68,27 @@ async function refreshDashboard() {
     }
 }
 
-function loadDashboardData() {
+async function getResponseErrorDetails(response) {
+    try {
+        const body = await response.text();
+        return body ? `: ${body}` : '';
+    } catch (_error) {
+        return '';
+    }
+}
+
+async function loadDashboardData() {
     // Load overall stats
     return authenticatedFetch('/api/v1/stats')
-        .then(response => response.json())
+        .then(async response => {
+            if (!response.ok) {
+                const details = await getResponseErrorDetails(response);
+                throw new Error(
+                    `Failed to load dashboard stats (${response.status})${details}`
+                );
+            }
+            return response.json();
+        })
         .then(data => {
             updateStats(data);
             return loadPaths();
@@ -70,6 +96,7 @@ function loadDashboardData() {
         .catch(error => {
             console.error('Error loading dashboard data:', error);
             showError('Failed to load dashboard data');
+            throw error;
         });
 }
 
@@ -123,12 +150,19 @@ function updatePathsCount(count) {
 
 function loadPaths() {
     return authenticatedFetch('/api/v1/paths')
-        .then(response => response.json())
+        .then(async response => {
+            if (!response.ok) {
+                const details = await getResponseErrorDetails(response);
+                throw new Error(`Failed to load paths (${response.status})${details}`);
+            }
+            return response.json();
+        })
         .then(paths => {
             updatePaths(paths);
         })
         .catch(error => {
             console.error('Error loading paths:', error);
+            throw error;
         });
 }
 

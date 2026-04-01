@@ -45,10 +45,30 @@ function stopStatsAutoRefresh() {
     statsRefreshInterval = null;
 }
 
+async function getStatsResponseErrorDetails(response) {
+    try {
+        const body = await response.text();
+        return body ? `: ${body}` : '';
+    } catch (_error) {
+        return '';
+    }
+}
+
 function loadStats() {
     // Load detailed stats (includes all comprehensive metrics)
     authenticatedFetch('/api/v1/stats/detailed')
-        .then(r => r.json())
+        .then(async response => {
+            if (!response.ok) {
+                const details = await getStatsResponseErrorDetails(response);
+                console.error(
+                    `Failed to load statistics (${response.status})${details}`
+                );
+                throw new Error(
+                    `Failed to load statistics (${response.status})${details}`
+                );
+            }
+            return response.json();
+        })
         .then(stats => {
             updateStats(stats);
             updateChart(stats.daily_activity || []);
