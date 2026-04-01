@@ -717,16 +717,15 @@ class FileWorkflowService:
             operation_id = scan_progress_manager.start_file_operation(
                 path.id, symlink_path.name, "move_to_hot", file_size
             )
-
             def progress_callback(bytes_transferred: int):
                 scan_progress_manager.update_file_progress(path.id, operation_id, bytes_transferred)
-
             # Get file inventory record with lock
             inventory_entry = (
                 db.query(FileInventory)
                 .with_for_update()
                 .filter(
                     FileInventory.path_id == path.id,
+                    FileInventory.storage_type == StorageType.COLD,
                     FileInventory.file_path.in_([str(cold_storage_path), str(symlink_path)]),
                 )
                 .first()

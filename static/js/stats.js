@@ -1,18 +1,80 @@
 // Statistics JavaScript - loads data via API
-document.addEventListener('DOMContentLoaded', function() {
+const STATS_REFRESH_INTERVAL_MS = 2000;
+
+let statsRefreshInterval = null;
+let dailyChartInstance = null;
+let storageChartInstance = null;
+let topPathsByFilesChartInstance = null;
+let topPathsBySizeChartInstance = null;
+
+document.addEventListener('DOMContentLoaded', function () {
     loadStats();
+    startStatsAutoRefresh();
 });
+
+document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+        stopStatsAutoRefresh();
+        return;
+    }
+
+    loadStats();
+    startStatsAutoRefresh();
+});
+
+window.addEventListener('beforeunload', stopStatsAutoRefresh);
+
+function startStatsAutoRefresh() {
+    if (statsRefreshInterval !== null) {
+        return;
+    }
+
+    statsRefreshInterval = window.setInterval(() => {
+        if (!document.hidden) {
+            loadStats();
+        }
+    }, STATS_REFRESH_INTERVAL_MS);
+}
+
+function stopStatsAutoRefresh() {
+    if (statsRefreshInterval === null) {
+        return;
+    }
+
+    window.clearInterval(statsRefreshInterval);
+    statsRefreshInterval = null;
+}
+
+async function getStatsResponseErrorDetails(response) {
+    try {
+        const body = await response.text();
+        return body ? `: ${body}` : '';
+    } catch (_error) {
+        return '';
+    }
+}
 
 function loadStats() {
     // Load detailed stats (includes all comprehensive metrics)
     authenticatedFetch('/api/v1/stats/detailed')
-        .then(r => r.json())
+        .then(async response => {
+            if (!response.ok) {
+                const details = await getStatsResponseErrorDetails(response);
+                console.error(
+                    `Failed to load statistics (${response.status})${details}`
+                );
+                throw new Error(
+                    `Failed to load statistics (${response.status})${details}`
+                );
+            }
+            return response.json();
+        })
         .then(stats => {
             updateStats(stats);
-            updateChart(stats.daily_activity);
-            updateStorageChart(stats); // New chart
-            updateTopPathsByFilesChart(stats.top_paths_by_files); // New chart
-            updateTopPathsBySizeChart(stats.top_paths_by_size); // New chart
+            updateChart(stats.daily_activity || []);
+            updateStorageChart(stats);
+            updateTopPathsByFilesChart(stats.top_paths_by_files || []);
+            updateTopPathsBySizeChart(stats.top_paths_by_size || []);
             updateAdditionalMetrics(stats);
         })
         .catch(error => {
@@ -100,9 +162,17 @@ function updateChart(dailyActivity) {
     // Process data for chart
     const labels = dailyActivity.map(d => d.date);
     const counts = dailyActivity.map(d => d.files_moved);
-    const sizes = dailyActivity.map(d => d.size_moved / (1024 * 1024 * 1024)); // Convert to GB
+    const sizes = dailyActivity.map(d => d.size_moved / (1024 * 1024 * 1024));
 
-    new Chart(chartCtx, {
+    if (dailyChartInstance) {
+        dailyChartInstance.data.labels = labels;
+        dailyChartInstance.data.datasets[0].data = counts;
+        dailyChartInstance.data.datasets[1].data = sizes;
+        dailyChartInstance.update();
+        return;
+    }
+
+    dailyChartInstance = new Chart(chartCtx, {
         type: 'line',
         data: {
             labels: labels,
@@ -113,7 +183,7 @@ function updateChart(dailyActivity) {
                     borderColor: 'rgb(75, 192, 192)',
                     backgroundColor: 'rgba(75, 192, 192, 0.2)',
                     tension: 0.1,
-                    yAxisID: 'y'
+                    yAxisID: 'y',
                 },
                 {
                     label: 'Size Moved (GB)',
@@ -121,16 +191,16 @@ function updateChart(dailyActivity) {
                     borderColor: 'rgb(255, 99, 132)',
                     backgroundColor: 'rgba(255, 99, 132, 0.2)',
                     tension: 0.1,
-                    yAxisID: 'y1'
-                }
-            ]
+                    yAxisID: 'y1',
+                },
+            ],
         },
         options: {
             responsive: true,
-            maintainAspectRatio: false, // Set to false to allow custom height
+            maintainAspectRatio: false,
             interaction: {
                 mode: 'index',
-                intersect: false
+                intersect: false,
             },
             scales: {
                 y: {
@@ -140,8 +210,8 @@ function updateChart(dailyActivity) {
                     beginAtZero: true,
                     title: {
                         display: true,
-                        text: 'Files Moved'
-                    }
+                        text: 'Files Moved',
+                    },
                 },
                 y1: {
                     type: 'linear',
@@ -150,30 +220,32 @@ function updateChart(dailyActivity) {
                     beginAtZero: true,
                     title: {
                         display: true,
-                        text: 'Size (GB)'
+                        text: 'Size (GB)',
                     },
                     grid: {
-                        drawOnChartArea: false
-                    }
-                }
+                        drawOnChartArea: false,
+                    },
+                },
             },
             plugins: {
                 tooltip: {
                     callbacks: {
-                        label: function(context) {
+                        label: function (context) {
                             let label = context.dataset.label || '';
                             if (label) {
                                 label += ': ';
                             }
                             if (context.parsed.y !== null) {
-                                label += context.dataset.label.includes('Size') ? formatBytes(context.parsed.y * 1024 * 1024 * 1024) : context.parsed.y;
+                                label += context.dataset.label.includes('Size')
+                                    ? formatBytes(context.parsed.y * 1024 * 1024 * 1024)
+                                    : context.parsed.y;
                             }
                             return label;
-                        }
-                    }
-                }
-            }
-        }
+                        },
+                    },
+                },
+            },
+        },
     });
 }
 
@@ -190,15 +262,21 @@ function updateStorageChart(stats) {
     const hotSize = stats.total_size_hot || 0;
     const coldSize = stats.total_size_cold || 0;
 
-    new Chart(chartCtx, {
+    if (storageChartInstance) {
+        storageChartInstance.data.datasets[0].data = [hotSize, coldSize];
+        storageChartInstance.update();
+        return;
+    }
+
+    storageChartInstance = new Chart(chartCtx, {
         type: 'doughnut',
         data: {
             labels: ['Hot Storage', 'Cold Storage'],
             datasets: [{
                 data: [hotSize, coldSize],
-                backgroundColor: ['#17a2b8', '#6c757d'], // info and secondary colors
-                hoverOffset: 4
-            }]
+                backgroundColor: ['#17a2b8', '#6c757d'],
+                hoverOffset: 4,
+            }],
         },
         options: {
             responsive: true,
@@ -209,7 +287,7 @@ function updateStorageChart(stats) {
                 },
                 tooltip: {
                     callbacks: {
-                        label: function(context) {
+                        label: function (context) {
                             let label = context.label || '';
                             if (label) {
                                 label += ': ';
@@ -218,11 +296,11 @@ function updateStorageChart(stats) {
                                 label += formatBytes(context.parsed);
                             }
                             return label;
-                        }
-                    }
-                }
-            }
-        }
+                        },
+                    },
+                },
+            },
+        },
     });
 }
 
@@ -239,33 +317,40 @@ function updateTopPathsByFilesChart(topPaths) {
     const labels = topPaths.map(p => p.path_name);
     const data = topPaths.map(p => p.file_count);
 
-    new Chart(chartCtx, {
+    if (topPathsByFilesChartInstance) {
+        topPathsByFilesChartInstance.data.labels = labels;
+        topPathsByFilesChartInstance.data.datasets[0].data = data;
+        topPathsByFilesChartInstance.update();
+        return;
+    }
+
+    topPathsByFilesChartInstance = new Chart(chartCtx, {
         type: 'bar',
         data: {
             labels: labels,
             datasets: [{
                 label: 'Files Moved',
                 data: data,
-                backgroundColor: 'rgba(40, 167, 69, 0.6)', // success color
+                backgroundColor: 'rgba(40, 167, 69, 0.6)',
                 borderColor: 'rgba(40, 167, 69, 1)',
-                borderWidth: 1
-            }]
+                borderWidth: 1,
+            }],
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            indexAxis: 'y', // Horizontal bar chart
+            indexAxis: 'y',
             plugins: {
                 legend: {
-                    display: false
+                    display: false,
                 },
                 title: {
                     display: false,
-                    text: 'Top Paths by Files'
+                    text: 'Top Paths by Files',
                 },
                 tooltip: {
                     callbacks: {
-                        label: function(context) {
+                        label: function (context) {
                             let label = context.dataset.label || '';
                             if (label) {
                                 label += ': ';
@@ -274,26 +359,16 @@ function updateTopPathsByFilesChart(topPaths) {
                                 label += context.parsed.x;
                             }
                             return label;
-                        }
-                    }
-                }
+                        },
+                    },
+                },
             },
             scales: {
                 x: {
                     beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Number of Files'
-                    }
                 },
-                y: {
-                    title: {
-                        display: true,
-                        text: 'Path Name'
-                    }
-                }
-            }
-        }
+            },
+        },
     });
 }
 
@@ -308,35 +383,38 @@ function updateTopPathsBySizeChart(topPaths) {
     ctx.style.display = 'block';
 
     const labels = topPaths.map(p => p.path_name);
-    const data = topPaths.map(p => p.total_size);
+    const data = topPaths.map(p => p.total_size || 0);
 
-    new Chart(chartCtx, {
+    if (topPathsBySizeChartInstance) {
+        topPathsBySizeChartInstance.data.labels = labels;
+        topPathsBySizeChartInstance.data.datasets[0].data = data;
+        topPathsBySizeChartInstance.update();
+        return;
+    }
+
+    topPathsBySizeChartInstance = new Chart(chartCtx, {
         type: 'bar',
         data: {
             labels: labels,
             datasets: [{
-                label: 'Size Moved',
+                label: 'Total Size',
                 data: data,
-                backgroundColor: 'rgba(0, 123, 255, 0.6)', // primary color
+                backgroundColor: 'rgba(0, 123, 255, 0.6)',
                 borderColor: 'rgba(0, 123, 255, 1)',
-                borderWidth: 1
-            }]
+                borderWidth: 1,
+            }],
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            indexAxis: 'y', // Horizontal bar chart
+            indexAxis: 'y',
             plugins: {
                 legend: {
-                    display: false
-                },
-                title: {
                     display: false,
-                    text: 'Top Paths by Size'
                 },
                 tooltip: {
                     callbacks: {
-                        label: function(context) {
+                        label: function (context) {
                             let label = context.dataset.label || '';
                             if (label) {
                                 label += ': ';
@@ -345,31 +423,21 @@ function updateTopPathsBySizeChart(topPaths) {
                                 label += formatBytes(context.parsed.x);
                             }
                             return label;
-                        }
-                    }
-                }
+                        },
+                    },
+                },
             },
             scales: {
                 x: {
                     beginAtZero: true,
-                    title: {
-                        display: true,
-                        text: 'Total Size'
-                    },
                     ticks: {
-                        callback: function(value) {
+                        callback: function (value) {
                             return formatBytes(value);
-                        }
-                    }
+                        },
+                    },
                 },
-                y: {
-                    title: {
-                        display: true,
-                        text: 'Path Name'
-                    }
-                }
-            }
-        }
+            },
+        },
     });
 }
 
@@ -387,6 +455,12 @@ function showError(message) {
     }
 }
 
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 function formatBytes(bytes) {
     if (bytes === 0) return '0 Bytes';
     if (bytes < 1024) return bytes + ' Bytes';
@@ -394,10 +468,3 @@ function formatBytes(bytes) {
     if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(2) + ' MB';
     return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
 }
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
