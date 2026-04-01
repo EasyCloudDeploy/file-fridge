@@ -1,15 +1,71 @@
 // Dashboard JavaScript - loads data via API
-document.addEventListener('DOMContentLoaded', function() {
-    loadDashboardData();
+const DASHBOARD_REFRESH_INTERVAL_MS = 2000;
+
+let dashboardRefreshInterval = null;
+let dashboardRefreshInFlight = false;
+
+document.addEventListener('DOMContentLoaded', function () {
+    refreshDashboard();
+    startDashboardAutoRefresh();
 });
+
+document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+        stopDashboardAutoRefresh();
+        return;
+    }
+
+    refreshDashboard();
+    startDashboardAutoRefresh();
+});
+
+window.addEventListener('beforeunload', stopDashboardAutoRefresh);
+
+function startDashboardAutoRefresh() {
+    if (dashboardRefreshInterval !== null) {
+        return;
+    }
+
+    dashboardRefreshInterval = window.setInterval(() => {
+        if (!document.hidden) {
+            refreshDashboard();
+        }
+    }, DASHBOARD_REFRESH_INTERVAL_MS);
+}
+
+function stopDashboardAutoRefresh() {
+    if (dashboardRefreshInterval === null) {
+        return;
+    }
+
+    window.clearInterval(dashboardRefreshInterval);
+    dashboardRefreshInterval = null;
+}
+
+async function refreshDashboard() {
+    if (dashboardRefreshInFlight) {
+        return;
+    }
+
+    dashboardRefreshInFlight = true;
+
+    try {
+        await loadDashboardData();
+        if (typeof loadAllStorageStats === 'function') {
+            await Promise.all([loadHotStorageStats(), loadColdStorageStats()]);
+        }
+    } finally {
+        dashboardRefreshInFlight = false;
+    }
+}
 
 function loadDashboardData() {
     // Load overall stats
-    authenticatedFetch('/api/v1/stats')
+    return authenticatedFetch('/api/v1/stats')
         .then(response => response.json())
         .then(data => {
             updateStats(data);
-            loadPaths();
+            return loadPaths();
         })
         .catch(error => {
             console.error('Error loading dashboard data:', error);
@@ -35,13 +91,13 @@ function updateStats(stats) {
     if (totalFilesColdEl) {
         totalFilesColdEl.textContent = stats.total_files_cold || 0;
     }
-    
+
     // Update total size
     const totalSizeEl = document.getElementById('totalSize');
     if (totalSizeEl) {
         totalSizeEl.textContent = formatBytes(stats.total_size_moved || 0);
     }
-    
+
     // Update recent count (last 24 hours)
     const recentCountEl = document.getElementById('recentCount');
     if (recentCountEl && stats.recent_activity) {
@@ -53,7 +109,7 @@ function updateStats(stats) {
         });
         recentCountEl.textContent = recent.length;
     }
-    
+
     // Update recent files
     updateRecentFiles(stats.recent_activity || []);
 }
@@ -66,7 +122,7 @@ function updatePathsCount(count) {
 }
 
 function loadPaths() {
-    authenticatedFetch('/api/v1/paths')
+    return authenticatedFetch('/api/v1/paths')
         .then(response => response.json())
         .then(paths => {
             updatePaths(paths);
@@ -79,9 +135,9 @@ function loadPaths() {
 function updatePaths(paths) {
     const pathsList = document.getElementById('pathsList');
     if (!pathsList) return;
-    
+
     updatePathsCount(paths.length);
-    
+
     if (paths.length === 0) {
         pathsList.innerHTML = `
             <p class="text-muted">No monitored paths configured yet.</p>
@@ -91,7 +147,7 @@ function updatePaths(paths) {
         `;
         return;
     }
-    
+
     pathsList.innerHTML = `
         <div class="table-responsive">
             <table class="table table-sm table-hover">
@@ -138,14 +194,14 @@ function updatePaths(paths) {
 function updateRecentFiles(files) {
     const recentFilesList = document.getElementById('recentFilesList');
     if (!recentFilesList) return;
-    
+
     const recentFiles = files.slice(0, 10);
-    
+
     if (recentFiles.length === 0) {
         recentFilesList.innerHTML = '<p class="text-muted">No recent activity.</p>';
         return;
     }
-    
+
     recentFilesList.innerHTML = recentFiles.map(file => `
         <tr>
             <td style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(file.original_path)}">
@@ -189,4 +245,3 @@ function formatDate(dateString) {
     const date = new Date(dateString);
     return date.toLocaleString();
 }
-
