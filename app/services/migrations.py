@@ -14,6 +14,7 @@ from app.models import (
     StorageType,
 )
 from app.schemas import FreezingFileSchema
+from app.services.scan_progress import scan_progress_manager
 
 logger = logging.getLogger(__name__)
 
@@ -58,16 +59,25 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
         }
 
     result = []
+    operation_lookup = {
+        (op["path_id"], op.get("file_path"), op["operation"]): op
+        for op in scan_progress_manager.get_all_current_operations()
+    }
+
     for f in freeze_thaw_files:
         if f.storage_type == StorageType.HOT:
             operation_type = "freeze"
+            operation_key = (f.path_id, f.file_path, "move_to_cold")
             source_label = "Hot Storage"
             target_label = "Cold Storage"
         else:
             operation_type = "thaw"
+            operation_key = (f.path_id, f.file_path, "move_to_hot")
             cold_location = cold_locations.get(f.cold_storage_location_id)
             source_label = cold_location.name if cold_location else "Cold Storage"
             target_label = "Hot Storage"
+
+        operation_progress = operation_lookup.get(operation_key, {})
 
         result.append(
             FreezingFileSchema(
@@ -77,6 +87,11 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
                 source_label=source_label,
                 target_label=target_label,
                 file_size=f.file_size,
+                transferred_bytes=operation_progress.get("bytes_transferred", 0),
+                total_bytes=operation_progress.get("bytes_total", f.file_size),
+                transfer_rate_bytes_per_sec=operation_progress.get("current_speed", 0),
+                eta_seconds=operation_progress.get("eta"),
+                percent_complete=operation_progress.get("percent", 0),
             )
         )
 
