@@ -4,7 +4,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
@@ -24,6 +24,7 @@ class FileThawer:
         pin: bool = False,
         db: Optional[Session] = None,
         initiated_by: Optional[str] = None,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> Tuple[bool, Optional[str]]:
         """
         Move a file back from cold storage to hot storage while preserving timestamps.
@@ -107,7 +108,9 @@ class FileThawer:
                     original_path.unlink()
                 # Move file back from cold storage, preserving timestamps
                 try:
-                    FileThawer._move_preserving_timestamps(cold_path, original_path)
+                    FileThawer._move_preserving_timestamps(
+                        cold_path, original_path, progress_callback
+                    )
                 except Exception as e:
                     return False, f"Failed to move file back: {e!s}"
             elif file_record.operation_type.value == "copy":
@@ -117,7 +120,9 @@ class FileThawer:
                 if not original_path.exists():
                     # Original doesn't exist, move from cold storage, preserving timestamps
                     try:
-                        FileThawer._move_preserving_timestamps(cold_path, original_path)
+                        FileThawer._move_preserving_timestamps(
+                            cold_path, original_path, progress_callback
+                        )
                     except Exception as e:
                         return False, f"Failed to move file back: {e!s}"
                 else:
@@ -131,7 +136,9 @@ class FileThawer:
                 try:
                     # Ensure destination directory exists
                     original_path.parent.mkdir(parents=True, exist_ok=True)
-                    FileThawer._move_preserving_timestamps(cold_path, original_path)
+                    FileThawer._move_preserving_timestamps(
+                        cold_path, original_path, progress_callback
+                    )
                 except Exception as e:
                     return False, f"Failed to move file back: {e!s}"
 
@@ -193,7 +200,11 @@ class FileThawer:
             return False, str(e)
 
     @staticmethod
-    def _move_preserving_timestamps(source: Path, destination: Path) -> None:
+    def _move_preserving_timestamps(
+        source: Path,
+        destination: Path,
+        progress_callback: Optional[Callable[[int], None]] = None,
+    ) -> None:
         """Move file while preserving all timestamps (mtime, atime)."""
         # Get original timestamps before moving
         stat_info = source.stat()
@@ -203,12 +214,28 @@ class FileThawer:
             source.rename(destination)
         except OSError:
             # Cross-filesystem move - copy with timestamp preservation
-            # Copy file with metadata (preserves mtime and atime)
-            shutil.copy2(str(source), str(destination))
+            bytes_transferred = 0
+            last_report = 0
+
+            with open(source, "rb") as fsrc, open(destination, "wb") as fdst:
+                while True:
+                    chunk = fsrc.read(64 * 1024)
+                    if not chunk:
+                        break
+                    fdst.write(chunk)
+                    bytes_transferred += len(chunk)
+
+                    if progress_callback and bytes_transferred - last_report >= 1024 * 1024:
+                        progress_callback(bytes_transferred)
+                        last_report = bytes_transferred
 
             # Explicitly set atime and mtime to original values to ensure preservation
             # Note: ctime cannot be set directly as it's managed by the filesystem
             os.utime(str(destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
+            shutil.copystat(str(source), str(destination))
+
+            if progress_callback and bytes_transferred > last_report:
+                progress_callback(bytes_transferred)
 
             # Remove original file
             source.unlink()

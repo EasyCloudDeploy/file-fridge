@@ -30,6 +30,7 @@ from app.services.criteria_matcher import CriteriaMatcher
 from app.services.file_cleanup import FileCleanup
 from app.services.file_mover import FileMover
 from app.services.file_reconciliation import FileReconciliation
+from app.services.file_thawer import FileThawer
 from app.services.scan_progress import scan_progress_manager
 from app.services.storage_routing_service import storage_routing_service
 from app.utils.network_detection import check_atime_availability
@@ -588,7 +589,7 @@ class FileWorkflowService:
                 file_name = file_path.name
 
                 operation_id = scan_progress_manager.start_file_operation(
-                    path.id, file_name, "move_to_cold", file_size
+                    path.id, file_name, "move_to_cold", file_size, file_path=str(file_path)
                 )
 
                 def progress_callback(bytes_transferred: int):
@@ -601,7 +602,11 @@ class FileWorkflowService:
 
                 # Move file with transaction pattern and checksum verification
                 success, error, checksum_after = FileMover.move_with_rollback(
-                    file_path, dest_path, path.operation_type, verify_checksum=True
+                    file_path,
+                    dest_path,
+                    path.operation_type,
+                    verify_checksum=True,
+                    progress_callback=progress_callback,
                 )
 
                 if success:
@@ -710,8 +715,15 @@ class FileWorkflowService:
                 file_size = 0
 
             operation_id = scan_progress_manager.start_file_operation(
-                path.id, symlink_path.name, "move_to_hot", file_size
+                path.id,
+                symlink_path.name,
+                "move_to_hot",
+                file_size,
+                file_path=str(cold_storage_path),
             )
+
+            def progress_callback(bytes_transferred: int):
+                scan_progress_manager.update_file_progress(path.id, operation_id, bytes_transferred)
 
             # Get file inventory record with lock
             inventory_entry = (
@@ -737,30 +749,31 @@ class FileWorkflowService:
 
                     try:
                         symlink_path.parent.mkdir(parents=True, exist_ok=True)
-                        stat_info = cold_storage_path.stat()
 
                         # Calculate checksum before move
                         checksum_before = checksum_verifier.calculate_checksum(cold_storage_path)
 
                         # Move file with verification
+                        prepared_path = symlink_path
+                        prepared_stat = None
                         try:
                             cold_storage_path.rename(symlink_path)
                         except OSError:
-                            shutil.copy2(str(cold_storage_path), str(symlink_path))
-                            os.utime(
-                                str(symlink_path),
-                                ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns),
+                            prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
+                                cold_storage_path,
+                                symlink_path,
+                                progress_callback=progress_callback,
                             )
-                            cold_storage_path.unlink()
 
                         # Verify checksum after move
-                        checksum_after = checksum_verifier.calculate_checksum(symlink_path)
+                        checksum_after = checksum_verifier.calculate_checksum(prepared_path)
                         if checksum_before and checksum_after != checksum_before:
                             logger.error(
                                 f"Checksum mismatch after thaw: {checksum_before[:16]}... != {checksum_after[:16]}..."
                             )
-                            # Rollback - move file back
-                            if cold_storage_path.exists():
+                            if prepared_path != symlink_path:
+                                FileThawer._cleanup_temp_destination(prepared_path, symlink_path)
+                            elif symlink_path.exists():
                                 symlink_path.unlink()
                             inventory_entry.status = old_status
                             db.commit()
@@ -774,6 +787,14 @@ class FileWorkflowService:
                             )
                             operation_completed = True
                             return result
+
+                        if prepared_path != symlink_path:
+                            FileThawer._finalize_staged_move(
+                                cold_storage_path,
+                                prepared_path,
+                                symlink_path,
+                                prepared_stat,
+                            )
 
                         file_record = (
                             db.query(FileRecord)
@@ -844,17 +865,35 @@ class FileWorkflowService:
                         symlink_path.unlink()
 
                     symlink_path.parent.mkdir(parents=True, exist_ok=True)
-                    stat_info = cold_storage_path.stat()
+                    checksum_before = checksum_verifier.calculate_checksum(cold_storage_path)
 
                     try:
                         cold_storage_path.rename(symlink_path)
                     except OSError:
-                        shutil.copy2(str(cold_storage_path), str(symlink_path))
-                        os.utime(
-                            str(symlink_path),
-                            ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns),
+                        prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
+                            cold_storage_path,
+                            symlink_path,
+                            progress_callback=progress_callback,
                         )
-                        cold_storage_path.unlink()
+                        checksum_after = checksum_verifier.calculate_checksum(prepared_path)
+                        if checksum_before and checksum_after != checksum_before:
+                            FileThawer._cleanup_temp_destination(prepared_path, symlink_path)
+                            result["error"] = "Checksum verification failed after thaw"
+                            scan_progress_manager.complete_file_operation(
+                                path.id,
+                                operation_id,
+                                "move_to_hot",
+                                success=False,
+                                error=result["error"],
+                            )
+                            operation_completed = True
+                            return result
+                        FileThawer._finalize_staged_move(
+                            cold_storage_path,
+                            prepared_path,
+                            symlink_path,
+                            prepared_stat,
+                        )
 
                     result["success"] = True
                     scan_progress_manager.update_file_progress(path.id, operation_id, file_size)
