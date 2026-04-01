@@ -19,6 +19,7 @@ class FileOperation:
     file_name: str
     operation: str  # "move_to_cold", "move_to_hot", "copy"
     bytes_total: int
+    file_path: Optional[str] = None
     bytes_transferred: int = 0
     start_time: float = 0.0
     current_speed: int = 0  # bytes per second
@@ -59,6 +60,7 @@ class ScanProgress:
                 "operation_id": op.operation_id,
                 "file_name": op.file_name,
                 "operation": op.operation,
+                "file_path": op.file_path,
                 "bytes_total": op.bytes_total,
                 "bytes_transferred": op.bytes_transferred,
                 "percent": op.percent,
@@ -168,7 +170,9 @@ class ScanProgressManager:
             # Check if a scan is already running for this path
             if path_id in self._scans and self._scans[path_id].status == "running":
                 existing_scan = self._scans[path_id]
-                logger.warning("Scan already running for path %s: %s", path_id, existing_scan.scan_id)
+                logger.warning(
+                    "Scan already running for path %s: %s", path_id, existing_scan.scan_id
+                )
                 return existing_scan.scan_id, False
 
             scan_id = str(uuid.uuid4())
@@ -183,7 +187,9 @@ class ScanProgressManager:
             self._scans[path_id] = progress
             self._scans_by_id[scan_id] = progress
 
-            logger.info("Started scan tracking: %s for path %s, %s files", scan_id, path_id, total_files)
+            logger.info(
+                "Started scan tracking: %s for path %s, %s files", scan_id, path_id, total_files
+            )
             return scan_id, True
 
     def update_total_files(self, path_id: int, total_files: int):
@@ -193,7 +199,12 @@ class ScanProgressManager:
                 self._scans[path_id].total_files = total_files
 
     def start_file_operation(
-        self, path_id: int, file_name: str, operation: str, file_size: int
+        self,
+        path_id: int,
+        file_name: str,
+        operation: str,
+        file_size: int,
+        file_path: Optional[str] = None,
     ) -> str:
         """
         Start tracking a file operation.
@@ -220,6 +231,7 @@ class ScanProgressManager:
                 operation_id=operation_id,
                 file_name=file_name,
                 operation=operation,
+                file_path=file_path,
                 bytes_total=file_size,
                 bytes_transferred=0,
                 start_time=time.time(),
@@ -229,6 +241,31 @@ class ScanProgressManager:
                 progress.current_operations.pop(0)
 
             return operation_id
+
+    def get_all_current_operations(self) -> List[dict]:
+        """Return all in-flight file operations across active scans."""
+        with self._lock:
+            operations = []
+            for progress in self._scans.values():
+                if progress.status != "running":
+                    continue
+                for op in progress.current_operations:
+                    operations.append(
+                        {
+                            "scan_id": progress.scan_id,
+                            "path_id": progress.path_id,
+                            "operation_id": op.operation_id,
+                            "file_name": op.file_name,
+                            "file_path": op.file_path,
+                            "operation": op.operation,
+                            "bytes_total": op.bytes_total,
+                            "bytes_transferred": op.bytes_transferred,
+                            "percent": op.percent,
+                            "current_speed": op.current_speed,
+                            "eta": op.eta,
+                        }
+                    )
+            return operations
 
     def update_file_progress(self, path_id: int, operation_id: str, bytes_transferred: int):
         """
@@ -324,7 +361,9 @@ class ScanProgressManager:
             if path_id not in self._scans or self._scans[path_id].status != "running":
                 return False
             self._scans[path_id].stop_requested = True
-            logger.info("Stop requested for scan %s (path %s)", self._scans[path_id].scan_id, path_id)
+            logger.info(
+                "Stop requested for scan %s (path %s)", self._scans[path_id].scan_id, path_id
+            )
             return True
 
     def is_stop_requested(self, path_id: int) -> bool:
@@ -344,7 +383,9 @@ class ScanProgressManager:
         """
         allowed_statuses = {"completed", "failed", "stopped"}
         if status not in allowed_statuses:
-            logger.warning("Invalid status '%s' provided to finish_scan, coercing to 'failed'", status)
+            logger.warning(
+                "Invalid status '%s' provided to finish_scan, coercing to 'failed'", status
+            )
             status = "failed"
 
         with self._lock:

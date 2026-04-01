@@ -2,7 +2,7 @@ import time
 from concurrent.futures import Future
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call, ANY
+from unittest.mock import MagicMock, patch, call
 
 import pytest
 from app.models import (
@@ -320,13 +320,70 @@ def test_process_single_file(
     assert reloaded_inventory.file_path == str(cold_path / "file.txt")
 
     mock_audit_trail.log_freeze_operation.assert_called_once()
-    mock_move.assert_called_once_with(
-        file_to_move,
-        cold_path / "file.txt",
-        monitored_path.operation_type,
-        verify_checksum=True,
-        progress_callback=ANY,
-    )
+    mock_move.assert_called_once()
+    move_args = mock_move.call_args
+    assert move_args.args == (file_to_move, cold_path / "file.txt", monitored_path.operation_type)
+    assert move_args.kwargs["verify_checksum"] is True
+    assert callable(move_args.kwargs["progress_callback"])
+
+
+@patch("app.services.file_workflow_service.FileMover.move_with_rollback")
+@patch("app.services.file_workflow_service.storage_routing_service.select_storage_location")
+@patch("app.services.file_workflow_service.checksum_verifier.calculate_checksum")
+@patch("app.services.file_workflow_service.audit_trail_service")
+@patch("app.services.file_workflow_service.scan_progress_manager")
+def test_process_single_file_passes_callable_progress_callback_on_move(
+    mock_scan_progress,
+    mock_audit_trail,
+    mock_checksum,
+    mock_select_location,
+    mock_move,
+    monitored_path,
+    file_inventory,
+    db_session,
+    tmp_path,
+):
+    """Test freeze moves pass a callable progress callback into the mover."""
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir()
+    cold_path = tmp_path / "cold"
+    cold_path.mkdir()
+
+    monitored_path.source_path = str(hot_path)
+    file_to_move = hot_path / "file.txt"
+    file_to_move.write_text("content")
+
+    file_inventory(file_to_move, StorageType.HOT, FileStatus.ACTIVE)
+    mock_select_location.return_value = MagicMock(id=1, path=str(cold_path))
+    mock_checksum.return_value = "checksum_before"
+    mock_audit_trail.log_freeze_operation.return_value = None
+    mock_scan_progress.start_file_operation.return_value = "freeze-op-1"
+
+    def move_side_effect(source, destination, operation_type, **kwargs):
+        assert source == file_to_move
+        assert destination == cold_path / "file.txt"
+        assert operation_type == monitored_path.operation_type
+        assert kwargs["verify_checksum"] is True
+        assert callable(kwargs["progress_callback"])
+        return True, None, "checksum_after"
+
+    mock_move.side_effect = move_side_effect
+
+    service = FileWorkflowService()
+
+    original_close = db_session.close
+    db_session.close = lambda: None
+    try:
+        with patch(
+            "app.services.file_workflow_service.SessionFactory",
+            side_effect=lambda: db_session,
+        ):
+            result = service._process_single_file(file_to_move, [1], monitored_path)
+    finally:
+        db_session.close = original_close
+
+    assert result["success"] is True
+    mock_move.assert_called_once()
 
 
 @patch("app.services.file_workflow_service.scan_progress_manager")
@@ -389,7 +446,11 @@ def test_thaw_single_file(
 
     mock_audit_trail.log_thaw_operation.assert_called_once()
     mock_scan_progress.start_file_operation.assert_called_once_with(
-        monitored_path.id, symlink_path.name, "move_to_hot", len("content")
+        monitored_path.id,
+        symlink_path.name,
+        "move_to_hot",
+        len("content"),
+        file_path=str(cold_file),
     )
     mock_scan_progress.update_file_progress.assert_called_once_with(
         monitored_path.id, "thaw-op-1", len("content")
@@ -397,6 +458,81 @@ def test_thaw_single_file(
     mock_scan_progress.complete_file_operation.assert_called_once_with(
         monitored_path.id, "thaw-op-1", "move_to_hot", success=True
     )
+
+
+@patch("app.services.file_workflow_service.scan_progress_manager")
+@patch("app.services.file_workflow_service.checksum_verifier.calculate_checksum")
+@patch("app.services.file_workflow_service.audit_trail_service")
+@patch("app.services.file_workflow_service.FileThawer._move_preserving_timestamps")
+def test_thaw_single_file_uses_callable_progress_callback_for_fallback_move(
+    mock_move_preserving_timestamps,
+    mock_audit_trail,
+    mock_checksum,
+    mock_scan_progress,
+    monitored_path,
+    file_inventory,
+    db_session,
+    tmp_path,
+):
+    """Test thaw fallback move preserves a callable progress callback."""
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir()
+    cold_path = tmp_path / "cold"
+    cold_path.mkdir()
+
+    monitored_path.source_path = str(hot_path)
+    monitored_path.storage_locations[0].path = str(cold_path)
+
+    cold_file = cold_path / "file.txt"
+    cold_file.write_text("content")
+    symlink_path = hot_path / "file.txt"
+
+    inventory = file_inventory(cold_file, StorageType.COLD, FileStatus.ACTIVE)
+    mock_scan_progress.start_file_operation.return_value = "thaw-op-1"
+    mock_checksum.side_effect = ["checksum1", "checksum1"]
+
+    temp_destination = hot_path / "file.txt.tmp"
+
+    def fallback_side_effect(source, destination, progress_callback=None):
+        assert source == cold_file
+        assert destination == symlink_path
+        assert callable(progress_callback)
+        temp_destination.write_text("content")
+        progress_callback(len("content"))
+        return temp_destination, cold_file.stat()
+
+    mock_move_preserving_timestamps.side_effect = fallback_side_effect
+
+    service = FileWorkflowService()
+
+    original_close = db_session.close
+    db_session.close = lambda: None
+    original_rename = Path.rename
+
+    def rename_side_effect(self, target):
+        if self == cold_file and Path(target) == symlink_path:
+            raise OSError("Cross-device link")
+        return original_rename(self, target)
+
+    try:
+        with patch(
+            "app.services.file_workflow_service.SessionFactory",
+            side_effect=lambda: db_session,
+        ), patch("pathlib.Path.rename", autospec=True, side_effect=rename_side_effect):
+            result = service._thaw_single_file(symlink_path, cold_file, monitored_path)
+    finally:
+        db_session.close = original_close
+
+    assert result["success"] is True
+    assert not cold_file.exists()
+    assert symlink_path.exists()
+    assert not temp_destination.exists()
+
+    db_session.expire_all()
+    reloaded_inventory = db_session.query(FileInventory).get(inventory.id)
+    assert reloaded_inventory.storage_type == StorageType.HOT
+    assert reloaded_inventory.file_path == str(symlink_path)
+    mock_move_preserving_timestamps.assert_called_once()
 
 
 def test_recursive_scandir(tmp_path):
