@@ -1,15 +1,14 @@
-import os
-import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import call, patch
 
 import pytest
-from app.models import MonitoredPath, OperationType
+
+from app.models import OperationType
 from app.services.file_mover import (
-    move_file,
-    _move,
     _copy,
+    _move,
     _move_and_symlink,
+    move_file,
     move_with_rollback,
     preserve_directory_structure,
 )
@@ -296,10 +295,10 @@ def test_move_symlink_direct(tmp_path):
     link = tmp_path / "the_link"
     link.symlink_to(target)
     dest = tmp_path / "final_dest.txt"
-    
+
     from app.services.file_mover import _move_symlink
     success, error = _move_symlink(link, dest)
-    
+
     assert success is True
     assert not link.exists()
     assert dest.exists()
@@ -314,10 +313,10 @@ def test_move_symlink_relative(tmp_path):
     link = subdir / "link_rel"
     link.symlink_to("target.txt")
     dest = tmp_path / "moved_relative.txt"
-    
+
     from app.services.file_mover import _move_symlink
     success, error = _move_symlink(link, dest)
-    
+
     assert success is True
     assert not link.exists()
     assert dest.exists()

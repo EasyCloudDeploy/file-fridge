@@ -2,22 +2,18 @@
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 from app.models import (
     ColdStorageLocation,
     FileInventory,
     FileRecord,
     FileStatus,
-    MonitoredPath,
     OperationType,
     PinnedFile,
     StorageType,
-    Tag,
 )
 from app.schemas import StorageType as StorageTypeSchema
 
@@ -32,7 +28,7 @@ def test_list_files_no_filters(authenticated_client: TestClient, file_inventory_
 
     response = authenticated_client.get("/api/v1/files")
     assert response.status_code == 200
-    
+
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
     files = [json.loads(line)["data"] for line in lines[1:-1]]
@@ -52,7 +48,7 @@ def test_list_files_filter_by_path_id(authenticated_client: TestClient, file_inv
 
     response = authenticated_client.get(f"/api/v1/files?path_id={path1_file.path_id}")
     assert response.status_code == 200
-    
+
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
     files = [json.loads(line)["data"] for line in lines[1:-1]]
@@ -69,7 +65,7 @@ def test_list_files_filter_by_storage_type(authenticated_client: TestClient, fil
 
     response = authenticated_client.get(f"/api/v1/files?storage_type={StorageTypeSchema.COLD.value}")
     assert response.status_code == 200
-    
+
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
     files = [json.loads(line)["data"] for line in lines[1:-1]]
@@ -86,7 +82,7 @@ def test_list_files_filter_by_file_status(authenticated_client: TestClient, file
 
     response = authenticated_client.get(f"/api/v1/files?status={FileStatus.MIGRATING.value}")
     assert response.status_code == 200
-    
+
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
     files = [json.loads(line)["data"] for line in lines[1:-1]]
@@ -103,7 +99,7 @@ def test_list_files_filter_by_search(authenticated_client: TestClient, file_inve
 
     response = authenticated_client.get("/api/v1/files?search=doc")
     assert response.status_code == 200
-    
+
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
     files = [json.loads(line)["data"] for line in lines[1:-1]]
@@ -120,7 +116,7 @@ def test_list_files_filter_by_extension(authenticated_client: TestClient, file_i
 
     response = authenticated_client.get("/api/v1/files?extension=.jpg")
     assert response.status_code == 200
-    
+
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
     files = [json.loads(line)["data"] for line in lines[1:-1]]
@@ -137,7 +133,7 @@ def test_list_files_filter_by_mime_type(authenticated_client: TestClient, file_i
 
     response = authenticated_client.get("/api/v1/files?mime_type=image")
     assert response.status_code == 200
-    
+
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
     files = [json.loads(line)["data"] for line in lines[1:-1]]
@@ -154,7 +150,7 @@ def test_list_files_filter_by_has_checksum(authenticated_client: TestClient, fil
 
     response = authenticated_client.get("/api/v1/files?has_checksum=true")
     assert response.status_code == 200
-    
+
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
     files = [json.loads(line)["data"] for line in lines[1:-1]]
@@ -165,7 +161,7 @@ def test_list_files_filter_by_has_checksum(authenticated_client: TestClient, fil
 
     response = authenticated_client.get("/api/v1/files?has_checksum=false")
     assert response.status_code == 200
-    
+
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
     files = [json.loads(line)["data"] for line in lines[1:-1]]
@@ -430,7 +426,7 @@ def test_list_files_pagination(authenticated_client: TestClient, file_inventory_
     """Test cursor-based pagination for files."""
     for i in range(15): # Need more than 10 for pagination
         file_inventory_factory(str(tmp_path / f"file{i}.txt"), path_name=f"pagination_p{i}")
-    
+
     # Get first page
     response = authenticated_client.get("/api/v1/files?page_size=10")
     assert response.status_code == 200
@@ -438,7 +434,7 @@ def test_list_files_pagination(authenticated_client: TestClient, file_inventory_
     metadata = json.loads(lines[0])
     assert metadata["has_more"] is True
     assert "next_cursor" in metadata
-    
+
     # Get second page
     cursor = metadata["next_cursor"]
     response = authenticated_client.get(f"/api/v1/files?page_size=10&cursor={cursor}")
@@ -454,16 +450,16 @@ def test_list_files_filter_by_tags(authenticated_client: TestClient, file_invent
     from app.models import FileTag
     db_session.add(FileTag(file_id=inv.id, tag_id=tag.id))
     db_session.commit()
-    
+
     # Other untagged file
     file_inventory_factory(path="/tmp/untagged_filter.txt", path_name="p_untagged")
-    
+
     response = authenticated_client.get(f"/api/v1/files?tag_ids={tag.id}")
     assert response.status_code == 200
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
     assert metadata["total"] == 1
-    
+
     files = [json.loads(line)["data"] for line in lines[1:-1]]
     assert files[0]["id"] == inv.id
 
@@ -471,7 +467,7 @@ def test_get_relocate_tasks(authenticated_client: TestClient, monkeypatch):
     """Test listing relocation tasks."""
     from app.services.relocation_manager import relocation_manager
     monkeypatch.setattr(relocation_manager, "get_recent_tasks", lambda limit: [])
-    
+
     response = authenticated_client.get("/api/v1/files/relocate/tasks")
     assert response.status_code == 200
     assert response.json()["tasks"] == []

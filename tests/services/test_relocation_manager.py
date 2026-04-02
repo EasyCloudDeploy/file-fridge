@@ -1,21 +1,15 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
-import time
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
 
 from app.models import (
     ColdStorageLocation,
-    FileInventory,
-    FileRecord,
-    FileStatus,
     MonitoredPath,
-    OperationType,
-    StorageType,
     RelocationTask,
-    RelocationTaskStatus
+    RelocationTaskStatus,
+    StorageType,
 )
 from app.services.relocation_manager import relocation_manager, serialize_relocation_task
-from app.database import SessionLocal
 
 
 @pytest.mark.unit
@@ -66,7 +60,7 @@ class TestRelocationManager:
         )
         serialized = serialize_relocation_task(task)
         assert serialized["percent_complete"] == 25
-        
+
         task.bytes_total = 0
         task.status = RelocationTaskStatus.COMPLETED
         serialized = serialize_relocation_task(task)
@@ -103,7 +97,7 @@ class TestRelocationManager:
         path = db_session.get(MonitoredPath, inv.path_id)
         path.storage_locations = [source_loc, target_loc]
         db_session.commit()
-        
+
         task_id = relocation_manager.create_task(
             inventory_id=inv.id,
             file_path=inv.file_path,
@@ -114,7 +108,7 @@ class TestRelocationManager:
             target_location_name=target_loc.name
         )
         relocation_manager._process_task(task_id, db_session)
-        
+
         db_session.expire_all()
         task = db_session.query(RelocationTask).filter(RelocationTask.task_id == task_id).first()
         assert task.status == RelocationTaskStatus.COMPLETED

@@ -1,29 +1,24 @@
 
-import asyncio
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
-import pytest
 import aiosmtplib
+import pytest
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
-from app.models import Notifier, NotifierType, Notification, NotificationDispatch, NotificationLevel, DispatchStatus
+from app.models import DispatchStatus, Notification, NotificationDispatch, Notifier, NotifierType
 from app.services.notification_events import (
-    NotificationEventType,
-    ScanCompletedData,
-    PathCreatedData,
     DiskSpaceCriticalData,
-    ScanErrorData,
+    NotificationEventType,
+    PathCreatedData,
+    ScanCompletedData,
 )
 from app.services.notification_service import NotificationService, rate_limiter
+
 
 # Reset rate limiter for each test
 @pytest.fixture(autouse=True)
 def reset_rate_limiter():
     rate_limiter.last_notification = {}
-    yield
 
 
 @pytest.fixture
@@ -136,7 +131,7 @@ async def test_dispatch_event_rate_limiting(email_notifier, db_session: Session)
     event_data = PathCreatedData(
         path_id=1, path_name="new_path", source_path="/path/to/new", operation_type="move"
     )
-    
+
     # Subscribe email_notifier to PATH_CREATED for this test
     email_notifier.subscribed_events = list(email_notifier.subscribed_events) + [NotificationEventType.PATH_CREATED.value]
     db_session.commit()

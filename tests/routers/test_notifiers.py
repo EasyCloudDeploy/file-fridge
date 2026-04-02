@@ -1,5 +1,6 @@
-import pytest
 from unittest.mock import AsyncMock
+
+import pytest
 
 from app.models import Notifier, NotifierType
 
@@ -11,7 +12,7 @@ class TestNotifiersRouter:
         n = Notifier(name="Notifier 1", type=NotifierType.EMAIL, address="test1@example.com")
         db_session.add(n)
         db_session.commit()
-        
+
         response = authenticated_client.get("/api/v1/notifiers")
         assert response.status_code == 200
         data = response.json()
@@ -23,7 +24,7 @@ class TestNotifiersRouter:
         n = Notifier(name="Notifier 2", type=NotifierType.EMAIL, address="test2@example.com")
         db_session.add(n)
         db_session.commit()
-        
+
         response = authenticated_client.get(f"/api/v1/notifiers/{n.id}")
         assert response.status_code == 200
         assert response.json()["name"] == "Notifier 2"
@@ -80,7 +81,7 @@ class TestNotifiersRouter:
         n = Notifier(name="Common Name", type=NotifierType.EMAIL, address="c1@ex.com")
         db_session.add(n)
         db_session.commit()
-        
+
         payload = {
             "name": "Common Name",
             "type": "email",
@@ -98,7 +99,7 @@ class TestNotifiersRouter:
         n = Notifier(name="Old Notif", type=NotifierType.EMAIL, address="old@ex.com")
         db_session.add(n)
         db_session.commit()
-        
+
         payload = {"name": "New Notif", "address": "new@ex.com"}
         response = authenticated_client.put(f"/api/v1/notifiers/{n.id}", json=payload)
         assert response.status_code == 200
@@ -111,7 +112,7 @@ class TestNotifiersRouter:
         db_session.add(n)
         db_session.commit()
         notif_id = n.id
-        
+
         response = authenticated_client.delete(f"/api/v1/notifiers/{notif_id}")
         assert response.status_code == 204
         assert db_session.get(Notifier, notif_id) is None
@@ -122,11 +123,11 @@ class TestNotifiersRouter:
         n = Notifier(name="Test Me", type=NotifierType.EMAIL, address="me@ex.com")
         db_session.add(n)
         db_session.commit()
-        
+
         from app.services.notification_service import notification_service
         mock_test = AsyncMock(return_value=(True, "Test successful"))
         monkeypatch.setattr(notification_service, "test_notifier", mock_test)
-        
+
         response = authenticated_client.post(f"/api/v1/notifiers/{n.id}/test")
         assert response.status_code == 200
         assert response.json()["success"] is True

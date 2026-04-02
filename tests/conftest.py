@@ -5,13 +5,21 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.database import Base, get_db
 from app.main import app
-from app.config import settings
-from app.models import RelocationTask, User, MonitoredPath, ColdStorageLocation, FileInventory, FileStatus, StorageType, Tag
+from app.models import (
+    ColdStorageLocation,
+    FileInventory,
+    FileStatus,
+    MonitoredPath,
+    StorageType,
+    Tag,
+    User,
+)
 from app.security import hash_password
 from app.utils.rate_limiter import _login_rate_limiter, _remote_rate_limiter
 
@@ -185,7 +193,7 @@ def file_inventory_factory(db_session: Session, monitored_path_factory):
         db_session.refresh(file_inv)
 
         if is_pinned:
-            from app.models import RelocationTask, PinnedFile
+            from app.models import PinnedFile
             pin = PinnedFile(path_id=file_inv.path_id, file_path=file_inv.file_path)
             db_session.add(pin)
             db_session.commit()
@@ -218,7 +226,7 @@ def remote_connection_factory(db_session: Session):
         trust_status = "TRUSTED",
         remote_transfer_mode = "BIDIRECTIONAL",
     ):
-        from app.models import RelocationTask, RemoteConnection, TrustStatus, TransferMode
+        from app.models import RemoteConnection, TransferMode
         conn = RemoteConnection(
             name=name,
             url=url,
@@ -249,7 +257,7 @@ def remote_transfer_job_factory(db_session: Session, remote_connection_factory, 
         direction = "PUSH",
         status = "PENDING",
     ):
-        from app.models import RelocationTask, RemoteTransferJob, TransferDirection, TransferStatus, StorageType
+        from app.models import RemoteTransferJob, StorageType, TransferDirection, TransferStatus
         n = next(_counter)
         if remote_connection is None:
             remote_connection = remote_connection_factory(fingerprint=f"testfingerprint{n}")

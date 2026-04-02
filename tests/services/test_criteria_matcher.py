@@ -1,12 +1,11 @@
+import contextlib
 import os
-import platform
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-import contextlib
 
 import pytest
+
 from app.models import Criteria, CriterionType, Operator
 from app.services.criteria_matcher import CriteriaMatcher
 

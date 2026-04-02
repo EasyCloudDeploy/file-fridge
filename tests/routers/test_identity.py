@@ -36,11 +36,11 @@ class TestIdentityRouter:
         # First export current keys to get valid PEMs
         payload = {"password": "password"}
         keys = authenticated_client.post("/api/v1/identity/private-export", json=payload).json()
-        
+
         # Add a remote connection to test replacement logic
         db_session.add(RemoteConnection(name="Test", url="u", remote_fingerprint="f1"))
         db_session.commit()
-        
+
         import_payload = {
             "password": "password",
             "signing_private_key": keys["signing_private_key"],
@@ -50,7 +50,7 @@ class TestIdentityRouter:
         response = authenticated_client.post("/api/v1/identity/import", json=import_payload)
         assert response.status_code == 200
         assert "imported successfully" in response.json()["message"].lower()
-        
+
         # Verify remote connections were cleared
         assert db_session.query(RemoteConnection).count() == 0
 
@@ -58,10 +58,10 @@ class TestIdentityRouter:
         """Test that import fails if remote connections exist and confirm_replace is False."""
         payload = {"password": "password"}
         keys = authenticated_client.post("/api/v1/identity/private-export", json=payload).json()
-        
+
         db_session.add(RemoteConnection(name="Test", url="u", remote_fingerprint="f1"))
         db_session.commit()
-        
+
         import_payload = {
             "password": "password",
             "signing_private_key": keys["signing_private_key"],
@@ -90,7 +90,7 @@ class TestIdentityRouter:
         def mock_fail(*args, **kwargs):
             raise Exception("Unexpected error")
         monkeypatch.setattr(identity_service, "import_keys_pem", mock_fail)
-        
+
         import_payload = {
             "password": "password",
             "signing_private_key": "k1",

@@ -1,5 +1,8 @@
 import os
-os.environ['SECRET_KEY'] = 'dummy_key'
-import pytest
+
+os.environ["SECRET_KEY"] = "dummy_key"
 import sys
-sys.exit(pytest.main(['-v', 'tests/services/test_relocation_manager.py']))
+
+import pytest
+
+sys.exit(pytest.main(["-v", "tests/services/test_relocation_manager.py"]))

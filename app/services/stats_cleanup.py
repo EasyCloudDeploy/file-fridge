@@ -136,7 +136,7 @@ class StatsCleanupService:
                 zombie.end_time = datetime.now(timezone.utc)
                 zombie.retry_count += 1
                 recovered_count += 1
-                
+
                 # Robust duration calculation for logging
                 duration = "unknown"
                 if zombie.start_time:
@@ -144,7 +144,7 @@ class StatsCleanupService:
                     if st.tzinfo is None:
                         st = st.replace(tzinfo=timezone.utc)
                     duration = str(datetime.now(timezone.utc) - st)
-                
+
                 logger.info(f"Recovered zombie transfer {zombie.id}: stuck for {duration}")
 
             db.commit()

@@ -1,11 +1,10 @@
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import MonitoredPath, ColdStorageLocation, ScanStatus
+from app.models import ColdStorageLocation, ScanStatus
 
 
 def test_list_paths(authenticated_client: TestClient, monitored_path_factory):
@@ -25,7 +24,7 @@ def test_create_path(mock_add_job, authenticated_client: TestClient, storage_loc
     """Test creating a new monitored path."""
     source_path = tmp_path / "new_hot"
     source_path.mkdir()
-    
+
     path_data = {
         "name": "New Path",
         "source_path": str(source_path),
@@ -58,7 +57,7 @@ def test_create_path_invalid_source(authenticated_client: TestClient, storage_lo
 def test_get_path(authenticated_client: TestClient, monitored_path_factory, tmp_path):
     """Test retrieving a single monitored path."""
     path = monitored_path_factory("My Path", str(tmp_path / "my_hot"))
-    
+
     response = authenticated_client.get(f"/api/v1/paths/{path.id}")
     assert response.status_code == 200
     data = response.json()
@@ -68,10 +67,10 @@ def test_get_path(authenticated_client: TestClient, monitored_path_factory, tmp_
 def test_update_path(authenticated_client: TestClient, monitored_path_factory, tmp_path):
     """Test updating a monitored path."""
     path = monitored_path_factory("Old Name", str(tmp_path / "old_hot"))
-    
+
     update_data = {"name": "New Name"}
     response = authenticated_client.put(f"/api/v1/paths/{path.id}", json=update_data)
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["name"] == "New Name"
@@ -80,10 +79,10 @@ def test_update_path(authenticated_client: TestClient, monitored_path_factory, t
 def test_delete_path(mock_remove_job, authenticated_client: TestClient, monitored_path_factory, tmp_path):
     """Test deleting a monitored path."""
     path = monitored_path_factory("To Be Deleted", str(tmp_path / "delete_me"))
-    
+
     response = authenticated_client.delete(f"/api/v1/paths/{path.id}")
     assert response.status_code == 200
-    
+
     # Verify it's gone
     response = authenticated_client.get(f"/api/v1/paths/{path.id}")
     assert response.status_code == 404
@@ -93,9 +92,9 @@ def test_delete_path(mock_remove_job, authenticated_client: TestClient, monitore
 def test_trigger_scan(mock_trigger_scan, authenticated_client: TestClient, monitored_path_factory, tmp_path):
     """Test triggering a scan for a path."""
     path = monitored_path_factory("Scan Me", str(tmp_path / "scan_hot"))
-    
+
     response = authenticated_client.post(f"/api/v1/paths/{path.id}/scan")
-    
+
     assert response.status_code == 202
     assert "Scan triggered" in response.json()["message"]
     mock_trigger_scan.assert_called_once_with(path.id)
@@ -150,7 +149,7 @@ def test_get_hot_storage_stats(mock_disk_usage, authenticated_client: TestClient
 def test_create_path_duplicate_name(authenticated_client: TestClient, monitored_path_factory, storage_location, tmp_path):
     """Test creating a path with a duplicate name."""
     monitored_path_factory("Existing Path", str(tmp_path / "hot1"))
-    
+
     payload = {
         "name": "Existing Path",
         "source_path": str(tmp_path / "hot2"),
@@ -159,7 +158,7 @@ def test_create_path_duplicate_name(authenticated_client: TestClient, monitored_
     }
     # Create hot2
     Path(payload["source_path"]).mkdir()
-    
+
     response = authenticated_client.post("/api/v1/paths", json=payload)
     assert response.status_code == 400
     assert "already exists" in response.json()["detail"].lower()
@@ -167,11 +166,11 @@ def test_create_path_duplicate_name(authenticated_client: TestClient, monitored_
 def test_delete_path_undo_operations(authenticated_client: TestClient, db_session, monitored_path_factory, tmp_path, monkeypatch):
     """Test deleting a path with undo_operations=True."""
     path = monitored_path_factory("Undo Path", str(tmp_path / "hot_undo"))
-    
+
     from app.services.path_reverser import PathReverser
     mock_reverse = MagicMock(return_value={"files_reversed": 1, "errors": []})
     monkeypatch.setattr(PathReverser, "reverse_path_operations", mock_reverse)
-    
+
     response = authenticated_client.delete(f"/api/v1/paths/{path.id}?undo_operations=true")
     assert response.status_code == 200
     assert response.json()["files_reversed"] == 1
@@ -181,7 +180,7 @@ def test_validate_path_access_not_dir(authenticated_client: TestClient, storage_
     """Test path validation when source is a file, not a directory."""
     not_a_dir = tmp_path / "not_a_dir.txt"
     not_a_dir.write_text("file content")
-    
+
     payload = {
         "name": "File Path",
         "source_path": str(not_a_dir),
@@ -197,7 +196,7 @@ def test_update_path_success(authenticated_client: TestClient, monitored_path_fa
     path = monitored_path_factory("Original Name", str(tmp_path / "orig_hot"))
     new_hot = tmp_path / "new_hot_upd"
     new_hot.mkdir()
-    
+
     payload = {
         "name": "Updated Path Name",
         "source_path": str(new_hot),
@@ -216,13 +215,13 @@ def test_update_path_success(authenticated_client: TestClient, monitored_path_fa
 def test_update_path_storage_locations(authenticated_client: TestClient, monitored_path_factory, db_session, tmp_path, storage_location):
     """Test updating storage locations for a path."""
     path = monitored_path_factory("Multi Loc Path", str(tmp_path / "multi_hot"))
-    
+
     # Create another storage location
     new_loc = ColdStorageLocation(name="Secondary Storage", path=str(tmp_path / "secondary"))
     Path(new_loc.path).mkdir()
     db_session.add(new_loc)
     db_session.commit()
-    
+
     payload = {
         "storage_location_ids": [storage_location.id, new_loc.id]
     }
@@ -235,7 +234,7 @@ def test_validate_path_access_not_writable(authenticated_client: TestClient, sto
     """Test path validation when directory is not writable."""
     read_only_dir = tmp_path / "read_only"
     read_only_dir.mkdir()
-    
+
     # Mock os.access to return False for W_OK
     import os
     original_access = os.access
@@ -243,9 +242,9 @@ def test_validate_path_access_not_writable(authenticated_client: TestClient, sto
         if mode == os.W_OK and str(path) == str(read_only_dir):
             return False
         return original_access(path, mode)
-    
+
     monkeypatch.setattr(os, "access", mock_access)
-    
+
     payload = {
         "name": "Read Only Path",
         "source_path": str(read_only_dir),
@@ -260,16 +259,16 @@ def test_validate_path_access_not_readable(authenticated_client: TestClient, sto
     """Test path validation when directory is not readable."""
     not_readable_dir = tmp_path / "not_readable"
     not_readable_dir.mkdir()
-    
+
     import os
     original_access = os.access
     def mock_access(path, mode):
         if mode == os.R_OK and str(path) == str(not_readable_dir):
             return False
         return original_access(path, mode)
-    
+
     monkeypatch.setattr(os, "access", mock_access)
-    
+
     payload = {
         "name": "Not Readable Path",
         "source_path": str(not_readable_dir),
@@ -284,16 +283,16 @@ def test_validate_path_access_not_executable(authenticated_client: TestClient, s
     """Test path validation when directory is not executable."""
     not_exec_dir = tmp_path / "not_exec"
     not_exec_dir.mkdir()
-    
+
     import os
     original_access = os.access
     def mock_access(path, mode):
         if mode == os.X_OK and str(path) == str(not_exec_dir):
             return False
         return original_access(path, mode)
-    
+
     monkeypatch.setattr(os, "access", mock_access)
-    
+
     payload = {
         "name": "Not Exec Path",
         "source_path": str(not_exec_dir),

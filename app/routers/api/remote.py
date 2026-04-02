@@ -326,7 +326,8 @@ async def fetch_remote_identity(
     try:
         return await remote_connection_service.get_remote_identity(data.url)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Failed to fetch remote identity")
+        raise HTTPException(status_code=400, detail="Failed to fetch remote identity") from e
 
 
 @router.post("/connect", response_model=RemoteConnectionSchema, tags=["Remote Connections"])
@@ -360,7 +361,8 @@ async def connect_with_code(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Failed to connect to remote instance")
+        raise HTTPException(status_code=400, detail="Failed to connect to remote instance") from e
     except Exception as e:
         logger.exception("Unexpected error connecting to remote instance")
         raise HTTPException(
@@ -381,7 +383,8 @@ async def create_connection(
     try:
         return await remote_connection_service.initiate_connection(db, name, remote_identity)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Failed to establish trusted connection")
+        raise HTTPException(status_code=400, detail="Failed to establish trusted connection") from e
 
 
 @router.post(
@@ -398,7 +401,8 @@ async def handle_connection_request(
             db, request_data.model_dump(exclude_unset=True)
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Failed to handle incoming connection request")
+        raise HTTPException(status_code=400, detail="Failed to handle incoming connection request") from e
 
 
 @router.get(
@@ -424,7 +428,8 @@ async def delete_connection(
     try:
         await remote_connection_service.delete_connection(db, connection_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Failed to delete remote connection")
+        raise HTTPException(status_code=400, detail="Failed to delete remote connection") from e
     return {"status": "success"}
 
 
@@ -443,7 +448,8 @@ def trust_connection(
     try:
         return remote_connection_service.trust_connection(db, connection_id)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        logger.exception("Connection not found or could not be trusted")
+        raise HTTPException(status_code=404, detail="Connection not found or could not be trusted") from e
 
 
 @router.post(
@@ -461,7 +467,8 @@ def reject_connection(
     try:
         return remote_connection_service.reject_connection(db, connection_id)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+        logger.exception("Connection not found or could not be rejected")
+        raise HTTPException(status_code=404, detail="Connection not found or could not be rejected") from e
 
 
 @router.patch(
@@ -569,8 +576,8 @@ async def migrate_file(
         logger.info(f"Transfer job {job.id} created successfully")
         return job
     except ValueError as e:
-        logger.error(f"Failed to create transfer job: {e}")
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Failed to create transfer job")
+        raise HTTPException(status_code=400, detail="Failed to create transfer job") from e
 
 
 @router.post("/migrate/bulk", response_model=BulkActionResponse, tags=["Remote Connections"])
@@ -862,8 +869,8 @@ async def receive_chunk(
                 disk_space_validator.validate_disk_space_direct(file_size, Path(base_dir))
                 logger.debug(f"Disk space validated for {file_size} bytes at {base_dir}")
             except ValueError as e:
-                logger.error(f"Insufficient disk space for job {headers.job_id}: {e}")
-                raise HTTPException(status_code=507, detail=str(e)) from None
+                logger.exception(f"Insufficient disk space for job {headers.job_id}")
+                raise HTTPException(status_code=507, detail="Insufficient disk space on the receiving instance") from None
 
     await anyio.to_thread.run_sync(lambda: tmp_path.parent.mkdir(parents=True, exist_ok=True))
     logger.debug(f"Created parent directory for chunk {headers.chunk_index}")
@@ -1116,7 +1123,8 @@ async def serve_transfer_request(
             strategy=strategy,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        logger.exception("Failed to accept pull request")
+        raise HTTPException(status_code=400, detail="Failed to accept pull request") from e
 
     # Queue the transfer to run in background
     background_tasks.add_task(remote_transfer_service.run_transfer, job.id)
@@ -1205,13 +1213,13 @@ async def browse_remote_instance_files(
             logger.error("Remote returned error browsing files: %s", e.response.text)
             raise HTTPException(
                 status_code=e.response.status_code,
-                detail=f"Remote error: {e.response.text}",
+                detail="Remote instance returned an error while browsing files",
             ) from e
         except Exception as e:
             logger.exception("Failed to browse files on remote instance")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to browse remote files: {e}",
+                detail="Failed to browse files on remote instance",
             ) from e
 
 
@@ -1269,11 +1277,11 @@ async def pull_file(
             logger.error("Remote returned error for pull request: %s", e.response.text)
             raise HTTPException(
                 status_code=e.response.status_code,
-                detail=f"Remote error: {e.response.text}",
+                detail="Remote instance returned an error for pull request",
             ) from e
         except Exception as e:
             logger.exception("Failed to initiate pull transfer")
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to request file from remote: {e}",
+                detail="Failed to request file from remote instance",
             ) from e

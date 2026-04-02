@@ -1,10 +1,7 @@
-import os
-import shutil
-from pathlib import Path
 
 import pytest
 
-from app.models import FileRecord, FileInventory, FileStatus, OperationType, StorageType, PinnedFile
+from app.models import FileRecord, FileStatus, OperationType, PinnedFile, StorageType
 from app.services.file_thawer import FileThawer
 
 
@@ -15,14 +12,14 @@ class TestFileThawer:
         hot_dir = tmp_path / "hot"
         hot_dir.mkdir(parents=True, exist_ok=True)
         hot_file = hot_dir / "test.txt"
-        
+
         cold_dir = tmp_path / "cold"
         cold_dir.mkdir(parents=True, exist_ok=True)
         cold_file = cold_dir / "test.txt"
         cold_file.write_text("content")
-        
+
         inv = file_inventory_factory(path=str(cold_file), storage_type=StorageType.COLD)
-        
+
         record = FileRecord(
             path_id=inv.path_id,
             original_path=str(hot_file),
@@ -32,14 +29,14 @@ class TestFileThawer:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         success, error = FileThawer.thaw_file(record, db=db_session)
-        
+
         assert success is True, f"Thaw failed: {error}"
         assert not cold_file.exists()
         assert hot_file.exists()
         assert hot_file.read_text() == "content"
-        
+
         db_session.refresh(inv)
         assert inv.storage_type == StorageType.HOT
         assert inv.file_path == str(hot_file)
@@ -51,19 +48,19 @@ class TestFileThawer:
         hot_dir = tmp_path / "hot"
         hot_dir.mkdir(parents=True, exist_ok=True)
         hot_file = hot_dir / "test.txt"
-        
+
         cold_dir = tmp_path / "cold"
         cold_dir.mkdir(parents=True, exist_ok=True)
         cold_file = cold_dir / "test.txt.ffenc"
-        
+
         # Actually encrypt it
         from app.services.encryption_service import file_encryption_service
         temp_src = tmp_path / "temp_src"
         temp_src.write_text("encrypted content")
         file_encryption_service.encrypt_file(db_session, temp_src, cold_file)
-        
+
         inv = file_inventory_factory(path=str(cold_file), storage_type=StorageType.COLD, is_encrypted=True)
-        
+
         record = FileRecord(
             path_id=inv.path_id,
             original_path=str(hot_file),
@@ -73,14 +70,14 @@ class TestFileThawer:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         success, error = FileThawer.thaw_file(record, db=db_session)
-        
+
         assert success is True, f"Thaw failed: {error}"
         assert not cold_file.exists()
         assert hot_file.exists()
         assert hot_file.read_text() == "encrypted content"
-        
+
         db_session.refresh(inv)
         assert inv.is_encrypted is False
         assert inv.storage_type == StorageType.HOT
@@ -91,12 +88,12 @@ class TestFileThawer:
         hot_dir.mkdir(parents=True, exist_ok=True)
         hot_file = hot_dir / "test.txt"
         hot_file.write_text("content") # Still exists for COPY
-        
+
         cold_dir = tmp_path / "cold"
         cold_dir.mkdir(parents=True, exist_ok=True)
         cold_file = cold_dir / "test.txt"
         cold_file.write_text("content")
-        
+
         inv = file_inventory_factory(path=str(cold_file), storage_type=StorageType.COLD)
         record = FileRecord(
             path_id=inv.path_id,
@@ -107,9 +104,9 @@ class TestFileThawer:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         success, error = FileThawer.thaw_file(record, db=db_session)
-        
+
         assert success is True, f"Thaw failed: {error}"
         assert not cold_file.exists()
         assert hot_file.exists()
@@ -120,12 +117,12 @@ class TestFileThawer:
         cold_dir.mkdir(parents=True, exist_ok=True)
         cold_file = cold_dir / "test.txt"
         cold_file.write_text("content")
-        
+
         hot_dir = tmp_path / "hot"
         hot_dir.mkdir(parents=True, exist_ok=True)
         hot_file = hot_dir / "test.txt"
         hot_file.symlink_to(cold_file)
-        
+
         inv = file_inventory_factory(path=str(hot_file), storage_type=StorageType.COLD)
         record = FileRecord(
             path_id=inv.path_id,
@@ -136,9 +133,9 @@ class TestFileThawer:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         success, error = FileThawer.thaw_file(record, db=db_session)
-        
+
         assert success is True, f"Thaw failed: {error}"
         assert not cold_file.exists()
         assert hot_file.exists()
@@ -149,7 +146,7 @@ class TestFileThawer:
         cold_file = tmp_path / "cold.txt"
         cold_file.write_text("content")
         hot_file = tmp_path / "hot.txt"
-        
+
         inv = file_inventory_factory(path=str(cold_file), storage_type=StorageType.COLD)
         record = FileRecord(
             path_id=inv.path_id,
@@ -160,9 +157,9 @@ class TestFileThawer:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         success, error = FileThawer.thaw_file(record, pin=True, db=db_session)
-        
+
         assert success is True, f"Thaw failed: {error}"
         pin = db_session.query(PinnedFile).filter(PinnedFile.file_path == str(hot_file)).first()
         assert pin is not None
@@ -178,8 +175,8 @@ class TestFileThawer:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         success, error = FileThawer.thaw_file(record, db=db_session)
-        
+
         assert success is False
         assert "not found" in error.lower()

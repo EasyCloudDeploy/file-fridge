@@ -1,20 +1,17 @@
-import time
 from concurrent.futures import Future
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
+
 from app.models import (
-    MonitoredPath,
-    Criteria,
-    CriterionType,
-    Operator,
+    ColdStorageLocation,
     FileInventory,
     FileStatus,
-    StorageType,
+    MonitoredPath,
     ScanStatus,
-    ColdStorageLocation,
+    StorageType,
 )
 from app.services.file_workflow_service import FileWorkflowService
 

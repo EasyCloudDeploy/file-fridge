@@ -1,7 +1,8 @@
-import pytest
 from datetime import datetime, timezone
 
-from app.models import FileRecord, FileInventory, StorageType, OperationType, MonitoredPath
+import pytest
+
+from app.models import FileRecord, OperationType
 
 
 @pytest.mark.unit
@@ -20,7 +21,7 @@ class TestStatsRouter:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         response = authenticated_client.get("/api/v1/stats")
         assert response.status_code == 200
         data = response.json()
@@ -41,7 +42,7 @@ class TestStatsRouter:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         response = authenticated_client.get("/api/v1/stats/detailed")
         assert response.status_code == 200
         data = response.json()
@@ -63,7 +64,7 @@ class TestStatsRouter:
         # Mock the service
         from app.services.stats_cleanup import stats_cleanup_service
         monkeypatch.setattr(stats_cleanup_service, "cleanup_old_records", lambda db: {"deleted": 5})
-        
+
         response = authenticated_client.post("/api/v1/stats/cleanup")
         assert response.status_code == 200
         assert response.json()["deleted"] == 5

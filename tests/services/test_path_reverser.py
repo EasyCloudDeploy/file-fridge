@@ -1,6 +1,4 @@
-import os
 import shutil
-from pathlib import Path
 
 import pytest
 
@@ -14,10 +12,10 @@ class TestPathReverser:
         """Test reversing a MOVE operation."""
         hot_file = tmp_path / "hot" / "file.txt"
         cold_file = tmp_path / "cold" / "file.txt"
-        
+
         cold_file.parent.mkdir(parents=True, exist_ok=True)
         cold_file.write_text("content")
-        
+
         record = FileRecord(
             path_id=1,
             original_path=str(hot_file),
@@ -27,9 +25,9 @@ class TestPathReverser:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         results = PathReverser.reverse_path_operations(1, db_session)
-        
+
         assert results["files_reversed"] == 1
         assert not cold_file.exists()
         assert hot_file.exists()
@@ -40,10 +38,10 @@ class TestPathReverser:
         """Test reversing a COPY operation when original is missing (moves it back)."""
         hot_file = tmp_path / "hot" / "file.txt"
         cold_file = tmp_path / "cold" / "file.txt"
-        
+
         cold_file.parent.mkdir(parents=True, exist_ok=True)
         cold_file.write_text("content")
-        
+
         record = FileRecord(
             path_id=1,
             original_path=str(hot_file),
@@ -53,9 +51,9 @@ class TestPathReverser:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         results = PathReverser.reverse_path_operations(1, db_session)
-        
+
         assert results["files_reversed"] == 1
         assert not cold_file.exists()
         assert hot_file.exists()
@@ -65,12 +63,12 @@ class TestPathReverser:
         """Test reversing a COPY operation when original exists (unlinks cold copy)."""
         hot_file = tmp_path / "hot" / "file.txt"
         cold_file = tmp_path / "cold" / "file.txt"
-        
+
         hot_file.parent.mkdir(parents=True, exist_ok=True)
         hot_file.write_text("content")
         cold_file.parent.mkdir(parents=True, exist_ok=True)
         cold_file.write_text("content")
-        
+
         record = FileRecord(
             path_id=1,
             original_path=str(hot_file),
@@ -80,9 +78,9 @@ class TestPathReverser:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         results = PathReverser.reverse_path_operations(1, db_session)
-        
+
         assert results["files_reversed"] == 1
         assert not cold_file.exists()
         assert hot_file.exists()
@@ -91,13 +89,13 @@ class TestPathReverser:
         """Test reversing a SYMLINK operation."""
         hot_file = tmp_path / "hot" / "file.txt"
         cold_file = tmp_path / "cold" / "file.txt"
-        
+
         hot_file.parent.mkdir(parents=True, exist_ok=True)
         cold_file.parent.mkdir(parents=True, exist_ok=True)
         cold_file.write_text("content")
         # In some environments, symlink might need special care, but standard Path works
         hot_file.symlink_to(cold_file)
-        
+
         record = FileRecord(
             path_id=1,
             original_path=str(hot_file),
@@ -107,9 +105,9 @@ class TestPathReverser:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         results = PathReverser.reverse_path_operations(1, db_session)
-        
+
         assert results["files_reversed"] == 1
         assert not cold_file.exists()
         assert hot_file.exists()
@@ -126,9 +124,9 @@ class TestPathReverser:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         results = PathReverser.reverse_path_operations(1, db_session)
-        
+
         assert results["files_reversed"] == 0
         assert len(results["errors"]) == 1
         assert "not found" in results["errors"][0].lower()
@@ -137,7 +135,7 @@ class TestPathReverser:
         """Test error handling for unknown operation type."""
         cold_file = tmp_path / "cold_unknown"
         cold_file.write_text("content")
-        
+
         record = FileRecord(
             path_id=1,
             original_path="/tmp/unknown",
@@ -147,9 +145,9 @@ class TestPathReverser:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         results = PathReverser.reverse_path_operations(1, db_session)
-        
+
         assert results["files_reversed"] == 0
         assert len(results["errors"]) == 1
         assert "not among the defined enum values" in results["errors"][0].lower()
@@ -158,10 +156,10 @@ class TestPathReverser:
         """Test handling of move failure during reversal."""
         hot_file = tmp_path / "hot_fail" / "file.txt"
         cold_file = tmp_path / "cold_fail" / "file.txt"
-        
+
         cold_file.parent.mkdir(parents=True, exist_ok=True)
         cold_file.write_text("content")
-        
+
         record = FileRecord(
             path_id=1,
             original_path=str(hot_file),
@@ -171,15 +169,14 @@ class TestPathReverser:
         )
         db_session.add(record)
         db_session.commit()
-        
+
         def mock_move(src, dst):
             raise OSError("Disk full")
-            
-        import shutil
+
         monkeypatch.setattr(shutil, "move", mock_move)
-        
+
         results = PathReverser.reverse_path_operations(1, db_session)
-        
+
         assert results["files_reversed"] == 0
         assert len(results["errors"]) == 1
         assert "disk full" in results["errors"][0].lower()

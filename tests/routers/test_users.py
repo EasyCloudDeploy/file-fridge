@@ -35,7 +35,7 @@ class TestUsersRouter:
         db_session.add(user)
         db_session.commit()
         user_id = user.id
-        
+
         payload = ["viewer", "editor"]
         response = authenticated_client.put(f"/api/v1/users/{user_id}/roles", json=payload)
         assert response.status_code == 200
@@ -51,7 +51,7 @@ class TestUsersRouter:
         # Get the current user ID (authtestuser)
         user = db_session.query(User).filter_by(username="authtestuser").first()
         user_id = user.id
-        
+
         response = authenticated_client.put(f"/api/v1/users/{user_id}/roles", json=["viewer"])
         assert response.status_code == 400
         assert "cannot remove admin role from yourself" in response.json()["detail"].lower()
@@ -62,7 +62,7 @@ class TestUsersRouter:
         db_session.add(user)
         db_session.commit()
         user_id = user.id
-        
+
         response = authenticated_client.delete(f"/api/v1/users/{user_id}")
         assert response.status_code == 204
         assert db_session.get(User, user_id) is None
@@ -71,7 +71,7 @@ class TestUsersRouter:
         """Test that a user cannot delete themselves."""
         user = db_session.query(User).filter_by(username="authtestuser").first()
         user_id = user.id
-        
+
         response = authenticated_client.delete(f"/api/v1/users/{user_id}")
         assert response.status_code == 400
         assert "cannot delete yourself" in response.json()["detail"].lower()

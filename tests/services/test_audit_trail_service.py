@@ -1,8 +1,8 @@
-import pytest
 from pathlib import Path
-from datetime import datetime, timezone
 
-from app.models import FileTransactionHistory, TransactionType, FileStatus, StorageType
+import pytest
+
+from app.models import FileStatus, StorageType, TransactionType
 from app.services.audit_trail_service import audit_trail_service
 
 
@@ -11,15 +11,15 @@ class TestAuditTrailService:
     def test_log_transaction_success(self, db_session, file_inventory_factory):
         """Test logging a generic file transaction."""
         inv = file_inventory_factory(path="/tmp/tx.txt")
-        
+
         tx = audit_trail_service.log_transaction(
-            db_session, 
-            file=inv, 
+            db_session,
+            file=inv,
             transaction_type=TransactionType.FREEZE,
             initiated_by="test_user",
             operation_metadata={"key": "value"}
         )
-        
+
         assert tx.id is not None
         assert tx.file_id == inv.id
         assert tx.transaction_type == TransactionType.FREEZE
@@ -31,11 +31,11 @@ class TestAuditTrailService:
         inv = file_inventory_factory(path="/tmp/hot/f.txt")
         src = Path("/tmp/hot/f.txt")
         dst = Path("/tmp/cold/f.txt")
-        
+
         tx = audit_trail_service.log_freeze_operation(
             db_session, inv, src, dst, storage_location_id=5
         )
-        
+
         assert tx.transaction_type == TransactionType.FREEZE
         assert tx.old_path == str(src)
         assert tx.new_path == str(dst)
@@ -46,11 +46,11 @@ class TestAuditTrailService:
         inv = file_inventory_factory(path="/tmp/cold/f.txt", storage_type=StorageType.COLD)
         src = Path("/tmp/cold/f.txt")
         dst = Path("/tmp/hot/f.txt")
-        
+
         tx = audit_trail_service.log_thaw_operation(
             db_session, inv, src, dst
         )
-        
+
         assert tx.transaction_type == TransactionType.THAW
         assert tx.old_storage_type == StorageType.COLD
         assert tx.new_storage_type == StorageType.HOT
@@ -82,7 +82,7 @@ class TestAuditTrailService:
         import time
         time.sleep(1.1)
         audit_trail_service.log_transaction(db_session, inv, TransactionType.THAW)
-        
+
         history = audit_trail_service.get_file_history(db_session, inv.id)
         assert len(history) == 2
         # Ordered by newest first
@@ -95,7 +95,7 @@ class TestAuditTrailService:
         audit_trail_service.log_transaction(db_session, inv, TransactionType.FREEZE, success=True)
         # Failure
         audit_trail_service.log_transaction(db_session, inv, TransactionType.FREEZE, success=False, error_message="Disk full")
-        
+
         failed = audit_trail_service.get_failed_transactions(db_session)
         assert len(failed) == 1
         assert failed[0].error_message == "Disk full"

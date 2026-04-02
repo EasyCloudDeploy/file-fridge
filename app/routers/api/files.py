@@ -453,9 +453,11 @@ def move_file(
         source = Path(request.source_path).resolve()
         destination = Path(request.destination_path).resolve()
     except (OSError, ValueError) as e:
+        logger.error(f"Invalid path requested: {e!s}")
+        msg = "Invalid path provided"
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid path: {e!s}",
+            detail=msg,
         ) from e
 
     # Security check: verify source and destination permissions
@@ -521,9 +523,11 @@ def browse_files(
             # Resolve the path to handle any '..' or symlinks
             resolved_path = Path(directory).resolve()
         except (OSError, ValueError) as e:
+            logger.error(f"Invalid directory path requested: {e!s}")
+            msg = "Invalid directory path"
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid directory path: {e!s}"
-            )
+                status_code=status.HTTP_400_BAD_REQUEST, detail=msg
+            ) from e
 
         # SECURITY: Validate that the requested path is within a configured monitored path or storage location
         monitored_paths = db.query(MonitoredPath.source_path).all()
@@ -588,9 +592,11 @@ def browse_files(
     except HTTPException:
         raise
     except Exception as e:
+        logger.exception("Error browsing directory")
+        msg = "An error occurred while browsing directory"
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {e!s}",
+            detail=msg,
         ) from e
 
 
@@ -853,7 +859,9 @@ def relocate_file(inventory_id: int, request: FileRelocateRequest, db: Session =
     except ValueError as e:
         inventory_entry.status = FileStatus.ACTIVE
         db.commit()
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+        logger.error(f"Failed to create relocation task: {e}")
+        msg = "Failed to create relocation task due to a conflict"
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=msg) from e
 
     return {
         "message": "Relocation task created",
