@@ -153,11 +153,12 @@ def _copy_with_progress(
     """Copy file with optional progress tracking and timestamp preservation."""
     stat_info = source.stat()
     file_size = stat_info.st_size
-    should_report_progress = progress_callback and file_size > (PROGRESS_THRESHOLD_MB * 1024 * 1024)
+    should_report_progress = progress_callback is not None
 
     if should_report_progress:
         bytes_transferred = 0
         last_report = 0
+        progress_callback(0)
 
         with open(source, "rb") as fsrc, open(destination, "wb") as fdst:
             while True:

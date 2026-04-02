@@ -972,6 +972,7 @@ class FreezingFileSchema(BaseModel):
     transfer_rate_bytes_per_sec: int = 0
     eta_seconds: Optional[int] = None
     percent_complete: int = 0
+    error_message: Optional[str] = None
 
 
 class RemoteTransferJob(RemoteTransferJobBase):

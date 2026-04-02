@@ -38,12 +38,31 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
         .all()
     }
 
+    current_operations = scan_progress_manager.get_all_current_operations()
+    failed_operations = scan_progress_manager.get_all_failed_operations()
+
+    # We need to get files currently migrating in the db
     migrating_files = (
         db.query(FileInventory).filter(FileInventory.status == FileStatus.MIGRATING).all()
     )
 
+    # We also need to get files that failed during the current scan,
+    # even if their DB status was rolled back to ACTIVE.
+    # To do this, we extract their paths from failed_operations.
+    failed_file_paths = {op.get("file_path") for op in failed_operations if op.get("file_path")}
+    failed_inventory_files = []
+    if failed_file_paths:
+        failed_inventory_files = (
+            db.query(FileInventory)
+            .filter(FileInventory.file_path.in_(failed_file_paths))
+            .filter(FileInventory.status != FileStatus.MIGRATING) # Avoid duplicates
+            .all()
+        )
+
+    all_files = migrating_files + failed_inventory_files
+
     # Filter to only freeze/thaw files (not covered by a RelocationTask)
-    freeze_thaw_files = [f for f in migrating_files if f.id not in active_relocation_ids]
+    freeze_thaw_files = [f for f in all_files if f.id not in active_relocation_ids]
 
     path_ids = {f.path_id for f in freeze_thaw_files}
     monitored_paths: dict[int, MonitoredPath] = {}
@@ -69,9 +88,15 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
         }
 
     result = []
+
     operation_lookup = {
         (op["path_id"], op.get("file_path"), op["operation"]): op
-        for op in scan_progress_manager.get_all_current_operations()
+        for op in current_operations
+    }
+
+    failed_lookup = {
+        (op["path_id"], op.get("file_path"), op["operation"]): op
+        for op in failed_operations
     }
 
     for f in freeze_thaw_files:
@@ -100,6 +125,16 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
                 except Exception:
                     destination_path = None
 
+        error_message = None
+        failed_op = failed_lookup.get(operation_key)
+        if failed_op:
+            error_message = failed_op.get("error_message")
+
+        # The file might not be in 'operation_progress' anymore if it failed,
+        # but it will be in 'failed_lookup'. We still return it since its status
+        # is MIGRATING (until it's rolled back in db, or if it got stuck).
+        # We'll use the progress info if available, otherwise default to 0.
+
         result.append(
             FreezingFileSchema(
                 inventory_id=f.id,
@@ -114,6 +149,7 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
                 transfer_rate_bytes_per_sec=operation_progress.get("current_speed", 0),
                 eta_seconds=operation_progress.get("eta"),
                 percent_complete=operation_progress.get("percent", 0),
+                error_message=error_message,
             )
         )
 

@@ -35,6 +35,18 @@ class FileOperation:
 
 
 @dataclass
+class FileOperationError:
+    """Represents a failed file operation with its error message."""
+
+    operation_id: str
+    file_name: str
+    operation: str
+    file_path: Optional[str]
+    destination_path: Optional[str]
+    error_message: str
+
+
+@dataclass
 class ScanProgress:
     """Represents the progress of a scan operation."""
 
@@ -49,6 +61,7 @@ class ScanProgress:
     files_moved_to_hot: int = 0
     files_skipped: int = 0
     current_operations: List[FileOperation] = field(default_factory=list)
+    failed_operations: List[FileOperationError] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     stop_requested: bool = False
 
@@ -71,6 +84,7 @@ class ScanProgress:
             }
             for op in self.current_operations
         ]
+        data["failed_operations"] = [asdict(err) for err in self.failed_operations]
         # Add progress summary
         data["progress"] = {
             "total_files": self.total_files,
@@ -272,6 +286,28 @@ class ScanProgressManager:
                     )
             return operations
 
+    def get_all_failed_operations(self) -> List[dict]:
+        """Return all failed file operations across active scans."""
+        with self._lock:
+            failed_operations = []
+            for progress in self._scans.values():
+                if progress.status != "running":
+                    continue
+                for err in progress.failed_operations:
+                    failed_operations.append(
+                        {
+                            "scan_id": progress.scan_id,
+                            "path_id": progress.path_id,
+                            "operation_id": err.operation_id,
+                            "file_name": err.file_name,
+                            "file_path": err.file_path,
+                            "destination_path": err.destination_path,
+                            "operation": err.operation,
+                            "error_message": err.error_message,
+                        }
+                    )
+            return failed_operations
+
     def update_file_progress(self, path_id: int, operation_id: str, bytes_transferred: int):
         """
         Update progress for a file operation.
@@ -337,6 +373,12 @@ class ScanProgressManager:
                 "Unknown file",
             )
 
+            # Find the operation before removing
+            file_op = next(
+                (op for op in progress.current_operations if op.operation_id == operation_id),
+                None
+            )
+
             # Remove from current operations
             progress.current_operations = [
                 op for op in progress.current_operations if op.operation_id != operation_id
@@ -354,6 +396,17 @@ class ScanProgressManager:
                     progress.files_skipped += 1
             elif error:
                 progress.errors.append(f"{file_name}: {error}")
+                if file_op:
+                    progress.failed_operations.append(
+                        FileOperationError(
+                            operation_id=file_op.operation_id,
+                            file_name=file_op.file_name,
+                            operation=file_op.operation,
+                            file_path=file_op.file_path,
+                            destination_path=file_op.destination_path,
+                            error_message=error,
+                        )
+                    )
 
     def request_stop(self, path_id: int) -> bool:
         """
