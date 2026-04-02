@@ -20,6 +20,7 @@ class FileOperation:
     operation: str  # "move_to_cold", "move_to_hot", "copy"
     bytes_total: int
     file_path: Optional[str] = None
+    destination_path: Optional[str] = None
     bytes_transferred: int = 0
     start_time: float = 0.0
     current_speed: int = 0  # bytes per second
@@ -61,6 +62,7 @@ class ScanProgress:
                 "file_name": op.file_name,
                 "operation": op.operation,
                 "file_path": op.file_path,
+                "destination_path": op.destination_path,
                 "bytes_total": op.bytes_total,
                 "bytes_transferred": op.bytes_transferred,
                 "percent": op.percent,
@@ -205,6 +207,7 @@ class ScanProgressManager:
         operation: str,
         file_size: int,
         file_path: Optional[str] = None,
+        destination_path: Optional[str] = None,
     ) -> str:
         """
         Start tracking a file operation.
@@ -232,6 +235,7 @@ class ScanProgressManager:
                 file_name=file_name,
                 operation=operation,
                 file_path=file_path,
+                destination_path=destination_path,
                 bytes_total=file_size,
                 bytes_transferred=0,
                 start_time=time.time(),
@@ -257,6 +261,7 @@ class ScanProgressManager:
                             "operation_id": op.operation_id,
                             "file_name": op.file_name,
                             "file_path": op.file_path,
+                            "destination_path": op.destination_path,
                             "operation": op.operation,
                             "bytes_total": op.bytes_total,
                             "bytes_transferred": op.bytes_transferred,

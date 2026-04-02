@@ -41,6 +41,7 @@ from app.services.browser_service import check_path_permission
 from app.services.file_freezer import FileFreezer
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
+from app.services.scan_progress import scan_progress_manager
 from app.utils.db_utils import escape_like_string
 
 router = APIRouter(prefix="/api/v1/files", tags=["files"])
@@ -65,13 +66,27 @@ def _get_storage_location_for_file(file_path: str, monitored_path: MonitoredPath
 
 
 def _serialize_file(
-    file: FileInventory, paths_map: dict, pinned_paths_set: Optional[set] = None
+    file: FileInventory,
+    paths_map: dict,
+    pinned_paths_set: Optional[set] = None,
+    operation_lookup: Optional[dict] = None,
 ) -> dict:
     """Serialize a FileInventory object to a dictionary for JSON output."""
+    operation_lookup = operation_lookup or {}
+    operation_key = None
+    if file.status == FileStatus.MIGRATING:
+        if file.storage_type == StorageType.HOT:
+            operation_key = (file.path_id, file.file_path, "move_to_cold")
+        elif file.storage_type == StorageType.COLD:
+            operation_key = (file.path_id, file.file_path, "move_to_hot")
+
+    operation = operation_lookup.get(operation_key, {}) if operation_key else {}
+
     file_dict = {
         "id": file.id,
         "path_id": file.path_id,
         "file_path": file.file_path,
+        "destination_path": operation.get("destination_path"),
         "storage_type": (
             file.storage_type.value if hasattr(file.storage_type, "value") else file.storage_type
         ),
@@ -352,6 +367,11 @@ def list_files(
             pinned_files = db.query(PinnedFile.file_path).all()
             pinned_paths_set = {p.file_path for p in pinned_files}
 
+            operation_lookup = {
+                (op["path_id"], op.get("file_path"), op["operation"]): op
+                for op in scan_progress_manager.get_all_current_operations()
+            }
+
             # Collect results to check for has_more and generate cursor
             files_list = list(query.all())
             has_more = len(files_list) > page_size
@@ -411,7 +431,7 @@ def list_files(
             # Stream files from the collected list
             for file in files_list:
                 try:
-                    file_dict = _serialize_file(file, paths_map, pinned_paths_set)
+                    file_dict = _serialize_file(file, paths_map, pinned_paths_set, operation_lookup)
                     yield json.dumps({"type": "file", "data": file_dict}) + "\n"
                     count += 1
                 except Exception as e:

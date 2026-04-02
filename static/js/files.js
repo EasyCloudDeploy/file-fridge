@@ -65,6 +65,20 @@ function filePathCellRenderer(params) {
     return `<code class="file-path-cell">${escapeHtml(params.value)}</code>`;
 }
 
+function destinationPathCellRenderer(params) {
+    const file = params.data;
+    if (!file || !file.destination_path) {
+        return '<span class="text-muted">-</span>';
+    }
+
+    const safePath = escapeHtml(file.destination_path);
+    return `
+        <div class="text-truncate" style="max-width: 240px;" title="${safePath}">
+            <code class="file-path-cell">${safePath}</code>
+        </div>
+    `;
+}
+
 function storageCellRenderer(params) {
     const storageType = params.value;
     if (storageType === 'hot') {
@@ -215,6 +229,15 @@ const columnDefs = [
         width: 130,
         sortable: false,
         resizable: true
+    },
+    {
+        field: 'destination_path',
+        headerName: 'Destination',
+        cellRenderer: destinationPathCellRenderer,
+        width: 260,
+        sortable: false,
+        resizable: true,
+        tooltipField: 'destination_path'
     },
     {
         field: 'file_size',

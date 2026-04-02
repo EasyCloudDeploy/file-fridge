@@ -1,6 +1,7 @@
 """Service functions for file migration queries."""
 
 import logging
+from pathlib import Path
 from typing import List
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,7 @@ from app.models import (
     ColdStorageLocation,
     FileInventory,
     FileStatus,
+    MonitoredPath,
     RelocationTask,
     RelocationTaskStatus,
     StorageType,
@@ -43,6 +45,14 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
     # Filter to only freeze/thaw files (not covered by a RelocationTask)
     freeze_thaw_files = [f for f in migrating_files if f.id not in active_relocation_ids]
 
+    path_ids = {f.path_id for f in freeze_thaw_files}
+    monitored_paths: dict[int, MonitoredPath] = {}
+    if path_ids:
+        monitored_paths = {
+            path.id: path
+            for path in db.query(MonitoredPath).filter(MonitoredPath.id.in_(path_ids)).all()
+        }
+
     # Resolve cold storage location names in a single query to avoid N+1
     cold_ids = {
         f.cold_storage_location_id
@@ -65,6 +75,7 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
     }
 
     for f in freeze_thaw_files:
+        monitored_path = monitored_paths.get(f.path_id)
         if f.storage_type == StorageType.HOT:
             operation_type = "freeze"
             operation_key = (f.path_id, f.file_path, "move_to_cold")
@@ -78,11 +89,22 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
             target_label = "Hot Storage"
 
         operation_progress = operation_lookup.get(operation_key, {})
+        destination_path = operation_progress.get("destination_path")
+
+        if destination_path is None and f.storage_type == StorageType.COLD and monitored_path:
+            cold_location = cold_locations.get(f.cold_storage_location_id)
+            if cold_location:
+                try:
+                    relative_path = Path(f.file_path).relative_to(Path(cold_location.path))
+                    destination_path = str(Path(monitored_path.source_path) / relative_path)
+                except Exception:
+                    destination_path = None
 
         result.append(
             FreezingFileSchema(
                 inventory_id=f.id,
                 file_path=f.file_path,
+                destination_path=destination_path,
                 operation_type=operation_type,
                 source_label=source_label,
                 target_label=target_label,

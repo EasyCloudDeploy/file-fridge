@@ -589,7 +589,12 @@ class FileWorkflowService:
                 file_name = file_path.name
 
                 operation_id = scan_progress_manager.start_file_operation(
-                    path.id, file_name, "move_to_cold", file_size, file_path=str(file_path)
+                    path.id,
+                    file_name,
+                    "move_to_cold",
+                    file_size,
+                    file_path=str(file_path),
+                    destination_path=str(dest_path),
                 )
 
                 def progress_callback(bytes_transferred: int):
@@ -720,6 +725,7 @@ class FileWorkflowService:
                 "move_to_hot",
                 file_size,
                 file_path=str(cold_storage_path),
+                destination_path=str(symlink_path),
             )
 
             def progress_callback(bytes_transferred: int):
