@@ -182,6 +182,19 @@
         return formatBytes(bytesPerSecond) + '/s';
     }
 
+    function renderDestinationPath(destinationPath) {
+        if (!destinationPath) {
+            return '';
+        }
+
+        const safeDestinationPath = escapeHtml(destinationPath);
+        return `
+            <small class="text-muted d-block text-truncate mt-1" style="max-width: 280px;" title="${safeDestinationPath}">
+                To: ${safeDestinationPath}
+            </small>
+        `;
+    }
+
     function renderProgressCell(percent, transferredBytes, totalBytes, animated = true) {
         const safePercent = Math.max(0, Math.min(100, percent || 0));
         const progressClass = animated
@@ -300,6 +313,7 @@
                         <span class="badge bg-secondary">${safeSource}</span>
                         <i class="bi bi-arrow-right mx-1"></i>
                         <span class="badge bg-info">${safeTarget}</span>
+                        ${renderDestinationPath(f.destination_path)}
                     </td>
                     <td>${formatBytes(f.file_size)}</td>
                     <td style="width: 25%;">${renderProgressCell(progress, transferredBytes, totalBytes)}</td>
@@ -392,6 +406,7 @@
         const completedTasks = tasks.filter(t => t.status !== 'pending' && t.status !== 'running');
         const inProgressFreezeThaw = freezingFiles.map(file => ({
             file_path: file.file_path,
+            destination_path: file.destination_path,
             source_location_name: file.source_label,
             target_location_name: file.target_label,
             bytes_total: file.total_bytes || file.file_size,
@@ -449,6 +464,7 @@
                         <span class="badge bg-secondary">${safeSource}</span>
                         <i class="bi bi-arrow-right mx-1"></i>
                         <span class="badge bg-info">${safeTarget}</span>
+                        ${renderDestinationPath(task.destination_path)}
                     </td>
                     <td>${formatBytes(task.bytes_total)}</td>
                     <td style="width: 25%;">${renderProgressCell(progress, transferredBytes, totalBytes, task.status === 'running_freeze_thaw')}</td>

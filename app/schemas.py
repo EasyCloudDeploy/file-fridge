@@ -962,6 +962,7 @@ class FreezingFileSchema(BaseModel):
 
     inventory_id: int
     file_path: str
+    destination_path: Optional[str] = None
     operation_type: str
     source_label: str
     target_label: str
