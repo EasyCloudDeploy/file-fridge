@@ -172,22 +172,39 @@ def _seed_live_freeze_state(
     inventory.status = FileStatus.MIGRATING
     db_session.commit()
 
-    chunk_size = 4 * 1024 * 1024
-    bytes_transferred = 0
-    with source_file.open("rb") as src_handle, destination_file.open("wb") as dest_handle:
-        while bytes_transferred < pause_bytes:
-            chunk = src_handle.read(min(chunk_size, pause_bytes - bytes_transferred))
-            if not chunk:
-                break
-            dest_handle.write(chunk)
-            bytes_transferred += len(chunk)
+    from app.services.file_mover import FileMover
+    from app.models import OperationType
+
+    def progress_callback(transferred: int) -> None:
+        scan_progress_manager.update_file_progress(
+            monitored_path.id, operation_id, transferred
+        )
+        if transferred >= pause_bytes:
+            raise RuntimeError("Paused for test")
+
+    # Ensure cross-filesystem move behavior by temporarily unlinking the actual file
+    # to force OSError on rename inside _move if necessary, or just force the copy code path.
+    # We will use monkeypatching to ensure `rename` fails and it uses `_copy_with_progress`.
+    original_rename = Path.rename
+    def mock_rename(self, target):
+        raise OSError("Cross-device link")
+    Path.rename = mock_rename
+
+    try:
+        FileMover.move_with_rollback(
+            source_file,
+            destination_file,
+            OperationType.MOVE,
+            verify_checksum=False,
+            progress_callback=progress_callback
+        )
+    except RuntimeError as e:
+        if str(e) != "Paused for test":
+            raise
+    finally:
+        Path.rename = original_rename
 
     time.sleep(0.05)
-    scan_progress_manager.update_file_progress(
-        monitored_path.id,
-        operation_id,
-        bytes_transferred,
-    )
 
     return {
         "monitored_path_id": monitored_path.id,
@@ -254,22 +271,33 @@ def _seed_live_thaw_state(
         destination_path=str(destination_file),
     )
 
-    chunk_size = 4 * 1024 * 1024
-    bytes_transferred = 0
-    with cold_file.open("rb") as src_handle, destination_file.open("wb") as dest_handle:
-        while bytes_transferred < pause_bytes:
-            chunk = src_handle.read(min(chunk_size, pause_bytes - bytes_transferred))
-            if not chunk:
-                break
-            dest_handle.write(chunk)
-            bytes_transferred += len(chunk)
+    from app.services.file_thawer import FileThawer
+
+    def progress_callback(transferred: int) -> None:
+        scan_progress_manager.update_file_progress(
+            monitored_path.id, operation_id, transferred
+        )
+        if transferred >= pause_bytes:
+            raise RuntimeError("Paused for test")
+
+    original_rename = Path.rename
+    def mock_rename(self, target):
+        raise OSError("Cross-device link")
+    Path.rename = mock_rename
+
+    try:
+        FileThawer._move_preserving_timestamps(
+            cold_file,
+            destination_file,
+            progress_callback=progress_callback
+        )
+    except RuntimeError as e:
+        if str(e) != "Paused for test":
+            raise
+    finally:
+        Path.rename = original_rename
 
     time.sleep(0.05)
-    scan_progress_manager.update_file_progress(
-        monitored_path.id,
-        operation_id,
-        bytes_transferred,
-    )
 
     return {
         "monitored_path_id": monitored_path.id,
