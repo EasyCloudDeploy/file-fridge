@@ -1,6 +1,6 @@
 {
   "frontend/entries/app.js": {
-    "file": "assets/app-CNJGWmbQ.js",
+    "file": "assets/app-B97iEOMA.js",
     "name": "app",
     "src": "frontend/entries/app.js",
     "isEntry": true,
@@ -8,7 +8,7 @@
       "static/js/app.js"
     ],
     "css": [
-      "assets/app-Cjq17Jpn.css"
+      "assets/app-B875uNZX.css"
     ],
     "assets": [
       "assets/bootstrap-icons-mSm7cUeB.woff2",
@@ -39,7 +39,7 @@
     "src": "node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff2"
   },
   "static/js/app.js": {
-    "file": "assets/app-Cw7AnFG3.js",
+    "file": "assets/app-CCMYMoBI.js",
     "name": "app",
     "src": "static/js/app.js",
     "isDynamicEntry": true

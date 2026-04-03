@@ -2,6 +2,7 @@
 const STATS_REFRESH_INTERVAL_MS = 2000;
 
 let statsRefreshInterval = null;
+let statsGlobalErrorShown = false;
 let dailyChartInstance = null;
 let storageChartInstance = null;
 let topPathsByFilesChartInstance = null;
@@ -78,6 +79,7 @@ function loadStats() {
             return response.json();
         })
         .then(stats => {
+            statsGlobalErrorShown = false;
             updateStats(stats);
             updateChart(stats.daily_activity || []);
             updateStorageChart(stats);
@@ -91,7 +93,10 @@ function loadStats() {
             showChartLoadError('storage-chart-loading', 'storageChart', 'Unable to load storage distribution.');
             showChartLoadError('top-files-chart-loading', 'topPathsByFilesChart', 'Unable to load top paths by files.');
             showChartLoadError('top-size-chart-loading', 'topPathsBySizeChart', 'Unable to load top paths by size.');
-            showError('Failed to load statistics');
+            if (!statsGlobalErrorShown) {
+                statsGlobalErrorShown = true;
+                showError('Failed to load statistics');
+            }
         });
 }
 

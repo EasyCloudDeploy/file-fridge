@@ -570,6 +570,19 @@ function initApp() {
     });
 
     updateConnectionStatus();
+
+    window.fileFridgeAppReady = true;
+    if (window.__fileFridgeReadyQueue) {
+        const queuedCallbacks = window.__fileFridgeReadyQueue.splice(0);
+        queuedCallbacks.forEach(callback => {
+            try {
+                callback();
+            } catch (error) {
+                console.error('File Fridge queued callback failed:', error);
+            }
+        });
+    }
+    window.dispatchEvent(new Event('filefridge:app-ready'));
 }
 
 function runWhenFileFridgeReady(callback) {
@@ -629,11 +642,6 @@ function loadAppInfo() {
             const footerVersionEl = document.getElementById('footer-app-version');
             if (footerVersionEl) {
                 footerVersionEl.textContent = version;
-            }
-
-            const topbarVersionEl = document.getElementById('footer-app-version');
-            if (topbarVersionEl) {
-                topbarVersionEl.textContent = version;
             }
         })
         .catch(error => {
@@ -737,15 +745,3 @@ window.handleLogout = handleLogout;
 window.clearAuthToken = clearAuthToken;
 window.installPWA = installPWA;
 window.runWhenFileFridgeReady = runWhenFileFridgeReady;
-window.fileFridgeAppReady = true;
-if (window.__fileFridgeReadyQueue) {
-    const queuedCallbacks = window.__fileFridgeReadyQueue.splice(0);
-    queuedCallbacks.forEach(callback => {
-        try {
-            callback();
-        } catch (error) {
-            console.error('File Fridge queued callback failed:', error);
-        }
-    });
-}
-window.dispatchEvent(new Event('filefridge:app-ready'));

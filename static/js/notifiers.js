@@ -12,7 +12,6 @@ async function initNotifiersPage() {
     if (notifiersInitialized) {
         return;
     }
-    notifiersInitialized = true;
 
     assertRequiredElements(
         [
@@ -22,9 +21,15 @@ async function initNotifiersPage() {
             'notifiers_table_body',
             'notifier_modal',
             'delete_modal',
+            'create_notifier_btn',
+            'save_notifier_btn',
+            'confirm_delete_btn',
+            'alert_container',
         ],
         'notifiers page'
     );
+
+    notifiersInitialized = true;
 
     // Initialize Bootstrap modals
     notifierModal = new bootstrap.Modal(document.getElementById('notifier_modal'));

@@ -2,6 +2,8 @@
  * Storage Locations Management JavaScript
  */
 
+const LOCATIONS_REGION = { loading: '#locations-loading', content: '#locations-content', empty: '#no-locations-message' };
+
 let allLocations = [];
 let deleteModal = null;
 let storageLocationsInitialized = false;
@@ -33,12 +35,7 @@ window.runWhenFileFridgeReady(() => {
  */
 async function loadStorageLocations() {
     try {
-        setRegionState({
-            loading: '#locations-loading',
-            content: '#locations-content',
-            empty: '#no-locations-message',
-            state: 'loading',
-        });
+        setRegionState({ ...LOCATIONS_REGION, state: 'loading' });
 
         const response = await authenticatedFetch(`/api/v1/storage/locations`);
         if (!response.ok) {
@@ -48,30 +45,14 @@ async function loadStorageLocations() {
         allLocations = await response.json();
 
         if (allLocations.length === 0) {
-            setRegionState({
-                loading: '#locations-loading',
-                content: '#locations-content',
-                empty: '#no-locations-message',
-                state: 'empty',
-            });
+            setRegionState({ ...LOCATIONS_REGION, state: 'empty' });
         } else {
-            setRegionState({
-                loading: '#locations-loading',
-                content: '#locations-content',
-                empty: '#no-locations-message',
-                state: 'content',
-            });
+            setRegionState({ ...LOCATIONS_REGION, state: 'content' });
             renderStorageLocations();
         }
     } catch (error) {
         console.error('Error loading storage locations:', error);
-        setRegionState({
-            loading: '#locations-loading',
-            content: '#locations-content',
-            empty: '#no-locations-message',
-            state: 'error',
-            errorMessage: `Failed to load storage locations: ${error.message}`,
-        });
+        setRegionState({ ...LOCATIONS_REGION, state: 'error', errorMessage: `Failed to load storage locations: ${error.message}` });
         showAlert('danger', `Failed to load storage locations: ${error.message}`);
     }
 }

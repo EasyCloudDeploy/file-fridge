@@ -86,16 +86,27 @@ async function initRemoteFilesPage() {
     if (remoteFilesInitialized) {
         return;
     }
-    remoteFilesInitialized = true;
 
-    connectionId = document.getElementById('connection-id').value;
+    const connectionEl = document.getElementById('connection-id');
+    if (!connectionEl) {
+        console.error('Connection ID element not found');
+        return;
+    }
+    connectionId = connectionEl.value;
     if (!connectionId) {
         console.error('Connection ID not found');
         return;
     }
 
-    // Init AG Grid
     const gridDiv = document.getElementById('filesGrid');
+    if (!gridDiv) {
+        console.error('filesGrid element not found');
+        return;
+    }
+
+    remoteFilesInitialized = true;
+
+    // Init AG Grid
     gridApi = agGrid.createGrid(gridDiv, gridOptions);
 
     // Load initial data

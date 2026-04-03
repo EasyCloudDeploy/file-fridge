@@ -33,14 +33,14 @@
 </div>
 {%- endmacro %}
 
-{% macro stat_tile(icon, label, value, tone="primary") -%}
+{% macro stat_tile(icon, label, tone="primary") -%}
 <article class="stat-tile stat-tile--{{ tone }}">
     <div class="stat-tile__icon">
         <i class="bi {{ icon }}" aria-hidden="true"></i>
     </div>
     <div class="stat-tile__content">
         <div class="stat-tile__label">{{ label }}</div>
-        <div class="stat-tile__value">{{ value|safe }}</div>
+        <div class="stat-tile__value">{{ caller() }}</div>
     </div>
 </article>
 {%- endmacro %}

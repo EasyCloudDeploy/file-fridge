@@ -28,6 +28,14 @@ async function initTagsPage() {
             'tagModal',
             'deleteTagModal',
             'tagRuleModal',
+            'create_tag_btn',
+            'save_tag_btn',
+            'confirm_delete_tag_btn',
+            'tag_form',
+            'tag_color',
+            'tag_color_text',
+            'tag_name',
+            'tag_preview',
         ],
         'tags page'
     );

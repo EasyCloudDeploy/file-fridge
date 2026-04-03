@@ -110,12 +110,14 @@ celerybeat.pid
 .env
 .envrc
 .venv
-node_modules/
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Node.js / Frontend
+node_modules/
 
 # Spyder project settings
 .spyderproject

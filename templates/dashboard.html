@@ -8,22 +8,22 @@
 {% block content %}
         <div class="row mb-4 g-3">
             <div class="col-6 col-md-4 col-lg-2">
-                {{ stat_tile("bi-file-earmark", "Files moved", '<span id="totalFiles">0</span>', "primary") }}
+                {% call stat_tile("bi-file-earmark", "Files moved", "primary") %}<span id="totalFiles">0</span>{% endcall %}
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                {{ stat_tile("bi-fire", "Hot files", '<span id="totalFilesHot">0</span>', "danger") }}
+                {% call stat_tile("bi-fire", "Hot files", "danger") %}<span id="totalFilesHot">0</span>{% endcall %}
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                {{ stat_tile("bi-snow", "Cold files", '<span id="totalFilesCold">0</span>', "info") }}
+                {% call stat_tile("bi-snow", "Cold files", "info") %}<span id="totalFilesCold">0</span>{% endcall %}
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                {{ stat_tile("bi-hdd", "Data moved", '<span id="totalSize">0.00 GB</span>', "success") }}
+                {% call stat_tile("bi-hdd", "Data moved", "success") %}<span id="totalSize">0.00 GB</span>{% endcall %}
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                {{ stat_tile("bi-folder", "Monitored paths", '<span id="pathsCount">0</span>', "neutral") }}
+                {% call stat_tile("bi-folder", "Monitored paths", "neutral") %}<span id="pathsCount">0</span>{% endcall %}
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                {{ stat_tile("bi-clock-history", "Last 24h", '<span id="recentCount">0</span>', "warning") }}
+                {% call stat_tile("bi-clock-history", "Last 24h", "warning") %}<span id="recentCount">0</span>{% endcall %}
             </div>
         </div>
 

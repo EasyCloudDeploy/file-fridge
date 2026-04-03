@@ -552,11 +552,7 @@ async function processNDJSONStream(body, append = false) {
 
                             // Process batch when it reaches size
                             if (batch.length >= batchSize) {
-                                if (append) {
-                                    allRowData = allRowData.concat(batch);
-                                } else {
-                                    allRowData = allRowData.concat(batch);
-                                }
+                                allRowData = allRowData.concat(batch);
 
                                 if (gridApi) {
                                     gridApi.setGridOption('rowData', allRowData);

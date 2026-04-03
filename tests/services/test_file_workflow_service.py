@@ -451,6 +451,7 @@ def test_thaw_single_file(
         "move_to_hot",
         len("content"),
         file_path=str(cold_file),
+        destination_path=str(symlink_path),
     )
     mock_scan_progress.update_file_progress.assert_called_once_with(
         monitored_path.id, "thaw-op-1", len("content")

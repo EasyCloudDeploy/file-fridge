@@ -119,12 +119,7 @@ export const routeContracts: RouteContract[] = [
         path: (context) =>
             context.remoteConnectionId ? `/remote-files/${context.remoteConnectionId}` : null,
         scripts: ['/static/js/remote_files.js'],
-        expectedApis: [
-            '/api/v1/remote/connections/',
-            '/api/v1/remote/connections/',
-            '/api/v1/paths/monitored',
-            '/api/v1/remote/connections/',
-        ],
+        expectedApis: ['/api/v1/remote/connections/', '/api/v1/paths/monitored'],
         loadingSelectors: ['.ag-overlay-loading-center'],
         readySelectors: ['#remote-instance-name', '#filesGrid'],
     },

@@ -10,6 +10,8 @@ function formatBytes(bytes, decimals = 2) {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
+const PATHS_REGION = { loading: '#paths-loading', content: '#paths-content', empty: '#no-paths-message' };
+
 // Progress polling state
 let progressPollingInterval = null;
 let currentPathId = null;
@@ -30,12 +32,7 @@ function showNotification(message, type = 'success') {
 async function loadPathsList() {
     const tableBody = document.querySelector('#pathsTable tbody');
 
-    setRegionState({
-        loading: '#paths-loading',
-        content: '#paths-content',
-        empty: '#no-paths-message',
-        state: 'loading',
-    });
+    setRegionState({ ...PATHS_REGION, state: 'loading' });
     if (tableBody) tableBody.innerHTML = '';
 
     try {
@@ -44,12 +41,7 @@ async function loadPathsList() {
         const paths = await response.json();
 
         if (paths.length === 0) {
-            setRegionState({
-                loading: '#paths-loading',
-                content: '#paths-content',
-                empty: '#no-paths-message',
-                state: 'empty',
-            });
+            setRegionState({ ...PATHS_REGION, state: 'empty' });
         } else {
             if (tableBody) {
                 paths.forEach(path => {
@@ -121,22 +113,11 @@ async function loadPathsList() {
                     `;
                 });
             }
-            setRegionState({
-                loading: '#paths-loading',
-                content: '#paths-content',
-                empty: '#no-paths-message',
-                state: 'content',
-            });
+            setRegionState({ ...PATHS_REGION, state: 'content' });
         }
     } catch (error) {
         console.error('Error loading paths:', error);
-        setRegionState({
-            loading: '#paths-loading',
-            content: '#paths-content',
-            empty: '#no-paths-message',
-            state: 'error',
-            errorMessage: `Failed to load paths: ${error.message}`,
-        });
+        setRegionState({ ...PATHS_REGION, state: 'error', errorMessage: `Failed to load paths: ${error.message}` });
         showNotification(`Failed to load paths: ${error.message}`, 'error');
     }
 }

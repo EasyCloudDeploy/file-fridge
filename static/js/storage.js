@@ -103,6 +103,8 @@ function loadAllStorageStats() {
     loadColdStorageStats();
 }
 
+let storageStatsInitialized = false;
+
 function initStorageStats() {
     if (storageStatsInitialized) {
         return;
@@ -110,7 +112,5 @@ function initStorageStats() {
     storageStatsInitialized = true;
     loadAllStorageStats();
 }
-
-let storageStatsInitialized = false;
 
 window.runWhenFileFridgeReady(initStorageStats);

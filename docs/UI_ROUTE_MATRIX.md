@@ -34,7 +34,7 @@ This matrix documents the expected frontend bootstrap, API usage, and UI state c
 | `/storage-locations/{location_id}` | `templates/storage/detail.html` | no dedicated page script | server-rendered detail view | server-rendered only |
 | `/storage-locations/{location_id}/edit` | `templates/storage/form.html` | `static/js/file-browser.js`, `static/js/storage-location-form.js` | `/api/v1/storage/locations/{id}` | form state, file-browser modal state |
 | `/tags` | `templates/tags.html` | `static/js/tags.js` | `/api/v1/tags`, `/api/v1/tag-rules` | `#tags_loading`, `#tags_content`, `#tags_empty`, `#rules_loading`, `#rules_content`, `#rules_empty` |
-| `/migrations` | `templates/migrations.html` | inline script in template | migrations endpoints referenced by template script | loading rows inside each table body |
+| `/migrations` | `templates/migrations.html` | inline script in template (**exception**: boots on `DOMContentLoaded` directly, not `runWhenFileFridgeReady`) | migrations endpoints referenced by template script | loading rows inside each table body |
 | `/notifiers` | `templates/notifiers.html` | `static/js/notifiers.js` | `/api/v1/notifiers` | `#notifiers_loading`, `#notifiers_content`, `#notifiers_empty`, `#alert_container` |
 | `/stats` | `templates/stats.html` | `static/js/stats.js`, Vite `charts` entry | `/api/v1/stats/detailed` | `#daily-chart-loading`, `#storage-chart-loading`, `#top-files-chart-loading`, `#top-size-chart-loading` |
 | `/settings` | `templates/settings.html` | `static/js/settings.js` | `/api/v1/auth/tokens`, `/api/v1/remote/*`, `/api/v1/encryption/keys`, `/api/v1/users`, `/health` | section-specific loaders in page, modal button spinners |
