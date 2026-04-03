@@ -1,6 +1,9 @@
 /**
  * Tag Management JavaScript
  */
+const assertRequiredElements = (...args) => window.assertRequiredElements(...args);
+const authenticatedFetch = (...args) => window.authenticatedFetch(...args);
+const setRegionState = (...args) => window.setRegionState(...args);
 
 let allTags = [];
 let currentEditingTagId = null;

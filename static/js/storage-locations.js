@@ -1,6 +1,9 @@
 /**
  * Storage Locations Management JavaScript
  */
+const assertRequiredElements = (...args) => window.assertRequiredElements(...args);
+const authenticatedFetch = (...args) => window.authenticatedFetch(...args);
+const setRegionState = (...args) => window.setRegionState(...args);
 
 const LOCATIONS_REGION = { loading: '#locations-loading', content: '#locations-content', empty: '#no-locations-message' };
 
