@@ -34,7 +34,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import settings
-from app.database import SessionLocal, init_db
+from app.database import SessionLocal, has_schema_objects, init_db
 from app.database_migrations import run_startup_migrations
 from app.frontend_assets import configure_templates
 from app.models import FileInventory, FileStatus, RelocationTask, RelocationTaskStatus
@@ -69,8 +69,12 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     """Application lifespan manager."""
     # Startup
     logger.info(f"Starting File Fridge with DATABASE_PATH: {settings.database_path}")
-    logger.info("Initializing database...")
-    init_db()
+
+    if has_schema_objects():
+        logger.info("Existing database detected; deferring schema changes to Alembic")
+    else:
+        logger.info("Initializing database...")
+        init_db()
 
     logger.info("Running database migrations...")
     run_startup_migrations()

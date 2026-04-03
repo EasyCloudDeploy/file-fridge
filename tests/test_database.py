@@ -3,7 +3,7 @@ from unittest.mock import ANY, MagicMock, patch
 import pytest
 from sqlalchemy import inspect
 
-from app.database import Base, engine, init_db
+from app.database import Base, engine, has_schema_objects, init_db
 from app.database_migrations import run_startup_migrations
 
 
@@ -40,6 +40,17 @@ def test_init_db_is_idempotent(db_session):
     table_names_second_call = inspect(engine).get_table_names()
 
     assert table_names_first_call == table_names_second_call
+
+
+def test_has_schema_objects_false_for_empty_db(db_session):
+    """Empty databases should not be treated as pre-existing application schemas."""
+    assert has_schema_objects() is False
+
+
+def test_has_schema_objects_true_when_tables_exist(db_session):
+    """Existing application tables should be detected before startup migrations run."""
+    init_db()
+    assert has_schema_objects() is True
 
 
 @patch("alembic.command.upgrade")
@@ -93,6 +104,34 @@ def test_run_startup_migrations_with_existing_tables_no_alembic_version(
     with patch("app.database_migrations.inspect", return_value=mock_inspector):
         run_startup_migrations()
 
-    # Should stamp to head because instance_url column is present
-    mock_stamp.assert_called_once_with(ANY, "head")
+    # The max_concurrent_migrations column tells us this schema matches the
+    # pre-head revision immediately before RelocationTask.
+    mock_stamp.assert_called_once_with(ANY, "6b398cde9d3e")
+    mock_upgrade.assert_called_once_with(ANY, "head")
+
+
+@patch("alembic.command.upgrade")
+@patch("alembic.command.stamp")
+@patch("app.database.engine")
+def test_run_startup_migrations_stamps_max_concurrent_schema_to_matching_revision(
+    mock_engine, mock_stamp, mock_upgrade, db_session, monkeypatch
+):
+    """Databases with the column already present should not be re-migrated from the base revision."""
+    monkeypatch.setattr("app.config.settings.database_path", ":memory:")
+
+    mock_inspector = MagicMock()
+    mock_inspector.get_table_names.return_value = ["monitored_paths", "users"]
+
+    def get_columns(table_name):
+        if table_name == "monitored_paths":
+            return [{"name": "id"}, {"name": "max_concurrent_migrations"}]
+        return [{"name": "id"}]
+
+    mock_inspector.get_columns.side_effect = get_columns
+    mock_engine.return_value.dialect.has_table.return_value = True
+
+    with patch("app.database_migrations.inspect", return_value=mock_inspector):
+        run_startup_migrations()
+
+    mock_stamp.assert_called_once_with(ANY, "6b398cde9d3e")
     mock_upgrade.assert_called_once_with(ANY, "head")
