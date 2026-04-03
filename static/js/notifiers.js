@@ -6,9 +6,26 @@ let allNotifiers = [];
 let currentEditingNotifierId = null;
 let notifierModal = null;
 let deleteModal = null;
+let notifiersInitialized = false;
 
-// Initialize when DOM is loaded
-document.addEventListener('DOMContentLoaded', async () => {
+async function initNotifiersPage() {
+    if (notifiersInitialized) {
+        return;
+    }
+    notifiersInitialized = true;
+
+    assertRequiredElements(
+        [
+            'notifiers_loading',
+            'notifiers_content',
+            'notifiers_empty',
+            'notifiers_table_body',
+            'notifier_modal',
+            'delete_modal',
+        ],
+        'notifiers page'
+    );
+
     // Initialize Bootstrap modals
     notifierModal = new bootstrap.Modal(document.getElementById('notifier_modal'));
     deleteModal = new bootstrap.Modal(document.getElementById('delete_modal'));
@@ -16,28 +33,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Set up event listeners
     setupEventListeners();
 
-    // Load app info
-    await loadAppInfo();
-
     // Load notifiers
     await loadNotifiers();
-});
-
-/**
- * Load application info (name and version)
- */
-async function loadAppInfo() {
-    try {
-        const response = await authenticatedFetch('/health');
-        if (response.ok) {
-            const data = await response.json();
-            document.getElementById('app-name-navbar').textContent = data.app_name || 'File Fridge';
-            document.getElementById('app-version').textContent = data.version || 'Unknown';
-        }
-    } catch (error) {
-        console.error('Failed to load app info:', error);
-    }
 }
+
+window.runWhenFileFridgeReady(() => {
+    void initNotifiersPage();
+});
 
 /**
  * Set up all event listeners
@@ -102,12 +104,14 @@ function setupEventListeners() {
  * Load all notifiers from the API
  */
 async function loadNotifiers() {
-    const loadingEl = document.getElementById('notifiers_loading');
-    const contentEl = document.getElementById('notifiers_content');
-
     try {
-        loadingEl.style.display = 'block';
-        contentEl.style.display = 'none';
+        setRegionState({
+            loading: '#notifiers_loading',
+            content: '#notifiers_content',
+            empty: '#notifiers_empty',
+            state: 'loading',
+            showContentOnEmpty: true,
+        });
 
         const response = await authenticatedFetch('/api/v1/notifiers');
         if (!response.ok) {
@@ -116,13 +120,16 @@ async function loadNotifiers() {
 
         allNotifiers = await response.json();
 
-        loadingEl.style.display = 'none';
-        contentEl.style.display = 'block';
-
         renderNotifiers();
     } catch (error) {
         console.error('Error loading notifiers:', error);
-        loadingEl.style.display = 'none';
+        setRegionState({
+            loading: '#notifiers_loading',
+            content: '#notifiers_content',
+            empty: '#notifiers_empty',
+            state: 'error',
+            errorMessage: `Failed to load notifiers: ${error.message}`,
+        });
         showAlert('Failed to load notifiers: ' + error.message, 'danger');
     }
 }
@@ -136,13 +143,25 @@ function renderNotifiers() {
     const tbody = document.getElementById('notifiers_table_body');
 
     if (allNotifiers.length === 0) {
-        emptyEl.style.display = 'block';
         tableContainer.style.display = 'none';
+        setRegionState({
+            loading: '#notifiers_loading',
+            content: '#notifiers_content',
+            empty: '#notifiers_empty',
+            state: 'empty',
+            showContentOnEmpty: true,
+        });
         return;
     }
 
-    emptyEl.style.display = 'none';
     tableContainer.style.display = 'block';
+    setRegionState({
+        loading: '#notifiers_loading',
+        content: '#notifiers_content',
+        empty: '#notifiers_empty',
+        state: 'content',
+    });
+    emptyEl.style.display = 'none';
 
     tbody.innerHTML = allNotifiers.map(notifier => {
         const statusBadge = notifier.enabled

@@ -1,6 +1,13 @@
 // Settings page JavaScript
 
-document.addEventListener('DOMContentLoaded', function () {
+let settingsPageInitialized = false;
+
+function initSettingsPage() {
+    if (settingsPageInitialized) {
+        return;
+    }
+    settingsPageInitialized = true;
+
     // Tab switching
     const navLinks = document.querySelectorAll('#settings-nav .list-group-item');
     const sections = document.querySelectorAll('.settings-section');
@@ -1432,7 +1439,9 @@ document.addEventListener('DOMContentLoaded', function () {
             setButtonTextLoading(btn, false, 'Deleting...', 'Delete User');
         }
     });
-});
+}
+
+window.runWhenFileFridgeReady(initSettingsPage);
 
 function setFormButtonLoading(baseName, isLoading) {
     const btn = document.getElementById(`${baseName}-btn`);

@@ -1,22 +1,17 @@
 {% extends "base.html" %}
+{% from "components/ui.html" import empty_state %}
 
 {% block title %}Storage Locations - File Fridge{% endblock %}
+{% block page_title %}Cold Storage Locations{% endblock %}
+{% block page_description %}Track capacity, manage destinations, and keep storage targets ready for automated file movement.{% endblock %}
+{% block page_actions %}
+<a href="/storage-locations/new" class="btn btn-primary">
+    <i class="bi bi-plus-circle"></i> Add Location
+</a>
+{% endblock %}
 
 {% block content %}
         <div id="alert-container"></div>
-        <div class="row">
-            <div class="col-12">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h1>
-                        <i class="bi bi-hdd-stack"></i> Cold Storage Locations
-                    </h1>
-                    <a href="/storage-locations/new" class="btn btn-primary">
-                        <i class="bi bi-plus-circle"></i> Add Location
-                    </a>
-                </div>
-            </div>
-        </div>
-
         <div class="row">
             <div class="col-12">
                 <div class="card">
@@ -46,11 +41,11 @@
                             </div>
                         </div>
                         <div id="no-locations-message" class="text-center py-5" style="display: none;">
-                            <i class="bi bi-hdd-x display-1 text-muted"></i>
-                            <p class="text-muted mt-3">No storage locations configured yet.</p>
+                            {% call empty_state("bi-hdd-x", "No storage locations configured yet", "Create one or more cold storage destinations before sending files out of hot storage.") %}
                             <a href="/storage-locations/new" class="btn btn-primary">
                                 <i class="bi bi-plus-circle"></i> Add Your First Storage Location
                             </a>
+                            {% endcall %}
                         </div>
                     </div>
                 </div>

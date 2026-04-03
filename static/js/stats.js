@@ -6,11 +6,19 @@ let dailyChartInstance = null;
 let storageChartInstance = null;
 let topPathsByFilesChartInstance = null;
 let topPathsBySizeChartInstance = null;
+let statsInitialized = false;
 
-document.addEventListener('DOMContentLoaded', function () {
+function initStatsPage() {
+    if (statsInitialized) {
+        return;
+    }
+    statsInitialized = true;
+
     loadStats();
     startStatsAutoRefresh();
-});
+}
+
+window.runWhenFileFridgeReady(initStatsPage);
 
 document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
@@ -79,8 +87,30 @@ function loadStats() {
         })
         .catch(error => {
             console.error('Error loading stats:', error);
+            showChartLoadError('daily-chart-loading', 'dailyChart', 'Unable to load activity trend.');
+            showChartLoadError('storage-chart-loading', 'storageChart', 'Unable to load storage distribution.');
+            showChartLoadError('top-files-chart-loading', 'topPathsByFilesChart', 'Unable to load top paths by files.');
+            showChartLoadError('top-size-chart-loading', 'topPathsBySizeChart', 'Unable to load top paths by size.');
             showError('Failed to load statistics');
         });
+}
+
+function showChartLoadError(loadingId, canvasId, message) {
+    const loadingEl = document.getElementById(loadingId);
+    const canvasEl = document.getElementById(canvasId);
+
+    if (canvasEl) {
+        canvasEl.style.display = 'none';
+    }
+
+    if (loadingEl) {
+        loadingEl.style.display = 'block';
+        loadingEl.innerHTML = `
+            <div class="alert alert-danger mb-0" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>${escapeHtml(message)}
+            </div>
+        `;
+    }
 }
 
 function updateStats(stats) {
@@ -448,7 +478,7 @@ function showError(message) {
         ${escapeHtml(message)}
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     `;
-    const container = document.querySelector('main.container-fluid');
+    const container = document.getElementById('main-content');
     if (container) {
         container.insertBefore(alertDiv, container.firstChild);
         setTimeout(() => alertDiv.remove(), 5000);

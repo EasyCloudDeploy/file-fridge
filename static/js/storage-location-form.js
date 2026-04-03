@@ -4,9 +4,14 @@
 
 let locationId = null;
 let isEditMode = false;
+let storageLocationFormInitialized = false;
 
-// Initialize when DOM is loaded
-document.addEventListener('DOMContentLoaded', async () => {
+async function initStorageLocationForm() {
+    if (storageLocationFormInitialized) {
+        return;
+    }
+    storageLocationFormInitialized = true;
+
     // Check if we're in edit mode
     const urlParts = window.location.pathname.split('/');
     if (urlParts.includes('edit')) {
@@ -17,6 +22,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Set up form submission
     document.getElementById('storage-location-form').addEventListener('submit', handleSubmit);
+}
+
+window.runWhenFileFridgeReady(() => {
+    void initStorageLocationForm();
 });
 
 /**

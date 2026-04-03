@@ -28,23 +28,28 @@ function showNotification(message, type = 'success') {
 
 // Load and render paths list
 async function loadPathsList() {
-    const loadingEl = document.getElementById('paths-loading');
-    const contentEl = document.getElementById('paths-content');
-    const emptyEl = document.getElementById('no-paths-message');
     const tableBody = document.querySelector('#pathsTable tbody');
-    
-    if (loadingEl) loadingEl.style.display = 'block';
-    if (contentEl) contentEl.style.display = 'none';
-    if (emptyEl) emptyEl.style.display = 'none';
+
+    setRegionState({
+        loading: '#paths-loading',
+        content: '#paths-content',
+        empty: '#no-paths-message',
+        state: 'loading',
+    });
     if (tableBody) tableBody.innerHTML = '';
-    
+
     try {
         const response = await authenticatedFetch(`${API_BASE_URL}/paths`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const paths = await response.json();
-        
+
         if (paths.length === 0) {
-            if (emptyEl) emptyEl.style.display = 'block';
+            setRegionState({
+                loading: '#paths-loading',
+                content: '#paths-content',
+                empty: '#no-paths-message',
+                state: 'empty',
+            });
         } else {
             if (tableBody) {
                 paths.forEach(path => {
@@ -116,14 +121,23 @@ async function loadPathsList() {
                     `;
                 });
             }
-            if (contentEl) contentEl.style.display = 'block';
+            setRegionState({
+                loading: '#paths-loading',
+                content: '#paths-content',
+                empty: '#no-paths-message',
+                state: 'content',
+            });
         }
     } catch (error) {
         console.error('Error loading paths:', error);
+        setRegionState({
+            loading: '#paths-loading',
+            content: '#paths-content',
+            empty: '#no-paths-message',
+            state: 'error',
+            errorMessage: `Failed to load paths: ${error.message}`,
+        });
         showNotification(`Failed to load paths: ${error.message}`, 'error');
-        if (emptyEl) emptyEl.style.display = 'block';
-    } finally {
-        if (loadingEl) loadingEl.style.display = 'none';
     }
 }
 
@@ -1169,8 +1183,14 @@ function setupCriteriaForm() {
     });
 }
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', function() {
+let pathsPageInitialized = false;
+
+function initPathsPage() {
+    if (pathsPageInitialized) {
+        return;
+    }
+    pathsPageInitialized = true;
+
     // Check which page we're on and load appropriate data
     if (window.location.pathname === '/paths' || window.location.pathname === '/paths/') {
         loadPathsList();
@@ -1204,7 +1224,9 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('form-title').innerHTML = '<i class="bi bi-pencil"></i> Edit Criteria';
         document.getElementById('submit-text').textContent = 'Update';
     }
-});
+}
+
+window.runWhenFileFridgeReady(initPathsPage);
 
 // Load storage locations into checkboxes
 async function loadStorageLocationsCheckboxes() {
@@ -1353,4 +1375,3 @@ async function loadCriteriaForEdit(criteriaId) {
         showNotification(`Failed to load criterion: ${error.message}`, 'error');
     }
 }
-

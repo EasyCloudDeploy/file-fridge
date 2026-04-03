@@ -103,4 +103,14 @@ function loadAllStorageStats() {
     loadColdStorageStats();
 }
 
-document.addEventListener('DOMContentLoaded', loadAllStorageStats);
+function initStorageStats() {
+    if (storageStatsInitialized) {
+        return;
+    }
+    storageStatsInitialized = true;
+    loadAllStorageStats();
+}
+
+let storageStatsInitialized = false;
+
+window.runWhenFileFridgeReady(initStorageStats);

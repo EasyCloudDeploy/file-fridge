@@ -1,0 +1,21 @@
+{
+  "name": "file-fridge-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
+  },
+  "dependencies": {
+    "ag-grid-community": "^34.2.0",
+    "bootstrap": "^5.3.8",
+    "bootstrap-icons": "^1.13.1",
+    "chart.js": "^4.5.1",
+    "vite": "^7.1.12"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1"
+  }
+}

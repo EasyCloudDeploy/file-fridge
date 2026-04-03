@@ -4,8 +4,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app.frontend_assets import configure_templates
+
 router = APIRouter()
-templates = Jinja2Templates(directory="templates")
+templates = configure_templates(Jinja2Templates(directory="templates"))
 
 
 # Simple template routes (path, template, active_page)

@@ -291,12 +291,23 @@
             const fileName = safeFilePath.split('/').pop() || safeFilePath;
             const safeSource = escapeHtml(f.source_label);
             const safeTarget = escapeHtml(f.target_label);
+            const safeError = escapeHtml(f.error_message || '');
             const opBadge = f.operation_type === 'freeze'
                 ? '<span class="badge bg-primary">Freeze</span>'
                 : '<span class="badge bg-warning text-dark">Thaw</span>';
             const totalBytes = f.total_bytes || f.file_size || 0;
             const transferredBytes = f.transferred_bytes || 0;
             const progress = f.percent_complete || 0;
+            const errorBlock = f.error_message
+                ? `<div class="small text-danger mt-2" title="${safeError}">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i>${safeError}
+                   </div>`
+                : '';
+            const progressCell = f.error_message
+                ? `<div class="small text-danger fw-semibold">
+                        <i class="bi bi-x-octagon-fill me-1"></i>Operation failed
+                   </div>`
+                : renderProgressCell(progress, transferredBytes, totalBytes);
 
             html += `
                 <tr>
@@ -314,9 +325,10 @@
                         <i class="bi bi-arrow-right mx-1"></i>
                         <span class="badge bg-info">${safeTarget}</span>
                         ${renderDestinationPath(f.destination_path)}
+                        ${errorBlock}
                     </td>
                     <td>${formatBytes(f.file_size)}</td>
-                    <td style="width: 25%;">${renderProgressCell(progress, transferredBytes, totalBytes)}</td>
+                    <td style="width: 25%;">${progressCell}</td>
                     <td>${formatTransferRate(f.transfer_rate_bytes_per_sec)}</td>
                     <td>${f.eta_seconds ? formatTime(f.eta_seconds) : '-'}</td>
                 </tr>
@@ -414,9 +426,9 @@
             percent_complete: file.percent_complete || 0,
             transfer_rate_bytes_per_sec: file.transfer_rate_bytes_per_sec || 0,
             eta_seconds: file.eta_seconds,
-            status: 'running_freeze_thaw',
+            status: file.error_message ? 'failed_freeze_thaw' : 'running_freeze_thaw',
             completed_at: null,
-            error_message: null,
+            error_message: file.error_message || null,
             operation_type: file.operation_type,
         }));
         const recentItems = [...inProgressFreezeThaw, ...completedTasks];
@@ -433,10 +445,16 @@
             const safeSource = escapeHtml(task.source_location_name);
             const safeTarget = escapeHtml(task.target_location_name);
             const safeError = escapeHtml(task.error_message || 'Unknown error');
+            const errorBlock = task.error_message
+                ? `<div class="small text-danger mt-2" title="${safeError}">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i>${safeError}
+                   </div>`
+                : '';
 
             let statusBadge = '';
             if (task.status === 'completed') statusBadge = '<span class="badge bg-success">Completed</span>';
             else if (task.status === 'failed') statusBadge = `<span class="badge bg-danger" title="${safeError}">Failed</span>`;
+            else if (task.status === 'failed_freeze_thaw') statusBadge = `<span class="badge bg-danger" title="${safeError}">Failed</span>`;
             else if (task.status === 'running_freeze_thaw') {
                 const label = task.operation_type === 'freeze' ? 'Freeze' : 'Thaw';
                 statusBadge = `<span class="badge bg-primary">${label} In Progress</span>`;
@@ -444,7 +462,9 @@
 
             const timeStr = task.completed_at
                 ? new Date(task.completed_at).toLocaleString()
-                : 'In Progress';
+                : task.status === 'failed_freeze_thaw'
+                    ? 'Failed'
+                    : 'In Progress';
             const progress = task.status === 'running_freeze_thaw'
                 ? (task.percent_complete || 0)
                 : (task.status === 'completed' ? 100 : 0);
@@ -465,6 +485,7 @@
                         <i class="bi bi-arrow-right mx-1"></i>
                         <span class="badge bg-info">${safeTarget}</span>
                         ${renderDestinationPath(task.destination_path)}
+                        ${errorBlock}
                     </td>
                     <td>${formatBytes(task.bytes_total)}</td>
                     <td style="width: 25%;">${renderProgressCell(progress, transferredBytes, totalBytes, task.status === 'running_freeze_thaw')}</td>

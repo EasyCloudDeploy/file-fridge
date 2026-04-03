@@ -80,8 +80,14 @@ const gridOptions = {
     overlayNoRowsTemplate: '<span class="text-muted">No files found for this remote path</span>'
 };
 
-// Initialize
-document.addEventListener('DOMContentLoaded', async () => {
+let remoteFilesInitialized = false;
+
+async function initRemoteFilesPage() {
+    if (remoteFilesInitialized) {
+        return;
+    }
+    remoteFilesInitialized = true;
+
     connectionId = document.getElementById('connection-id').value;
     if (!connectionId) {
         console.error('Connection ID not found');
@@ -130,6 +136,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Event delegation for grid action buttons
     document.getElementById('filesGrid').addEventListener('click', handleActionClick);
+}
+
+window.runWhenFileFridgeReady(() => {
+    void initRemoteFilesPage();
 });
 
 async function loadConnectionDetails() {

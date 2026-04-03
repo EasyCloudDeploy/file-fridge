@@ -1,16 +1,10 @@
 {% extends "base.html" %}
 
 {% block title %}Settings - File Fridge{% endblock %}
+{% block page_title %}Settings{% endblock %}
+{% block page_description %}Manage account security, remote connectivity, encryption, and user administration from a single operations workspace.{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <h1 class="mb-4">
-            <i class="bi bi-gear me-2"></i>Settings
-        </h1>
-    </div>
-</div>
-
 <div class="row">
     <!-- Settings Navigation -->
     <div class="col-md-3 mb-4">
@@ -713,8 +707,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
-    integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8CdnJMR=="
-    crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="/static/js/settings.js"></script>
 {% endblock %}

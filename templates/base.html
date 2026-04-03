@@ -22,126 +22,157 @@
     <link rel="icon" type="image/svg+xml" href="/static/icons/icon-192.svg">
     <link rel="apple-touch-icon" href="/static/icons/icon-192.svg">
 
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <!-- Custom CSS -->
-    <link href="/static/css/style.css" rel="stylesheet">
+    {{ vite_assets('app') }}
 
     {% block extra_head %}{% endblock %}
 </head>
 <body>
-    <!-- Navigation -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/">
-                <i class="bi bi-snow"></i> <span id="app-name-navbar">File Fridge</span>
-            </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'dashboard' %}active{% endif %}" href="/">
-                            <i class="bi bi-speedometer2"></i> Dashboard
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'paths' %}active{% endif %}" href="/paths">
-                            <i class="bi bi-folder"></i> Paths
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'storage' %}active{% endif %}" href="/storage-locations">
-                            <i class="bi bi-hdd-stack"></i> Storage
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'files' %}active{% endif %}" href="/files">
-                            <i class="bi bi-file-earmark"></i> Files
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'tags' %}active{% endif %}" href="/tags">
-                            <i class="bi bi-tags"></i> Tags
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'migrations' %}active{% endif %}" href="/migrations">
-                            <i class="bi bi-arrow-left-right"></i> File Migrations
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'notifiers' %}active{% endif %}" href="/notifiers">
-                            <i class="bi bi-bell"></i> Notifiers
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'stats' %}active{% endif %}" href="/stats">
-                            <i class="bi bi-graph-up"></i> Statistics
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if active_page == 'settings' %}active{% endif %}" href="/settings">
-                            <i class="bi bi-gear"></i> Settings
-                        </a>
-                    </li>
-                </ul>
-                <div class="d-flex align-items-center gap-2">
-                    <button class="btn btn-outline-light btn-sm d-none" id="pwa-install-btn" onclick="installPWA()">
-                        <i class="bi bi-download"></i> Install
-                    </button>
-                    <span class="badge bg-light text-dark" id="version-badge">
-                        <i class="bi bi-thermometer-snow"></i> <span id="app-version">Loading...</span>
+    {% set page_title_value %}{% block page_title %}{% endblock %}{% endset %}
+    {% set page_description_value %}{% block page_description %}{% endblock %}{% endset %}
+    {% set breadcrumb_value %}{% block breadcrumbs %}{% endblock %}{% endset %}
+    {% set page_actions_value %}{% block page_actions %}{% endblock %}{% endset %}
+    {% set page_title_value = page_title_value|trim %}
+    {% set page_description_value = page_description_value|trim %}
+    {% set breadcrumb_value = breadcrumb_value|trim %}
+    {% set page_actions_value = page_actions_value|trim %}
+
+    <div class="app-shell" id="app-shell">
+        <div class="app-shell__backdrop" id="app-shell-backdrop"></div>
+
+        <aside class="app-sidebar" id="app-sidebar" aria-label="Primary navigation">
+            <div class="app-sidebar__brand">
+                <a class="app-brand" href="/">
+                    <span class="app-brand__mark"><i class="bi bi-snow"></i></span>
+                    <span class="app-brand__copy">
+                        <strong id="app-name-navbar">File Fridge</strong>
+                        <small>Cold storage control plane</small>
                     </span>
-                    <button class="btn btn-outline-light btn-sm" id="logout-btn" onclick="handleLogout()">
-                        <i class="bi bi-box-arrow-right"></i> Logout
-                    </button>
-                </div>
+                </a>
             </div>
-        </div>
-    </nav>
 
-    <!-- Main Content -->
-    <main class="container-fluid mt-4" id="main-content">
-        {% block content %}{% endblock %}
-    </main>
-
-    <!-- Footer -->
-    <footer class="mt-5 py-4 bg-light text-center">
-        <div class="container">
-            <div class="row">
-                <div class="col-md-12">
-                    <p class="text-muted mb-2">
-                        <i class="bi bi-snow me-2"></i>
-                        <strong id="app-name-footer">File Fridge</strong> - Intelligent Cold Storage Management
-                    </p>
-                    <small class="text-muted">
-                        Keep your hot storage warm and your cold storage frozen
-                    </small>
-                    <br>
-                    <small class="text-muted" id="footer-version">
-                        Version: <span id="footer-app-version">Loading...</span>
-                    </small>
+            <nav class="app-nav">
+                <div class="app-nav__group">
+                    <div class="app-nav__label">Overview</div>
+                    <a class="app-nav__link {% if active_page == 'dashboard' %}is-active{% endif %}" href="/">
+                        <i class="bi bi-speedometer2"></i>
+                        <span>Dashboard</span>
+                    </a>
                 </div>
+
+                <div class="app-nav__group">
+                    <div class="app-nav__label">Management</div>
+                    <a class="app-nav__link {% if active_page == 'paths' %}is-active{% endif %}" href="/paths">
+                        <i class="bi bi-folder"></i>
+                        <span>Paths</span>
+                    </a>
+                    <a class="app-nav__link {% if active_page == 'storage' %}is-active{% endif %}" href="/storage-locations">
+                        <i class="bi bi-hdd-stack"></i>
+                        <span>Storage</span>
+                    </a>
+                    <a class="app-nav__link {% if active_page == 'files' %}is-active{% endif %}" href="/files">
+                        <i class="bi bi-file-earmark"></i>
+                        <span>Files</span>
+                    </a>
+                    <a class="app-nav__link {% if active_page == 'tags' %}is-active{% endif %}" href="/tags">
+                        <i class="bi bi-tags"></i>
+                        <span>Tags</span>
+                    </a>
+                </div>
+
+                <div class="app-nav__group">
+                    <div class="app-nav__label">Operations</div>
+                    <a class="app-nav__link {% if active_page == 'migrations' %}is-active{% endif %}" href="/migrations">
+                        <i class="bi bi-arrow-left-right"></i>
+                        <span>File Migrations</span>
+                    </a>
+                    <a class="app-nav__link {% if active_page == 'notifiers' %}is-active{% endif %}" href="/notifiers">
+                        <i class="bi bi-bell"></i>
+                        <span>Notifiers</span>
+                    </a>
+                    <a class="app-nav__link {% if active_page == 'remote-files' %}is-active{% endif %}" href="/settings#remote-connections">
+                        <i class="bi bi-hdd-network"></i>
+                        <span>Remote Files</span>
+                    </a>
+                </div>
+
+                <div class="app-nav__group">
+                    <div class="app-nav__label">System</div>
+                    <a class="app-nav__link {% if active_page == 'stats' %}is-active{% endif %}" href="/stats">
+                        <i class="bi bi-graph-up"></i>
+                        <span>Statistics</span>
+                    </a>
+                    <a class="app-nav__link {% if active_page == 'settings' %}is-active{% endif %}" href="/settings">
+                        <i class="bi bi-gear"></i>
+                        <span>Settings</span>
+                    </a>
+                </div>
+            </nav>
+
+            <div class="app-sidebar__footer">
+                <button class="btn btn-primary w-100 d-none" id="pwa-install-btn" onclick="installPWA()">
+                    <i class="bi bi-download"></i> Install App
+                </button>
+                <div class="app-sidebar__meta">
+                    <span class="status-pill" id="connection-status-pill">Checking connection</span>
+                    <span class="status-pill status-pill--ghost" id="version-badge">
+                        <i class="bi bi-thermometer-snow"></i>
+                        <span id="app-version">Loading...</span>
+                    </span>
+                </div>
+                <button class="btn btn-outline-secondary w-100" id="logout-btn" onclick="handleLogout()">
+                    <i class="bi bi-box-arrow-right"></i> Logout
+                </button>
             </div>
+        </aside>
+
+        <div class="app-main">
+            <main class="app-content" id="main-content">
+                {% if page_title_value %}
+                <section class="page-frame">
+                    {% if breadcrumb_value %}
+                    <div class="page-breadcrumbs">
+                        {{ breadcrumb_value }}
+                    </div>
+                    {% endif %}
+
+                    <div class="page-frame__header">
+                        <div>
+                            <h1 class="page-frame__title">{{ page_title_value }}</h1>
+                            {% if page_description_value %}
+                            <p class="page-frame__description">{{ page_description_value }}</p>
+                            {% endif %}
+                        </div>
+                        {% if page_actions_value %}
+                        <div class="page-frame__actions">
+                            {{ page_actions_value }}
+                        </div>
+                        {% endif %}
+                    </div>
+                </section>
+                {% endif %}
+
+                {% block content %}{% endblock %}
+            </main>
         </div>
-    </footer>
+    </div>
 
-    <!-- Bootstrap Bundle with Popper -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-
-    <!-- App JavaScript (must load before page-specific scripts) -->
-    <script src="/static/js/app.js"></script>
-
-    <!-- Load app information -->
     <script>
-        document.addEventListener('DOMContentLoaded', loadAppInfo);
+        if (!window.__fileFridgeReadyQueue) {
+            window.__fileFridgeReadyQueue = [];
+        }
+
+        if (typeof window.runWhenFileFridgeReady !== 'function') {
+            window.runWhenFileFridgeReady = (callback) => {
+                if (window.fileFridgeAppReady) {
+                    callback();
+                    return;
+                }
+
+                window.__fileFridgeReadyQueue.push(callback);
+            };
+        }
     </script>
 
-    <!-- Register Service Worker for PWA -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

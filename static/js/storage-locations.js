@@ -4,28 +4,41 @@
 
 let allLocations = [];
 let deleteModal = null;
+let storageLocationsInitialized = false;
 
-// Initialize when DOM is loaded
-document.addEventListener('DOMContentLoaded', async () => {
+async function initStorageLocationsPage() {
+    if (storageLocationsInitialized) {
+        return;
+    }
+    storageLocationsInitialized = true;
+
+    assertRequiredElements(
+        ['locations-loading', 'locations-content', 'no-locations-message', 'locationsTable'],
+        'storage locations page'
+    );
+
     // Initialize modal
     deleteModal = new bootstrap.Modal(document.getElementById('deleteLocationModal'));
 
     // Load storage locations
     await loadStorageLocations();
+}
+
+window.runWhenFileFridgeReady(() => {
+    void initStorageLocationsPage();
 });
 
 /**
  * Load all storage locations from the API
  */
 async function loadStorageLocations() {
-    const loadingEl = document.getElementById('locations-loading');
-    const contentEl = document.getElementById('locations-content');
-    const noLocationsEl = document.getElementById('no-locations-message');
-
     try {
-        loadingEl.style.display = 'block';
-        contentEl.style.display = 'none';
-        noLocationsEl.style.display = 'none';
+        setRegionState({
+            loading: '#locations-loading',
+            content: '#locations-content',
+            empty: '#no-locations-message',
+            state: 'loading',
+        });
 
         const response = await authenticatedFetch(`/api/v1/storage/locations`);
         if (!response.ok) {
@@ -34,16 +47,31 @@ async function loadStorageLocations() {
 
         allLocations = await response.json();
 
-        loadingEl.style.display = 'none';
-
         if (allLocations.length === 0) {
-            noLocationsEl.style.display = 'block';
+            setRegionState({
+                loading: '#locations-loading',
+                content: '#locations-content',
+                empty: '#no-locations-message',
+                state: 'empty',
+            });
         } else {
-            contentEl.style.display = 'block';
+            setRegionState({
+                loading: '#locations-loading',
+                content: '#locations-content',
+                empty: '#no-locations-message',
+                state: 'content',
+            });
             renderStorageLocations();
         }
     } catch (error) {
         console.error('Error loading storage locations:', error);
+        setRegionState({
+            loading: '#locations-loading',
+            content: '#locations-content',
+            empty: '#no-locations-message',
+            state: 'error',
+            errorMessage: `Failed to load storage locations: ${error.message}`,
+        });
         showAlert('danger', `Failed to load storage locations: ${error.message}`);
     }
 }

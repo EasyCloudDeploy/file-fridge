@@ -125,6 +125,17 @@ To use File Fridge as a PWA, your deployment must:
 
 **Note:** HTTPS configuration is the responsibility of the deploying administrator. See the [Installation Guide](docs/INSTALLATION.md) for deployment options.
 
+## Frontend Asset Builds
+
+The web UI is designed to run without CDN access. Third-party frontend dependencies are bundled locally with Vite and served from `static/dist/`.
+
+```bash
+npm install
+npm run build
+```
+
+Jinja templates load these bundles through the `vite_assets(...)` helper, so new frontend dependencies should be added to the local build instead of linked from external CDNs.
+
 ## Getting Started
 
 Getting File Fridge up and running is simple, especially if you use Docker.

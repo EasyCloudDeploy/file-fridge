@@ -1,11 +1,18 @@
 {% extends "base.html" %}
+{% from "components/ui.html" import empty_state %}
 
 {% block title %}Files - File Fridge{% endblock %}
+{% block page_title %}File Browser{% endblock %}
+{% block page_description %}Search, filter, tag, and move files across hot and cold storage from a denser, desktop-friendly workspace.{% endblock %}
+{% block page_actions %}
+<button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()"
+    title="Remove duplicate file records">
+    <i class="bi bi-files"></i><span class="ms-1">Remove Duplicates</span>
+</button>
+{% endblock %}
 
 {% block extra_head %}
-<!-- AG Grid CSS -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-grid.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-theme-quartz.css">
+{{ vite_assets('grid') }}
 <style>
     #filesGrid {
         height: 70vh;
@@ -67,16 +74,9 @@
 {% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <h1 class="mb-4">
-            <i class="bi bi-file-earmark"></i> File Browser
-        </h1>
-    </div>
-</div>
-
 <!-- Search and Filters -->
-<div class="row mb-3 filters-row">
+<section class="panel-section mb-3">
+<div class="row g-3 filters-row">
     <div class="col-12 col-md-6 mb-2 mb-md-0">
         <div class="input-group">
             <span class="input-group-text"><i class="bi bi-search"></i></span>
@@ -129,15 +129,10 @@
             multiple)</div>
     </div>
     <div class="col-12 col-md-6 text-md-end">
-        <div class="btn-group">
-
-            <button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()"
-                title="Remove duplicate file records">
-                <i class="bi bi-files"></i><span class="d-none d-sm-inline ms-1">Remove Duplicates</span>
-            </button>
-        </div>
+        <div class="filters-row__hint text-muted small">Use tag and storage filters together for faster triage.</div>
     </div>
 </div>
+</section>
 
 <div class="row">
     <div class="col-12">
@@ -156,8 +151,7 @@
                 </div>
                 <div id="filesGrid" class="ag-theme-quartz" style="display: none;"></div>
                 <div id="no-files-message" class="text-center py-5" style="display: none;">
-                    <i class="bi bi-file-earmark-x display-1 text-muted"></i>
-                    <p class="text-muted mt-3">No files found.</p>
+                    {{ empty_state("bi-file-earmark-x", "No files found", "Try clearing one or more filters to broaden the result set.") }}
                 </div>
             </div>
         </div>
@@ -608,7 +602,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<!-- AG Grid JS -->
-<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/dist/ag-grid-community.min.js"></script>
 <script src="/static/js/files.js"></script>
 {% endblock %}

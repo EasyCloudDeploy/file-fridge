@@ -1,0 +1,46 @@
+{% macro page_header(title, icon="", description="") -%}
+<section class="page-header">
+    <div class="page-header__body">
+        <div class="page-header__eyebrow">File Fridge</div>
+        <h1 class="page-header__title">
+            {% if icon %}<i class="bi {{ icon }}" aria-hidden="true"></i>{% endif %}
+            <span>{{ title }}</span>
+        </h1>
+        {% if description %}
+        <p class="page-header__description">{{ description }}</p>
+        {% endif %}
+    </div>
+    {% if caller is defined %}
+    <div class="page-header__actions">
+        {{ caller() }}
+    </div>
+    {% endif %}
+</section>
+{%- endmacro %}
+
+{% macro empty_state(icon, title, description) -%}
+<div class="empty-state">
+    <div class="empty-state__icon">
+        <i class="bi {{ icon }}" aria-hidden="true"></i>
+    </div>
+    <h3 class="empty-state__title">{{ title }}</h3>
+    <p class="empty-state__description">{{ description }}</p>
+    {% if caller is defined %}
+    <div class="empty-state__actions">
+        {{ caller() }}
+    </div>
+    {% endif %}
+</div>
+{%- endmacro %}
+
+{% macro stat_tile(icon, label, value, tone="primary") -%}
+<article class="stat-tile stat-tile--{{ tone }}">
+    <div class="stat-tile__icon">
+        <i class="bi {{ icon }}" aria-hidden="true"></i>
+    </div>
+    <div class="stat-tile__content">
+        <div class="stat-tile__label">{{ label }}</div>
+        <div class="stat-tile__value">{{ value|safe }}</div>
+    </div>
+</article>
+{%- endmacro %}

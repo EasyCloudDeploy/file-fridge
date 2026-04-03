@@ -105,6 +105,35 @@ class TestScanProgressManager:
         assert len(progress["errors"]) == 1
         assert "Access denied" in progress["errors"][0]
 
+    def test_get_all_failed_operations_includes_completed_scans(self):
+        """Failed operations should remain visible after scan completion."""
+        path_id = 11
+        scan_progress_manager.start_scan(path_id, total_files=1)
+
+        operation_id = scan_progress_manager.start_file_operation(
+            path_id,
+            "freeze-error.txt",
+            "move_to_cold",
+            128,
+            file_path="/tmp/hot/freeze-error.txt",
+            destination_path="/tmp/cold/freeze-error.txt",
+        )
+        scan_progress_manager.complete_file_operation(
+            path_id,
+            operation_id,
+            "move_to_cold",
+            success=False,
+            error="Permission denied",
+        )
+        scan_progress_manager.finish_scan(path_id, status="completed")
+
+        failed_operations = scan_progress_manager.get_all_failed_operations()
+        assert len(failed_operations) == 1
+        assert failed_operations[0]["path_id"] == path_id
+        assert failed_operations[0]["file_path"] == "/tmp/hot/freeze-error.txt"
+        assert failed_operations[0]["destination_path"] == "/tmp/cold/freeze-error.txt"
+        assert failed_operations[0]["error_message"] == "Permission denied"
+
     def test_finish_scan(self):
         """Test finishing a scan."""
         path_id = 5

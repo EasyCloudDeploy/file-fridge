@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 
 {% block title %}Storage Location - File Fridge{% endblock %}
+{% block page_title %}Storage Location{% endblock %}
+{% block page_description %}Define where cold files live and set threshold policies that surface capacity issues before they cause failures.{% endblock %}
+{% block page_actions %}
+<a href="/storage-locations" class="btn btn-outline-secondary">Back to Storage</a>
+{% endblock %}
 
 {% block content %}
         <div class="row">
             <div class="col-12 col-md-8 offset-md-2">
-                <h1 class="mb-4" id="form-title">
-                    <i class="bi bi-plus-circle"></i> Create Storage Location
-                </h1>
-
                 <div class="card">
                     <div class="card-body">
                         <form id="storage-location-form">

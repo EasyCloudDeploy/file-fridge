@@ -11,6 +11,8 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+!static/dist/
+!static/dist/**
 downloads/
 eggs/
 .eggs/
@@ -108,6 +110,7 @@ celerybeat.pid
 .env
 .envrc
 .venv
+node_modules/
 env/
 venv/
 ENV/
@@ -158,3 +161,5 @@ logs/
 .DS_Store
 
 test_run/
+playwright-report/
+test-results/
