@@ -465,11 +465,12 @@
                 : task.status === 'failed_freeze_thaw'
                     ? 'Failed'
                     : 'In Progress';
-            const progress = task.status === 'running_freeze_thaw'
+            const isLiveTransfer = task.status === 'running_freeze_thaw' || task.status === 'failed_freeze_thaw';
+            const progress = isLiveTransfer
                 ? (task.percent_complete || 0)
                 : (task.status === 'completed' ? 100 : 0);
             const totalBytes = task.bytes_total || 0;
-            const transferredBytes = task.status === 'running_freeze_thaw'
+            const transferredBytes = isLiveTransfer
                 ? (task.bytes_transferred || 0)
                 : totalBytes;
 

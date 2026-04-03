@@ -14,12 +14,12 @@ const CORE_ASSETS = [
 ];
 
 async function getBuiltAssets() {
-  try {
-    const response = await fetch('/static/dist/manifest.json', { cache: 'no-store' });
-    if (!response.ok) {
-      return [];
-    }
+  const response = await fetch('/static/dist/manifest.json', { cache: 'no-store' });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch Vite manifest: ${response.status}`);
+  }
 
+  try {
     const manifest = await response.json();
     const files = new Set(['/static/dist/manifest.json']);
     const seen = new Set();
@@ -61,8 +61,8 @@ async function getBuiltAssets() {
     }
 
     return Array.from(files);
-  } catch (_error) {
-    return [];
+  } catch (error) {
+    throw new Error(`Failed to parse Vite manifest: ${error}`);
   }
 }
 

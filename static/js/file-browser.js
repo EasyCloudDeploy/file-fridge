@@ -318,8 +318,13 @@ class FileBrowser {
 
 // Create global instance
 const fileBrowser = new FileBrowser();
+let fileBrowserInitialized = false;
 
 function initFileBrowser() {
+    if (fileBrowserInitialized) {
+        return;
+    }
+    fileBrowserInitialized = true;
     fileBrowser.init();
 }
 

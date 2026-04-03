@@ -9,7 +9,7 @@ from typing import Any
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup, escape
 
-MANIFEST_PATH = Path("static/dist/manifest.json")
+MANIFEST_PATH = Path(__file__).resolve().parent.parent / "static/dist/manifest.json"
 ENTRY_ALIASES = {
     "app": "frontend/entries/app.js",
     "grid": "frontend/entries/grid.js",
@@ -18,9 +18,12 @@ ENTRY_ALIASES = {
 
 
 def _load_manifest() -> dict[str, Any]:
-    if not MANIFEST_PATH.exists():
+    try:
+        return json.loads(MANIFEST_PATH.read_text())
+    except FileNotFoundError:
         return {}
-    return json.loads(MANIFEST_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Failed to load Vite manifest at {MANIFEST_PATH}: {exc}") from exc
 
 
 def _resolve_entry(entry: str) -> str:

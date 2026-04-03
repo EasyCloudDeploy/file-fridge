@@ -1132,6 +1132,7 @@ code {
     --ff-warning: #b45309;
     --ff-danger: #c2410c;
     --ff-info: #0369a1;
+    --ff-radius-md: 0.5rem;
     --ff-radius-xl: 1.5rem;
     --ff-sidebar-width: 18rem;
     --ff-sidebar-compact: 5.75rem;

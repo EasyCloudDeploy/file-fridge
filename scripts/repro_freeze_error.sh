@@ -5,7 +5,12 @@ set -euo pipefail
 DB_PATH="${FILE_FRIDGE_DB_PATH:-data/file_fridge.db}"
 PATH_ID="${FILE_FRIDGE_PATH_ID:-}"
 STORAGE_ID="${FILE_FRIDGE_STORAGE_ID:-}"
-TEST_NAME="${FILE_FRIDGE_TEST_NAME:-ff-test-repro-$(date +%Y%m%d-%H%M%S)}"
+_raw_test_name="${FILE_FRIDGE_TEST_NAME:-ff-test-repro-$(date +%Y%m%d-%H%M%S)}"
+# Sanitize: allow only alphanumerics, dot, underscore, hyphen
+TEST_NAME="${_raw_test_name//[^a-zA-Z0-9._-]/_}"
+if [[ -z "$TEST_NAME" ]]; then
+    TEST_NAME="ff-test-repro"
+fi
 REPRO_MODE="${FILE_FRIDGE_REPRO_MODE:-conflict}"
 
 if [[ ! -f "$DB_PATH" ]]; then
@@ -22,6 +27,11 @@ if [[ -z "$PATH_ID" ]]; then
     exit 1
 fi
 
+if [[ ! "$PATH_ID" =~ ^[0-9]+$ ]]; then
+    echo "Invalid PATH_ID: must be a positive integer, got: $PATH_ID" >&2
+    exit 1
+fi
+
 if [[ -z "$STORAGE_ID" ]]; then
     STORAGE_ID="$(
         sqlite3 "$DB_PATH" \
@@ -31,6 +41,11 @@ fi
 
 if [[ -z "$STORAGE_ID" ]]; then
     echo "No storage location associated with path_id=$PATH_ID" >&2
+    exit 1
+fi
+
+if [[ ! "$STORAGE_ID" =~ ^[0-9]+$ ]]; then
+    echo "Invalid STORAGE_ID: must be a positive integer, got: $STORAGE_ID" >&2
     exit 1
 fi
 
@@ -61,6 +76,12 @@ COLD_DIR="$STORAGE_PATH/$TEST_NAME"
 HOT_FILE="$HOT_DIR/freeze-error.txt"
 COLD_FILE="$COLD_DIR/freeze-error.txt"
 
+if [[ -e "$HOT_DIR" || -e "$COLD_DIR" ]]; then
+    echo "Directories already exist for TEST_NAME=$TEST_NAME; aborting to avoid overwriting." >&2
+    echo "  HOT_DIR:  $HOT_DIR" >&2
+    echo "  COLD_DIR: $COLD_DIR" >&2
+    exit 1
+fi
 mkdir -p "$HOT_DIR" "$COLD_DIR"
 
 cat > "$HOT_FILE" <<EOF
@@ -70,6 +91,7 @@ EOF
 
 WHY_FAILS=""
 CLEANUP_NOTES=""
+COLD_FILE_LINE=""
 
 if [[ "$REPRO_MODE" == "conflict" ]]; then
     cat > "$COLD_FILE" <<EOF
@@ -80,6 +102,7 @@ EOF
     WHY_FAILS="When File Fridge tries to freeze the hot file, it will compute the same
   relative destination under cold storage and should fail with:
   \"Destination already exists: $COLD_FILE\""
+    COLD_FILE_LINE="  cold: $COLD_FILE"
 elif [[ "$REPRO_MODE" == "permission_denied" ]]; then
     chmod 0555 "$COLD_DIR"
     WHY_FAILS="When File Fridge tries to freeze the hot file, the destination directory
@@ -109,7 +132,7 @@ Storage:
 
 Created files:
   hot:  $HOT_FILE
-  cold: $COLD_FILE
+${COLD_FILE_LINE}
 
 Why this fails:
   $WHY_FAILS

@@ -23,6 +23,11 @@ async function buildRouteContext(request: Parameters<typeof apiLogin>[0], token:
     const paths = (await pathsResponse.json()) as Array<{ id: number }>;
 
     const remoteResponse = await request.get('/api/v1/remote/connections', { headers });
+    if (!remoteResponse.ok() && remoteResponse.status() !== 404) {
+        throw new Error(
+            `GET /api/v1/remote/connections failed: ${remoteResponse.status()} ${await remoteResponse.text()}`
+        );
+    }
     const remoteConnections = remoteResponse.ok()
         ? ((await remoteResponse.json()) as Array<{ id: number }>)
         : [];

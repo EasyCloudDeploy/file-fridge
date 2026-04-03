@@ -136,6 +136,10 @@
                     {% endif %}
 
                     <div class="page-frame__header">
+                        <button type="button" id="sidebar-toggle" class="btn btn-link p-0 me-2 d-lg-none"
+                                aria-label="Toggle navigation" aria-controls="app-sidebar" aria-expanded="false">
+                            <i class="bi bi-list fs-4"></i>
+                        </button>
                         <div>
                             <h1 class="page-frame__title">{{ page_title_value }}</h1>
                             {% if page_description_value %}

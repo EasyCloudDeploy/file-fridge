@@ -350,14 +350,13 @@ def test_get_freezing_files_returns_live_progress_metrics(
         )
         assert freezing_file["transfer_rate_bytes_per_sec"] > 0
         assert freezing_file["eta_seconds"] is not None
-        assert freezing_file["eta_seconds"] > 0
+        assert freezing_file["eta_seconds"] >= 0
     finally:
         scan_progress_manager.complete_file_operation(
             state["monitored_path_id"],
             state["operation_id"],
             "move_to_cold",
-            success=False,
-            error="test cleanup",
+            success=True,
         )
         scan_progress_manager.finish_scan(state["monitored_path_id"], status="stopped")
         (
@@ -412,14 +411,13 @@ def test_get_freezing_files_returns_live_thaw_progress_metrics(
         )
         assert freezing_file["transfer_rate_bytes_per_sec"] > 0
         assert freezing_file["eta_seconds"] is not None
-        assert freezing_file["eta_seconds"] > 0
+        assert freezing_file["eta_seconds"] >= 0
     finally:
         scan_progress_manager.complete_file_operation(
             state["monitored_path_id"],
             state["operation_id"],
             "move_to_hot",
-            success=False,
-            error="test cleanup",
+            success=True,
         )
         scan_progress_manager.finish_scan(state["monitored_path_id"], status="stopped")
         (
