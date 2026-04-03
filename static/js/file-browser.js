@@ -319,10 +319,11 @@ class FileBrowser {
 // Create global instance
 const fileBrowser = new FileBrowser();
 
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
+function initFileBrowser() {
     fileBrowser.init();
-});
+}
+
+window.runWhenFileFridgeReady(initFileBrowser);
 
 // Export to window for global access
 window.fileBrowser = fileBrowser;

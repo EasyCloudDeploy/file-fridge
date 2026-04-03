@@ -1,21 +1,15 @@
 {% extends "base.html" %}
 
 {% block title %}Tags - File Fridge{% endblock %}
+{% block page_title %}Tags{% endblock %}
+{% block page_description %}Organize archived files with reusable labels and automated tagging rules that stay readable on every screen size.{% endblock %}
+{% block page_actions %}
+    <button class="btn btn-primary" id="create_tag_btn">
+        <i class="bi bi-plus-circle"></i> Create Tag
+    </button>
+{% endblock %}
 
 {% block content %}
-    <div class="container mt-4">
-        <div class="row mb-4">
-            <div class="col-12 col-md-8 mb-2 mb-md-0">
-                <h2>Tag Management</h2>
-                <p class="text-muted d-none d-md-block">Create and manage tags to organize your archived files</p>
-            </div>
-            <div class="col-12 col-md-4 text-md-end">
-                <button class="btn btn-primary" id="create_tag_btn">
-                    <i class="bi bi-plus-circle"></i> Create Tag
-                </button>
-            </div>
-        </div>
-
         <div class="row">
             <div class="col-12">
                 <div class="card">
@@ -124,7 +118,6 @@
                 </div>
             </div>
         </div>
-    </div>
 
     <!-- Create/Edit Tag Modal -->
     <div class="modal fade" id="tagModal" tabindex="-1" aria-labelledby="tagModalLabel" aria-hidden="true">
@@ -318,6 +311,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-    <script src="/static/js/config.js"></script>
     <script src="/static/js/tags.js"></script>
 {% endblock %}

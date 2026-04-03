@@ -3,13 +3,21 @@ const DASHBOARD_REFRESH_INTERVAL_MS = 2000;
 
 let dashboardRefreshInterval = null;
 let dashboardRefreshInFlight = false;
+let dashboardInitialized = false;
 
-document.addEventListener('DOMContentLoaded', function () {
+function initDashboard() {
+    if (dashboardInitialized) {
+        return;
+    }
+    dashboardInitialized = true;
+
     refreshDashboard().catch(error => {
         console.error('Initial dashboard refresh failed:', error);
     });
     startDashboardAutoRefresh();
-});
+}
+
+window.runWhenFileFridgeReady(initDashboard);
 
 document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
@@ -232,7 +240,11 @@ function updateRecentFiles(files) {
     const recentFiles = files.slice(0, 10);
 
     if (recentFiles.length === 0) {
-        recentFilesList.innerHTML = '<p class="text-muted">No recent activity.</p>';
+        recentFilesList.innerHTML = `
+            <tr>
+                <td colspan="3" class="text-center text-muted">No recent activity yet.</td>
+            </tr>
+        `;
         return;
     }
 
@@ -254,7 +266,7 @@ function showError(message) {
         ${escapeHtml(message)}
         <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
     `;
-    const container = document.querySelector('main.container-fluid');
+    const container = document.getElementById('main-content');
     if (container) {
         container.insertBefore(alertDiv, container.firstChild);
         setTimeout(() => alertDiv.remove(), 5000);

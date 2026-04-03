@@ -1,76 +1,29 @@
 {% extends "base.html" %}
+{% from "components/ui.html" import stat_tile %}
 
 {% block title %}Dashboard - File Fridge{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+{% block page_description %}Track storage health, recent movement, and monitored path activity from a single control surface.{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <h1 class="mb-4">
-            <i class="bi bi-speedometer2"></i> Dashboard
-        </h1>
-    </div>
-</div>
-
         <div class="row mb-4 g-3">
             <div class="col-6 col-md-4 col-lg-2">
-                <div class="card text-white bg-primary h-100">
-                    <div class="card-body py-3">
-                        <h6 class="card-title mb-1">
-                            <i class="bi bi-file-earmark"></i> <span class="d-none d-sm-inline">Total </span>Files<span class="d-none d-lg-inline"> Moved</span>
-                        </h6>
-                        <h3 class="mb-0" id="totalFiles">0</h3>
-                    </div>
-                </div>
+                {{ stat_tile("bi-file-earmark", "Files moved", '<span id="totalFiles">0</span>', "primary") }}
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <div class="card text-white bg-danger h-100">
-                    <div class="card-body py-3">
-                        <h6 class="card-title mb-1">
-                            <i class="bi bi-fire"></i> <span class="d-none d-sm-inline">Hot </span>Files
-                        </h6>
-                        <h3 class="mb-0" id="totalFilesHot">0</h3>
-                    </div>
-                </div>
+                {{ stat_tile("bi-fire", "Hot files", '<span id="totalFilesHot">0</span>', "danger") }}
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <div class="card text-white bg-info h-100">
-                    <div class="card-body py-3">
-                        <h6 class="card-title mb-1">
-                            <i class="bi bi-snow"></i> <span class="d-none d-sm-inline">Cold </span>Files
-                        </h6>
-                        <h3 class="mb-0" id="totalFilesCold">0</h3>
-                    </div>
-                </div>
+                {{ stat_tile("bi-snow", "Cold files", '<span id="totalFilesCold">0</span>', "info") }}
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <div class="card text-white bg-success h-100">
-                    <div class="card-body py-3">
-                        <h6 class="card-title mb-1">
-                            <i class="bi bi-hdd"></i> <span class="d-none d-sm-inline">Total </span>Size<span class="d-none d-lg-inline"> Moved</span>
-                        </h6>
-                        <h3 class="mb-0" id="totalSize">0.00 GB</h3>
-                    </div>
-                </div>
+                {{ stat_tile("bi-hdd", "Data moved", '<span id="totalSize">0.00 GB</span>', "success") }}
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <div class="card text-white bg-secondary h-100">
-                    <div class="card-body py-3">
-                        <h6 class="card-title mb-1">
-                            <i class="bi bi-folder"></i> <span class="d-none d-sm-inline">Monitored </span>Paths
-                        </h6>
-                        <h3 class="mb-0" id="pathsCount">0</h3>
-                    </div>
-                </div>
+                {{ stat_tile("bi-folder", "Monitored paths", '<span id="pathsCount">0</span>', "neutral") }}
             </div>
             <div class="col-6 col-md-4 col-lg-2">
-                <div class="card text-white bg-warning h-100">
-                    <div class="card-body py-3">
-                        <h6 class="card-title mb-1">
-                            <i class="bi bi-clock-history"></i> <span class="d-none d-sm-inline">Last </span>24h
-                        </h6>
-                        <h3 class="mb-0" id="recentCount">0</h3>
-                    </div>
-                </div>
+                {{ stat_tile("bi-clock-history", "Last 24h", '<span id="recentCount">0</span>', "warning") }}
             </div>
         </div>
 
@@ -171,4 +124,3 @@
 <script src="/static/js/dashboard.js"></script>
 <script src="/static/js/storage.js"></script>
 {% endblock %}
-

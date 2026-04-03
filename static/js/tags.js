@@ -6,9 +6,32 @@ let allTags = [];
 let currentEditingTagId = null;
 let tagModal = null;
 let deleteTagModal = null;
+let tagsPageInitialized = false;
+let tagRulesInitialized = false;
 
-// Initialize when DOM is loaded
-document.addEventListener('DOMContentLoaded', async () => {
+async function initTagsPage() {
+    if (tagsPageInitialized) {
+        return;
+    }
+    tagsPageInitialized = true;
+
+    assertRequiredElements(
+        [
+            'tags_loading',
+            'tags_content',
+            'tags_empty',
+            'tags_table_body',
+            'rules_loading',
+            'rules_content',
+            'rules_empty',
+            'rules_table_body',
+            'tagModal',
+            'deleteTagModal',
+            'tagRuleModal',
+        ],
+        'tags page'
+    );
+
     // Initialize Bootstrap modals
     tagModal = new bootstrap.Modal(document.getElementById('tagModal'));
     deleteTagModal = new bootstrap.Modal(document.getElementById('deleteTagModal'));
@@ -18,7 +41,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Load tags
     await loadTags();
-});
+    await initTagRulesSection();
+}
 
 /**
  * Set up all event listeners
@@ -68,12 +92,14 @@ function setupEventListeners() {
  * Load all tags from the API
  */
 async function loadTags() {
-    const loadingEl = document.getElementById('tags_loading');
-    const contentEl = document.getElementById('tags_content');
-
     try {
-        loadingEl.style.display = 'block';
-        contentEl.style.display = 'none';
+        setRegionState({
+            loading: '#tags_loading',
+            content: '#tags_content',
+            empty: '#tags_empty',
+            state: 'loading',
+            showContentOnEmpty: true,
+        });
 
         const response = await authenticatedFetch(`/api/v1/tags`);
         if (!response.ok) {
@@ -81,19 +107,16 @@ async function loadTags() {
         }
 
         allTags = await response.json();
-
-        loadingEl.style.display = 'none';
-        contentEl.style.display = 'block';
-
         renderTags();
     } catch (error) {
         console.error('Error loading tags:', error);
-        loadingEl.innerHTML = `
-            <div class="alert alert-danger" role="alert">
-                <i class="bi bi-exclamation-triangle"></i>
-                Failed to load tags: ${error.message}
-            </div>
-        `;
+        setRegionState({
+            loading: '#tags_loading',
+            content: '#tags_content',
+            empty: '#tags_empty',
+            state: 'error',
+            errorMessage: `Failed to load tags: ${error.message}`,
+        });
     }
 }
 
@@ -106,13 +129,25 @@ function renderTags() {
     const tableBody = document.getElementById('tags_table_body');
 
     if (allTags.length === 0) {
-        emptyEl.style.display = 'block';
         tableContainer.style.display = 'none';
+        setRegionState({
+            loading: '#tags_loading',
+            content: '#tags_content',
+            empty: '#tags_empty',
+            state: 'empty',
+            showContentOnEmpty: true,
+        });
         return;
     }
 
-    emptyEl.style.display = 'none';
     tableContainer.style.display = 'block';
+    setRegionState({
+        loading: '#tags_loading',
+        content: '#tags_content',
+        empty: '#tags_empty',
+        state: 'content',
+    });
+    emptyEl.style.display = 'none';
 
     tableBody.innerHTML = allTags.map(tag => {
         const color = tag.color || '#6c757d';
@@ -367,12 +402,14 @@ let deleteRuleModal = null;
  * Load all tag rules
  */
 async function loadTagRules() {
-    const loadingEl = document.getElementById('rules_loading');
-    const contentEl = document.getElementById('rules_content');
-
     try {
-        loadingEl.style.display = 'block';
-        contentEl.style.display = 'none';
+        setRegionState({
+            loading: '#rules_loading',
+            content: '#rules_content',
+            empty: '#rules_empty',
+            state: 'loading',
+            showContentOnEmpty: true,
+        });
 
         const response = await authenticatedFetch('/api/v1/tag-rules');
         if (!response.ok) {
@@ -380,19 +417,16 @@ async function loadTagRules() {
         }
 
         allRules = await response.json();
-
-        loadingEl.style.display = 'none';
-        contentEl.style.display = 'block';
-
         renderTagRules();
     } catch (error) {
         console.error('Error loading tag rules:', error);
-        loadingEl.innerHTML = `
-            <div class="alert alert-danger" role="alert">
-                <i class="bi bi-exclamation-triangle"></i>
-                Failed to load tag rules: ${error.message}
-            </div>
-        `;
+        setRegionState({
+            loading: '#rules_loading',
+            content: '#rules_content',
+            empty: '#rules_empty',
+            state: 'error',
+            errorMessage: `Failed to load tag rules: ${error.message}`,
+        });
     }
 }
 
@@ -405,13 +439,25 @@ function renderTagRules() {
     const tableBody = document.getElementById('rules_table_body');
 
     if (allRules.length === 0) {
-        emptyEl.style.display = 'block';
         tableContainer.style.display = 'none';
+        setRegionState({
+            loading: '#rules_loading',
+            content: '#rules_content',
+            empty: '#rules_empty',
+            state: 'empty',
+            showContentOnEmpty: true,
+        });
         return;
     }
 
-    emptyEl.style.display = 'none';
     tableContainer.style.display = 'block';
+    setRegionState({
+        loading: '#rules_loading',
+        content: '#rules_content',
+        empty: '#rules_empty',
+        state: 'content',
+    });
+    emptyEl.style.display = 'none';
 
     tableBody.innerHTML = allRules.map(rule => {
         const tag = rule.tag || {};
@@ -672,7 +718,12 @@ async function applyAllTagRules() {
 }
 
 // Set up tag rule event listeners when DOM is loaded
-document.addEventListener('DOMContentLoaded', async () => {
+async function initTagRulesSection() {
+    if (tagRulesInitialized) {
+        return;
+    }
+    tagRulesInitialized = true;
+
     // Create rule button
     const createRuleBtn = document.getElementById('create_rule_btn');
     if (createRuleBtn) {
@@ -699,4 +750,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Load tag rules
     await loadTagRules();
+}
+
+window.runWhenFileFridgeReady(() => {
+    void initTagsPage();
 });

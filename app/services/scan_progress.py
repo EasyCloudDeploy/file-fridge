@@ -287,11 +287,14 @@ class ScanProgressManager:
             return operations
 
     def get_all_failed_operations(self) -> List[dict]:
-        """Return all failed file operations across active scans."""
+        """Return all failed file operations across retained scans."""
         with self._lock:
             failed_operations = []
             for progress in self._scans.values():
-                if progress.status != "running":
+                # Keep failed operations visible until the scan record ages out of
+                # the in-memory retention window. This lets the UI explain recent
+                # freeze/thaw failures after a scan has completed.
+                if not progress.failed_operations:
                     continue
                 for err in progress.failed_operations:
                     failed_operations.append(

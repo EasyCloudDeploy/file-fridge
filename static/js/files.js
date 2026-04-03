@@ -2302,8 +2302,14 @@ async function executeBulkUnpin() {
 // Initialization
 // ============================================
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', function () {
+let filesPageInitialized = false;
+
+function initFilesPage() {
+    if (filesPageInitialized) {
+        return;
+    }
+    filesPageInitialized = true;
+
     const urlParams = new URLSearchParams(window.location.search);
     currentPathId = urlParams.get('path_id') ? parseInt(urlParams.get('path_id')) : null;
     currentStorageType = urlParams.get('storage_type') || null;
@@ -2562,7 +2568,9 @@ document.addEventListener('DOMContentLoaded', function () {
     if (bulkRemotePathSelect) {
         bulkRemotePathSelect.addEventListener('change', onBulkRemotePathChange);
     }
-});
+}
+
+window.runWhenFileFridgeReady(initFilesPage);
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {

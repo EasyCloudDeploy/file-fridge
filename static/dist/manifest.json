@@ -1,0 +1,47 @@
+{
+  "frontend/entries/app.js": {
+    "file": "assets/app-CNJGWmbQ.js",
+    "name": "app",
+    "src": "frontend/entries/app.js",
+    "isEntry": true,
+    "dynamicImports": [
+      "static/js/app.js"
+    ],
+    "css": [
+      "assets/app-Cjq17Jpn.css"
+    ],
+    "assets": [
+      "assets/bootstrap-icons-mSm7cUeB.woff2",
+      "assets/bootstrap-icons-BeopsB42.woff"
+    ]
+  },
+  "frontend/entries/charts.js": {
+    "file": "assets/charts-Ct78DFbm.js",
+    "name": "charts",
+    "src": "frontend/entries/charts.js",
+    "isEntry": true
+  },
+  "frontend/entries/grid.js": {
+    "file": "assets/grid-CayKH8_u.js",
+    "name": "grid",
+    "src": "frontend/entries/grid.js",
+    "isEntry": true,
+    "css": [
+      "assets/grid-bOOJsxkm.css"
+    ]
+  },
+  "node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff": {
+    "file": "assets/bootstrap-icons-BeopsB42.woff",
+    "src": "node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff"
+  },
+  "node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff2": {
+    "file": "assets/bootstrap-icons-mSm7cUeB.woff2",
+    "src": "node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff2"
+  },
+  "static/js/app.js": {
+    "file": "assets/app-Cw7AnFG3.js",
+    "name": "app",
+    "src": "static/js/app.js",
+    "isDynamicEntry": true
+  }
+}

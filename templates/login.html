@@ -6,59 +6,60 @@
     <meta name="description" content="File Fridge - Login">
     <title>Login - File Fridge</title>
 
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Bootstrap Icons -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <!-- Custom CSS -->
-    <link href="/static/css/style.css" rel="stylesheet">
+    {{ vite_assets('app') }}
 
     <style>
         body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background:
+                radial-gradient(circle at top left, rgba(66, 153, 225, 0.35), transparent 28%),
+                radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.28), transparent 30%),
+                linear-gradient(180deg, #081223 0%, #0f172a 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
+            padding: 1.5rem;
         }
         .login-container {
-            max-width: 450px;
+            max-width: 480px;
             width: 100%;
-            padding: 15px;
         }
         .login-card {
-            background: white;
-            border-radius: 15px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            background: rgba(255, 255, 255, 0.96);
+            border-radius: 28px;
+            border: 1px solid rgba(148, 163, 184, 0.25);
+            box-shadow: 0 32px 80px rgba(15, 23, 42, 0.35);
             overflow: hidden;
         }
         .login-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background:
+                radial-gradient(circle at top right, rgba(255, 255, 255, 0.14), transparent 30%),
+                linear-gradient(135deg, #0f4c81 0%, #155e75 55%, #0f766e 100%);
             color: white;
-            padding: 30px;
+            padding: 2.25rem;
             text-align: center;
         }
         .login-header i {
-            font-size: 3rem;
-            margin-bottom: 10px;
+            font-size: 3.25rem;
+            margin-bottom: 0.75rem;
         }
         .login-body {
-            padding: 30px;
+            padding: 2rem;
         }
         .form-control:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+            border-color: #0f766e;
+            box-shadow: 0 0 0 0.2rem rgba(15, 118, 110, 0.16);
         }
         .btn-login {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #0f4c81 0%, #0f766e 100%);
             border: none;
-            padding: 12px;
+            padding: 0.875rem 1rem;
             font-weight: 600;
-            transition: transform 0.2s;
+            transition: transform 0.2s, box-shadow 0.2s;
         }
         .btn-login:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 14px 34px rgba(15, 118, 110, 0.28);
         }
         .form-floating label {
             color: #6c757d;
@@ -125,9 +126,6 @@
             </small>
         </div>
     </div>
-
-    <!-- Bootstrap Bundle with Popper -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
     <!-- Login JavaScript -->
     <script>

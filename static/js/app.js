@@ -375,6 +375,75 @@ function debounce(func, wait) {
     };
 }
 
+function resolveElement(elementOrSelector) {
+    if (!elementOrSelector) {
+        return null;
+    }
+
+    if (typeof elementOrSelector === 'string') {
+        return document.querySelector(elementOrSelector);
+    }
+
+    return elementOrSelector;
+}
+
+function setRegionState(options = {}) {
+    const {
+        loading,
+        content,
+        empty,
+        error,
+        state = 'content',
+        errorMessage = '',
+        showContentOnEmpty = false,
+    } = options;
+
+    const loadingEl = resolveElement(loading);
+    const contentEl = resolveElement(content);
+    const emptyEl = resolveElement(empty);
+    const errorEl = resolveElement(error);
+
+    if (loadingEl) {
+        loadingEl.style.display = state === 'loading' ? '' : 'none';
+    }
+
+    if (contentEl) {
+        const showContent = state === 'content' || (state === 'empty' && showContentOnEmpty);
+        contentEl.style.display = showContent ? '' : 'none';
+    }
+
+    if (emptyEl) {
+        emptyEl.style.display = state === 'empty' ? '' : 'none';
+    }
+
+    if (errorEl) {
+        errorEl.style.display = state === 'error' ? '' : 'none';
+        if (state === 'error' && errorMessage) {
+            errorEl.innerHTML = `
+                <div class="alert alert-danger mb-0" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>${escapeHtml(errorMessage)}
+                </div>
+            `;
+        }
+    } else if (loadingEl && state === 'error' && errorMessage) {
+        loadingEl.style.display = '';
+        loadingEl.innerHTML = `
+            <div class="alert alert-danger mb-0" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>${escapeHtml(errorMessage)}
+            </div>
+        `;
+    }
+}
+
+function assertRequiredElements(elementIds, contextLabel = 'page') {
+    const missing = elementIds.filter(id => !document.getElementById(id));
+    if (missing.length > 0) {
+        const message = `Missing required ${contextLabel} element(s): ${missing.join(', ')}`;
+        console.error(message);
+        throw new Error(message);
+    }
+}
+
 // ========================================
 // Global Event Handlers
 // ========================================
@@ -383,6 +452,7 @@ function debounce(func, wait) {
  * Handle online/offline status changes
  */
 function handleOnlineStatus() {
+    updateConnectionStatus();
     if (navigator.onLine) {
         showToast('You are back online', 'success', 3000);
         // Reload the page to refresh data
@@ -397,7 +467,43 @@ function handleOnlineStatus() {
 window.addEventListener('online', handleOnlineStatus);
 window.addEventListener('offline', handleOnlineStatus);
 
-document.addEventListener('DOMContentLoaded', function() {
+function setSidebarOpen(isOpen) {
+    const shell = document.getElementById('app-shell');
+    const toggle = document.getElementById('sidebar-toggle');
+
+    if (!shell || !toggle) {
+        return;
+    }
+
+    shell.classList.toggle('app-shell--nav-open', isOpen);
+    toggle.setAttribute('aria-expanded', String(isOpen));
+}
+
+function updateConnectionStatus() {
+    const statusPill = document.getElementById('connection-status-pill');
+    if (!statusPill) {
+        return;
+    }
+
+    if (navigator.onLine) {
+        statusPill.textContent = 'Online';
+        statusPill.className = 'status-pill status-pill--success';
+    } else {
+        statusPill.textContent = 'Offline mode';
+        statusPill.className = 'status-pill status-pill--warning';
+    }
+}
+
+let appInitialized = false;
+
+function initApp() {
+    if (appInitialized) {
+        return;
+    }
+    appInitialized = true;
+
+    loadAppInfo();
+
     // Check authentication (skip on login page)
     if (window.location.pathname !== '/login') {
         if (!isAuthenticated()) {
@@ -434,7 +540,56 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
-});
+
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+    const sidebarBackdrop = document.getElementById('app-shell-backdrop');
+    const desktopQuery = window.matchMedia('(min-width: 992px)');
+
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', () => {
+            const shell = document.getElementById('app-shell');
+            const isOpen = !shell?.classList.contains('app-shell--nav-open');
+            setSidebarOpen(isOpen);
+        });
+    }
+
+    if (sidebarBackdrop) {
+        sidebarBackdrop.addEventListener('click', () => setSidebarOpen(false));
+    }
+
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            setSidebarOpen(false);
+        }
+    });
+
+    desktopQuery.addEventListener('change', event => {
+        if (event.matches) {
+            setSidebarOpen(false);
+        }
+    });
+
+    updateConnectionStatus();
+}
+
+function runWhenFileFridgeReady(callback) {
+    if (window.fileFridgeAppReady) {
+        callback();
+        return;
+    }
+
+    if (!window.__fileFridgeReadyQueue) {
+        window.__fileFridgeReadyQueue = [];
+    }
+
+    window.__fileFridgeReadyQueue.push(callback);
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp, { once: true });
+} else {
+    initApp();
+}
 
 // ========================================
 // App Information Loader
@@ -474,6 +629,11 @@ function loadAppInfo() {
             const footerVersionEl = document.getElementById('footer-app-version');
             if (footerVersionEl) {
                 footerVersionEl.textContent = version;
+            }
+
+            const topbarVersionEl = document.getElementById('footer-app-version');
+            if (topbarVersionEl) {
+                topbarVersionEl.textContent = version;
             }
         })
         .catch(error => {
@@ -561,11 +721,31 @@ async function installPWA() {
 window.showToast = showToast;
 window.showConfirmModal = showConfirmModal;
 window.showConfirmModalWithCheckbox = showConfirmModalWithCheckbox;
+window.getAuthToken = getAuthToken;
+window.setAuthToken = setAuthToken;
+window.isAuthenticated = isAuthenticated;
+window.addAuthHeader = addAuthHeader;
+window.authenticatedFetch = authenticatedFetch;
 window.formatBytes = formatBytes;
 window.formatRelativeTime = formatRelativeTime;
 window.debounce = debounce;
 window.escapeHtml = escapeHtml;
+window.setRegionState = setRegionState;
+window.assertRequiredElements = assertRequiredElements;
 window.loadAppInfo = loadAppInfo;
 window.handleLogout = handleLogout;
 window.clearAuthToken = clearAuthToken;
 window.installPWA = installPWA;
+window.runWhenFileFridgeReady = runWhenFileFridgeReady;
+window.fileFridgeAppReady = true;
+if (window.__fileFridgeReadyQueue) {
+    const queuedCallbacks = window.__fileFridgeReadyQueue.splice(0);
+    queuedCallbacks.forEach(callback => {
+        try {
+            callback();
+        } catch (error) {
+            console.error('File Fridge queued callback failed:', error);
+        }
+    });
+}
+window.dispatchEvent(new Event('filefridge:app-ready'));

@@ -36,6 +36,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.config import settings
 from app.database import SessionLocal, init_db
 from app.database_migrations import run_startup_migrations
+from app.frontend_assets import configure_templates
 from app.models import FileInventory, FileStatus, RelocationTask, RelocationTaskStatus
 from app.routers.api import auth as api_auth
 from app.routers.api import browser as api_browser
@@ -162,7 +163,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # Configure Jinja2 Templates
-templates = Jinja2Templates(directory="templates")
+templates = configure_templates(Jinja2Templates(directory="templates"))
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")

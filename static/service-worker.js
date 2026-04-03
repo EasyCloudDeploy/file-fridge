@@ -1,47 +1,82 @@
 // File Fridge Service Worker
 // Provides basic caching for static assets and offline support
 
-const CACHE_NAME = 'file-fridge-v1';
+const CACHE_NAME = 'file-fridge-v2';
 const OFFLINE_URL = '/static/html/offline.html';
 
-const STATIC_ASSETS = [
+const CORE_ASSETS = [
   '/',
   '/static/html/offline.html',
-  '/static/css/style.css',
-  '/static/js/app.js',
-  '/static/js/dashboard.js',
-  '/static/js/files.js',
-  '/static/js/paths.js',
-  '/static/js/storage.js',
-  '/static/js/stats.js',
-  '/static/js/tags.js',
-  '/static/js/notifiers.js',
-
+  '/static/service-worker.js',
+  '/static/manifest.json',
   '/static/icons/icon-192.svg',
-  '/static/icons/icon-512.svg',
-  '/static/manifest.json'
+  '/static/icons/icon-512.svg'
 ];
+
+async function getBuiltAssets() {
+  try {
+    const response = await fetch('/static/dist/manifest.json', { cache: 'no-store' });
+    if (!response.ok) {
+      return [];
+    }
+
+    const manifest = await response.json();
+    const files = new Set(['/static/dist/manifest.json']);
+    const seen = new Set();
+
+    function collect(manifestKey) {
+      if (seen.has(manifestKey)) {
+        return;
+      }
+      seen.add(manifestKey);
+
+      const item = manifest[manifestKey];
+      if (!item) {
+        return;
+      }
+
+      if (item.file) {
+        files.add(`/static/dist/${item.file}`);
+      }
+
+      for (const cssFile of item.css || []) {
+        files.add(`/static/dist/${cssFile}`);
+      }
+
+      for (const assetFile of item.assets || []) {
+        files.add(`/static/dist/${assetFile}`);
+      }
+
+      for (const importKey of item.imports || []) {
+        collect(importKey);
+      }
+
+      for (const dynamicImportKey of item.dynamicImports || []) {
+        collect(dynamicImportKey);
+      }
+    }
+
+    for (const manifestKey of Object.keys(manifest)) {
+      collect(manifestKey);
+    }
+
+    return Array.from(files);
+  } catch (_error) {
+    return [];
+  }
+}
 
 // Install event - cache static assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => {
+    Promise.all([caches.open(CACHE_NAME), getBuiltAssets()])
+      .then(([cache, builtAssets]) => {
         console.log('Service Worker: Caching static assets');
-        return cache.addAll(STATIC_ASSETS);
+        return cache.addAll([...CORE_ASSETS, ...builtAssets]);
       })
       .then(() => self.skipWaiting())
   );
 });
-
-// Helper to check if user is online
-function isOnline() {
-  return self.clients.matchAll()
-    .then(clients => {
-      if (clients.length === 0) return false;
-      return clients[0].navigator.onLine;
-    });
-}
 
 // Activate event - clean up old caches
 self.addEventListener('activate', (event) => {

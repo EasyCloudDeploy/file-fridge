@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 
 {% block title %}Create Path - File Fridge{% endblock %}
+{% block page_title %}Monitored Path{% endblock %}
+{% block page_description %}Define the source directory, storage targets, and automation settings used to manage file lifecycle for this path.{% endblock %}
+{% block page_actions %}
+<a href="/paths" class="btn btn-outline-secondary">Back to Paths</a>
+{% endblock %}
 
 {% block content %}
         <div class="row">
             <div class="col-12 col-md-8 offset-md-2">
-                <h1 class="mb-4" id="form-title">
-                    <i class="bi bi-plus-circle"></i> Create Monitored Path
-                </h1>
-
                 <div class="card">
                     <div class="card-body">
                         <form id="path-form">

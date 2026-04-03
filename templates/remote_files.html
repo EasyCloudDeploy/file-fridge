@@ -1,11 +1,19 @@
 {% extends "base.html" %}
 
 {% block title %}Remote Files - File Fridge{% endblock %}
+{% block page_title %}Remote Files{% endblock %}
+{% block page_description %}Inspect files on connected instances and pull them into a local monitored path without leaving the web interface.{% endblock %}
+{% block breadcrumbs %}
+<nav aria-label="breadcrumb">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/settings#remote-connections">Remote Connections</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Browse Files</li>
+    </ol>
+</nav>
+{% endblock %}
 
 {% block extra_head %}
-<!-- AG Grid CSS -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-grid.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/styles/ag-theme-quartz.css">
+{{ vite_assets('grid') }}
 <style>
     #filesGrid {
         height: 70vh;
@@ -24,19 +32,8 @@
 {% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <h1 class="mb-4">
-            <i class="bi bi-hdd-network"></i> Remote File Browser: <span id="remote-instance-name"
-                class="text-primary">Loading...</span>
-        </h1>
-        <nav aria-label="breadcrumb">
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="/settings#remote-connections">Remote Connections</a></li>
-                <li class="breadcrumb-item active" aria-current="page">Browse Files</li>
-            </ol>
-        </nav>
-    </div>
+<div class="remote-page-heading">
+    Remote instance: <span id="remote-instance-name" class="text-primary">Loading...</span>
 </div>
 
 <!-- Search and Filters -->
@@ -142,7 +139,5 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<!-- AG Grid JS -->
-<script src="https://cdn.jsdelivr.net/npm/ag-grid-community@32.0.2/dist/ag-grid-community.min.js"></script>
 <script src="/static/js/remote_files.js"></script>
 {% endblock %}
