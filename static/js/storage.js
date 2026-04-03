@@ -1,5 +1,7 @@
 // static/js/storage.js
 const authenticatedFetch = (...args) => window.authenticatedFetch(...args);
+let hotStorageLoadedOnce = false;
+let coldStorageLoadedOnce = false;
 
 function renderStorageLoadingState(elementId, message = 'Loading storage statistics...') {
     const listEl = document.getElementById(elementId);
@@ -39,11 +41,30 @@ function renderStorageStatsList(stats, elementId, emptyMessage) {
         return;
     }
 
-    let html = '<ul class="list-group list-group-flush">';
+    let listGroup = listEl.querySelector('[data-storage-list]');
+    if (!listGroup) {
+        listEl.innerHTML = '<ul class="list-group list-group-flush" data-storage-list></ul>';
+        listGroup = listEl.querySelector('[data-storage-list]');
+    }
+
+    if (!listGroup) {
+        return;
+    }
+
+    const activePaths = new Set(stats.map(storageStat => String(storageStat.path || '')));
+
     stats.forEach(s => {
-        html += '<li class="list-group-item px-0">';
+        const storageKey = String(s.path || '');
+        let item = listGroup.querySelector(`[data-storage-path="${CSS.escape(storageKey)}"]`);
+        if (!item) {
+            item = document.createElement('li');
+            item.className = 'list-group-item px-0';
+            item.dataset.storagePath = storageKey;
+            listGroup.appendChild(item);
+        }
+
         if (s.error) {
-            html += `
+            item.innerHTML = `
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="text-danger text-truncate" title="${escapeStorageHtml(s.path)}"><strong>${escapeStorageHtml(s.path)}</strong></span>
                     <span class="badge bg-danger ms-2">Error</span>
@@ -58,7 +79,7 @@ function renderStorageStatsList(stats, elementId, emptyMessage) {
                 progressBarClass = 'bg-warning';
             }
 
-            html += `
+            item.innerHTML = `
                 <div>
                     <div class="text-truncate mb-1" title="${escapeStorageHtml(s.path)}"><strong class="small">${escapeStorageHtml(s.path)}</strong></div>
                     <div class="progress" style="height: 16px;">
@@ -72,11 +93,13 @@ function renderStorageStatsList(stats, elementId, emptyMessage) {
                     </div>
                 </div>`;
         }
-        html += '</li>';
     });
-    html += '</ul>';
 
-    listEl.innerHTML = html;
+    Array.from(listGroup.querySelectorAll('[data-storage-path]')).forEach(item => {
+        if (!activePaths.has(item.dataset.storagePath || '')) {
+            item.remove();
+        }
+    });
 }
 
 async function loadHotStorageStats() {
@@ -84,16 +107,21 @@ async function loadHotStorageStats() {
     if (!listEl) return;
 
     try {
-        renderStorageLoadingState('hotStorageStatusList', 'Loading hot storage statistics...');
+        if (!hotStorageLoadedOnce) {
+            renderStorageLoadingState('hotStorageStatusList', 'Loading hot storage statistics...');
+        }
         const response = await authenticatedFetch('/api/v1/paths/stats');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const stats = await response.json();
         renderStorageStatsList(stats, 'hotStorageStatusList', 'No monitored paths configured.');
+        hotStorageLoadedOnce = true;
     } catch (error) {
         console.error('Error fetching hot storage stats:', error);
-        listEl.innerHTML = '<p class="text-danger">Could not load hot storage statistics.</p>';
+        if (!hotStorageLoadedOnce) {
+            listEl.innerHTML = '<p class="text-danger">Could not load hot storage statistics.</p>';
+        }
     }
 }
 
@@ -102,16 +130,21 @@ async function loadColdStorageStats() {
     if (!listEl) return;
 
     try {
-        renderStorageLoadingState('storageStatusList', 'Loading cold storage statistics...');
+        if (!coldStorageLoadedOnce) {
+            renderStorageLoadingState('storageStatusList', 'Loading cold storage statistics...');
+        }
         const response = await authenticatedFetch('/api/v1/storage/stats');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         const stats = await response.json();
         renderStorageStatsList(stats, 'storageStatusList', 'No cold storage paths configured.');
+        coldStorageLoadedOnce = true;
     } catch (error) {
         console.error('Error fetching cold storage stats:', error);
-        listEl.innerHTML = '<p class="text-danger">Could not load cold storage statistics.</p>';
+        if (!coldStorageLoadedOnce) {
+            listEl.innerHTML = '<p class="text-danger">Could not load cold storage statistics.</p>';
+        }
     }
 }
 

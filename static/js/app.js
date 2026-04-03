@@ -598,6 +598,30 @@ function runWhenFileFridgeReady(callback) {
     window.__fileFridgeReadyQueue.push(callback);
 }
 
+function exportAppGlobals() {
+    window.showToast = showToast;
+    window.showConfirmModal = showConfirmModal;
+    window.showConfirmModalWithCheckbox = showConfirmModalWithCheckbox;
+    window.getAuthToken = getAuthToken;
+    window.setAuthToken = setAuthToken;
+    window.isAuthenticated = isAuthenticated;
+    window.addAuthHeader = addAuthHeader;
+    window.authenticatedFetch = authenticatedFetch;
+    window.formatBytes = formatBytes;
+    window.formatRelativeTime = formatRelativeTime;
+    window.debounce = debounce;
+    window.escapeHtml = escapeHtml;
+    window.setRegionState = setRegionState;
+    window.assertRequiredElements = assertRequiredElements;
+    window.loadAppInfo = loadAppInfo;
+    window.handleLogout = handleLogout;
+    window.clearAuthToken = clearAuthToken;
+    window.installPWA = installPWA;
+    window.runWhenFileFridgeReady = runWhenFileFridgeReady;
+}
+
+exportAppGlobals();
+
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initApp, { once: true });
 } else {
@@ -726,22 +750,4 @@ async function installPWA() {
 // ========================================
 // Export functions to global scope
 // ========================================
-window.showToast = showToast;
-window.showConfirmModal = showConfirmModal;
-window.showConfirmModalWithCheckbox = showConfirmModalWithCheckbox;
-window.getAuthToken = getAuthToken;
-window.setAuthToken = setAuthToken;
-window.isAuthenticated = isAuthenticated;
-window.addAuthHeader = addAuthHeader;
-window.authenticatedFetch = authenticatedFetch;
-window.formatBytes = formatBytes;
-window.formatRelativeTime = formatRelativeTime;
-window.debounce = debounce;
-window.escapeHtml = escapeHtml;
-window.setRegionState = setRegionState;
-window.assertRequiredElements = assertRequiredElements;
-window.loadAppInfo = loadAppInfo;
-window.handleLogout = handleLogout;
-window.clearAuthToken = clearAuthToken;
-window.installPWA = installPWA;
-window.runWhenFileFridgeReady = runWhenFileFridgeReady;
+exportAppGlobals();

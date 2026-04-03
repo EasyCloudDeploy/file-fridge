@@ -1,6 +1,6 @@
 {
   "frontend/entries/app.js": {
-    "file": "assets/app-B97iEOMA.js",
+    "file": "assets/app-xJpQ1dgB.js",
     "name": "app",
     "src": "frontend/entries/app.js",
     "isEntry": true,
@@ -39,7 +39,7 @@
     "src": "node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff2"
   },
   "static/js/app.js": {
-    "file": "assets/app-CCMYMoBI.js",
+    "file": "assets/app-CyJiTTVT.js",
     "name": "app",
     "src": "static/js/app.js",
     "isDynamicEntry": true
