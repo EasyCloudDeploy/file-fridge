@@ -1,6 +1,9 @@
 /**
  * Notifier Management JavaScript
  */
+const assertRequiredElements = (...args) => window.assertRequiredElements(...args);
+const authenticatedFetch = (...args) => window.authenticatedFetch(...args);
+const setRegionState = (...args) => window.setRegionState(...args);
 
 let allNotifiers = [];
 let currentEditingNotifierId = null;

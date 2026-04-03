@@ -1,4 +1,19 @@
 // static/js/storage.js
+const authenticatedFetch = (...args) => window.authenticatedFetch(...args);
+
+function renderStorageLoadingState(elementId, message = 'Loading storage statistics...') {
+    const listEl = document.getElementById(elementId);
+    if (!listEl) return;
+
+    listEl.innerHTML = `
+        <div class="text-center py-3">
+            <div class="spinner-border spinner-border-sm" role="status">
+                <span class="visually-hidden">${message}</span>
+            </div>
+            <p class="text-muted small mt-2 mb-0">${message}</p>
+        </div>
+    `;
+}
 
 function formatStorageBytes(bytes, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
@@ -69,6 +84,7 @@ async function loadHotStorageStats() {
     if (!listEl) return;
 
     try {
+        renderStorageLoadingState('hotStorageStatusList', 'Loading hot storage statistics...');
         const response = await authenticatedFetch('/api/v1/paths/stats');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
@@ -86,6 +102,7 @@ async function loadColdStorageStats() {
     if (!listEl) return;
 
     try {
+        renderStorageLoadingState('storageStatusList', 'Loading cold storage statistics...');
         const response = await authenticatedFetch('/api/v1/storage/stats');
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);

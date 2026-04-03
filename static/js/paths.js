@@ -1,5 +1,8 @@
 // Paths management JavaScript - client-side rendering
 const API_BASE_URL = '/api/v1';
+const authenticatedFetch = (...args) => window.authenticatedFetch(...args);
+const setRegionState = (...args) => window.setRegionState(...args);
+const showConfirmModal = (...args) => window.showConfirmModal(...args);
 
 function formatBytes(bytes, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
@@ -25,7 +28,7 @@ function escapeHtml(text) {
 
 // Notification function - uses toast notifications from app.js
 function showNotification(message, type = 'success') {
-    showToast(message, type);
+    window.showToast(message, type);
 }
 
 // Load and render paths list
