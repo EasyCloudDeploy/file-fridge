@@ -385,8 +385,8 @@ function initializeDropdowns() {
                 existingInstance.dispose();
             }
 
-            // Create new dropdown with custom config
-            new bootstrap.Dropdown(toggle, {
+            // Create or get existing dropdown with custom config
+            bootstrap.Dropdown.getOrCreateInstance(toggle, {
                 boundary: 'window',
                 popperConfig: function (defaultConfig) {
                     return {
