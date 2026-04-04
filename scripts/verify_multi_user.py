@@ -1,9 +1,16 @@
 
+import os
 import sys
 import time
+from pathlib import Path
 
 import httpx
 import jwt
+
+# Add project root to sys.path to allow importing app modules
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from app.config import settings
 
 BASE_URL = "http://localhost:8000"
 RUN_ID = int(time.time())
@@ -43,7 +50,12 @@ def test_multi_user():
 
     # 3. Decode JWT and check roles
     print("\nStep 3: Verifying Admin JWT roles...")
-    decoded = jwt.decode(admin_token, options={"verify_signature": False})
+    # Securely verify and decode the token using the application's secret key and algorithm
+    decoded = jwt.decode(
+        admin_token, 
+        settings.secret_key, 
+        algorithms=[settings.algorithm]
+    )
     if "admin" in decoded.get("roles", []):
         print(f"SUCCESS: Admin roles verified: {decoded['roles']}")
     else:
