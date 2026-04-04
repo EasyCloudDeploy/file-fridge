@@ -542,6 +542,15 @@ class FileWorkflowService:
 
             dest_base = Path(storage_location.path)
             dest_path = FileMover.preserve_directory_structure(file_path, source_base, dest_base)
+            logger.info(
+                "Preparing automatic freeze: path_id=%s inventory_source=%s destination=%s operation=%s storage_location=%s file_size=%s",
+                path.id,
+                file_path,
+                dest_path,
+                path.operation_type,
+                storage_location.path,
+                file_size,
+            )
 
             # Lock file inventory record for update
             inventory_entry = (
@@ -604,6 +613,14 @@ class FileWorkflowService:
 
                 # Calculate checksum before move
                 checksum_before = checksum_verifier.calculate_checksum(file_path)
+                logger.debug(
+                    "Starting automatic freeze execution: inventory_id=%s operation_id=%s source=%s destination=%s checksum_prefix=%s",
+                    inventory_entry.id,
+                    operation_id,
+                    file_path,
+                    dest_path,
+                    checksum_before[:16] if checksum_before else None,
+                )
 
                 # Move file with transaction pattern and checksum verification
                 success, error, checksum_after = FileMover.move_with_rollback(
@@ -664,6 +681,12 @@ class FileWorkflowService:
                     # Rollback status on failure
                     inventory_entry.status = old_status
                     db.commit()
+                    logger.error(
+                        "Automatic freeze failed for %s -> %s: %s",
+                        file_path,
+                        dest_path,
+                        error,
+                    )
 
                     # Log failed operation to audit trail
                     audit_trail_service.log_freeze_operation(
