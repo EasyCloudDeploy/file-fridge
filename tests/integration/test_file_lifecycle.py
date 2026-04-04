@@ -323,3 +323,112 @@ def test_file_lifecycle_non_existent_file(monitored_path_with_locations, db_sess
 
     # Clean up the file (it was never actually moved by the mock)
     file_to_disappear.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Operation type migration — end-to-end
+# ---------------------------------------------------------------------------
+
+def test_symlink_to_move_migration(monitored_path_with_locations, db_session):
+    """
+    End-to-end: switch from SYMLINK → MOVE with an already-frozen file.
+
+    Phase 1 – Freeze with SYMLINK:
+        File moves to cold, symlink left at hot path.
+    Phase 2 – Change operation_type to MOVE, re-scan:
+        Orphaned symlink is deleted; cold file remains untouched.
+        Nothing is thawed — the file is already where MOVE wants it (cold only).
+    """
+    monitored_path, hot_path, cold_path = monitored_path_with_locations
+    monitored_path.operation_type = "symlink"
+    db_session.commit()
+
+    test_file = hot_path / "movie.mkv"
+    test_file.write_text("movie content")
+    original_content = test_file.read_text()
+
+    criteria = _never_match_criterion(monitored_path.id)
+    db_session.add(criteria)
+    db_session.commit()
+
+    # ---- Phase 1: Freeze with SYMLINK ----
+    results = file_workflow_service.process_path(monitored_path, db_session)
+    assert results["files_moved"] == 1, f"errors: {results['errors']}"
+
+    expected_cold = cold_path / "movie.mkv"
+    assert test_file.is_symlink()
+    assert expected_cold.exists()
+    assert test_file.resolve() == expected_cold
+
+    # ---- Phase 2: Switch to MOVE, re-scan ----
+    monitored_path.operation_type = "move"
+    db_session.commit()
+
+    results2 = file_workflow_service.process_path(monitored_path, db_session)
+    assert results2["errors"] == []
+
+    # Symlink must be gone; cold file must be intact with original content
+    assert not test_file.exists()
+    assert expected_cold.exists()
+    assert expected_cold.read_text() == original_content
+
+    # Nothing thawed — the file was already correctly in cold storage
+    assert results2["files_moved"] == 0
+
+
+def test_symlink_to_copy_migration(monitored_path_with_locations, db_session):
+    """
+    End-to-end: switch from SYMLINK → COPY with an already-frozen file.
+
+    Phase 1 – Freeze with SYMLINK:
+        File moves to cold, symlink left at hot path.
+    Phase 2 – Change operation_type to COPY, scan 1:
+        Orphaned symlink is thawed: cold file moves back to hot, symlink removed.
+    Phase 3 – Scan 2 (same criteria):
+        Hot file is now a real file; COPY freezes it — cold copy created,
+        hot original preserved.
+    """
+    monitored_path, hot_path, cold_path = monitored_path_with_locations
+    monitored_path.operation_type = "symlink"
+    db_session.commit()
+
+    test_file = hot_path / "document.pdf"
+    test_file.write_text("document content")
+    original_content = test_file.read_text()
+
+    criteria = _never_match_criterion(monitored_path.id)
+    db_session.add(criteria)
+    db_session.commit()
+
+    # ---- Phase 1: Freeze with SYMLINK ----
+    results = file_workflow_service.process_path(monitored_path, db_session)
+    assert results["files_moved"] == 1, f"errors: {results['errors']}"
+
+    expected_cold = cold_path / "document.pdf"
+    assert test_file.is_symlink()
+    assert expected_cold.exists()
+
+    # ---- Phase 2: Switch to COPY, scan 1 — thaw ----
+    monitored_path.operation_type = "copy"
+    db_session.commit()
+
+    results2 = file_workflow_service.process_path(monitored_path, db_session)
+    assert results2["errors"] == []
+
+    # Symlink gone, real file restored to hot, cold copy removed during thaw
+    assert test_file.exists()
+    assert not test_file.is_symlink()
+    assert test_file.read_text() == original_content
+    assert not expected_cold.exists()
+
+    # ---- Phase 3: Scan 2 — re-freeze as COPY ----
+    results3 = file_workflow_service.process_path(monitored_path, db_session)
+    assert results3["files_moved"] == 1, f"errors: {results3['errors']}"
+    assert results3["errors"] == []
+
+    # Both hot original and cold copy must now exist
+    assert test_file.exists()
+    assert not test_file.is_symlink()
+    assert test_file.read_text() == original_content
+    assert expected_cold.exists()
+    assert expected_cold.read_text() == original_content
