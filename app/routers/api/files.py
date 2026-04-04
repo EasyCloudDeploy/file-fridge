@@ -32,6 +32,7 @@ from app.schemas import (
     BulkFreezeRequest,
     FileMoveRequest,
     FileRelocateRequest,
+    FilterCriteria,
 )
 from app.schemas import (
     StorageType as StorageTypeSchema,
@@ -141,63 +142,51 @@ def _parse_tag_ids(tag_ids: Optional[str]) -> Optional[List[int]]:
 def _apply_filters(
     query,
     db: Session,
-    path_id: Optional[int] = None,
-    storage_type: Optional[StorageTypeSchema] = None,
-    file_status: Optional[str] = None,
-    search: Optional[str] = None,
-    extension: Optional[str] = None,
-    mime_type: Optional[str] = None,
-    has_checksum: Optional[bool] = None,
-    tag_id_list: Optional[List[int]] = None,
-    is_pinned: Optional[bool] = None,
-    min_size: Optional[int] = None,
-    max_size: Optional[int] = None,
-    min_mtime: Optional[datetime] = None,
-    max_mtime: Optional[datetime] = None,
-    storage_location_id: Optional[int] = None,
+    criteria: FilterCriteria,
 ):
     """Apply various filters to the FileInventory query."""
     from app.models import FileTag
 
-    if path_id:
-        query = query.filter(FileInventory.path_id == path_id)
-    if storage_type:
-        query = query.filter(FileInventory.storage_type == storage_type)
-    if file_status:
-        query = query.filter(FileInventory.status == file_status)
-    if search:
-        escaped_search = escape_like_string(search)
+    if criteria.path_id:
+        query = query.filter(FileInventory.path_id == criteria.path_id)
+    if criteria.storage_type:
+        query = query.filter(FileInventory.storage_type == criteria.storage_type)
+    if criteria.file_status:
+        query = query.filter(FileInventory.status == criteria.file_status)
+    if criteria.search:
+        escaped_search = escape_like_string(criteria.search)
         search_pattern = f"%{escaped_search}%"
         query = query.filter(FileInventory.file_path.ilike(search_pattern, escape="\\"))
-    if extension:
-        ext = extension if extension.startswith(".") else f".{extension}"
+    if criteria.extension:
+        ext = criteria.extension if criteria.extension.startswith(".") else f".{criteria.extension}"
         query = query.filter(FileInventory.file_extension == ext.lower())
-    if mime_type:
-        escaped_mime = escape_like_string(mime_type)
+    if criteria.mime_type:
+        escaped_mime = escape_like_string(criteria.mime_type)
         query = query.filter(FileInventory.mime_type.ilike(f"%{escaped_mime}%", escape="\\"))
-    if has_checksum is not None:
-        if has_checksum:
+    if criteria.has_checksum is not None:
+        if criteria.has_checksum:
             query = query.filter(FileInventory.checksum.isnot(None))
         else:
             query = query.filter(FileInventory.checksum.is_(None))
-    if tag_id_list:
-        query = query.join(FileInventory.tags).filter(FileTag.tag_id.in_(tag_id_list)).distinct()
-    if is_pinned is not None:
+    if criteria.tag_id_list:
+        query = query.join(FileInventory.tags).filter(FileTag.tag_id.in_(criteria.tag_id_list)).distinct()
+    if criteria.is_pinned is not None:
         pinned_subquery = db.query(PinnedFile.file_path)
-        if is_pinned:
+        if criteria.is_pinned:
             query = query.filter(FileInventory.file_path.in_(pinned_subquery))
         else:
             query = query.filter(FileInventory.file_path.notin_(pinned_subquery))
-    if min_size is not None:
-        query = query.filter(FileInventory.file_size >= min_size)
-    if max_size is not None:
-        query = query.filter(FileInventory.file_size <= max_size)
-    if min_mtime is not None:
-        query = query.filter(FileInventory.file_mtime >= min_mtime)
-    if max_mtime is not None:
-        query = query.filter(FileInventory.file_mtime <= max_mtime)
-    if storage_location_id is not None:
-        query = query.filter(FileInventory.cold_storage_location_id == storage_location_id)
+    if criteria.min_size is not None:
+        query = query.filter(FileInventory.file_size >= criteria.min_size)
+    if max_size := criteria.max_size:
+        if max_size >= 0:
+            query = query.filter(FileInventory.file_size <= max_size)
+    if criteria.min_mtime is not None:
+        query = query.filter(FileInventory.file_mtime >= criteria.min_mtime)
+    if criteria.max_mtime is not None:
+        query = query.filter(FileInventory.file_mtime <= criteria.max_mtime)
+    if criteria.storage_location_id is not None:
+        query = query.filter(FileInventory.cold_storage_location_id == criteria.storage_location_id)
     return query
 
 
@@ -206,7 +195,7 @@ def _apply_cursor_pagination(query, sort_field, cursor_data, is_descending):
     last_id = cursor_data.get("id")
     last_sort_value = cursor_data.get("sort_value")
 
-    if last_id is None or last_sort_value is None:
+    if last_id is None:
         return query
 
     if is_descending:
@@ -260,36 +249,26 @@ def _generate_next_cursor(files_list, sort_by, valid_sort_fields):
 
 @router.get("", responses={400: {"description": "Invalid query parameters"}})
 def list_files(
-    path_id: Optional[int] = Query(None, description="Filter by monitored path ID"),
-    storage_type: Optional[StorageTypeSchema] = Query(
-        None, description="Filter by storage type (hot/cold)"
-    ),
-    file_status: Optional[str] = Query(None, alias="status", description="Filter by file status"),
-    search: Optional[str] = Query(None, description="Search in file path"),
-    extension: Optional[str] = Query(
-        None, description="Filter by file extension (e.g., .pdf, .jpg)"
-    ),
-    mime_type: Optional[str] = Query(None, description="Filter by MIME type"),
-    has_checksum: Optional[bool] = Query(None, description="Filter files with/without checksum"),
-    tag_ids: Optional[str] = Query(None, description="Filter by tag IDs (comma-separated)"),
-    is_pinned: Optional[bool] = Query(None, description="Filter by pinned status"),
-    min_size: Optional[int] = Query(None, description="Minimum file size in bytes"),
-    max_size: Optional[int] = Query(None, description="Maximum file size in bytes"),
-    min_mtime: Optional[datetime] = Query(None, description="Minimum modification time"),
-    max_mtime: Optional[datetime] = Query(None, description="Maximum modification time"),
-    storage_location_id: Optional[int] = Query(
-        None, description="Filter by cold storage location ID"
-    ),
-    sort_by: str = Query(
-        "last_seen",
-        description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)",
-    ),
-    sort_order: str = Query("desc", description="Sort order (asc/desc)"),
-    page_size: int = Query(
-        100, ge=10, le=500, description="Number of items per page (for pagination)"
-    ),
-    cursor: Optional[str] = Query(None, description="Pagination cursor (base64 encoded)"),
-    db: Session = Depends(get_db),
+    path_id: Annotated[Optional[int], Query(description="Filter by monitored path ID")] = None,
+    storage_type: Annotated[Optional[StorageTypeSchema], Query(description="Filter by storage type (hot/cold)")] = None,
+    file_status: Annotated[Optional[str], Query(alias="status", description="Filter by file status")] = None,
+    search: Annotated[Optional[str], Query(description="Search in file path")] = None,
+    extension: Annotated[Optional[str], Query(description="Filter by file extension (e.g., .pdf, .jpg)")] = None,
+    mime_type: Annotated[Optional[str], Query(description="Filter by MIME type")] = None,
+    has_checksum: Annotated[Optional[bool], Query(description="Filter files with/without checksum")] = None,
+    tag_ids: Annotated[Optional[str], Query(description="Filter by tag IDs (comma-separated)")] = None,
+    is_pinned: Annotated[Optional[bool], Query(description="Filter by pinned status")] = None,
+    min_size: Annotated[Optional[int], Query(description="Minimum file size in bytes")] = None,
+    max_size: Annotated[Optional[int], Query(description="Maximum file size in bytes")] = None,
+    min_mtime: Annotated[Optional[datetime], Query(description="Minimum modification time")] = None,
+    max_mtime: Annotated[Optional[datetime], Query(description="Maximum modification time")] = None,
+    storage_location_id: Annotated[Optional[int], Query(description="Filter by cold storage location ID")] = None,
+    sort_by: Annotated[str, Query(description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)")] = "last_seen",
+    sort_order: Annotated[str, Query(description="Sort order (asc/desc)")] = "desc",
+    page_size: Annotated[int, Query(ge=10, le=500, description="Number of items per page (for pagination)")] = 100,
+    cursor: Annotated[Optional[str], Query(description="Pagination cursor (base64 encoded)")] = None,
+    db: Annotated[Session, Depends(get_db)] = None,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
 ):
     """
     Stream files in inventory as NDJSON.
@@ -328,24 +307,29 @@ def list_files(
                 yield json.dumps({"type": "error", "message": str(e), "partial_count": 0}) + "\n"
                 return
 
+            # Prepare filter criteria
+            filter_criteria = FilterCriteria(
+                path_id=path_id,
+                storage_type=StorageType(storage_type.value) if storage_type else None,
+                file_status=file_status,
+                search=search,
+                extension=extension,
+                mime_type=mime_type,
+                has_checksum=has_checksum,
+                tag_id_list=tag_id_list,
+                is_pinned=is_pinned,
+                min_size=min_size,
+                max_size=max_size,
+                min_mtime=min_mtime,
+                max_mtime=max_mtime,
+                storage_location_id=storage_location_id,
+            )
+
             # Apply filters
             query = _apply_filters(
                 db.query(FileInventory),
                 db,
-                path_id,
-                storage_type,
-                file_status,
-                search,
-                extension,
-                mime_type,
-                has_checksum,
-                tag_id_list,
-                is_pinned,
-                min_size,
-                max_size,
-                min_mtime,
-                max_mtime,
-                storage_location_id,
+                filter_criteria,
             )
 
             total_count = query.count()
@@ -450,8 +434,8 @@ def list_files(
 @router.post("/move", status_code=status.HTTP_202_ACCEPTED)
 def move_file(
     request: FileMoveRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """Move a file on-demand."""
     try:
@@ -518,7 +502,7 @@ def move_file(
 
 @router.get("/browse")
 def browse_files(
-    directory: str, storage_type: Optional[str] = "hot", db: Session = Depends(get_db)
+    directory: str, storage_type: Optional[str] = "hot", db: Annotated[Session, Depends(get_db)]
 ):
     """Browse files in a directory. Restricted to configured paths."""
     try:
@@ -600,7 +584,7 @@ def browse_files(
 
 
 @router.post("/thaw/{inventory_id}")
-def thaw_file(inventory_id: int, pin: bool = False, db: Session = Depends(get_db)):
+def thaw_file(inventory_id: int, pin: bool = False, db: Annotated[Session, Depends(get_db)]):
     """Thaw a file (move back from cold storage to hot storage)."""
     inventory_entry = (
         db.query(FileInventory)
@@ -644,7 +628,7 @@ def thaw_file(inventory_id: int, pin: bool = False, db: Session = Depends(get_db
 
 
 @router.get("/freeze/{inventory_id}/options")
-def get_freeze_options(inventory_id: int, db: Session = Depends(get_db)):
+def get_freeze_options(inventory_id: int, db: Annotated[Session, Depends(get_db)]):
     """Get available cold storage locations for freezing a file."""
     inventory_entry = (
         db.query(FileInventory)
@@ -686,7 +670,7 @@ def freeze_file(
     inventory_id: int,
     storage_location_id: int = Query(..., description="Target cold storage location ID"),
     pin: bool = Query(False, description="Pin file after freezing"),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Freeze a file (move from hot storage to cold storage).
@@ -764,7 +748,7 @@ def freeze_file(
 
 
 @router.post("/relocate/{inventory_id}", status_code=status.HTTP_202_ACCEPTED)
-def relocate_file(inventory_id: int, request: FileRelocateRequest, db: Session = Depends(get_db)):
+def relocate_file(inventory_id: int, request: FileRelocateRequest, db: Annotated[Session, Depends(get_db)]):
     """
     Start an async relocation of a file from one cold storage location to another.
 
@@ -870,7 +854,7 @@ def relocate_file(inventory_id: int, request: FileRelocateRequest, db: Session =
 
 
 @router.get("/relocate/{inventory_id}/options")
-def get_relocate_options(inventory_id: int, db: Session = Depends(get_db)):
+def get_relocate_options(inventory_id: int, db: Annotated[Session, Depends(get_db)]):
     """Get available cold storage locations for relocating a file."""
     inventory_entry = (
         db.query(FileInventory)
@@ -965,7 +949,7 @@ def backfill_metadata(
     path_id: Optional[int] = None,
     batch_size: int = Query(100, ge=1, le=1000, description="Files to process per batch"),
     compute_checksum: bool = Query(True, description="Whether to compute file checksums"),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Backfill metadata (extension, MIME type, checksum) for existing files."""
     from app.services.metadata_backfill import MetadataBackfillService
@@ -989,7 +973,7 @@ def backfill_metadata(
 def bulk_thaw_files(
     request: BulkFileActionRequest,
     pin: bool = Query(False, description="Pin files after thawing"),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Bulk thaw multiple files from cold storage to hot storage.
@@ -1063,7 +1047,7 @@ def bulk_thaw_files(
 
 
 @router.post("/bulk/freeze", response_model=BulkActionResponse)
-def bulk_freeze_files(request: BulkFreezeRequest, db: Session = Depends(get_db)):
+def bulk_freeze_files(request: BulkFreezeRequest, db: Annotated[Session, Depends(get_db)]):
     """
     Bulk freeze multiple files from hot storage to cold storage.
 
@@ -1194,7 +1178,7 @@ def bulk_freeze_files(request: BulkFreezeRequest, db: Session = Depends(get_db))
 
 
 @router.post("/bulk/pin", response_model=BulkActionResponse)
-def bulk_pin_files(request: BulkFileActionRequest, db: Session = Depends(get_db)):
+def bulk_pin_files(request: BulkFileActionRequest, db: Annotated[Session, Depends(get_db)]):
     """
     Bulk pin multiple files to exclude them from automatic scan operations.
     """
@@ -1291,7 +1275,7 @@ def bulk_pin_files(request: BulkFileActionRequest, db: Session = Depends(get_db)
 
 
 @router.post("/bulk/unpin", response_model=BulkActionResponse)
-def bulk_unpin_files(request: BulkFileActionRequest, db: Session = Depends(get_db)):
+def bulk_unpin_files(request: BulkFileActionRequest, db: Annotated[Session, Depends(get_db)]):
     """
     Bulk unpin multiple files to allow automatic scan operations.
     """
@@ -1373,7 +1357,7 @@ def bulk_unpin_files(request: BulkFileActionRequest, db: Session = Depends(get_d
 
 
 @router.post("/{inventory_id}/pin", status_code=status.HTTP_200_OK)
-def pin_file(inventory_id: int, db: Session = Depends(get_db)):
+def pin_file(inventory_id: int, db: Annotated[Session, Depends(get_db)]):
     """
     Pin a file to exclude it from automatic scan operations.
 
@@ -1415,7 +1399,7 @@ def pin_file(inventory_id: int, db: Session = Depends(get_db)):
 
 
 @router.delete("/{inventory_id}/pin", status_code=status.HTTP_200_OK)
-def unpin_file(inventory_id: int, db: Session = Depends(get_db)):
+def unpin_file(inventory_id: int, db: Annotated[Session, Depends(get_db)]):
     """
     Remove pin from a file, allowing automatic scan operations.
 

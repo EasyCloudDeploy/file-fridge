@@ -1,7 +1,7 @@
 """API routes for user management."""
 
 import logging
-from typing import List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -20,7 +20,7 @@ admin_only = [Depends(PermissionChecker("admin"))]
 
 
 @router.get("", response_model=List[schemas.UserOut], dependencies=admin_only)
-def list_users(db: Session = Depends(get_db)):
+def list_users(db: Annotated[Session, Depends(get_db)]):
     """List all users."""
     return db.query(User).all()
 
@@ -30,8 +30,8 @@ def list_users(db: Session = Depends(get_db)):
 )
 def create_user(
     user_data: schemas.UserCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(PermissionChecker("admin")),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(PermissionChecker("admin"))],
 ):
     """Create a new user with default role."""
     existing_user = db.query(User).filter(User.username == user_data.username).first()
@@ -75,8 +75,8 @@ def create_user(
 def update_user_roles(
     user_id: int,
     roles: List[str],
-    db: Session = Depends(get_db),
-    current_user: User = Depends(PermissionChecker("admin")),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(PermissionChecker("admin"))],
 ):
     """Update a user's roles."""
     user = db.query(User).filter(User.id == user_id).first()
@@ -114,8 +114,8 @@ def update_user_roles(
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=admin_only)
 def delete_user(
     user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(PermissionChecker("admin")),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(PermissionChecker("admin"))],
 ):
     """Delete a user."""
     user = db.query(User).filter(User.id == user_id).first()

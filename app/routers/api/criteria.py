@@ -2,7 +2,7 @@
 """API routes for criteria management."""
 
 import logging
-from typing import List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/v1/criteria", tags=["criteria"])
 
 
 @router.get("/path/{path_id}", response_model=List[CriteriaSchema])
-def list_criteria(path_id: int, db: Session = Depends(get_db)):
+def list_criteria(path_id: int, db: Annotated[Session, Depends(get_db)]):
     """List all criteria for a path."""
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
     if not path:
@@ -30,7 +30,7 @@ def list_criteria(path_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/path/{path_id}", response_model=CriteriaSchema, status_code=status.HTTP_201_CREATED)
-def create_criteria(path_id: int, criteria: CriteriaCreate, db: Session = Depends(get_db)):
+def create_criteria(path_id: int, criteria: CriteriaCreate, db: Annotated[Session, Depends(get_db)]):
     """Create a new criterion for a path."""
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
     if not path:
@@ -61,7 +61,7 @@ def create_criteria(path_id: int, criteria: CriteriaCreate, db: Session = Depend
 
 
 @router.get("/{criteria_id}", response_model=CriteriaSchema)
-def get_criteria(criteria_id: int, db: Session = Depends(get_db)):
+def get_criteria(criteria_id: int, db: Annotated[Session, Depends(get_db)]):
     """Get a specific criterion."""
     criteria = db.query(Criteria).filter(Criteria.id == criteria_id).first()
     if not criteria:
@@ -74,7 +74,7 @@ def get_criteria(criteria_id: int, db: Session = Depends(get_db)):
 
 @router.put("/{criteria_id}", response_model=CriteriaSchema)
 def update_criteria(
-    criteria_id: int, criteria_update: CriteriaUpdate, db: Session = Depends(get_db)
+    criteria_id: int, criteria_update: CriteriaUpdate, db: Annotated[Session, Depends(get_db)]
 ):
     """Update a criterion."""
     criteria = db.query(Criteria).filter(Criteria.id == criteria_id).first()
@@ -119,7 +119,7 @@ def update_criteria(
 
 
 @router.delete("/{criteria_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_criteria(criteria_id: int, db: Session = Depends(get_db)):
+def delete_criteria(criteria_id: int, db: Annotated[Session, Depends(get_db)]):
     """Delete a criterion. If it's the last criterion, all files are moved back from cold storage."""
     criteria = db.query(Criteria).filter(Criteria.id == criteria_id).first()
     if not criteria:

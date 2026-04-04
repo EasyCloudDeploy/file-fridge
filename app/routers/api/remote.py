@@ -3,7 +3,7 @@ import base64
 import json
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 import aiofiles
 import anyio
@@ -218,8 +218,8 @@ async def _decompress_chunk(chunk: bytes) -> bytes:
 
 @router.get("/status", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def get_remote_status(
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Check if remote connections are properly configured."""
     _ = current_user
@@ -239,8 +239,8 @@ def get_remote_status(
 
 @router.get("/config", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def get_instance_config(
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Get instance configuration including source information (environment vs database)."""
     _ = current_user
@@ -250,8 +250,8 @@ def get_instance_config(
 @router.post("/config", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def update_instance_config(
     config_data: dict,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """
     Update instance configuration (database values).
@@ -272,7 +272,7 @@ def update_instance_config(
 
 
 @router.get("/identity", response_model=RemoteConnectionIdentity, tags=[RESOURCE_REMOTE_CONNECTIONS])
-def get_public_identity(db: Session = Depends(get_db)):
+def get_public_identity(db: Annotated[Session, Depends(get_db)]):
     """Return the public identity of this File Fridge instance."""
     instance_url = instance_config_service.get_instance_url(db)
     if not instance_url:
@@ -294,8 +294,8 @@ def get_public_identity(db: Session = Depends(get_db)):
 
 @router.get("/connection-code", response_model=ConnectionCodeResponse, tags=[RESOURCE_REMOTE_CONNECTIONS])
 def get_connection_code(
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """
     Get the current rotating connection code for this instance.
@@ -322,7 +322,7 @@ def get_connection_code(
 )
 async def fetch_remote_identity(
     data: RemoteConnectionCreate,
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Fetch the public identity of a remote instance to initiate a connection."""
     _ = current_user
@@ -343,8 +343,8 @@ async def fetch_remote_identity(
 )
 async def connect_with_code(
     connection_data: RemoteConnectionCreate,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """
     Establish a connection using a connection code.
@@ -389,8 +389,8 @@ async def connect_with_code(
 async def create_connection(
     name: str,
     remote_identity: RemoteConnectionIdentity,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Establish a trusted connection with a remote instance after verifying its identity."""
     _ = current_user
@@ -410,7 +410,7 @@ async def create_connection(
     },
 )
 async def handle_connection_request(
-    request_data: RemoteConnectionRequest, db: Session = Depends(get_db)
+    request_data: RemoteConnectionRequest, db: Annotated[Session, Depends(get_db)]
 ):
     """Handles an incoming connection request from a remote instance (unauthenticated)."""
     try:
@@ -427,8 +427,8 @@ async def handle_connection_request(
     "/connections", response_model=List[RemoteConnectionSchema], tags=[RESOURCE_REMOTE_CONNECTIONS]
 )
 def list_connections(
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """List all remote connections."""
     _ = current_user
@@ -438,8 +438,8 @@ def list_connections(
 @router.delete("/connections/{connection_id}", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def delete_connection(
     connection_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Delete a remote connection."""
     _ = current_user
@@ -457,8 +457,8 @@ async def delete_connection(
 )
 def trust_connection(
     connection_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ) -> RemoteConnectionSchema:
     """Manually trust a PENDING remote connection."""
     _ = current_user
@@ -475,8 +475,8 @@ def trust_connection(
 )
 def reject_connection(
     connection_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ) -> RemoteConnectionSchema:
     """Reject a PENDING remote connection."""
     _ = current_user
@@ -494,8 +494,8 @@ def reject_connection(
 async def update_connection(
     connection_id: int,
     update_data: RemoteConnectionUpdate,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ) -> RemoteConnectionSchema:
     """Update a remote connection's name and/or transfer mode."""
     _ = current_user
@@ -534,7 +534,7 @@ async def update_connection(
 @router.post("/terminate-connection", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def terminate_connection(
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Handle an incoming termination request."""
     remote_connection_service.handle_terminate_connection(db, remote_conn.remote_fingerprint)
@@ -547,8 +547,8 @@ async def terminate_connection(
 )
 async def get_remote_paths(
     connection_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Fetch available MonitoredPaths from a remote instance."""
     _ = current_user
@@ -571,8 +571,8 @@ async def get_remote_paths(
 @router.post("/migrate", response_model=RemoteTransferJobSchema, tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def migrate_file(
     migration_data: RemoteTransferJobBase,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Trigger a file migration to a remote instance."""
     _ = current_user
@@ -598,8 +598,8 @@ async def migrate_file(
 @router.post("/migrate/bulk", response_model=BulkActionResponse, tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def bulk_migrate_files(
     migration_data: BulkRemoteMigrationRequest,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Trigger bulk file migration to a remote instance."""
     _ = current_user
@@ -634,8 +634,8 @@ async def bulk_migrate_files(
 
 @router.get("/transfers", response_model=List[RemoteTransferJobSchema], tags=[RESOURCE_REMOTE_CONNECTIONS])
 def list_transfers(
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """List all remote transfer jobs."""
     _ = current_user
@@ -645,8 +645,8 @@ def list_transfers(
 @router.post("/transfers/bulk/cancel", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def bulk_cancel_transfers(
     job_ids: List[int],
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Cancel multiple remote transfer jobs."""
     _ = current_user
@@ -666,8 +666,8 @@ def bulk_cancel_transfers(
 )
 def bulk_retry_transfers(
     request: BulkRetryTransfersRequest,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ) -> BulkRetryTransfersResponse:
     """Retry multiple failed remote transfer jobs."""
     _ = current_user
@@ -706,8 +706,8 @@ def bulk_retry_transfers(
 @router.post("/transfers/bulk/delete", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def bulk_delete_transfers(
     job_ids: List[int],
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Delete multiple transfer job records."""
     _ = current_user
@@ -733,8 +733,8 @@ def bulk_delete_transfers(
 @router.post("/transfers/{job_id}/cancel", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def cancel_transfer(
     job_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Cancel a remote transfer job."""
     _ = current_user
@@ -762,8 +762,8 @@ def cancel_transfer(
 @router.delete("/transfers/{job_id}", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def delete_transfer(
     job_id: int,
-    db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     """Delete a transfer job record (for failed/completed/cancelled transfers)."""
     _ = current_user
@@ -820,7 +820,7 @@ class ReceiveHeader:
 async def receive_chunk(
     request: Request,
     headers: ReceiveHeader = Depends(ReceiveHeader),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Inter-instance endpoint to receive file chunks."""
     logger.info(
@@ -927,7 +927,7 @@ async def receive_chunk(
 async def verify_transfer(
     data: dict,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """Finalize and verify a file transfer."""
@@ -974,7 +974,7 @@ async def get_transfer_status(
     relative_path: str,
     remote_path_id: int,
     storage_type: str,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """Check the status of a file transfer on the remote instance."""
@@ -1000,7 +1000,7 @@ async def get_transfer_status(
 
 @router.get("/exposed-paths", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def get_exposed_paths(
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """Return MonitoredPaths for inter-instance selection."""
@@ -1040,7 +1040,7 @@ def browse_remote_files(
     limit: int = 100,
     search: Optional[str] = Query(None, description="Search in file path"),
     storage_type: Optional[StorageTypeSchema] = Query(None, description="Filter by storage type"),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """
@@ -1097,7 +1097,7 @@ def browse_remote_files(
 async def serve_transfer_request(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """
@@ -1149,7 +1149,7 @@ async def serve_transfer_request(
 @router.post("/sync-transfer-mode", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def sync_transfer_mode(
     request: Request,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """
@@ -1191,7 +1191,7 @@ async def browse_remote_instance_files(
     limit: int = 100,
     search: Optional[str] = Query(None),
     storage_type: Optional[str] = Query(None),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     current_user: dict = Depends(get_current_user),
 ):
     """Browse files on a remote instance for pull transfer."""
@@ -1240,7 +1240,7 @@ async def browse_remote_instance_files(
 @router.post("/pull", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def pull_file(
     pull_data: PullTransferRequest,
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
     current_user: dict = Depends(get_current_user),
 ):
     """

@@ -4,7 +4,7 @@
 import logging
 import shutil
 from pathlib import Path
-from typing import List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/v1/storage", tags=["storage"])
 
 
 @router.get("/stats", response_model=List[StorageStats])
-def get_storage_stats(db: Session = Depends(get_db)):
+def get_storage_stats(db: Annotated[Session, Depends(get_db)]):
     """Get storage statistics for all cold storage locations."""
     locations = db.query(ColdStorageLocation).all()
 
@@ -95,7 +95,7 @@ def get_storage_stats(db: Session = Depends(get_db)):
 
 
 @router.get("/locations", response_model=List[ColdStorageLocationWithStats])
-def list_storage_locations(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def list_storage_locations(skip: int = 0, limit: int = 100, db: Annotated[Session, Depends(get_db)]):
     """List all cold storage locations."""
     locations = db.query(ColdStorageLocation).offset(skip).limit(limit).all()
 
@@ -110,7 +110,7 @@ def list_storage_locations(skip: int = 0, limit: int = 100, db: Session = Depend
 @router.post(
     "/locations", response_model=ColdStorageLocationSchema, status_code=status.HTTP_201_CREATED
 )
-def create_storage_location(location: ColdStorageLocationCreate, db: Session = Depends(get_db)):
+def create_storage_location(location: ColdStorageLocationCreate, db: Annotated[Session, Depends(get_db)]):
     """Create a new cold storage location."""
     # Check for duplicate name
     existing_name = (
@@ -158,7 +158,7 @@ def create_storage_location(location: ColdStorageLocationCreate, db: Session = D
 
 
 @router.get("/locations/{location_id}", response_model=ColdStorageLocationSchema)
-def get_storage_location(location_id: int, db: Session = Depends(get_db)):
+def get_storage_location(location_id: int, db: Annotated[Session, Depends(get_db)]):
     """Get a specific cold storage location."""
     location = db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
     if not location:
@@ -171,7 +171,7 @@ def get_storage_location(location_id: int, db: Session = Depends(get_db)):
 
 @router.put("/locations/{location_id}", response_model=ColdStorageLocationSchema)
 def update_storage_location(
-    location_id: int, location_update: ColdStorageLocationUpdate, db: Session = Depends(get_db)
+    location_id: int, location_update: ColdStorageLocationUpdate, db: Annotated[Session, Depends(get_db)]
 ):
     """Update a cold storage location."""
     location = db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
@@ -316,7 +316,7 @@ def update_storage_location(
 def delete_storage_location(
     location_id: int,
     force: bool = Query(False, description="Force delete the location even if it's not empty"),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Delete a cold storage location.

@@ -2,7 +2,7 @@
 """API endpoints for notifier management."""
 
 import logging
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import EmailStr, HttpUrl, TypeAdapter
@@ -71,7 +71,7 @@ def _validate_notifier_config(
 
 
 @router.get("", response_model=List[Notifier])
-def list_notifiers(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def list_notifiers(skip: int = 0, limit: int = 100, db: Annotated[Session, Depends(get_db)]):
     """
     List all configured notifiers.
 
@@ -87,7 +87,7 @@ def list_notifiers(skip: int = 0, limit: int = 100, db: Session = Depends(get_db
 
 
 @router.get("/{notifier_id}", response_model=Notifier)
-def get_notifier(notifier_id: int, db: Session = Depends(get_db)):
+def get_notifier(notifier_id: int, db: Annotated[Session, Depends(get_db)]):
     """
     Get a specific notifier by ID.
 
@@ -111,7 +111,7 @@ def get_notifier(notifier_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=Notifier, status_code=status.HTTP_201_CREATED)
-def create_notifier(notifier: NotifierCreate, db: Session = Depends(get_db)):
+def create_notifier(notifier: NotifierCreate, db: Annotated[Session, Depends(get_db)]):
     """
     Create a new notifier.
 
@@ -160,7 +160,7 @@ def create_notifier(notifier: NotifierCreate, db: Session = Depends(get_db)):
 
 @router.put("/{notifier_id}", response_model=Notifier)
 def update_notifier(
-    notifier_id: int, notifier_update: NotifierUpdate, db: Session = Depends(get_db)
+    notifier_id: int, notifier_update: NotifierUpdate, db: Annotated[Session, Depends(get_db)]
 ):
     """
     Update an existing notifier.
@@ -224,7 +224,7 @@ def update_notifier(
 
 
 @router.delete("/{notifier_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_notifier(notifier_id: int, db: Session = Depends(get_db)):
+def delete_notifier(notifier_id: int, db: Annotated[Session, Depends(get_db)]):
     """
     Delete a notifier.
 
@@ -249,7 +249,7 @@ def delete_notifier(notifier_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{notifier_id}/test", response_model=TestNotifierResponse)
-async def test_notifier(notifier_id: int, db: Session = Depends(get_db)):
+async def test_notifier(notifier_id: int, db: Annotated[Session, Depends(get_db)]):
     """
     Send a test notification to a specific notifier.
 

@@ -3,6 +3,7 @@
 
 import logging
 from datetime import timedelta
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/api/v1/auth", tags=["authentication"])
 
 
 @router.get("/check", response_model=schemas.AuthCheckResponse)
-def check_auth_status(db: Session = Depends(get_db)):
+def check_auth_status(db: Annotated[Session, Depends(get_db)]):
     """
     Check if initial setup is required.
 
@@ -49,7 +50,7 @@ def check_auth_status(db: Session = Depends(get_db)):
         500: {"description": "Internal server error"},
     },
 )
-def setup_first_user(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
+def setup_first_user(user_data: schemas.UserCreate, db: Annotated[Session, Depends(get_db)]):
     """
     Create the first administrator account.
 
@@ -117,8 +118,8 @@ def setup_first_user(user_data: schemas.UserCreate, db: Session = Depends(get_db
 )
 def change_password(
     password_data: schemas.PasswordChange,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Change the current user's password.
@@ -165,7 +166,7 @@ def change_password(
     dependencies=[Depends(check_login_rate_limit)],
     responses={401: {"description": "Incorrect username or password"}},
 )
-def login(credentials: schemas.UserLogin, db: Session = Depends(get_db)):
+def login(credentials: schemas.UserLogin, db: Annotated[Session, Depends(get_db)]):
     """
     Authenticate a user and return an access token.
 
@@ -198,7 +199,7 @@ def login(credentials: schemas.UserLogin, db: Session = Depends(get_db)):
 @router.post("/tokens", response_model=schemas.Token)
 def generate_api_token(
     token_data: schemas.TokenCreate,
-    current_user: User = Depends(get_current_user),
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
     """
     Generate a manual API token with custom expiration.

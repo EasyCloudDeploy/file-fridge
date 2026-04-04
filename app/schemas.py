@@ -98,6 +98,25 @@ class ColdStorageLocationUpdate(BaseModel):
     is_encrypted: Optional[bool] = None
 
 
+class FilterCriteria(BaseModel):
+    """Schema for filtering file inventory."""
+
+    path_id: Optional[int] = None
+    storage_type: Optional[StorageType] = None
+    file_status: Optional[str] = None
+    search: Optional[str] = None
+    extension: Optional[str] = None
+    mime_type: Optional[str] = None
+    has_checksum: Optional[bool] = None
+    tag_id_list: Optional[List[int]] = None
+    is_pinned: Optional[bool] = None
+    min_size: Optional[int] = None
+    max_size: Optional[int] = None
+    min_mtime: Optional[datetime] = None
+    max_mtime: Optional[datetime] = None
+    storage_location_id: Optional[int] = None
+
+
 class ColdStorageLocation(ColdStorageLocationBase):
     """Schema for cold storage location response."""
 

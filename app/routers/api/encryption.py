@@ -1,5 +1,5 @@
 import hashlib
-from typing import List
+from typing import Annotated, Any, List
 
 from cryptography.fernet import Fernet
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,13 +14,13 @@ router = APIRouter(prefix="/api/v1/encryption", tags=["Encryption"])
 
 
 @router.get("/keys", response_model=List[ServerEncryptionKeyResponse])
-def list_keys(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def list_keys(db: Annotated[Session, Depends(get_db)], current_user: Annotated[Any, Depends(get_current_user)]):
     """List all server encryption keys."""
     return db.query(ServerEncryptionKey).order_by(ServerEncryptionKey.created_at.desc()).all()
 
 
 @router.post("/keys", response_model=ServerEncryptionKeyResponse)
-def generate_key(db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def generate_key(db: Annotated[Session, Depends(get_db)], current_user: Annotated[Any, Depends(get_current_user)]):
     """Generate a new encryption key (rotate)."""
     new_key = Fernet.generate_key().decode()
     fingerprint = hashlib.sha256(new_key.encode()).hexdigest()
@@ -37,7 +37,7 @@ def generate_key(db: Session = Depends(get_db), current_user=Depends(get_current
 
 
 @router.delete("/keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_key(key_id: int, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
+def delete_key(key_id: int, db: Annotated[Session, Depends(get_db)], current_user: Annotated[Any, Depends(get_current_user)]):
     """Delete an encryption key."""
     key = db.query(ServerEncryptionKey).filter(ServerEncryptionKey.id == key_id).first()
     if not key:

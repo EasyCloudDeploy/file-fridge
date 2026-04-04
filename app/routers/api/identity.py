@@ -1,4 +1,5 @@
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -21,8 +22,8 @@ router = APIRouter(prefix="/api/v1/identity", tags=["Identity"])
 
 @router.get("/public-export", response_model=IdentityPublicExportResponse)
 def export_public_keys(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(PermissionChecker("admin")),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(PermissionChecker("admin"))],
 ):
     """
     Export the instance's public keys in PEM format.
@@ -37,8 +38,8 @@ def export_public_keys(
 @router.post("/private-export", response_model=IdentityExportResponse)
 def export_private_keys(
     request: PrivateExportRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(PermissionChecker("admin")),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(PermissionChecker("admin"))],
 ):
     """
     Export the instance's private and public keys in PEM format.
@@ -56,8 +57,8 @@ def export_private_keys(
 @router.post("/import", status_code=status.HTTP_200_OK)
 def import_identity(
     request: IdentityImportRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(PermissionChecker("admin")),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(PermissionChecker("admin"))],
 ):
     """
     Import a new identity (private keys).

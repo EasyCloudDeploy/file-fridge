@@ -1,7 +1,7 @@
 # ruff: noqa: B008
 """API routes for tag rule management."""
 
-from typing import List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/v1/tag-rules", tags=["tag-rules"])
 
 
 @router.get("", response_model=List[TagRuleSchema])
-def list_tag_rules(db: Session = Depends(get_db)):
+def list_tag_rules(db: Annotated[Session, Depends(get_db)]):
     """List all tag rules."""
     return (
         db.query(TagRuleModel)
@@ -26,7 +26,7 @@ def list_tag_rules(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=TagRuleSchema, status_code=status.HTTP_201_CREATED)
-def create_tag_rule(rule: TagRuleCreate, db: Session = Depends(get_db)):
+def create_tag_rule(rule: TagRuleCreate, db: Annotated[Session, Depends(get_db)]):
     """Create a new tag rule."""
     tag = db.query(Tag).filter(Tag.id == rule.tag_id).first()
     if not tag:
@@ -49,7 +49,7 @@ def create_tag_rule(rule: TagRuleCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{rule_id}", response_model=TagRuleSchema)
-def get_tag_rule(rule_id: int, db: Session = Depends(get_db)):
+def get_tag_rule(rule_id: int, db: Annotated[Session, Depends(get_db)]):
     """Get a specific tag rule by ID."""
     rule = db.query(TagRuleModel).filter(TagRuleModel.id == rule_id).first()
     if not rule:
@@ -60,7 +60,7 @@ def get_tag_rule(rule_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{rule_id}", response_model=TagRuleSchema)
-def update_tag_rule(rule_id: int, rule_update: TagRuleUpdate, db: Session = Depends(get_db)):
+def update_tag_rule(rule_id: int, rule_update: TagRuleUpdate, db: Annotated[Session, Depends(get_db)]):
     """Update a tag rule."""
     rule = db.query(TagRuleModel).filter(TagRuleModel.id == rule_id).first()
     if not rule:
@@ -78,7 +78,7 @@ def update_tag_rule(rule_id: int, rule_update: TagRuleUpdate, db: Session = Depe
 
 
 @router.delete("/{rule_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_tag_rule(rule_id: int, db: Session = Depends(get_db)):
+def delete_tag_rule(rule_id: int, db: Annotated[Session, Depends(get_db)]):
     """Delete a tag rule."""
     rule = db.query(TagRuleModel).filter(TagRuleModel.id == rule_id).first()
     if not rule:
@@ -91,7 +91,7 @@ def delete_tag_rule(rule_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/apply", status_code=status.HTTP_200_OK)
-def apply_tag_rules(db: Session = Depends(get_db)):
+def apply_tag_rules(db: Annotated[Session, Depends(get_db)]):
     """Apply all enabled tag rules to all files in inventory."""
     from app.services.tag_rule_service import TagRuleService
 
