@@ -256,6 +256,26 @@ def test_move_with_rollback_success(mock_move, mock_verifier, source_and_dest):
 
 @patch("app.services.file_mover.checksum_verifier")
 @patch("app.services.file_mover._move")
+def test_move_with_rollback_creates_destination_parent(mock_move, mock_verifier, tmp_path):
+    """Direct move_with_rollback callers should not fail on a missing destination directory."""
+    source = tmp_path / "source.txt"
+    source.write_text("Hello, world!")
+    dest = tmp_path / "nested" / "folder" / "dest.txt"
+
+    mock_move.return_value = (True, None)
+    mock_verifier.calculate_checksum.side_effect = ["checksum1", "checksum1"]
+
+    success, error, checksum = move_with_rollback(source, dest, OperationType.MOVE)
+
+    assert success is True
+    assert error is None
+    assert checksum == "checksum1"
+    assert dest.parent.exists() is True
+    mock_move.assert_called_once_with(source, dest, None)
+
+
+@patch("app.services.file_mover.checksum_verifier")
+@patch("app.services.file_mover._move")
 def test_move_with_rollback_checksum_mismatch(
     mock_move, mock_verifier, source_and_dest, mocker
 ):  # Removed mock_unlink, added mocker

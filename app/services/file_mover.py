@@ -86,17 +86,26 @@ def _move(
 ) -> tuple[bool, Optional[str]]:
     """Move file (atomic if same filesystem, otherwise copy+delete)."""
     try:
+        logger.debug("Attempting move operation: %s -> %s", source, destination)
         if source.is_symlink():
             return _move_symlink(source, destination, progress_callback)
 
         # Try atomic rename first (same filesystem)
         try:
             source.rename(destination)
+            logger.debug("Move completed via atomic rename: %s -> %s", source, destination)
             return True, None
-        except OSError:
+        except OSError as exc:
+            logger.debug(
+                "Atomic rename failed for %s -> %s, falling back to copy+delete: %s",
+                source,
+                destination,
+                exc,
+            )
             # Cross-filesystem move
             _copy_with_progress(source, destination, progress_callback)
             source.unlink()
+            logger.debug("Move completed via copy+delete: %s -> %s", source, destination)
             return True, None
     except Exception as e:
         return False, f"Move failed: {e!s}"
@@ -141,7 +150,9 @@ def _copy(
 ) -> tuple[bool, Optional[str]]:
     """Copy file preserving metadata."""
     try:
+        logger.debug("Attempting copy operation: %s -> %s", source, destination)
         _copy_with_progress(source, destination, progress_callback)
+        logger.debug("Copy completed successfully: %s -> %s", source, destination)
         return True, None
     except Exception as e:
         return False, f"Copy failed: {e!s}"
@@ -206,10 +217,33 @@ def move_with_rollback(
     Returns:
         (success, error_message, checksum) tuple
     """
+    logger.info(
+        "Starting file transfer: source=%s destination=%s operation=%s verify_checksum=%s",
+        source,
+        destination,
+        operation_type,
+        verify_checksum,
+    )
+    destination_parent_existed = destination.parent.exists()
+    # Ensure the target directory exists for direct callers such as the
+    # workflow freezer path, which bypasses move_file().
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    logger.debug(
+        "Destination parent ready: path=%s existed_before=%s exists_now=%s",
+        destination.parent,
+        destination_parent_existed,
+        destination.parent.exists(),
+    )
+
     # Calculate source checksum for verification
     source_checksum = None
     if verify_checksum:
         source_checksum = checksum_verifier.calculate_checksum(source)
+        logger.debug(
+            "Calculated source checksum for transfer: source=%s checksum_prefix=%s",
+            source,
+            source_checksum[:16] if source_checksum else None,
+        )
 
     # Perform the move operation
     if operation_type == OperationType.MOVE:
@@ -222,11 +256,17 @@ def move_with_rollback(
         return False, f"Unknown operation type: {operation_type}", None
 
     if not success:
+        logger.error("File move failed: %s -> %s (%s)", source, destination, error)
         return False, error, None
 
     # Verify checksum if requested and source checksum was calculated
     if verify_checksum and source_checksum:
         dest_checksum = checksum_verifier.calculate_checksum(destination)
+        logger.debug(
+            "Calculated destination checksum for transfer: destination=%s checksum_prefix=%s",
+            destination,
+            dest_checksum[:16] if dest_checksum else None,
+        )
 
         if dest_checksum != source_checksum:
             logger.error(
@@ -242,6 +282,12 @@ def move_with_rollback(
 
             return False, "Checksum verification failed", source_checksum
 
+    logger.info(
+        "Completed file transfer: source=%s destination=%s operation=%s",
+        source,
+        destination,
+        operation_type,
+    )
     return True, None, source_checksum
 
 
@@ -250,6 +296,7 @@ def _move_and_symlink(
 ) -> tuple[bool, Optional[str]]:
     """Move file and create symlink at original location."""
     try:
+        logger.debug("Attempting move+symlink operation: %s -> %s", source, destination)
         original_source = source
 
         if source.is_symlink():
@@ -278,6 +325,12 @@ def _move_and_symlink(
         try:
             symlink_target = translate_path_for_symlink(str(destination))
             original_source.symlink_to(symlink_target)
+            logger.debug(
+                "Move+symlink completed successfully: source=%s destination=%s symlink_target=%s",
+                original_source,
+                destination,
+                symlink_target,
+            )
             return True, None
         except OSError as e:
             # Try to restore file on symlink failure

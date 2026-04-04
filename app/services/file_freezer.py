@@ -76,6 +76,14 @@ class FileFreezer:
             destination_path = preserve_directory_structure(
                 source_path, base_source, base_destination
             )
+            logger.info(
+                "Preparing manual freeze: file_id=%s source=%s destination=%s operation=%s storage_location=%s",
+                locked_file.id,
+                source_path,
+                destination_path,
+                monitored_path.operation_type,
+                storage_location.path,
+            )
 
             # Check encryption
             encrypt_file = storage_location.is_encrypted
@@ -83,7 +91,13 @@ class FileFreezer:
                 destination_path = destination_path.with_suffix(destination_path.suffix + ".ffenc")
 
             # Ensure destination directory exists
+            destination_parent_existed = destination_path.parent.exists()
             destination_path.parent.mkdir(parents=True, exist_ok=True)
+            logger.debug(
+                "Manual freeze destination parent ready: path=%s existed_before=%s",
+                destination_path.parent,
+                destination_parent_existed,
+            )
 
             # Check if destination already exists
             if destination_path.exists():
@@ -129,6 +143,12 @@ class FileFreezer:
                         # Rollback status change
                         locked_file.status = old_status
                         db.commit()
+                        logger.error(
+                            "Freeze move failed for %s -> %s: %s",
+                            source_path,
+                            destination_path,
+                            error,
+                        )
                         return False, f"Failed to move file: {error}", None
 
                 # Create FileRecord entry
