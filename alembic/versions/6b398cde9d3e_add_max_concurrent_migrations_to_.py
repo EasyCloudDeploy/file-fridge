@@ -21,6 +21,11 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
+    tables = inspector.get_table_names()
+    
+    if "monitored_paths" not in tables:
+        return
+
     column_names = {column["name"] for column in inspector.get_columns("monitored_paths")}
 
     if "max_concurrent_migrations" not in column_names:

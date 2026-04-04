@@ -12,15 +12,23 @@ logger = logging.getLogger(__name__)
 
 INITIAL_REVISION = "726412e8862d"
 MAX_CONCURRENT_MIGRATIONS_REVISION = "6b398cde9d3e"
-HEAD_REVISION = "4cb41a7faab6"
+RELOCATION_TASK_REVISION = "4cb41a7faab6"
+HEAD_REVISION = "764abe6a5a03"
 
 
 def _determine_schema_revision(inspector) -> str:
     """Infer the closest Alembic revision from the live schema."""
     tables = set(inspector.get_table_names())
 
+    if "monitored_paths" in tables:
+        monitored_path_columns = {
+            column["name"] for column in inspector.get_columns("monitored_paths")
+        }
+        if "permissions_error" in monitored_path_columns:
+            return HEAD_REVISION
+
     if "relocation_tasks" in tables:
-        return HEAD_REVISION
+        return RELOCATION_TASK_REVISION
 
     if "monitored_paths" in tables:
         monitored_path_columns = {

@@ -2,11 +2,21 @@ import asyncio
 import hashlib
 import os
 import shutil
-import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
+import aiofiles
+import httpx
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from app.models import (
+    FileInventory,
+    MonitoredPath,
+    RemoteConnection,
+    StorageType,
+    TrustStatus,
+)
 
 # We'll use absolute paths to avoid confusion
 BASE_DIR = Path("./file-fridge").absolute()
@@ -17,15 +27,22 @@ INSTANCE_B_DIR = TEST_DIR / "instance_b"
 PORT_A = 8001
 PORT_B = 8002
 
-def cleanup():
+
+async def cleanup():
     # Kill any processes on PORT_A or PORT_B
     for port in [PORT_A, PORT_B]:
         try:
-            result = subprocess.check_output(["lsof", "-ti", f":{port}"]).decode().strip()
+            cmd = ["lsof", "-ti", f":{port}"]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await proc.communicate()
+            result = stdout.decode().strip()
             if result:
                 for pid in result.splitlines():
                     print(f"Killing process {pid} on port {port}")
-                    os.system(f"kill -9 {pid}")
+                    kill_proc = await asyncio.create_subprocess_shell(f"kill -9 {pid}")
+                    await kill_proc.wait()
         except Exception:
             pass
 
@@ -39,17 +56,23 @@ def cleanup():
     (INSTANCE_B_DIR / "data").mkdir()
     (INSTANCE_B_DIR / "hot").mkdir()
 
-def create_dummy_1gb_file(path: Path):
+
+async def create_dummy_1gb_file(path: Path):
     print(f"Creating 1GB dummy file at {path}...")
     chunk = os.urandom(1024 * 1024)
-    with open(path, "wb") as f:
+    async with aiofiles.open(path, "wb") as f:
         for _ in range(1024):
-            f.write(chunk)
+            await f.write(chunk)
     print("Dummy file created.")
 
-def run_setup(db_path):
+
+async def run_setup(db_path):
     cmd = [str(BASE_DIR / ".venv" / "bin" / "python3"), "scripts/setup_instance.py", str(db_path)]
-    result = subprocess.check_output(cmd, cwd=BASE_DIR).decode()
+    proc = await asyncio.create_subprocess_exec(
+        *cmd, cwd=BASE_DIR, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
+    stdout, _ = await proc.communicate()
+    result = stdout.decode()
     data = {}
     for line in result.splitlines():
         if ":" in line:
@@ -57,43 +80,41 @@ def run_setup(db_path):
             data[k] = v
     return data
 
+
+async def stream_logs_async(stream, prefix):
+    async for line in stream:
+        if line:
+            print(f"{prefix}: {line.decode().strip()}")
+
+
 async def run_simulation():
-    cleanup()
+    await cleanup()
 
     file_a = INSTANCE_A_DIR / "hot" / "large_file.dat"
-    create_dummy_1gb_file(file_a)
+    await create_dummy_1gb_file(file_a)
 
     # 1. Initialize Identities in separate processes
     print("Initializing Instance A...")
-    id_a = run_setup(INSTANCE_A_DIR / "data" / "file_fridge_a.db")
+    id_a = await run_setup(INSTANCE_A_DIR / "data" / "file_fridge_a.db")
     print(f"Identity A: {id_a['FINGERPRINT']}")
 
     print("Initializing Instance B...")
-    id_b = run_setup(INSTANCE_B_DIR / "data" / "file_fridge_b.db")
+    id_b = await run_setup(INSTANCE_B_DIR / "data" / "file_fridge_b.db")
     print(f"Identity B: {id_b['FINGERPRINT']}")
 
     # 2. Setup Mutual Trust and Paths (Direct DB write)
-    from datetime import datetime, timezone
-
-    from app.models import (
-        FileInventory,
-        MonitoredPath,
-        RemoteConnection,
-        StorageType,
-        TrustStatus,
-    )
-
     # DB A setup
     engine_a = create_engine(f"sqlite:///{INSTANCE_A_DIR / 'data' / 'file_fridge_a.db'}")
-    SessionA = sessionmaker(bind=engine_a)
-    db_a = SessionA()
+    session_a_factory = sessionmaker(bind=engine_a)
+    db_a = session_a_factory()
 
     conn_b = RemoteConnection(
-        name="Instance B", url=f"http://localhost:{PORT_B}",
+        name="Instance B",
+        url=f"http://localhost:{PORT_B}",
         remote_fingerprint=id_b["FINGERPRINT"],
         remote_ed25519_public_key=id_b["PUB_SIGNING"],
         remote_x25519_public_key=id_b["PUB_KX"],
-        trust_status=TrustStatus.TRUSTED
+        trust_status=TrustStatus.TRUSTED,
     )
     db_a.add(conn_b)
     path_a = MonitoredPath(name="Hot A", source_path=str(INSTANCE_A_DIR / "hot"))
@@ -101,14 +122,17 @@ async def run_simulation():
     db_a.flush()
 
     # Compute checksum with proper file handle management
-    with open(file_a, "rb") as f:
-        checksum = hashlib.sha256(f.read(4096)).hexdigest()
+    async with aiofiles.open(file_a, "rb") as f:
+        data = await f.read(4096)
+        checksum = hashlib.sha256(data).hexdigest()
 
     file_obj = FileInventory(
-        path_id=path_a.id, file_path=str(file_a), file_size=1024 * 1024 * 1024,
+        path_id=path_a.id,
+        file_path=str(file_a),
+        file_size=1024 * 1024 * 1024,
         file_mtime=datetime.fromtimestamp(file_a.stat().st_mtime, tz=timezone.utc),
         storage_type=StorageType.HOT,
-        checksum=checksum
+        checksum=checksum,
     )
     db_a.add(file_obj)
     db_a.commit()
@@ -118,14 +142,15 @@ async def run_simulation():
 
     # DB B setup
     engine_b = create_engine(f"sqlite:///{INSTANCE_B_DIR / 'data' / 'file_fridge_b.db'}")
-    SessionB = sessionmaker(bind=engine_b)
-    db_b = SessionB()
+    session_b_factory = sessionmaker(bind=engine_b)
+    db_b = session_b_factory()
     conn_a = RemoteConnection(
-        name="Instance A", url=f"http://localhost:{PORT_A}",
+        name="Instance A",
+        url=f"http://localhost:{PORT_A}",
         remote_fingerprint=id_a["FINGERPRINT"],
         remote_ed25519_public_key=id_a["PUB_SIGNING"],
         remote_x25519_public_key=id_a["PUB_KX"],
-        trust_status=TrustStatus.TRUSTED
+        trust_status=TrustStatus.TRUSTED,
     )
     db_b.add(conn_a)
     path_b = MonitoredPath(name="Hot B", source_path=str(INSTANCE_B_DIR / "hot"))
@@ -144,21 +169,24 @@ async def run_simulation():
         "SECRET_KEY": "test-secret-b",
         "FF_INSTANCE_URL": f"http://localhost:{PORT_B}",
         "LOG_LEVEL": "DEBUG",
-        "PYTHONUNBUFFERED": "1"
+        "PYTHONUNBUFFERED": "1",
     }
 
-    import threading
-    def stream_logs(pipe, prefix):
-        for line in iter(pipe.readline, b""):
-            print(f"{prefix}: {line.decode().strip()}")
-
-    proc_b = subprocess.Popen(
-        [str(BASE_DIR / ".venv" / "bin" / "uvicorn"), "app.main:app", "--host", "localhost", "--port", str(PORT_B)],
-        cwd=BASE_DIR, env=env_b, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+    proc_b = await asyncio.create_subprocess_exec(
+        str(BASE_DIR / ".venv" / "bin" / "uvicorn"),
+        "app.main:app",
+        "--host",
+        "localhost",
+        "--port",
+        str(PORT_B),
+        cwd=BASE_DIR,
+        env=env_b,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
     )
-    threading.Thread(target=stream_logs, args=(proc_b.stdout, "[B]"), daemon=True).start()
+    # Store reference to task to avoid it being garbage collected
+    log_task_b = asyncio.create_task(stream_logs_async(proc_b.stdout, "[B]"))
 
-    import httpx
     # Wait for B to be ready
     print("Waiting for Instance B to be ready...")
     ready = False
@@ -176,14 +204,16 @@ async def run_simulation():
     if not ready:
         print("Instance B failed to start.")
         proc_b.terminate()
+        await proc_b.wait()
         return
 
     # 4. Run Transfer in a separate process
     print("Initiating transfer from A to B via sub-process...")
     # Create a small script to trigger and run the transfer
     transfer_script = TEST_DIR / "trigger_transfer.py"
-    with open(transfer_script, "w") as f:
-        f.write(f"""
+    async with aiofiles.open(transfer_script, "w") as f:
+        await f.write(
+            f"""
 import os
 import asyncio
 import sys
@@ -209,7 +239,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-""")
+"""
+        )
 
     env_a = {
         **os.environ,
@@ -217,21 +248,25 @@ if __name__ == "__main__":
         "SECRET_KEY": "test-secret-a",
         "FF_INSTANCE_URL": f"http://localhost:{PORT_A}",
         "LOG_LEVEL": "DEBUG",
-        "PYTHONUNBUFFERED": "1"
+        "PYTHONUNBUFFERED": "1",
     }
 
-    proc_a = subprocess.Popen(
-        [str(BASE_DIR / ".venv" / "bin" / "python3"), str(transfer_script)],
-        cwd=BASE_DIR, env=env_a, stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+    proc_a = await asyncio.create_subprocess_exec(
+        str(BASE_DIR / ".venv" / "bin" / "python3"),
+        str(transfer_script),
+        cwd=BASE_DIR,
+        env=env_a,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
     )
-    threading.Thread(target=stream_logs, args=(proc_a.stdout, "[A]"), daemon=True).start()
+    # Store reference to task to avoid it being garbage collected
+    log_task_a = asyncio.create_task(stream_logs_async(proc_a.stdout, "[A]"))
 
     # Wait for A to finish
-    while proc_a.poll() is None:
-        await asyncio.sleep(1)
+    await proc_a.wait()
 
     print("Transfer process finished. Verifying result...")
-    await asyncio.sleep(2) # Buffer for B to finalize
+    await asyncio.sleep(2)  # Buffer for B to finalize
 
     file_b = INSTANCE_B_DIR / "hot" / "large_file.dat"
     if file_b.exists():
@@ -245,6 +280,11 @@ if __name__ == "__main__":
 
     # Clean up
     proc_b.terminate()
+    await proc_b.wait()
+    # Cancel log tasks
+    log_task_b.cancel()
+    log_task_a.cancel()
+
 
 if __name__ == "__main__":
     asyncio.run(run_simulation())

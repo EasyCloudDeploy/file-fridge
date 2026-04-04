@@ -8,7 +8,7 @@ from alembic.config import Config
 from sqlalchemy.orm import sessionmaker
 
 from alembic import command
-from app.database_migrations import run_startup_migrations
+from app.database_migrations import HEAD_REVISION, run_startup_migrations
 
 SNAPSHOT_DIR = Path("tests/fixtures/db_snapshots")
 
@@ -32,8 +32,7 @@ def alembic_config(tmp_path):
 def test_migrations_up_and_down(alembic_config):
     """
     Test that Alembic can successfully upgrade to head and downgrade back to base.
-    This ensures that all migrations (including the one adding max_concurrent_migrations)
-    have valid syntax and correct rollback logic.
+    This ensures that all migrations have valid syntax and correct rollback logic.
     """
     cfg, db_url = alembic_config
 
@@ -65,6 +64,39 @@ def test_migrations_up_and_down(alembic_config):
             """
                 )
             )
+            connection.execute(
+                sa.text(
+                    """
+                CREATE TABLE cold_storage_locations (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR2(255) NOT NULL,
+                    path VARCHAR2(1024) NOT NULL,
+                    caution_threshold_percent INTEGER NOT NULL,
+                    critical_threshold_percent INTEGER NOT NULL,
+                    is_encrypted BOOLEAN NOT NULL,
+                    encryption_status VARCHAR(10) NOT NULL,
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """
+                )
+            )
+            # Add file_inventory for relocation_tasks foreign key
+            connection.execute(
+                sa.text(
+                    """
+                CREATE TABLE file_inventory (
+                    id INTEGER PRIMARY KEY,
+                    path_id INTEGER NOT NULL,
+                    file_path VARCHAR NOT NULL,
+                    storage_type VARCHAR NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    file_mtime DATETIME NOT NULL,
+                    is_encrypted BOOLEAN NOT NULL
+                )
+            """
+                )
+            )
 
         # Apply initial empty migration explicitly or stamp it
         command.stamp(cfg, "726412e8862d")
@@ -72,14 +104,23 @@ def test_migrations_up_and_down(alembic_config):
         # Upgrade to head
         command.upgrade(cfg, "head")
 
-        # Verify the table and the new column exist
+        # Verify the tables and columns exist
         inspector = sa.inspect(engine)
 
         columns = inspector.get_columns("monitored_paths")
         column_names = [col["name"] for col in columns]
         assert "max_concurrent_migrations" in column_names
+        assert "permissions_error" in column_names
 
-        # Verify the default value is correct
+        columns = inspector.get_columns("cold_storage_locations")
+        column_names = [col["name"] for col in columns]
+        assert "permissions_error" in column_names
+
+        tables = inspector.get_table_names()
+        assert "relocation_tasks" in tables
+
+        # Verify the default value for max_concurrent_migrations
+        columns = inspector.get_columns("monitored_paths")
         for col in columns:
             if col["name"] == "max_concurrent_migrations":
                 default_val = col["default"]
@@ -89,15 +130,23 @@ def test_migrations_up_and_down(alembic_config):
         # Downgrade back to base
         command.downgrade(cfg, "726412e8862d")
 
-        # Verify the column is gone
+        # Verify columns and tables are gone
         inspector = sa.inspect(engine)
         columns = inspector.get_columns("monitored_paths")
         column_names = [col["name"] for col in columns]
         assert "max_concurrent_migrations" not in column_names
+        assert "permissions_error" not in column_names
+
+        columns = inspector.get_columns("cold_storage_locations")
+        column_names = [col["name"] for col in columns]
+        assert "permissions_error" not in column_names
+
+        tables = inspector.get_table_names()
+        assert "relocation_tasks" not in tables
 
 
-def test_max_concurrent_migrations_upgrade_is_idempotent_for_drifted_schema(alembic_config):
-    """Upgrade should succeed when the column already exists but Alembic is behind."""
+def test_permissions_error_upgrade_is_idempotent(alembic_config):
+    """Upgrade should succeed even if permissions_error already exists (drifted schema)."""
     cfg, db_url = alembic_config
 
     with patch("app.config.Settings.database_url", new_callable=PropertyMock, return_value=db_url):
@@ -109,19 +158,43 @@ def test_max_concurrent_migrations_upgrade_is_idempotent_for_drifted_schema(alem
                     """
                 CREATE TABLE monitored_paths (
                     id INTEGER PRIMARY KEY,
-                    name VARCHAR2(255) NOT NULL,
-                    source_path VARCHAR2(1024) NOT NULL,
-                    operation_type VARCHAR2(50),
-                    check_interval_seconds INTEGER,
-                    enabled BOOLEAN,
+                    name VARCHAR NOT NULL,
+                    source_path VARCHAR NOT NULL,
                     prevent_indexing BOOLEAN NOT NULL,
-                    max_concurrent_migrations INTEGER NOT NULL DEFAULT 3,
-                    error_message TEXT,
-                    last_scan_at DATETIME,
-                    last_scan_status VARCHAR2(50),
-                    last_scan_error_log TEXT,
-                    created_at DATETIME,
-                    updated_at DATETIME
+                    permissions_error TEXT,
+                    max_concurrent_migrations INTEGER NOT NULL DEFAULT 3
+                )
+            """
+                )
+            )
+            connection.execute(
+                sa.text(
+                    """
+                CREATE TABLE cold_storage_locations (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    path VARCHAR NOT NULL,
+                    caution_threshold_percent INTEGER NOT NULL,
+                    critical_threshold_percent INTEGER NOT NULL,
+                    is_encrypted BOOLEAN NOT NULL,
+                    encryption_status VARCHAR(10) NOT NULL,
+                    permissions_error TEXT
+                )
+            """
+                )
+            )
+            # Add file_inventory for relocation_tasks foreign key
+            connection.execute(
+                sa.text(
+                    """
+                CREATE TABLE file_inventory (
+                    id INTEGER PRIMARY KEY,
+                    path_id INTEGER NOT NULL,
+                    file_path VARCHAR NOT NULL,
+                    storage_type VARCHAR NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    file_mtime DATETIME NOT NULL,
+                    is_encrypted BOOLEAN NOT NULL
                 )
             """
                 )
@@ -131,8 +204,8 @@ def test_max_concurrent_migrations_upgrade_is_idempotent_for_drifted_schema(alem
         command.upgrade(cfg, "head")
 
         inspector = sa.inspect(engine)
-        column_names = [col["name"] for col in inspector.get_columns("monitored_paths")]
-        assert "max_concurrent_migrations" in column_names
+        assert "permissions_error" in [col["name"] for col in inspector.get_columns("monitored_paths")]
+        assert "permissions_error" in [col["name"] for col in inspector.get_columns("cold_storage_locations")]
 
 
 def _restore_snapshot(snapshot_name: str, tmp_path: Path) -> tuple[sa.Engine, str]:
@@ -169,10 +242,11 @@ def test_run_startup_migrations_against_real_world_snapshots(
     inspector = sa.inspect(engine)
     monitored_path_columns = [col["name"] for col in inspector.get_columns("monitored_paths")]
     assert "max_concurrent_migrations" in monitored_path_columns
+    assert "permissions_error" in monitored_path_columns
 
     with engine.connect() as connection:
         version = connection.execute(
             sa.text("SELECT version_num FROM alembic_version")
         ).scalar_one()
 
-    assert version == "4cb41a7faab6"
+    assert version == HEAD_REVISION

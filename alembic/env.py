@@ -8,6 +8,7 @@ from app.config import settings
 
 # Import your models and settings
 from app.database import Base
+from app import models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
