@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,11 +12,9 @@ from app.models import (
     FileInventory,
     FileRecord,
     FileStatus,
-    MonitoredPath,
     OperationType,
     PinnedFile,
     StorageType,
-    Tag,
 )
 from app.schemas import StorageType as StorageTypeSchema
 from app.services.scan_progress import scan_progress_manager

@@ -5,13 +5,21 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.config import settings
 from app.database import Base, get_db
 from app.main import app
-from app.config import settings
-from app.models import RelocationTask, User, MonitoredPath, ColdStorageLocation, FileInventory, FileStatus, StorageType, Tag
+from app.models import (
+    ColdStorageLocation,
+    FileInventory,
+    FileStatus,
+    MonitoredPath,
+    StorageType,
+    Tag,
+    User,
+)
 from app.security import hash_password
 from app.utils.rate_limiter import _login_rate_limiter, _remote_rate_limiter
 
@@ -64,7 +72,7 @@ def db_connection():
     connection.close()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def db_session(db_connection):
     # Before each test, create all tables
     Base.metadata.create_all(bind=engine)
@@ -81,7 +89,7 @@ def db_session(db_connection):
     Base.metadata.drop_all(bind=engine)
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def client(db_session):
     """
     Create a new FastAPI TestClient that uses the `db_session` fixture to override
@@ -99,7 +107,7 @@ def client(db_session):
         yield test_client
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def authenticated_client(client: TestClient, db_session: Session):
     """Fixture to get an authenticated client."""
     username = "authtestuser"
@@ -117,7 +125,7 @@ def authenticated_client(client: TestClient, db_session: Session):
     return client
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def storage_location(db_session: Session):
     """Fixture for a ColdStorageLocation object."""
     location = ColdStorageLocation(
@@ -132,7 +140,7 @@ def storage_location(db_session: Session):
     return location
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def monitored_path_factory(db_session: Session, storage_location: ColdStorageLocation):
     """Factory fixture to create MonitoredPath objects."""
     def _factory(name: str, source_path: str):
@@ -150,7 +158,7 @@ def monitored_path_factory(db_session: Session, storage_location: ColdStorageLoc
     return _factory
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def file_inventory_factory(db_session: Session, monitored_path_factory):
     """Fixture for creating FileInventory objects."""
     def _create_file(
@@ -167,7 +175,7 @@ def file_inventory_factory(db_session: Session, monitored_path_factory):
         cold_storage_location = kwargs.pop("cold_storage_location", None)
         if cold_storage_location is not None and "cold_storage_location_id" not in kwargs:
             kwargs["cold_storage_location_id"] = cold_storage_location.id
-        
+
         # Ensure parent directory exists for monitored_path_factory
         file_path_obj = Path(path)
         file_path_obj.parent.mkdir(exist_ok=True, parents=True)
@@ -175,14 +183,14 @@ def file_inventory_factory(db_session: Session, monitored_path_factory):
 
         now = datetime.now(timezone.utc)
         file_mtime = kwargs.pop("file_mtime", now)
-        
+
         if create_physical_file:
             # Create actual file on disk
             file_path_obj.touch()
             if size > 0:
-                with open(file_path_obj, "wb") as f:
+                with file_path_obj.open("wb") as f:
                     f.truncate(size)
-            
+
             # Set timestamps if provided (utime expects float seconds)
             m_t = file_mtime.timestamp() if isinstance(file_mtime, datetime) else file_mtime
             os.utime(file_path_obj, (m_t, m_t))
@@ -201,7 +209,7 @@ def file_inventory_factory(db_session: Session, monitored_path_factory):
         db_session.refresh(file_inv)
 
         if is_pinned:
-            from app.models import RelocationTask, PinnedFile
+            from app.models import PinnedFile
             pin = PinnedFile(path_id=file_inv.path_id, file_path=file_inv.file_path)
             db_session.add(pin)
             db_session.commit()
@@ -211,7 +219,7 @@ def file_inventory_factory(db_session: Session, monitored_path_factory):
     return _create_file
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def create_tag(db_session: Session):
     """Fixture for creating tags."""
     def _create_tag(name: str, color: str = "#000000"):
@@ -224,7 +232,7 @@ def create_tag(db_session: Session):
     return _create_tag
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def remote_connection_factory(db_session: Session):
     """Factory for RemoteConnection objects."""
     def _factory(
@@ -234,7 +242,7 @@ def remote_connection_factory(db_session: Session):
         trust_status = "TRUSTED",
         remote_transfer_mode = "BIDIRECTIONAL",
     ):
-        from app.models import RelocationTask, RemoteConnection, TrustStatus, TransferMode
+        from app.models import RemoteConnection, TransferMode
         conn = RemoteConnection(
             name=name,
             url=url,
@@ -252,7 +260,7 @@ def remote_connection_factory(db_session: Session):
     return _factory
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def remote_transfer_job_factory(db_session: Session, remote_connection_factory, monitored_path_factory, tmp_path):
     """Factory for RemoteTransferJob objects."""
     import itertools
@@ -265,7 +273,7 @@ def remote_transfer_job_factory(db_session: Session, remote_connection_factory, 
         direction = "PUSH",
         status = "PENDING",
     ):
-        from app.models import RelocationTask, RemoteTransferJob, TransferDirection, TransferStatus, StorageType
+        from app.models import RemoteTransferJob, StorageType, TransferDirection, TransferStatus
         n = next(_counter)
         if remote_connection is None:
             remote_connection = remote_connection_factory(fingerprint=f"testfingerprint{n}")

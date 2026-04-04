@@ -3,19 +3,20 @@ import time
 from concurrent.futures import Future
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
+
 from app.models import (
-    MonitoredPath,
+    ColdStorageLocation,
     Criteria,
     CriterionType,
-    Operator,
     FileInventory,
     FileStatus,
-    StorageType,
+    MonitoredPath,
+    Operator,
     ScanStatus,
-    ColdStorageLocation,
+    StorageType,
 )
 from app.services.file_workflow_service import FileWorkflowService
 
@@ -450,7 +451,8 @@ def test_thaw_single_file(
 
     assert result["success"] is True
     assert not cold_file.exists()
-    assert symlink_path.exists() and not symlink_path.is_symlink()
+    assert symlink_path.exists()
+    assert not symlink_path.is_symlink()
 
     db_session.expire_all()
     reloaded_inventory = db_session.query(FileInventory).get(inventory.id)
@@ -900,12 +902,12 @@ def test_process_path_integration_real_files(db_session, tmp_path):
 
     # Create real files
     now = time.time()
-    
+
     # Old file (10 mins ago) -> should be moved to cold
     old_file = hot_dir / "old.txt"
     old_file.write_text("old content")
     os.utime(old_file, (now - 600, now - 600))
-    
+
     # New file (1 min ago) -> should stay in hot
     new_file = hot_dir / "new.txt"
     new_file.write_text("new content")
@@ -913,18 +915,18 @@ def test_process_path_integration_real_files(db_session, tmp_path):
 
     # Run the workflow
     service = FileWorkflowService()
-    
+
     # We need to mock SessionFactory because process_single_file opens its own sessions.
-    # By returning the same db_session (wrapped in a lambda), we ensure it sees 
+    # By returning the same db_session (wrapped in a lambda), we ensure it sees
     # the tables created by the db_session fixture.
     # We also mock SessionLocal used by some other services if any.
-    with patch("app.services.file_workflow_service.SessionFactory", side_effect=lambda: db_session):
+    with patch("app.services.file_workflow_service.SessionFactory", side_effect=lambda: db_session), \
+         patch("app.services.file_workflow_service.scan_progress_manager") as mock_progress:
         # We also need to mock scan_progress_manager to avoid singleton state issues
-        with patch("app.services.file_workflow_service.scan_progress_manager") as mock_progress:
-            mock_progress.start_scan.return_value = ("scan-123", True)
-            mock_progress.is_stop_requested.return_value = False
-            
-            result = service.process_path(monitored, db_session)
+        mock_progress.start_scan.return_value = ("scan-123", True)
+        mock_progress.is_stop_requested.return_value = False
+
+        result = service.process_path(monitored, db_session)
 
     # Verify results
     assert result["files_found"] == 1  # 1 file matched criteria to be moved
@@ -946,4 +948,3 @@ def test_process_path_integration_real_files(db_session, tmp_path):
     inv_new = db_session.query(FileInventory).filter(FileInventory.file_path.contains("new.txt")).first()
     assert inv_new is not None
     assert inv_new.storage_type == StorageType.HOT
-

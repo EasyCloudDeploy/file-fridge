@@ -4,7 +4,6 @@ import fnmatch
 import json
 import logging
 import os
-import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
@@ -355,6 +354,9 @@ class FileWorkflowService:
         pinned = db.query(PinnedFile).filter(PinnedFile.path_id == path.id).all()
         pinned_paths = {Path(p.file_path) for p in pinned}
 
+        # Cold storage roots for symlink detection
+        cold_roots = [Path(loc.path) for loc in path.storage_locations]
+
         # Scan hot storage
         file_count = 0
         for entry in self._recursive_scandir(source_path):
@@ -390,11 +392,14 @@ class FileWorkflowService:
                 try:
                     resolved = file_path.resolve(strict=True)
                     actual_file_path = resolved
-                    try:
-                        resolved.relative_to(dest_base)
-                        is_symlink_to_cold = True
-                    except ValueError:
-                        pass
+                    # Check if the resolved path is in ANY of our cold storage roots
+                    for root in cold_roots:
+                        try:
+                            resolved.relative_to(root)
+                            is_symlink_to_cold = True
+                            break
+                        except ValueError:
+                            continue
                 except (OSError, RuntimeError):
                     continue
 

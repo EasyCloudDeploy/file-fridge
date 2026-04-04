@@ -277,7 +277,7 @@ def test_list_directory_is_file(authenticated_client: TestClient, tmp_path):
     """Test listing a path that is a file, not a directory."""
     file_path = tmp_path / "regular_file.txt"
     file_path.write_text("not a dir")
-    
+
     response = authenticated_client.get(f"/api/v1/browser/list?path={file_path}")
     assert response.status_code == 400
     assert "not a directory" in response.json()["detail"].lower()

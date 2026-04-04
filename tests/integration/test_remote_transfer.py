@@ -1,18 +1,11 @@
 
-import asyncio
-import base64
-import json
-import os
-import time
-import re
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
 import respx
-import aiofiles
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -22,13 +15,11 @@ from app.models import (
     FileTransferStrategy,
     MonitoredPath,
     RemoteConnection,
-    RemoteTransferJob,
     StorageType,
-    TrustStatus,
     TransferStatus,
+    TrustStatus,
 )
-from app.services.remote_transfer_service import remote_transfer_service, get_transfer_timeouts, MAX_RETRIES
-
+from app.services.remote_transfer_service import remote_transfer_service
 
 # --- Fixtures ---
 
@@ -139,13 +130,13 @@ async def test_push_transfer_success(
 
     mock_session = MagicMock(wraps=db_session)
     mock_session.close = MagicMock()
-    
+
     with patch("app.services.remote_transfer_service.SessionLocal", return_value=mock_session):
         job = remote_transfer_service.create_transfer_job(
             db_session, file_inventory_local.id, local_connection.id, remote_monitored_path.id
         )
         await remote_transfer_service.run_transfer(job.id)
-        
+
         db_session.refresh(job)
         assert job.status == TransferStatus.COMPLETED
 
@@ -159,14 +150,14 @@ async def test_pull_transfer_success(
 ):
     # Mock remote serve-transfer endpoint
     respx.post(url__regex=r".*/serve-transfer").mock(return_value=httpx.Response(200, json={"status": "accepted", "job_id": "remote_pull_job_1"}))
-    
+
     pull_data = {
         "remote_file_inventory_id": 99,
         "remote_connection_id": local_connection.id,
         "local_monitored_path_id": local_monitored_path.id,
         "strategy": "COPY",
     }
-    
+
     response = authenticated_client.post("/api/v1/remote/pull", json=pull_data)
     assert response.status_code == 200
     assert response.json()["status"] == "accepted"
@@ -188,13 +179,13 @@ async def test_resumable_transfer(
 
     mock_session = MagicMock(wraps=db_session)
     mock_session.close = MagicMock()
-    
+
     with patch("app.services.remote_transfer_service.SessionLocal", return_value=mock_session):
         job = remote_transfer_service.create_transfer_job(
             db_session, file_inventory_local.id, local_connection.id, remote_monitored_path.id
         )
         await remote_transfer_service.run_transfer(job.id)
-        
+
         db_session.refresh(job)
         assert job.status == TransferStatus.COMPLETED
 
@@ -213,13 +204,13 @@ async def test_checksum_mismatch_rollback(
 
     mock_session = MagicMock(wraps=db_session)
     mock_session.close = MagicMock()
-    
+
     with patch("app.services.remote_transfer_service.SessionLocal", return_value=mock_session):
         job = remote_transfer_service.create_transfer_job(
             db_session, file_inventory_local.id, local_connection.id, remote_monitored_path.id
         )
         await remote_transfer_service.run_transfer(job.id)
-        
+
         db_session.refresh(job)
         assert job.status == TransferStatus.FAILED
 
@@ -238,7 +229,7 @@ async def test_move_strategy_cleanup(
 
     mock_session = MagicMock(wraps=db_session)
     mock_session.close = MagicMock()
-    
+
     with patch("app.services.remote_transfer_service.SessionLocal", return_value=mock_session):
         job = remote_transfer_service.create_transfer_job(
             db_session, file_inventory_local.id, local_connection.id, remote_monitored_path.id,
@@ -246,9 +237,9 @@ async def test_move_strategy_cleanup(
         )
         source_path = Path(file_inventory_local.file_path)
         assert source_path.exists()
-        
+
         await remote_transfer_service.run_transfer(job.id)
-        
+
         db_session.refresh(job)
         assert job.status == TransferStatus.COMPLETED
         assert not source_path.exists()
@@ -272,16 +263,16 @@ async def test_encryption_headers_sent(
 
     mock_session = MagicMock(wraps=db_session)
     mock_session.close = MagicMock()
-    
+
     with patch("app.services.remote_transfer_service.SessionLocal", return_value=mock_session):
         with patch("app.services.remote_transfer_service.RemoteTransferService._perform_ecdh_key_exchange") as mock_ecdh:
             mock_ecdh.return_value = ("ephemeral_pub_key", b"a" * 32)
-            
+
             job = remote_transfer_service.create_transfer_job(
                 db_session, file_inventory_local.id, local_connection.id, remote_monitored_path.id
             )
             await remote_transfer_service.run_transfer(job.id)
-            
+
             db_session.refresh(job)
             assert job.status == TransferStatus.COMPLETED
             mock_ecdh.assert_called_once()
@@ -300,13 +291,13 @@ async def test_network_failure_retries_and_fails(
 
     mock_session = MagicMock(wraps=db_session)
     mock_session.close = MagicMock()
-    
+
     with patch("app.services.remote_transfer_service.SessionLocal", return_value=mock_session):
         with patch("app.services.remote_transfer_service.MAX_RETRIES", 2):
             job = remote_transfer_service.create_transfer_job(
                 db_session, file_inventory_local.id, local_connection.id, remote_monitored_path.id
             )
             await remote_transfer_service.run_transfer(job.id)
-            
+
             db_session.refresh(job)
             assert job.status == TransferStatus.FAILED

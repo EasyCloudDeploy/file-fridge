@@ -1,4 +1,5 @@
 import pytest
+
 from app.utils.sanitization import sanitize_for_log
 
 

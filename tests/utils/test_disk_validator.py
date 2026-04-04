@@ -1,7 +1,6 @@
-import pytest
 import shutil
-from pathlib import Path
-from unittest.mock import MagicMock
+
+import pytest
 
 from app.utils.disk_validator import disk_space_validator
 
@@ -14,7 +13,7 @@ class TestDiskValidator:
         f.write_text("some data")
         dest = tmp_path / "destination"
         dest.mkdir()
-        
+
         # Should not raise
         disk_space_validator.validate_disk_space(f, dest)
 
@@ -22,7 +21,7 @@ class TestDiskValidator:
         """Test direct validation with file size."""
         dest = tmp_path / "destination_direct"
         dest.mkdir()
-        
+
         # Should not raise
         disk_space_validator.validate_disk_space_direct(1024, dest)
 
@@ -32,11 +31,11 @@ class TestDiskValidator:
         f.write_text("data")
         dest = tmp_path / "full_dest"
         dest.mkdir()
-        
+
         # Mock disk usage to return only 1 byte free
         # Required space will be at least 1MB (default buffer)
         monkeypatch.setattr(shutil, "disk_usage", lambda p: (10**9, 10**9 - 1, 1))
-        
+
         with pytest.raises(ValueError, match="Insufficient disk space"):
             disk_space_validator.validate_disk_space(f, dest)
 

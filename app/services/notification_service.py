@@ -110,22 +110,22 @@ class NotificationService:
         db: Session,
         event_type: NotificationEventType,
         event_data: EventData,
-    ):
+    ) -> None:
         """
         Synchronous wrapper for dispatch_event().
-        Dispatches notification in background without blocking.
+        Dispatches notification synchronously by running the event loop.
 
-        Use this from synchronous routers/endpoints.
+        Use this from synchronous routers/endpoints or scheduler jobs.
         """
         try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            # No event loop in current thread (sync context)
+            # We use a new event loop to ensure it runs to completion in sync contexts
+            # like scheduler threads or synchronous FastAPI endpoints.
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-
-        # Fire and forget - don't block router response
-        loop.create_task(self.dispatch_event(db, event_type, event_data))
+            loop.run_until_complete(self.dispatch_event(db, event_type, event_data))
+            loop.close()
+        except Exception as e:
+            logger.error(f"Error in synchronous event dispatch: {e}")
 
     async def dispatch_event(
         self,
@@ -242,6 +242,15 @@ class NotificationService:
                 f"IMMEDIATE ACTION REQUIRED!"
             )
 
+        if isinstance(event_data, StoragePermissionErrorData):
+            missing_str = ", ".join(event_data.missing_permissions)
+            return (
+                f"PERMISSION ERROR: Missing {missing_str} access on {event_data.storage_type} storage\n"
+                f"Location: {event_data.location_name}\n"
+                f"Path: {event_data.location_path}\n"
+                f"Please verify filesystem permissions and mount status."
+            )
+
         return f"Event: {event_type.value}"
 
     def _get_legacy_level_for_event(self, event_type: NotificationEventType) -> str:
@@ -263,6 +272,7 @@ class NotificationService:
             NotificationEventType.DISK_SPACE_CAUTION: "WARNING",
             NotificationEventType.SCAN_ERROR: "ERROR",
             NotificationEventType.DISK_SPACE_CRITICAL: "ERROR",
+            NotificationEventType.STORAGE_PERMISSION_ERROR: "ERROR",
         }
         return level_mapping.get(event_type, "INFO")
 

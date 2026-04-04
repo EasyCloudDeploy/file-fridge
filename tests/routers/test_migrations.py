@@ -1,6 +1,6 @@
-import uuid
 import random
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -172,8 +172,8 @@ def _seed_live_freeze_state(
     inventory.status = FileStatus.MIGRATING
     db_session.commit()
 
-    from app.services.file_mover import FileMover
     from app.models import OperationType
+    from app.services.file_mover import FileMover
 
     def progress_callback(transferred: int) -> None:
         scan_progress_manager.update_file_progress(

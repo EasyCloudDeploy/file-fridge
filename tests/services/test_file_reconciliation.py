@@ -1,9 +1,9 @@
-import pytest
 import os
 from datetime import datetime, timezone
-from pathlib import Path
 
-from app.models import MonitoredPath, FileInventory, OperationType, StorageType, ColdStorageLocation
+import pytest
+
+from app.models import FileInventory, MonitoredPath, OperationType, StorageType
 from app.services.file_reconciliation import FileReconciliation
 
 
@@ -15,18 +15,18 @@ class TestFileReconciliation:
         hot_dir.mkdir()
         cold_dir = tmp_path / "cold_recon"
         cold_dir.mkdir()
-        
+
         cold_file = cold_dir / "test.txt"
         cold_file.write_text("data")
-        
+
         # Ensure the cold storage location path matches our temp dir
         storage_location.path = str(cold_dir)
         db_session.add(storage_location)
         db_session.commit()
-        
+
         # Create inventory
         inv = file_inventory_factory(
-            path=str(cold_file), 
+            path=str(cold_file),
             storage_type=StorageType.COLD,
             cold_storage_location=storage_location
         )
@@ -34,13 +34,13 @@ class TestFileReconciliation:
         path.operation_type = OperationType.SYMLINK
         path.source_path = str(hot_dir)
         db_session.commit()
-        
+
         # Symlink is missing in hot_dir
         expected_symlink = hot_dir / "test.txt"
         assert not expected_symlink.exists()
-        
+
         stats = FileReconciliation.reconcile_missing_symlinks(path, db_session)
-        
+
         assert stats["symlinks_created"] == 1
         assert expected_symlink.is_symlink()
         assert expected_symlink.resolve() == cold_file
@@ -50,7 +50,7 @@ class TestFileReconciliation:
         path = monitored_path_factory("Move Path", "/tmp/hot")
         path.operation_type = OperationType.MOVE
         db_session.commit()
-        
+
         stats = FileReconciliation.reconcile_missing_symlinks(path, db_session)
         assert stats["symlinks_checked"] == 0
 
@@ -60,20 +60,20 @@ class TestFileReconciliation:
         hot_dir.mkdir()
         cold_dir = tmp_path / "cold_exists"
         cold_dir.mkdir()
-        
+
         cold_file = cold_dir / "test.txt"
         cold_file.write_text("data")
-        
+
         symlink_path = hot_dir / "test.txt"
         symlink_path.symlink_to(cold_file)
-        
+
         # Ensure the cold storage location path matches our temp dir
         storage_location.path = str(cold_dir)
         db_session.add(storage_location)
         db_session.commit()
-        
+
         inv = file_inventory_factory(
-            path=str(cold_file), 
+            path=str(cold_file),
             storage_type=StorageType.COLD,
             cold_storage_location=storage_location
         )
@@ -81,7 +81,7 @@ class TestFileReconciliation:
         path.operation_type = OperationType.SYMLINK
         path.source_path = str(hot_dir)
         db_session.commit()
-        
+
         stats = FileReconciliation.reconcile_missing_symlinks(path, db_session)
         assert stats["symlinks_skipped"] == 1
         assert stats["symlinks_created"] == 0
@@ -94,25 +94,25 @@ class TestFileReconciliation:
         f1.write_text("t")
         f2 = cold_dir / "untracked.txt"
         f2.write_text("u")
-        
+
         path = monitored_path_factory("Track Path", "/tmp/hot")
         loc = path.storage_locations[0]
         loc.path = str(cold_dir)
-        
+
         # Track f1 in DB
         inv = FileInventory(
-            path_id=path.id, 
-            file_path=str(f1), 
-            file_size=1, 
+            path_id=path.id,
+            file_path=str(f1),
+            file_size=1,
             file_mtime=datetime.fromtimestamp(os.path.getmtime(f1), tz=timezone.utc),
-            storage_type=StorageType.COLD, 
+            storage_type=StorageType.COLD,
             status="active"
         )
         db_session.add(inv)
         db_session.commit()
-        
+
         stats = FileReconciliation.verify_cold_storage_tracking(path, db_session)
-        
+
         assert stats["files_checked"] == 2
         assert stats["files_tracked"] == 1
         assert stats["files_untracked"] == 1
@@ -123,6 +123,6 @@ class TestFileReconciliation:
         loc = path.storage_locations[0]
         loc.path = "/non/existent/cold/path"
         db_session.commit()
-        
+
         stats = FileReconciliation.verify_cold_storage_tracking(path, db_session)
         assert stats["files_checked"] == 0

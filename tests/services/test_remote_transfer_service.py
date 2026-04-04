@@ -1,13 +1,10 @@
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
 
 from app.models import (
-    RemoteTransferJob, 
-    TransferStatus, 
-    TransferDirection, 
-    FileInventory, 
-    RemoteConnection,
-    MonitoredPath
+    RemoteTransferJob,
+    TransferDirection,
+    TransferStatus,
 )
 from app.services.remote_transfer_service import remote_transfer_service
 
@@ -18,17 +15,17 @@ class TestRemoteTransferService:
         """Test successful creation of a transfer job."""
         source_file = tmp_path / "transfer.txt"
         source_file.write_text("content")
-        
+
         inv = file_inventory_factory(path=str(source_file))
         conn = remote_connection_factory()
-        
+
         job = remote_transfer_service.create_transfer_job(
-            db_session, 
-            file_id=inv.id, 
-            remote_connection_id=conn.id, 
+            db_session,
+            file_id=inv.id,
+            remote_connection_id=conn.id,
             remote_monitored_path_id=10
         )
-        
+
         assert job.id is not None
         assert job.file_inventory_id == inv.id
         assert job.remote_connection_id == conn.id
@@ -53,7 +50,7 @@ class TestRemoteTransferService:
         # Ensure no pending jobs
         db_session.query(RemoteTransferJob).delete()
         db_session.commit()
-        
+
         # Mocking background logic if needed, but let's see if it just finishes
         await remote_transfer_service.process_pending_transfers()
         # Success if no exception

@@ -16,7 +16,6 @@ Example:
 
 import grp
 import os
-import platform
 import pwd
 import stat
 import struct
@@ -25,8 +24,7 @@ import zipfile
 import zlib
 from io import BytesIO
 from pathlib import Path
-from typing import List
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -39,12 +37,9 @@ from app.models import (
     MonitoredPath,
     OperationType,
     Operator,
-    ScanStatus,
     StorageType,
 )
 from app.services.criteria_matcher import CriteriaMatcher
-from app.services.file_workflow_service import FileWorkflowService
-
 
 # ==============================================================================
 # File Factory Helpers – creates many different real file types
@@ -1299,6 +1294,7 @@ class TestFileMoverIntegration:
     def test_move_json_file_preserves_content(self, hot_storage, cold_storage):
         """JSON moved; content is byte-identical."""
         import json
+
         from app.services.file_mover import move_with_rollback
 
         f = make_json_file(hot_storage / "settings.json")

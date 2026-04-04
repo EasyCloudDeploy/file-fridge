@@ -1,7 +1,8 @@
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from app.models import Criteria, CriterionType, Operator, MonitoredPath
+import pytest
+
+from app.models import Criteria, CriterionType, Operator
 
 
 @pytest.mark.unit
@@ -36,14 +37,14 @@ class TestCriteriaRouter:
         """Test getting a specific criterion."""
         path = monitored_path_factory("Test Path", "/tmp/hot_crit_get")
         crit = Criteria(
-            path_id=path.id, 
-            criterion_type=CriterionType.SIZE, 
-            operator=Operator.GT, 
+            path_id=path.id,
+            criterion_type=CriterionType.SIZE,
+            operator=Operator.GT,
             value="100"
         )
         db_session.add(crit)
         db_session.commit()
-        
+
         response = authenticated_client.get(f"/api/v1/criteria/{crit.id}")
         assert response.status_code == 200
         assert response.json()["value"] == "100"
@@ -52,14 +53,14 @@ class TestCriteriaRouter:
         """Test updating a criterion."""
         path = monitored_path_factory("Test Path", "/tmp/hot_crit_upd")
         crit = Criteria(
-            path_id=path.id, 
-            criterion_type=CriterionType.SIZE, 
-            operator=Operator.GT, 
+            path_id=path.id,
+            criterion_type=CriterionType.SIZE,
+            operator=Operator.GT,
             value="100"
         )
         db_session.add(crit)
         db_session.commit()
-        
+
         payload = {"value": "200", "operator": "<"}
         response = authenticated_client.put(f"/api/v1/criteria/{crit.id}", json=payload)
         assert response.status_code == 200
@@ -70,15 +71,15 @@ class TestCriteriaRouter:
         """Test deleting a criterion."""
         path = monitored_path_factory("Test Path", "/tmp/hot_crit_del")
         crit = Criteria(
-            path_id=path.id, 
-            criterion_type=CriterionType.SIZE, 
-            operator=Operator.GT, 
+            path_id=path.id,
+            criterion_type=CriterionType.SIZE,
+            operator=Operator.GT,
             value="100"
         )
         db_session.add(crit)
         db_session.commit()
         crit_id = crit.id
-        
+
         response = authenticated_client.delete(f"/api/v1/criteria/{crit_id}")
         assert response.status_code == 204
         assert db_session.get(Criteria, crit_id) is None
@@ -88,25 +89,25 @@ class TestCriteriaRouter:
         path = monitored_path_factory("Test Path", "/tmp/hot_crit_rev")
         path_id = path.id
         crit = Criteria(
-            path_id=path_id, 
-            criterion_type=CriterionType.SIZE, 
-            operator=Operator.GT, 
+            path_id=path_id,
+            criterion_type=CriterionType.SIZE,
+            operator=Operator.GT,
             value="100",
             enabled=True
         )
         db_session.add(crit)
         db_session.commit()
         crit_id = crit.id
-        
+
         # Mock PathReverser
         from app.services.path_reverser import PathReverser
         reversed_called = []
         def mock_reverse(pid, db):
             reversed_called.append(pid)
             return {"files_reversed": 0, "errors": []}
-        
+
         monkeypatch.setattr(PathReverser, "reverse_path_operations", mock_reverse)
-        
+
         response = authenticated_client.delete(f"/api/v1/criteria/{crit_id}")
         assert response.status_code == 204
         assert path_id in reversed_called
@@ -115,10 +116,10 @@ class TestCriteriaRouter:
     def test_create_atime_criteria_incompatible(self, mock_atime, authenticated_client, monitored_path_factory):
         """Test that creating an ATIME criterion fails if atime is not supported on the path."""
         path = monitored_path_factory("Atime Path", "/tmp/hot_atime")
-        
+
         # Mock atime not available
         mock_atime.return_value = (False, "Atime not supported")
-        
+
         payload = {
             "criterion_type": "atime",
             "operator": ">",

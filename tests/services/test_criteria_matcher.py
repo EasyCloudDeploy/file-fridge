@@ -1,12 +1,10 @@
-import os
-import platform
-import time
-from datetime import datetime, timezone
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 import contextlib
+import os
+import time
+from unittest.mock import patch
 
 import pytest
+
 from app.models import Criteria, CriterionType, Operator
 from app.services.criteria_matcher import CriteriaMatcher
 
@@ -19,23 +17,23 @@ def real_file(tmp_path):
     def _real_file(filename="test.txt", size=0, mtime=None, atime=None, content=None):
         file_path = tmp_path / filename
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         if content:
             file_path.write_text(content)
         else:
             file_path.touch()
-        
+
         if size > 0:
-            with open(file_path, "wb") as f:
+            with file_path.open("wb") as f:
                 f.truncate(size)
-        
+
         if mtime is not None or atime is not None:
             # If one is None, use current time
             now = time.time()
             m_t = mtime if mtime is not None else now
             a_t = atime if atime is not None else now
             os.utime(file_path, (a_t, m_t))
-            
+
         yield file_path
 
     return _real_file
@@ -47,7 +45,7 @@ def real_file(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "operator, file_age_minutes, criterion_value_minutes, expected",
+    ("operator", "file_age_minutes", "criterion_value_minutes", "expected"),
     [
         (Operator.GT, 60, "30", True),  # Older than 30 mins -> True
         (Operator.GT, 20, "30", False),  # Newer than 30 mins -> False
@@ -136,26 +134,20 @@ def test_match_time_atime_macos_with_older_last_open(mock_get_last_open, mock_pl
 
 
 @pytest.mark.parametrize(
-    "operator, file_size, criterion_value, expected",
+    ("operator", "file_size", "criterion_value", "expected"),
     [
-        # Bytes (c)
         (Operator.GT, 1024, "1000c", True),
         (Operator.LT, 1000, "1k", True),
         (Operator.EQ, 1024, "1k", True),
-        # Kilobytes (k)
         (Operator.GT, 2048, "1k", True),
         (Operator.LT, 1000, "1K", True),
-        (Operator.EQ, 1024, "1k", True),
         (Operator.GTE, 1024, "1k", True),
         (Operator.LTE, 1024, "1k", True),
-        # Megabytes (M)
         (Operator.GT, 2 * 1024 * 1024, "1M", True),
         (Operator.LT, 1024 * 1024 - 1, "1m", True),
         (Operator.EQ, 1024 * 1024, "1M", True),
-        # Gigabytes (G)
         (Operator.GT, 2 * 1024 * 1024 * 1024, "1g", True),
         (Operator.EQ, 1024 * 1024 * 1024, "1G", True),
-        # Failure cases
         (Operator.GT, 100, "1k", False),
         (Operator.LT, 2048, "1k", False),
         (Operator.EQ, 1023, "1k", False),
@@ -163,7 +155,7 @@ def test_match_time_atime_macos_with_older_last_open(mock_get_last_open, mock_pl
 )
 def test_match_size(real_file, operator, file_size, criterion_value, expected):
     """Test SIZE criteria with various operators and suffixes using real files."""
-    # Note: Creating a 2GB file for testing might be slow/heavy, 
+    # Note: Creating a 2GB file for testing might be slow/heavy,
     # but truncate() is usually very fast on modern filesystems (sparse files).
     with real_file(size=file_size) as file_path:
         stat_info = file_path.stat()
@@ -179,7 +171,7 @@ def test_match_size(real_file, operator, file_size, criterion_value, expected):
 
 
 @pytest.mark.parametrize(
-    "operator, filename, criterion_value, case_sensitive, expected",
+    ("operator", "filename", "criterion_value", "case_sensitive", "expected"),
     [
         (Operator.EQ, "test.txt", "test.txt", True, True),
         (Operator.EQ, "test.txt", "Test.txt", True, False),
@@ -212,7 +204,7 @@ def test_match_name(real_file, operator, filename, criterion_value, case_sensiti
 
 
 @pytest.mark.parametrize(
-    "file_creator, criterion_value, expected",
+    ("file_creator", "criterion_value", "expected"),
     [
         (lambda p: p.touch(), "f", True),
         (lambda p: p.mkdir(), "d", True),

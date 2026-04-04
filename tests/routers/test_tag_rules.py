@@ -1,6 +1,6 @@
 import pytest
 
-from app.models import Tag, TagRule
+from app.models import TagRule
 
 
 @pytest.mark.unit
@@ -9,15 +9,15 @@ class TestTagRulesRouter:
         """Test listing all tag rules."""
         tag = create_tag("Rule List Tag")
         rule = TagRule(
-            tag_id=tag.id, 
-            criterion_type="extension", 
-            operator="=", 
+            tag_id=tag.id,
+            criterion_type="extension",
+            operator="=",
             value="txt",
             priority=5
         )
         db_session.add(rule)
         db_session.commit()
-        
+
         response = authenticated_client.get("/api/v1/tag-rules")
         assert response.status_code == 200
         data = response.json()
@@ -58,7 +58,7 @@ class TestTagRulesRouter:
         db_session.add(rule)
         db_session.commit()
         rule_id = rule.id
-        
+
         response = authenticated_client.get(f"/api/v1/tag-rules/{rule_id}")
         assert response.status_code == 200
         assert response.json()["value"] == "doc"
@@ -70,7 +70,7 @@ class TestTagRulesRouter:
         db_session.add(rule)
         db_session.commit()
         rule_id = rule.id
-        
+
         payload = {"value": "new", "priority": 20}
         response = authenticated_client.patch(f"/api/v1/tag-rules/{rule_id}", json=payload)
         assert response.status_code == 200
@@ -84,7 +84,7 @@ class TestTagRulesRouter:
         db_session.add(rule)
         db_session.commit()
         rule_id = rule.id
-        
+
         response = authenticated_client.delete(f"/api/v1/tag-rules/{rule_id}")
         assert response.status_code == 204
         assert db_session.get(TagRule, rule_id) is None
@@ -94,7 +94,7 @@ class TestTagRulesRouter:
         from app.services.tag_rule_service import TagRuleService
         mock_apply = lambda self: {"files_processed": 10, "tags_added": 5}
         monkeypatch.setattr(TagRuleService, "apply_all_rules", mock_apply)
-        
+
         response = authenticated_client.post("/api/v1/tag-rules/apply")
         assert response.status_code == 200
         assert response.json()["tags_added"] == 5

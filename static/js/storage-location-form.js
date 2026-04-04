@@ -18,6 +18,10 @@ async function initStorageLocationForm() {
         isEditMode = true;
         locationId = parseInt(urlParts[urlParts.length - 2]);
         await loadLocation();
+    } else {
+        // Set up create mode title
+        document.getElementById('form-title').innerHTML = '<i class="bi bi-plus-circle"></i> Create Storage Location';
+        document.getElementById('submit-text').textContent = 'Create Location';
     }
 
     // Set up form submission
