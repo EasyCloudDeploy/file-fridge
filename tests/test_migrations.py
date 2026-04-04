@@ -49,15 +49,15 @@ def test_migrations_up_and_down(alembic_config):
                     """
                 CREATE TABLE monitored_paths (
                     id INTEGER PRIMARY KEY,
-                    name VARCHAR NOT NULL,
-                    source_path VARCHAR NOT NULL,
-                    operation_type VARCHAR,
+                    name VARCHAR2(255) NOT NULL,
+                    source_path VARCHAR2(1024) NOT NULL,
+                    operation_type VARCHAR2(50),
                     check_interval_seconds INTEGER,
                     enabled BOOLEAN,
                     prevent_indexing BOOLEAN NOT NULL,
                     error_message TEXT,
                     last_scan_at DATETIME,
-                    last_scan_status VARCHAR,
+                    last_scan_status VARCHAR2(50),
                     last_scan_error_log TEXT,
                     created_at DATETIME,
                     updated_at DATETIME
@@ -109,16 +109,16 @@ def test_max_concurrent_migrations_upgrade_is_idempotent_for_drifted_schema(alem
                     """
                 CREATE TABLE monitored_paths (
                     id INTEGER PRIMARY KEY,
-                    name VARCHAR NOT NULL,
-                    source_path VARCHAR NOT NULL,
-                    operation_type VARCHAR,
+                    name VARCHAR2(255) NOT NULL,
+                    source_path VARCHAR2(1024) NOT NULL,
+                    operation_type VARCHAR2(50),
                     check_interval_seconds INTEGER,
                     enabled BOOLEAN,
                     prevent_indexing BOOLEAN NOT NULL,
                     max_concurrent_migrations INTEGER NOT NULL DEFAULT 3,
                     error_message TEXT,
                     last_scan_at DATETIME,
-                    last_scan_status VARCHAR,
+                    last_scan_status VARCHAR2(50),
                     last_scan_error_log TEXT,
                     created_at DATETIME,
                     updated_at DATETIME
