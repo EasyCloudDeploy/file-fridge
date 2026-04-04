@@ -6,7 +6,7 @@ import threading
 from typing import Optional
 
 import sqlalchemy as sa
-from cryptography.fernet import Fernet, InvalidToken
+from app.constants import COLD_STORAGE_LOCATIONS_ID
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -213,7 +213,7 @@ path_storage_location_association = Table(
     Base.metadata,
     Column("path_id", Integer, ForeignKey("monitored_paths.id"), primary_key=True),
     Column(
-        "storage_location_id", Integer, ForeignKey("cold_storage_locations.id"), primary_key=True
+        "storage_location_id", Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), primary_key=True
     ),
 )
 
@@ -331,7 +331,7 @@ class FileRecord(Base):
     original_path = Column(String, nullable=False)
     cold_storage_path = Column(String, nullable=False)
     cold_storage_location_id = Column(
-        Integer, ForeignKey("cold_storage_locations.id"), nullable=True, index=True
+        Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=True, index=True
     )
     file_size = Column(Integer, nullable=False)
     moved_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
@@ -398,7 +398,7 @@ class FileInventory(Base):
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     cold_storage_location_id = Column(
-        Integer, ForeignKey("cold_storage_locations.id"), nullable=True, index=True
+        Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=True, index=True
     )
     is_encrypted = Column(Boolean, nullable=False, default=False)
 
@@ -443,10 +443,10 @@ class FileTransactionHistory(Base):
     old_path = Column(String, nullable=True)
     new_path = Column(String, nullable=True)
     old_storage_location_id = Column(
-        Integer, ForeignKey("cold_storage_locations.id"), nullable=True
+        Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=True
     )
     new_storage_location_id = Column(
-        Integer, ForeignKey("cold_storage_locations.id"), nullable=True
+        Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=True
     )
     file_size = Column(Integer, nullable=True)
     checksum_before = Column(String, nullable=True)
@@ -909,9 +909,9 @@ class RelocationTask(Base):
     task_id = Column(String, nullable=False, unique=True, index=True)
     inventory_id = Column(Integer, ForeignKey(FILE_INVENTORY_ID_FK), nullable=False, index=True)
     file_path = Column(String, nullable=False)
-    source_location_id = Column(Integer, ForeignKey("cold_storage_locations.id"), nullable=False)
+    source_location_id = Column(Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=False)
     source_location_name = Column(String, nullable=False)
-    target_location_id = Column(Integer, ForeignKey("cold_storage_locations.id"), nullable=False)
+    target_location_id = Column(Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=False)
     target_location_name = Column(String, nullable=False)
     status = Column(
         SQLEnum(RelocationTaskStatus),

@@ -40,7 +40,15 @@ def check_auth_status(db: Session = Depends(get_db)):
     return schemas.AuthCheckResponse(setup_required=setup_required, user_count=user_count)
 
 
-@router.post("/setup", response_model=schemas.Token, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/setup",
+    response_model=schemas.Token,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        400: {"description": "Setup already completed or username taken"},
+        500: {"description": "Internal server error"},
+    },
+)
 def setup_first_user(user_data: schemas.UserCreate, db: Session = Depends(get_db)):
     """
     Create the first administrator account.
@@ -100,7 +108,13 @@ def setup_first_user(user_data: schemas.UserCreate, db: Session = Depends(get_db
     return schemas.Token(access_token=access_token, token_type="bearer")
 
 
-@router.post("/change-password")
+@router.post(
+    "/change-password",
+    responses={
+        400: {"description": "Incorrect old password"},
+        500: {"description": "Internal server error"},
+    },
+)
 def change_password(
     password_data: schemas.PasswordChange,
     current_user: User = Depends(get_current_user),
@@ -146,7 +160,10 @@ def change_password(
 
 
 @router.post(
-    "/login", response_model=schemas.Token, dependencies=[Depends(check_login_rate_limit)]
+    "/login",
+    response_model=schemas.Token,
+    dependencies=[Depends(check_login_rate_limit)],
+    responses={401: {"description": "Incorrect username or password"}},
 )
 def login(credentials: schemas.UserLogin, db: Session = Depends(get_db)):
     """

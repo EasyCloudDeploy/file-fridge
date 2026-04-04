@@ -105,7 +105,7 @@ class ColdStorageLocation(ColdStorageLocationBase):
     encryption_status: EncryptionStatus
     permissions_error: Optional[str] = None
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -165,7 +165,7 @@ class MonitoredPath(MonitoredPathBase):
     id: int
     permissions_error: Optional[str] = None  # Set when read/write permissions are denied
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
     criteria: List[Criteria] = []
     file_inventory: List["FileInventory"] = []
     storage_locations: List[ColdStorageLocation] = []
@@ -180,7 +180,7 @@ class MonitoredPathSummary(MonitoredPathBase):
     id: int
     permissions_error: Optional[str] = None  # Set when read/write permissions are denied
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
     file_count: int
     hot_file_count: int
     cold_file_count: int
@@ -417,8 +417,8 @@ class Tag(BaseModel):
 
     id: int
     name: str
-    description: Optional[str]
-    color: Optional[str]
+    description: Optional[str] = None
+    color: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -445,7 +445,7 @@ class FileTagResponse(BaseModel):
     file_id: int
     tag: Tag
     tagged_at: datetime
-    tagged_by: Optional[str]
+    tagged_by: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -484,7 +484,7 @@ class TagRule(BaseModel):
     enabled: bool
     priority: int
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -629,7 +629,7 @@ class Notifier(NotifierBase):
 
     id: int
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -663,7 +663,7 @@ class NotificationDispatch(BaseModel):
     notification_id: int
     notifier_id: int
     status: DispatchStatus
-    details: Optional[str]
+    details: Optional[str] = None
     timestamp: datetime
 
     class Config:
@@ -872,7 +872,7 @@ class RemoteConnection(RemoteConnectionBase):
     remote_transfer_mode: TransferMode = TransferMode.PUSH_ONLY
     effective_bidirectional: bool = False
     created_at: datetime
-    updated_at: Optional[datetime]
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -938,9 +938,9 @@ class RelocationTaskBase(BaseModel):
     inventory_id: int
     file_path: str
     source_location_id: int
-    source_location_name: str
+    source_label: str
     target_location_id: int
-    target_location_name: str
+    target_label: str
     status: str
     bytes_total: int
     bytes_transferred: int
@@ -986,13 +986,13 @@ class RemoteTransferJob(RemoteTransferJobBase):
     progress: int
     current_size: int
     total_size: int
-    start_time: Optional[datetime]
-    end_time: Optional[datetime]
-    error_message: Optional[str]
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    error_message: Optional[str] = None
     source_path: str
     relative_path: str
     storage_type: StorageType
-    checksum: Optional[str]
+    checksum: Optional[str] = None
     eta: Optional[float] = None  # Seconds remaining, calculated at runtime
     direction: TransferDirection = TransferDirection.PUSH
     strategy: FileTransferStrategy = FileTransferStrategy.COPY
