@@ -1,14 +1,14 @@
 CREATE TABLE monitored_paths (
     id INTEGER PRIMARY KEY,
-    name VARCHAR NOT NULL,
-    source_path VARCHAR NOT NULL,
-    operation_type VARCHAR,
+    name VARCHAR2(255) NOT NULL,
+    source_path VARCHAR2(1024) NOT NULL,
+    operation_type VARCHAR2(50),
     check_interval_seconds INTEGER,
     enabled BOOLEAN,
     prevent_indexing BOOLEAN NOT NULL,
     error_message TEXT,
     last_scan_at DATETIME,
-    last_scan_status VARCHAR,
+    last_scan_status VARCHAR2(50),
     last_scan_error_log TEXT,
     created_at DATETIME,
     updated_at DATETIME
@@ -16,8 +16,8 @@ CREATE TABLE monitored_paths (
 
 CREATE TABLE users (
     id INTEGER PRIMARY KEY,
-    username VARCHAR NOT NULL,
-    password_hash VARCHAR NOT NULL,
+    username VARCHAR2(255) NOT NULL,
+    password_hash VARCHAR2(255) NOT NULL,
     roles JSON,
     created_at DATETIME
 );

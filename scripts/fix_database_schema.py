@@ -71,7 +71,7 @@ def fix_database_schema(db_path: str = "data/file_fridge.db"):
         if "filter_level" not in columns:
             print("   ➕ Adding missing filter_level column...")
             cursor.execute(
-                "ALTER TABLE notifiers ADD COLUMN filter_level VARCHAR(15) NOT NULL DEFAULT 'info'"
+                "ALTER TABLE notifiers ADD COLUMN filter_level VARCHAR2(15) NOT NULL DEFAULT 'info'"
             )
             print("   ✅ Added filter_level column")
 
@@ -83,16 +83,16 @@ def fix_database_schema(db_path: str = "data/file_fridge.db"):
                 cursor.execute(
                     """CREATE TABLE notifiers (
                         id INTEGER PRIMARY KEY,
-                        name VARCHAR NOT NULL,
-                        type VARCHAR(15) NOT NULL,
-                        address VARCHAR NOT NULL,
+                        name VARCHAR2(255) NOT NULL,
+                        type VARCHAR2(15) NOT NULL,
+                        address VARCHAR2(1024) NOT NULL,
                         enabled BOOLEAN NOT NULL,
-                        filter_level VARCHAR(15) NOT NULL DEFAULT 'info',
-                        smtp_host VARCHAR,
+                        filter_level VARCHAR2(15) NOT NULL DEFAULT 'info',
+                        smtp_host VARCHAR2(255),
                         smtp_port INTEGER,
-                        smtp_user VARCHAR,
-                        smtp_password VARCHAR,
-                        smtp_sender VARCHAR,
+                        smtp_user VARCHAR2(255),
+                        smtp_password VARCHAR2(1024),
+                        smtp_sender VARCHAR2(255),
                         smtp_use_tls BOOLEAN,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME
