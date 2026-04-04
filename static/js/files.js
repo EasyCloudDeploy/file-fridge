@@ -572,6 +572,15 @@ async function processNDJSONStream(body, append = false) {
                                 if (gridApi) {
                                     gridApi.setGridOption('rowData', allRowData);
                                 }
+                                
+                                // Show grid if we now have data
+                                const gridEl = document.getElementById('filesGrid');
+                                if (gridEl && gridEl.style.display === 'none' && allRowData.length > 0) {
+                                    gridEl.style.display = 'block';
+                                    const emptyEl = document.getElementById('no-files-message');
+                                    if (emptyEl) emptyEl.style.display = 'none';
+                                }
+                                
                                 batch = [];
                             }
 
@@ -595,6 +604,14 @@ async function processNDJSONStream(body, append = false) {
             allRowData = allRowData.concat(batch);
             if (gridApi) {
                 gridApi.setGridOption('rowData', allRowData);
+            }
+            
+            // Show grid if we now have data
+            const gridEl = document.getElementById('filesGrid');
+            if (gridEl && gridEl.style.display === 'none' && allRowData.length > 0) {
+                gridEl.style.display = 'block';
+                const emptyEl = document.getElementById('no-files-message');
+                if (emptyEl) emptyEl.style.display = 'none';
             }
         }
 
@@ -760,11 +777,13 @@ async function loadFilesList() {
         // Process NDJSON stream
         await processNDJSONStream(response.body);
 
-        // Show content or empty message
-        if (totalItems === 0) {
+        // Show content or empty message based on actual received data
+        if (allRowData.length === 0) {
             if (emptyEl) emptyEl.style.display = 'block';
+            if (gridEl) gridEl.style.display = 'none';
         } else {
             if (gridEl) gridEl.style.display = 'block';
+            if (emptyEl) emptyEl.style.display = 'none';
         }
 
     } catch (error) {
