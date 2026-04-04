@@ -10,6 +10,27 @@ from app.database import SessionLocal, engine
 
 logger = logging.getLogger(__name__)
 
+INITIAL_REVISION = "726412e8862d"
+MAX_CONCURRENT_MIGRATIONS_REVISION = "6b398cde9d3e"
+HEAD_REVISION = "4cb41a7faab6"
+
+
+def _determine_schema_revision(inspector) -> str:
+    """Infer the closest Alembic revision from the live schema."""
+    tables = set(inspector.get_table_names())
+
+    if "relocation_tasks" in tables:
+        return HEAD_REVISION
+
+    if "monitored_paths" in tables:
+        monitored_path_columns = {
+            column["name"] for column in inspector.get_columns("monitored_paths")
+        }
+        if "max_concurrent_migrations" in monitored_path_columns:
+            return MAX_CONCURRENT_MIGRATIONS_REVISION
+
+    return INITIAL_REVISION
+
 
 def run_startup_migrations() -> None:
     """
@@ -37,37 +58,17 @@ def run_startup_migrations() -> None:
                 result = db.execute(text("SELECT version_num FROM alembic_version")).fetchone()
                 has_version = result is not None
 
-            # If we have tables but no alembic version, we need to determine
-            # the correct version to stamp to based on the actual schema
+            # If we have tables but no alembic version, determine the closest
+            # revision from the live schema before upgrading further.
             if not has_version and len(tables) > (1 if has_alembic_table else 0):
                 logger.info(
                     "Database tables exist but alembic version is not set. "
                     "Determining correct version based on schema..."
                 )
 
-                # Check if instance_metadata has the new columns
-                # This tells us if we should stamp to head or to the previous version
-                if "instance_metadata" in tables:
-                    instance_metadata_cols = {
-                        col["name"] for col in inspector.get_columns("instance_metadata")
-                    }
-                    has_new_columns = "instance_url" in instance_metadata_cols
-
-                    if has_new_columns:
-                        # Columns exist, safe to stamp to head
-                        logger.info("New columns detected, stamping to head...")
-                        command.stamp(alembic_cfg, "head")
-                    else:
-                        # Columns don't exist, stamp to version before the migration
-                        # so the migration will run and add them
-                        logger.info(
-                            "New columns not detected, stamping to add_missing_instance_metadata "
-                            "to allow migration to run..."
-                        )
-                        command.stamp(alembic_cfg, "add_missing_instance_metadata")
-                else:
-                    # No instance_metadata table, stamp to head (it will be created by init_db)
-                    command.stamp(alembic_cfg, "head")
+                revision_to_stamp = _determine_schema_revision(inspector)
+                logger.info("Detected schema equivalent to revision %s", revision_to_stamp)
+                command.stamp(alembic_cfg, revision_to_stamp)
 
                 logger.info("✓ Database stamped with appropriate version")
         finally:

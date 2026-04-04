@@ -11,6 +11,18 @@ let notifierModal = null;
 let deleteModal = null;
 let notifiersInitialized = false;
 
+function normalizeSubscribedEvents(subscribedEvents) {
+    if (Array.isArray(subscribedEvents)) {
+        return subscribedEvents.filter(event => typeof event === 'string');
+    }
+
+    if (typeof subscribedEvents === 'string' && subscribedEvents.trim() !== '') {
+        return [subscribedEvents];
+    }
+
+    return [];
+}
+
 async function initNotifiersPage() {
     if (notifiersInitialized) {
         return;
@@ -172,6 +184,7 @@ function renderNotifiers() {
     emptyEl.style.display = 'none';
 
     tbody.innerHTML = allNotifiers.map(notifier => {
+        const subscribedEvents = normalizeSubscribedEvents(notifier.subscribed_events);
         const statusBadge = notifier.enabled
             ? '<span class="badge bg-success"><i class="bi bi-check-circle"></i><span class="d-none d-sm-inline"> Enabled</span></span>'
             : '<span class="badge bg-secondary"><i class="bi bi-dash-circle"></i><span class="d-none d-sm-inline"> Disabled</span></span>';
@@ -180,7 +193,7 @@ function renderNotifiers() {
             ? '<span class="badge bg-primary"><i class="bi bi-envelope"></i><span class="d-none d-lg-inline"> Email</span></span>'
             : '<span class="badge bg-info"><i class="bi bi-webhook"></i><span class="d-none d-lg-inline"> Webhook</span></span>';
 
-        const eventsBadges = (notifier.subscribed_events || []).map(event => {
+        const eventsBadges = subscribedEvents.map(event => {
             const label = event.replace(/_/g, ' ').toLowerCase();
             return `<span class="badge bg-light text-dark border me-1 small" style="font-size: 0.7rem;">${escapeHtml(label)}</span>`;
         }).join('');
@@ -188,9 +201,10 @@ function renderNotifiers() {
         const createdDate = new Date(notifier.created_at).toLocaleDateString();
 
         // Truncate address if too long
-        const displayAddress = notifier.address.length > 35
-            ? notifier.address.substring(0, 32) + '...'
-            : notifier.address;
+        const notifierAddress = typeof notifier.address === 'string' ? notifier.address : '';
+        const displayAddress = notifierAddress.length > 35
+            ? notifierAddress.substring(0, 32) + '...'
+            : notifierAddress;
 
         return `
             <tr>
@@ -243,7 +257,7 @@ function openNotifierModal(notifier = null) {
         document.getElementById('notifier_enabled').checked = notifier.enabled;
 
         // Set event checkboxes
-        const subscribedEvents = notifier.subscribed_events || [];
+        const subscribedEvents = normalizeSubscribedEvents(notifier.subscribed_events);
         document.querySelectorAll('.event-checkbox').forEach(cb => {
             cb.checked = subscribedEvents.includes(cb.value);
         });

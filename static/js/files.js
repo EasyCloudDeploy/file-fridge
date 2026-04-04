@@ -460,7 +460,22 @@ function initGrid() {
         return;
     }
 
-    agGrid.createGrid(gridDiv, gridOptions);
+    window.agGrid.createGrid(gridDiv, gridOptions);
+}
+
+async function waitForAgGrid(maxWaitMs = 5000) {
+    if (window.agGrid) {
+        return;
+    }
+
+    const startTime = Date.now();
+    while (!window.agGrid) {
+        if (Date.now() - startTime >= maxWaitMs) {
+            throw new Error('AG Grid library did not finish loading in time');
+        }
+
+        await new Promise(resolve => window.setTimeout(resolve, 50));
+    }
 }
 
 // Handle metadata message from stream
@@ -2300,10 +2315,12 @@ async function executeBulkUnpin() {
 
 let filesPageInitialized = false;
 
-function initFilesPage() {
+async function initFilesPage() {
     if (filesPageInitialized) {
         return;
     }
+
+    await waitForAgGrid();
     filesPageInitialized = true;
 
     const urlParams = new URLSearchParams(window.location.search);
@@ -2566,7 +2583,11 @@ function initFilesPage() {
     }
 }
 
-window.runWhenFileFridgeReady(initFilesPage);
+window.runWhenFileFridgeReady(() => {
+    void initFilesPage().catch(error => {
+        console.error('Failed to initialize files page:', error);
+    });
+});
 
 // Cleanup on page unload
 window.addEventListener('beforeunload', () => {

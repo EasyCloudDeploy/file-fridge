@@ -1,5 +1,5 @@
 // Dashboard JavaScript - loads data via API
-const DASHBOARD_REFRESH_INTERVAL_MS = 2000;
+const DASHBOARD_REFRESH_INTERVAL_MS = 10000;
 
 let dashboardRefreshInterval = null;
 let dashboardRefreshInFlight = false;
@@ -190,47 +190,74 @@ function updatePaths(paths) {
         return;
     }
 
-    pathsList.innerHTML = `
-        <div class="table-responsive">
-            <table class="table table-sm table-hover">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${paths.map(path => `
-                        <tr ${path.error_message ? 'class="table-danger"' : ''}>
-                            <td style="max-width: 180px;">
-                                <strong class="small">${escapeHtml(path.name)}</strong><br>
-                                <small class="text-muted text-truncate d-block" style="max-width: 160px;" title="${escapeHtml(path.source_path)}">${escapeHtml(path.source_path)}</small>
-                                ${path.error_message ? `
-                                    <div class="alert alert-danger alert-sm mt-1 mb-0 py-1 px-2 d-none d-md-block" role="alert" style="font-size: 0.7rem;">
-                                        <i class="bi bi-exclamation-triangle-fill"></i> ${escapeHtml(path.error_message)}
-                                    </div>
-                                ` : ''}
-                            </td>
-                            <td>
-                                <span class="badge bg-${path.enabled ? 'success' : 'secondary'}">${path.enabled ? 'On' : 'Off'}</span>
-                                ${path.error_message ? `
-                                    <br><span class="badge bg-danger mt-1">
-                                        <i class="bi bi-exclamation-triangle-fill"></i>
-                                    </span>
-                                ` : ''}
-                            </td>
-                            <td>
-                                <a href="/paths/${path.id}" class="btn btn-sm btn-outline-primary" title="View">
-                                    <i class="bi bi-eye"></i>
-                                </a>
-                            </td>
+    let tableWrapper = pathsList.querySelector('[data-dashboard-paths-table]');
+    let tbody = pathsList.querySelector('[data-dashboard-paths-body]');
+
+    if (!tableWrapper || !tbody) {
+        pathsList.innerHTML = `
+            <div class="table-responsive" data-dashboard-paths-table>
+                <table class="table table-sm table-hover">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Status</th>
+                            <th>Actions</th>
                         </tr>
-                    `).join('')}
-                </tbody>
-            </table>
-        </div>
-    `;
+                    </thead>
+                    <tbody data-dashboard-paths-body></tbody>
+                </table>
+            </div>
+        `;
+        tableWrapper = pathsList.querySelector('[data-dashboard-paths-table]');
+        tbody = pathsList.querySelector('[data-dashboard-paths-body]');
+    }
+
+    if (!tableWrapper || !tbody) {
+        return;
+    }
+
+    const activePathIds = new Set(paths.map(path => String(path.id)));
+
+    paths.forEach(path => {
+        let row = tbody.querySelector(`[data-path-id="${path.id}"]`);
+        if (!row) {
+            row = document.createElement('tr');
+            row.dataset.pathId = String(path.id);
+            tbody.appendChild(row);
+        }
+
+        row.className = path.error_message ? 'table-danger' : '';
+        row.innerHTML = `
+            <td style="max-width: 180px;">
+                <strong class="small">${escapeHtml(path.name)}</strong><br>
+                <small class="text-muted text-truncate d-block" style="max-width: 160px;" title="${escapeHtml(path.source_path)}">${escapeHtml(path.source_path)}</small>
+                ${path.error_message ? `
+                    <div class="alert alert-danger alert-sm mt-1 mb-0 py-1 px-2 d-none d-md-block" role="alert" style="font-size: 0.7rem;">
+                        <i class="bi bi-exclamation-triangle-fill"></i> ${escapeHtml(path.error_message)}
+                    </div>
+                ` : ''}
+            </td>
+            <td>
+                <span class="badge bg-${path.enabled ? 'success' : 'secondary'}">${path.enabled ? 'On' : 'Off'}</span>
+                ${path.error_message ? `
+                    <br><span class="badge bg-danger mt-1">
+                        <i class="bi bi-exclamation-triangle-fill"></i>
+                    </span>
+                ` : ''}
+            </td>
+            <td>
+                <a href="/paths/${path.id}" class="btn btn-sm btn-outline-primary" title="View">
+                    <i class="bi bi-eye"></i>
+                </a>
+            </td>
+        `;
+    });
+
+    Array.from(tbody.querySelectorAll('[data-path-id]')).forEach(row => {
+        if (!activePathIds.has(row.dataset.pathId || '')) {
+            row.remove();
+        }
+    });
 }
 
 function updateRecentFiles(files) {
@@ -248,15 +275,35 @@ function updateRecentFiles(files) {
         return;
     }
 
-    recentFilesList.innerHTML = recentFiles.map(file => `
-        <tr>
+    const activeFileKeys = new Set(
+        recentFiles.map(file => `${file.original_path}::${file.moved_at}`)
+    );
+
+    recentFiles.forEach(file => {
+        const rowKey = `${file.original_path}::${file.moved_at}`;
+        let row = recentFilesList.querySelector(
+            `[data-file-key="${CSS.escape(rowKey)}"]`
+        );
+        if (!row) {
+            row = document.createElement('tr');
+            row.dataset.fileKey = rowKey;
+            recentFilesList.appendChild(row);
+        }
+
+        row.innerHTML = `
             <td style="max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(file.original_path)}">
                 <code class="small">${escapeHtml(file.original_path)}</code>
             </td>
             <td class="d-none d-sm-table-cell">${formatBytes(file.file_size)}</td>
             <td><small>${formatDate(file.moved_at)}</small></td>
-        </tr>
-    `).join('');
+        `;
+    });
+
+    Array.from(recentFilesList.querySelectorAll('[data-file-key]')).forEach(row => {
+        if (!activeFileKeys.has(row.dataset.fileKey || '')) {
+            row.remove();
+        }
+    });
 }
 
 function showError(message) {

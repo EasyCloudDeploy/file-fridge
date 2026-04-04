@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -78,3 +78,9 @@ def init_db():
     # This is idempotent - existing tables are not affected
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables initialized")
+
+
+def has_schema_objects() -> bool:
+    """Return True when the database already contains application tables."""
+    tables = inspect(engine).get_table_names()
+    return any(table != "alembic_version" for table in tables)
