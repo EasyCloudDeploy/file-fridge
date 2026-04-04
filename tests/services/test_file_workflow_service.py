@@ -1,3 +1,4 @@
+import os
 import time
 from concurrent.futures import Future
 from datetime import datetime, timezone
@@ -20,16 +21,21 @@ from app.services.file_workflow_service import FileWorkflowService
 
 
 @pytest.fixture
-def monitored_path(db_session):
+def monitored_path(db_session, tmp_path):
     """Fixture for a MonitoredPath object."""
     # Create cold storage location
-    cold_loc = ColdStorageLocation(name="TestColdLoc", path="/tmp/cold")
+    hot_dir = tmp_path / "hot"
+    hot_dir.mkdir(exist_ok=True)
+    cold_dir = tmp_path / "cold"
+    cold_dir.mkdir(exist_ok=True)
+
+    cold_loc = ColdStorageLocation(name="TestColdLoc", path=str(cold_dir))
     db_session.add(cold_loc)
     db_session.flush()  # Flush to get an ID for cold_loc before creating MonitoredPath
 
     path = MonitoredPath(
         name="Test Path",
-        source_path="/tmp/hot",
+        source_path=str(hot_dir),
         operation_type="move",
         last_scan_status=ScanStatus.SUCCESS,
     )
@@ -45,6 +51,13 @@ def file_inventory(db_session, monitored_path):
     """Fixture for a FileInventory object."""
 
     def _create_inventory(file_path, storage_type, status):
+        # Ensure file exists if it's supposed to be HOT
+        if storage_type == StorageType.HOT and status == FileStatus.ACTIVE:
+            p = Path(file_path)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            if not p.exists():
+                p.write_text("test content")
+
         inventory = FileInventory(
             path_id=monitored_path.id,
             file_path=str(file_path),
@@ -192,9 +205,9 @@ def test_scan_path(
 ):
     """Test the _scan_path method."""
     hot_path = tmp_path / "hot"
-    hot_path.mkdir()
+    hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
-    cold_path.mkdir()
+    cold_path.mkdir(exist_ok=True)
 
     monitored_path.source_path = str(hot_path)
     monitored_path.storage_locations[0].path = str(cold_path)
@@ -284,9 +297,9 @@ def test_process_single_file(
 ):
     """Test the _process_single_file method for a successful move."""
     hot_path = tmp_path / "hot"
-    hot_path.mkdir()
+    hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
-    cold_path.mkdir()
+    cold_path.mkdir(exist_ok=True)
 
     monitored_path.source_path = str(hot_path)
     file_to_move = hot_path / "file.txt"
@@ -345,9 +358,9 @@ def test_process_single_file_passes_callable_progress_callback_on_move(
 ):
     """Test freeze moves pass a callable progress callback into the mover."""
     hot_path = tmp_path / "hot"
-    hot_path.mkdir()
+    hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
-    cold_path.mkdir()
+    cold_path.mkdir(exist_ok=True)
 
     monitored_path.source_path = str(hot_path)
     file_to_move = hot_path / "file.txt"
@@ -400,9 +413,9 @@ def test_thaw_single_file(
 ):
     """Test the _thaw_single_file method for a successful thaw."""
     hot_path = tmp_path / "hot"
-    hot_path.mkdir()
+    hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
-    cold_path.mkdir()
+    cold_path.mkdir(exist_ok=True)
 
     monitored_path.source_path = str(hot_path)
     monitored_path.storage_locations[0].path = str(cold_path)
@@ -477,9 +490,9 @@ def test_thaw_single_file_uses_callable_progress_callback_for_fallback_move(
 ):
     """Test thaw fallback move preserves a callable progress callback."""
     hot_path = tmp_path / "hot"
-    hot_path.mkdir()
+    hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
-    cold_path.mkdir()
+    cold_path.mkdir(exist_ok=True)
 
     monitored_path.source_path = str(hot_path)
     monitored_path.storage_locations[0].path = str(cold_path)
@@ -581,9 +594,9 @@ def test_scan_path_move_op_deletes_orphaned_symlinks(
     """Symlinks left over from a previous SYMLINK operation are deleted when the
     path has since been changed to MOVE, leaving the cold file untouched."""
     hot_path = tmp_path / "hot"
-    hot_path.mkdir()
+    hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
-    cold_path.mkdir()
+    cold_path.mkdir(exist_ok=True)
 
     monitored_path.source_path = str(hot_path)
     monitored_path.operation_type = "move"
@@ -637,9 +650,9 @@ def test_scan_path_copy_op_thaws_orphaned_symlinks_when_active(
     regardless of whether criteria say it is active or inactive. COPY always needs
     a real file in hot storage."""
     hot_path = tmp_path / "hot"
-    hot_path.mkdir()
+    hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
-    cold_path.mkdir()
+    cold_path.mkdir(exist_ok=True)
 
     monitored_path.source_path = str(hot_path)
     monitored_path.operation_type = "copy"
@@ -689,9 +702,9 @@ def test_scan_path_symlink_op_does_not_delete_normal_symlinks(
     """When operation_type is SYMLINK, symlinks pointing to cold storage are the
     expected state and must never be deleted."""
     hot_path = tmp_path / "hot"
-    hot_path.mkdir()
+    hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
-    cold_path.mkdir()
+    cold_path.mkdir(exist_ok=True)
 
     monitored_path.source_path = str(hot_path)
     monitored_path.operation_type = "symlink"
@@ -744,9 +757,9 @@ def test_scan_path_move_op_unlink_failure_does_not_abort_scan(
     """If deleting an orphaned symlink fails (e.g. permission error), the scan
     continues processing remaining files rather than crashing."""
     hot_path = tmp_path / "hot"
-    hot_path.mkdir()
+    hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
-    cold_path.mkdir()
+    cold_path.mkdir(exist_ok=True)
 
     monitored_path.source_path = str(hot_path)
     monitored_path.operation_type = "move"
@@ -810,9 +823,9 @@ def test_scan_path_copy_op_thaws_orphaned_symlinks_when_inactive(
       scan 2: freeze hot → cold as a proper copy (hot copy kept)
     """
     hot_path = tmp_path / "hot"
-    hot_path.mkdir()
+    hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
-    cold_path.mkdir()
+    cold_path.mkdir(exist_ok=True)
 
     monitored_path.source_path = str(hot_path)
     monitored_path.operation_type = "copy"
@@ -844,3 +857,93 @@ def test_scan_path_copy_op_thaws_orphaned_symlinks_when_inactive(
     # Must be queued for thawing so the next scan can re-freeze it as a real copy
     assert result["to_hot"] == [(orphaned_symlink, cold_file)]
     assert result["to_cold"] == []
+
+
+def test_process_path_integration_real_files(db_session, tmp_path):
+    """
+    An integration-style test for process_path using real files on disk.
+    This tests the coordination between scanning, criteria matching, and processing
+    without mocking the internal methods of FileWorkflowService.
+    """
+    # Setup directories
+    hot_dir = tmp_path / "hot_integration"
+    cold_dir = tmp_path / "cold_integration"
+    hot_dir.mkdir()
+    cold_dir.mkdir()
+
+    # Create Database objects
+    cold_loc = ColdStorageLocation(name="RealCold", path=str(cold_dir))
+    db_session.add(cold_loc)
+    db_session.flush()
+
+    monitored = MonitoredPath(
+        name="RealMonitored",
+        source_path=str(hot_dir),
+        operation_type="move",
+        enabled=True,
+    )
+    monitored.storage_locations.append(cold_loc)
+    db_session.add(monitored)
+    db_session.flush()
+
+    # Create a criterion: files younger than 5 minutes should stay in hot
+    # We'll create one "old" file and one "new" file.
+    criteria = Criteria(
+        path_id=monitored.id,
+        criterion_type=CriterionType.MTIME,
+        operator=Operator.LT,
+        value="5",
+        enabled=True,
+    )
+    db_session.add(criteria)
+    db_session.commit()
+
+    # Create real files
+    now = time.time()
+    
+    # Old file (10 mins ago) -> should be moved to cold
+    old_file = hot_dir / "old.txt"
+    old_file.write_text("old content")
+    os.utime(old_file, (now - 600, now - 600))
+    
+    # New file (1 min ago) -> should stay in hot
+    new_file = hot_dir / "new.txt"
+    new_file.write_text("new content")
+    os.utime(new_file, (now - 60, now - 60))
+
+    # Run the workflow
+    service = FileWorkflowService()
+    
+    # We need to mock SessionFactory because process_single_file opens its own sessions.
+    # By returning the same db_session (wrapped in a lambda), we ensure it sees 
+    # the tables created by the db_session fixture.
+    # We also mock SessionLocal used by some other services if any.
+    with patch("app.services.file_workflow_service.SessionFactory", side_effect=lambda: db_session):
+        # We also need to mock scan_progress_manager to avoid singleton state issues
+        with patch("app.services.file_workflow_service.scan_progress_manager") as mock_progress:
+            mock_progress.start_scan.return_value = ("scan-123", True)
+            mock_progress.is_stop_requested.return_value = False
+            
+            result = service.process_path(monitored, db_session)
+
+    # Verify results
+    assert result["files_found"] == 1  # 1 file matched criteria to be moved
+    assert result["files_moved"] == 1
+    assert result["errors"] == []
+
+    # Verify filesystem
+    assert not old_file.exists()
+    assert (cold_dir / "old.txt").exists()
+    assert new_file.exists()
+
+    # Verify database inventory
+    db_session.expire_all()
+    inv_old = db_session.query(FileInventory).filter(FileInventory.file_path.contains("old.txt")).first()
+    assert inv_old is not None
+    assert inv_old.storage_type == StorageType.COLD
+    assert inv_old.file_path == str(cold_dir / "old.txt")
+
+    inv_new = db_session.query(FileInventory).filter(FileInventory.file_path.contains("new.txt")).first()
+    assert inv_new is not None
+    assert inv_new.storage_type == StorageType.HOT
+

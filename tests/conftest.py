@@ -162,20 +162,36 @@ def file_inventory_factory(db_session: Session, monitored_path_factory):
     ):
         path_name = kwargs.pop("path_name", "test_path")
         is_pinned = kwargs.pop("is_pinned", False)
+        create_physical_file = kwargs.pop("create_physical_file", False)
         # Handle cold_storage_location object → id conversion
         cold_storage_location = kwargs.pop("cold_storage_location", None)
         if cold_storage_location is not None and "cold_storage_location_id" not in kwargs:
             kwargs["cold_storage_location_id"] = cold_storage_location.id
+        
         # Ensure parent directory exists for monitored_path_factory
-        Path(path).parent.mkdir(exist_ok=True, parents=True)
-        monitored_path = monitored_path_factory(path_name, str(Path(path).parent))
+        file_path_obj = Path(path)
+        file_path_obj.parent.mkdir(exist_ok=True, parents=True)
+        monitored_path = monitored_path_factory(path_name, str(file_path_obj.parent))
 
         now = datetime.now(timezone.utc)
+        file_mtime = kwargs.pop("file_mtime", now)
+        
+        if create_physical_file:
+            # Create actual file on disk
+            file_path_obj.touch()
+            if size > 0:
+                with open(file_path_obj, "wb") as f:
+                    f.truncate(size)
+            
+            # Set timestamps if provided (utime expects float seconds)
+            m_t = file_mtime.timestamp() if isinstance(file_mtime, datetime) else file_mtime
+            os.utime(file_path_obj, (m_t, m_t))
+
         file_inv = FileInventory(
             path_id=monitored_path.id,
             file_path=path,
             file_size=size,
-            file_mtime=kwargs.pop("file_mtime", now),
+            file_mtime=file_mtime,
             status=status,
             storage_type=storage_type,
             **kwargs,

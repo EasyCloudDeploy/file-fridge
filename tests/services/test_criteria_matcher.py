@@ -12,49 +12,33 @@ from app.services.criteria_matcher import CriteriaMatcher
 
 
 @pytest.fixture
-def mock_stat():
-    """Fixture to create a mock stat_result object."""
-
-    def _mock_stat(
-        st_mtime=None,
-        st_atime=None,
-        st_ctime=None,
-        st_size=0,
-        st_mode=0o644,
-        st_uid=1000,
-        st_gid=1000,
-    ):
-        stat_result = MagicMock(spec=os.stat_result)
-        now = time.time()
-        stat_result.st_mtime = st_mtime if st_mtime is not None else now
-        stat_result.st_atime = st_atime if st_atime is not None else now
-        stat_result.st_ctime = st_ctime if st_ctime is not None else now
-        stat_result.st_size = st_size
-        stat_result.st_mode = st_mode
-        stat_result.st_uid = st_uid
-        stat_result.st_gid = st_gid
-        return stat_result
-
-    return _mock_stat
-
-
-@pytest.fixture
-def mock_file(tmp_path, mocker):
-    """Fixture to create a mock file and optionally mock stat."""
+def real_file(tmp_path):
+    """Fixture to create a real file with specific attributes."""
 
     @contextlib.contextmanager
-    def _mock_file(filename="test.txt", *, create_file=True, stat_info=None):
+    def _real_file(filename="test.txt", size=0, mtime=None, atime=None, content=None):
         file_path = tmp_path / filename
-        if create_file:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        if content:
+            file_path.write_text(content)
+        else:
             file_path.touch()
-
-        if stat_info is not None:
-            mocker.patch.object(Path, "stat", return_value=stat_info)
-            mocker.patch("os.stat", return_value=stat_info)
-
+        
+        if size > 0:
+            with open(file_path, "wb") as f:
+                f.truncate(size)
+        
+        if mtime is not None or atime is not None:
+            # If one is None, use current time
+            now = time.time()
+            m_t = mtime if mtime is not None else now
+            a_t = atime if atime is not None else now
+            os.utime(file_path, (a_t, m_t))
+            
         yield file_path
 
-    return _mock_file
+    return _real_file
 
 
 # ==================================
@@ -75,13 +59,13 @@ def mock_file(tmp_path, mocker):
         (Operator.EQ, 31, "30", False),  # Outside tolerance -> False
     ],
 )
-def test_match_time_mtime(mock_file, operator, file_age_minutes, criterion_value_minutes, expected):
-    """Test MTIME criteria with various operators."""
+def test_match_time_mtime(real_file, operator, file_age_minutes, criterion_value_minutes, expected):
+    """Test MTIME criteria with various operators using real files."""
     now = time.time()
     file_mtime = now - (file_age_minutes * 60)
-    stat_info = MagicMock(spec=os.stat_result, st_mtime=file_mtime)
 
-    with mock_file(stat_info=stat_info) as file_path:
+    with real_file(mtime=file_mtime) as file_path:
+        stat_info = file_path.stat()
         criterion = Criteria(
             criterion_type=CriterionType.MTIME, operator=operator, value=criterion_value_minutes
         )
@@ -89,13 +73,13 @@ def test_match_time_mtime(mock_file, operator, file_age_minutes, criterion_value
 
 
 @patch("platform.system", return_value="Linux")
-def test_match_time_atime_linux(mock_platform, mock_file):
-    """Test ATIME on a non-macOS system."""
+def test_match_time_atime_linux(mock_platform, real_file):
+    """Test ATIME on a non-macOS system using real files."""
     now = time.time()
     file_atime = now - (10 * 60)  # 10 minutes ago
-    stat_info = MagicMock(spec=os.stat_result, st_atime=file_atime)
 
-    with mock_file(stat_info=stat_info) as file_path:
+    with real_file(atime=file_atime) as file_path:
+        stat_info = file_path.stat()
         criterion = Criteria(criterion_type=CriterionType.ATIME, operator=Operator.GT, value="5")
         assert CriteriaMatcher._match_criterion(file_path, stat_info, criterion) is True
 
@@ -105,17 +89,18 @@ def test_match_time_atime_linux(mock_platform, mock_file):
 
 @patch("platform.system", return_value="Darwin")
 @patch("app.services.criteria_matcher.CriteriaMatcher._get_macos_last_open_time")
-def test_match_time_atime_macos_with_last_open(mock_get_last_open, mock_platform, mock_file):
+def test_match_time_atime_macos_with_last_open(mock_get_last_open, mock_platform, real_file):
     """Test ATIME on macOS when _get_macos_last_open_time returns a more recent time."""
     now = time.time()
     file_atime = now - (20 * 60)  # atime is 20 minutes ago
     last_open_time = now - (5 * 60)  # last open is 5 minutes ago
 
     mock_get_last_open.return_value = last_open_time
-    stat_info = MagicMock(spec=os.stat_result, st_atime=file_atime)
 
-    with mock_file(stat_info=stat_info) as file_path:
-        # Match against last_open_time (5 mins ago), which is > 10 mins ago = False
+    with real_file(atime=file_atime) as file_path:
+        stat_info = file_path.stat()
+        # Match against last_open_time (5 mins ago), which is > 10 mins ago = False (age < 10)
+        # Wait, if age is 5 mins, and criterion is > 10 mins, it should be False.
         criterion = Criteria(criterion_type=CriterionType.ATIME, operator=Operator.GT, value="10")
         assert CriteriaMatcher._match_criterion(file_path, stat_info, criterion) is False
 
@@ -126,16 +111,16 @@ def test_match_time_atime_macos_with_last_open(mock_get_last_open, mock_platform
 
 @patch("platform.system", return_value="Darwin")
 @patch("app.services.criteria_matcher.CriteriaMatcher._get_macos_last_open_time")
-def test_match_time_atime_macos_with_older_last_open(mock_get_last_open, mock_platform, mock_file):
+def test_match_time_atime_macos_with_older_last_open(mock_get_last_open, mock_platform, real_file):
     """Test ATIME on macOS when atime is more recent than _get_macos_last_open_time."""
     now = time.time()
     file_atime = now - (5 * 60)  # atime is 5 minutes ago
     last_open_time = now - (20 * 60)  # last open is 20 minutes ago
 
     mock_get_last_open.return_value = last_open_time
-    stat_info = MagicMock(spec=os.stat_result, st_atime=file_atime)
 
-    with mock_file(stat_info=stat_info) as file_path:
+    with real_file(atime=file_atime) as file_path:
+        stat_info = file_path.stat()
         # Match against atime (5 mins ago), which is > 10 mins ago = False
         criterion = Criteria(criterion_type=CriterionType.ATIME, operator=Operator.GT, value="10")
         assert CriteriaMatcher._match_criterion(file_path, stat_info, criterion) is False
@@ -176,11 +161,12 @@ def test_match_time_atime_macos_with_older_last_open(mock_get_last_open, mock_pl
         (Operator.EQ, 1023, "1k", False),
     ],
 )
-def test_match_size(mock_file, operator, file_size, criterion_value, expected):
-    """Test SIZE criteria with various operators and suffixes."""
-    stat_info = MagicMock(spec=os.stat_result, st_size=file_size)
-
-    with mock_file(stat_info=stat_info) as file_path:
+def test_match_size(real_file, operator, file_size, criterion_value, expected):
+    """Test SIZE criteria with various operators and suffixes using real files."""
+    # Note: Creating a 2GB file for testing might be slow/heavy, 
+    # but truncate() is usually very fast on modern filesystems (sparse files).
+    with real_file(size=file_size) as file_path:
+        stat_info = file_path.stat()
         criterion = Criteria(
             criterion_type=CriterionType.SIZE, operator=operator, value=criterion_value
         )
@@ -209,11 +195,10 @@ def test_match_size(mock_file, operator, file_size, criterion_value, expected):
         (Operator.REGEX, "photo.JPEG", r"\.(jpeg|jpg)$", False, True),
     ],
 )
-def test_match_name(mock_file, operator, filename, criterion_value, case_sensitive, expected):
-    """Test NAME and INAME criteria with various operators."""
-    stat_info = MagicMock(spec=os.stat_result)
-
-    with mock_file(filename=filename, stat_info=stat_info) as file_path:
+def test_match_name(real_file, operator, filename, criterion_value, case_sensitive, expected):
+    """Test NAME and INAME criteria with various operators using real files."""
+    with real_file(filename=filename) as file_path:
+        stat_info = file_path.stat()
         criterion_type = CriterionType.NAME if case_sensitive else CriterionType.INAME
         criterion = Criteria(
             criterion_type=criterion_type, operator=operator, value=criterion_value
@@ -236,42 +221,22 @@ def test_match_name(mock_file, operator, filename, criterion_value, case_sensiti
         (lambda p: p.mkdir(), "f", False),
     ],
 )
-def test_match_type(tmp_path, file_creator, criterion_value, expected, mocker):
-    """Test TYPE criteria for file, directory, and symlink."""
-    file_path = tmp_path / "test_entity"
+def test_match_type(tmp_path, file_creator, criterion_value, expected):
+    """Test TYPE criteria for file, directory, and symlink using real entities."""
+    file_path = tmp_path / f"test_entity_{criterion_value}_{expected}"
+    if file_path.exists():
+         import shutil
+         if file_path.is_dir() and not file_path.is_symlink():
+             shutil.rmtree(file_path)
+         else:
+             file_path.unlink()
+
     file_creator(file_path)
 
-    criterion = Criteria(
-        criterion_type=CriterionType.TYPE, operator=Operator.EQ, value=criterion_value
-    )
-
     # We need to use lstat for symlinks to not follow them
-    if file_path.is_symlink():
-        stat_info = file_path.lstat()
-    else:
-        stat_info = file_path.stat()
+    stat_info = file_path.lstat()
 
-    # To test file type, we need to mock the is_file, is_dir, is_symlink methods on the Path object
-    # But for this test, it's easier to create real files in a temporary directory
-
-    # We create a mock for stat_info because _match_criterion expects it
-    mock_stat_info = MagicMock(spec=os.stat_result)
-
-    # Let's mock the Path object's methods for the test
-    # Note: Path.is_file/is_dir/is_symlink are methods that call stat internally,
-    #       so patching Path.stat might be enough.
-    #       However, directly patching these for the test scenario is also valid.
-    mocker.patch.object(
-        Path, "is_file", return_value=(criterion_value in ["f", "file"] and expected)
-    )
-    mocker.patch.object(
-        Path, "is_dir", return_value=(criterion_value in ["d", "directory"] and expected)
-    )
-    mocker.patch.object(
-        Path, "is_symlink", return_value=(criterion_value in ["l", "link"] and expected)
-    )
-
-    assert CriteriaMatcher._match_type(file_path, mock_stat_info, criterion_value) == expected
+    assert CriteriaMatcher._match_type(file_path, stat_info, criterion_value) == expected
 
 
 # ==================================
@@ -279,14 +244,13 @@ def test_match_type(tmp_path, file_creator, criterion_value, expected, mocker):
 # ==================================
 
 
-def test_match_file_all_criteria_match(mock_file):
-    """Test that match_file returns True when all criteria match."""
+def test_match_file_all_criteria_match(real_file):
+    """Test that match_file returns True when all criteria match with real files."""
     now = time.time()
     file_mtime = now - (10 * 60)  # 10 mins old
     file_size = 2048  # 2k
-    stat_info = MagicMock(spec=os.stat_result, st_mtime=file_mtime, st_size=file_size)
 
-    with mock_file(filename="report-final.pdf", stat_info=stat_info) as file_path:
+    with real_file(filename="report-final.pdf", size=file_size, mtime=file_mtime) as file_path:
         criteria = [
             Criteria(
                 id=1,
@@ -317,13 +281,13 @@ def test_match_file_all_criteria_match(mock_file):
         assert sorted(matched_ids) == [1, 2, 3]
 
 
-def test_match_file_one_criterion_fails(mock_file):
+def test_match_file_one_criterion_fails(real_file):
     """Test that match_file returns False if one criterion does not match."""
     now = time.time()
     file_mtime = now - (10 * 60)  # 10 mins old
-    stat_info = MagicMock(spec=os.stat_result, st_mtime=file_mtime, st_size=500)
+    file_size = 500
 
-    with mock_file(filename="report-final.pdf", stat_info=stat_info) as file_path:
+    with real_file(filename="report-final.pdf", size=file_size, mtime=file_mtime) as file_path:
         criteria = [
             Criteria(
                 id=1,
@@ -354,21 +318,17 @@ def test_match_file_one_criterion_fails(mock_file):
         assert matched_ids == []
 
 
-def test_match_file_no_criteria(mock_file):
+def test_match_file_no_criteria(real_file):
     """Test that match_file returns True when no criteria are provided."""
-    stat_info = MagicMock(spec=os.stat_result)
-
-    with mock_file(stat_info=stat_info) as file_path:
+    with real_file() as file_path:
         matches, matched_ids = CriteriaMatcher.match_file(file_path, [])
         assert matches is True
         assert matched_ids == []
 
 
-def test_match_file_no_enabled_criteria(mock_file):
+def test_match_file_no_enabled_criteria(real_file):
     """Test that match_file returns True when all criteria are disabled."""
-    stat_info = MagicMock(spec=os.stat_result)
-
-    with mock_file(stat_info=stat_info) as file_path:
+    with real_file() as file_path:
         criteria = [
             Criteria(
                 id=1,
