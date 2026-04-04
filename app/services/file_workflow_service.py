@@ -20,6 +20,7 @@ from app.models import (
     FileRecord,
     FileStatus,
     MonitoredPath,
+    OperationType,
     PinnedFile,
     ScanStatus,
     StorageType,
@@ -397,6 +398,19 @@ class FileWorkflowService:
                 except (OSError, RuntimeError):
                     continue
 
+            # Orphaned symlink: was created by a previous SYMLINK operation but the path has
+            # since been changed to MOVE. Delete it so the cold file is the only copy.
+            if is_symlink_to_cold and path.operation_type == OperationType.MOVE:
+                try:
+                    file_path.unlink()
+                    logger.info(
+                        f"Removed orphaned symlink {file_path} "
+                        f"(operation_type changed from symlink to move)"
+                    )
+                except OSError as e:
+                    logger.warning(f"Could not remove orphaned symlink {file_path}: {e}")
+                continue
+
             try:
                 is_active, matched_ids = CriteriaMatcher.match_file(
                     file_path, path.criteria, actual_file_path
@@ -408,6 +422,15 @@ class FileWorkflowService:
                         files_skipped_hot += 1
                 elif not is_symlink_to_cold:
                     matching_files.append((file_path, matched_ids))
+                elif path.operation_type == OperationType.COPY and actual_file_path:
+                    # COPY requires a real file in hot storage, not just a symlink.
+                    # Thaw the file so the next scan can re-freeze it as a proper copy
+                    # (keeping the original in hot and writing a copy to cold).
+                    logger.info(
+                        f"Thawing {file_path} to convert orphaned symlink to a real copy "
+                        f"(operation_type changed from symlink to copy)"
+                    )
+                    files_to_thaw.append((file_path, actual_file_path))
                 else:
                     files_skipped_cold += 1
             except (OSError, PermissionError) as e:

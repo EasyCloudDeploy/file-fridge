@@ -1,4 +1,5 @@
 import logging
+import os
 import shutil
 import time
 import traceback
@@ -17,6 +18,7 @@ from app.services.notification_events import (
     NotificationEventType,
     ScanCompletedData,
     ScanErrorData,
+    StoragePermissionErrorData,
 )
 from app.services.notification_service import notification_service
 from app.services.remote_transfer_service import remote_transfer_service
@@ -68,6 +70,7 @@ class SchedulerService:
                 self._load_existing_jobs()
                 self._add_stats_cleanup_job()
                 self._add_disk_space_monitoring_job()
+                self._add_storage_permissions_job()
                 self._add_nonce_cleanup_job()
                 self._add_remote_code_rotation_job()
                 self._add_remote_transfer_job()
@@ -307,6 +310,29 @@ class SchedulerService:
             logger.exception(f"Error adding disk space monitoring job: {e}")
 
 
+    def _add_storage_permissions_job(self):
+        """Add scheduled job for storage permissions checking (runs every hour)."""
+        if not self.scheduler.running:
+            logger.warning("Scheduler not running, skipping storage permissions job addition")
+            return
+
+        job_id = "storage_permissions_check"
+        try:
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            self.scheduler.add_job(
+                check_storage_permissions_job_func,
+                "interval",
+                hours=1,
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info("Added scheduled job for storage permissions check (runs every hour)")
+        except Exception as e:
+            logger.exception(f"Error adding storage permissions job: {e}")
+
+
 def _check_and_notify_disk_space(location, db: Session):
     """
     Check disk space for a cold storage location and send notifications if low.
@@ -400,6 +426,97 @@ def rotate_remote_code_job_func():
     """Job function to rotate the remote connection code."""
     remote_auth.rotate_code()
     logger.info("Rotated remote connection code")
+
+
+def _check_path_permissions(path: str) -> list[str]:
+    """Return list of missing permissions ('read', 'write') for the given path."""
+    missing = []
+    if not os.access(path, os.R_OK):
+        missing.append("read")
+    if not os.access(path, os.W_OK):
+        missing.append("write")
+    return missing
+
+
+def check_storage_permissions_job_func():
+    """Background job to verify read/write access on all hot and cold storage paths (runs every hour)."""
+    from app.models import ColdStorageLocation, MonitoredPath
+
+    db = SchedulerSessionLocal()
+    try:
+        # Check cold storage locations
+        locations = db.query(ColdStorageLocation).all()
+        for location in locations:
+            try:
+                missing = _check_path_permissions(location.path)
+                if missing:
+                    error = f"Missing {' and '.join(missing)} permission on cold storage path: {location.path}"
+                    if location.permissions_error != error:
+                        location.permissions_error = error
+                        logger.warning(f"Permission issue on cold storage '{location.name}': {error}")
+                        try:
+                            notification_service.dispatch_event_sync(
+                                db=db,
+                                event_type=NotificationEventType.STORAGE_PERMISSION_ERROR,
+                                event_data=StoragePermissionErrorData(
+                                    storage_type="cold",
+                                    location_name=location.name,
+                                    location_path=location.path,
+                                    missing_permissions=missing,
+                                ),
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to dispatch STORAGE_PERMISSION_ERROR notification: {e}")
+                else:
+                    if location.permissions_error is not None:
+                        logger.info(f"Permissions restored on cold storage '{location.name}'")
+                    location.permissions_error = None
+            except FileNotFoundError:
+                error = f"Path not found: {location.path}"
+                location.permissions_error = error
+                logger.warning(f"Cold storage path not found for '{location.name}': {location.path}")
+            except Exception:
+                logger.exception(f"Error checking permissions for cold storage '{location.name}'")
+
+        # Check hot storage (monitored paths)
+        paths = db.query(MonitoredPath).all()
+        for path in paths:
+            try:
+                missing = _check_path_permissions(path.source_path)
+                if missing:
+                    error = f"Missing {' and '.join(missing)} permission on hot storage path: {path.source_path}"
+                    if path.permissions_error != error:
+                        path.permissions_error = error
+                        logger.warning(f"Permission issue on hot storage '{path.name}': {error}")
+                        try:
+                            notification_service.dispatch_event_sync(
+                                db=db,
+                                event_type=NotificationEventType.STORAGE_PERMISSION_ERROR,
+                                event_data=StoragePermissionErrorData(
+                                    storage_type="hot",
+                                    location_name=path.name,
+                                    location_path=path.source_path,
+                                    missing_permissions=missing,
+                                ),
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to dispatch STORAGE_PERMISSION_ERROR notification: {e}")
+                else:
+                    if path.permissions_error is not None:
+                        logger.info(f"Permissions restored on hot storage '{path.name}'")
+                    path.permissions_error = None
+            except FileNotFoundError:
+                path.permissions_error = f"Path not found: {path.source_path}"
+                logger.warning(f"Hot storage path not found for '{path.name}': {path.source_path}")
+            except Exception:
+                logger.exception(f"Error checking permissions for hot storage '{path.name}'")
+
+        db.commit()
+        logger.info(
+            f"Storage permissions check complete: {len(locations)} cold locations, {len(paths)} hot paths"
+        )
+    finally:
+        db.close()
 
 
 def disk_space_monitoring_job_func():

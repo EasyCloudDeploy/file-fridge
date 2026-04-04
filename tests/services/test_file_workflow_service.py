@@ -559,3 +559,288 @@ def test_recursive_scandir(tmp_path):
     assert "f2.txt" in names
     assert ".DS_Store" not in names
     assert len(files) == 2
+
+
+# ---------------------------------------------------------------------------
+# Orphaned symlink handling when operation_type changes away from SYMLINK
+# ---------------------------------------------------------------------------
+
+@patch("app.services.file_workflow_service.CriteriaMatcher.match_file")
+@patch("app.services.file_workflow_service.FileWorkflowService._recursive_scandir")
+@patch("app.services.file_workflow_service.FileWorkflowService._update_file_inventory")
+@patch("app.services.file_workflow_service.check_atime_availability", return_value=(True, None))
+def test_scan_path_move_op_deletes_orphaned_symlinks(
+    mock_check_atime,
+    mock_update_inventory,
+    mock_scandir,
+    mock_match_file,
+    monitored_path,
+    db_session,
+    tmp_path,
+):
+    """Symlinks left over from a previous SYMLINK operation are deleted when the
+    path has since been changed to MOVE, leaving the cold file untouched."""
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir()
+    cold_path = tmp_path / "cold"
+    cold_path.mkdir()
+
+    monitored_path.source_path = str(hot_path)
+    monitored_path.operation_type = "move"
+    monitored_path.storage_locations[0].path = str(cold_path)
+    db_session.commit()
+
+    # Cold file is the real copy; hot entry is an orphaned symlink from when
+    # the operation type used to be SYMLINK.
+    cold_file = cold_path / "movie.mkv"
+    cold_file.write_text("cold content")
+    orphaned_symlink = hot_path / "movie.mkv"
+    orphaned_symlink.symlink_to(cold_file)
+
+    mock_scandir.side_effect = [
+        [
+            MagicMock(
+                path=str(orphaned_symlink),
+                is_symlink=lambda: True,
+                stat=lambda **kw: orphaned_symlink.lstat(),
+            )
+        ],
+        [],  # cold scan
+    ]
+
+    service = FileWorkflowService()
+    result = service._scan_path(monitored_path, db_session)
+
+    # Symlink must be gone; cold file must be intact
+    assert not orphaned_symlink.exists()
+    assert cold_file.exists()
+
+    # File should not appear in to_cold or to_hot — it was handled inline
+    assert result["to_cold"] == []
+    assert result["to_hot"] == []
+
+
+@patch("app.services.file_workflow_service.CriteriaMatcher.match_file")
+@patch("app.services.file_workflow_service.FileWorkflowService._recursive_scandir")
+@patch("app.services.file_workflow_service.FileWorkflowService._update_file_inventory")
+@patch("app.services.file_workflow_service.check_atime_availability", return_value=(True, None))
+def test_scan_path_copy_op_thaws_orphaned_symlinks_when_active(
+    mock_check_atime,
+    mock_update_inventory,
+    mock_scandir,
+    mock_match_file,
+    monitored_path,
+    db_session,
+    tmp_path,
+):
+    """When operation_type is COPY and a symlink-to-cold exists, the file is thawed
+    regardless of whether criteria say it is active or inactive. COPY always needs
+    a real file in hot storage."""
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir()
+    cold_path = tmp_path / "cold"
+    cold_path.mkdir()
+
+    monitored_path.source_path = str(hot_path)
+    monitored_path.operation_type = "copy"
+    monitored_path.storage_locations[0].path = str(cold_path)
+    db_session.commit()
+
+    cold_file = cold_path / "doc.pdf"
+    cold_file.write_text("cold content")
+    symlink = hot_path / "doc.pdf"
+    symlink.symlink_to(cold_file)
+
+    mock_scandir.side_effect = [
+        [
+            MagicMock(
+                path=str(symlink),
+                is_symlink=lambda: True,
+                stat=lambda **kw: symlink.lstat(),
+            )
+        ],
+        [],  # cold scan
+    ]
+
+    # Criteria says file is active (recently used — should stay in hot)
+    mock_match_file.return_value = (True, [])
+
+    service = FileWorkflowService()
+    result = service._scan_path(monitored_path, db_session)
+
+    # Thaw queued so a real hot copy can be restored
+    assert result["to_hot"] == [(symlink, cold_file)]
+    assert result["to_cold"] == []
+
+
+@patch("app.services.file_workflow_service.CriteriaMatcher.match_file")
+@patch("app.services.file_workflow_service.FileWorkflowService._recursive_scandir")
+@patch("app.services.file_workflow_service.FileWorkflowService._update_file_inventory")
+@patch("app.services.file_workflow_service.check_atime_availability", return_value=(True, None))
+def test_scan_path_symlink_op_does_not_delete_normal_symlinks(
+    mock_check_atime,
+    mock_update_inventory,
+    mock_scandir,
+    mock_match_file,
+    monitored_path,
+    db_session,
+    tmp_path,
+):
+    """When operation_type is SYMLINK, symlinks pointing to cold storage are the
+    expected state and must never be deleted."""
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir()
+    cold_path = tmp_path / "cold"
+    cold_path.mkdir()
+
+    monitored_path.source_path = str(hot_path)
+    monitored_path.operation_type = "symlink"
+    monitored_path.storage_locations[0].path = str(cold_path)
+    db_session.commit()
+
+    cold_file = cold_path / "archive.zip"
+    cold_file.write_text("cold content")
+    symlink = hot_path / "archive.zip"
+    symlink.symlink_to(cold_file)
+
+    mock_scandir.side_effect = [
+        [
+            MagicMock(
+                path=str(symlink),
+                is_symlink=lambda: True,
+                stat=lambda **kw: symlink.lstat(),
+            )
+        ],
+        [],  # cold scan
+    ]
+
+    # Criteria says file is still cold (not active)
+    mock_match_file.return_value = (False, [])
+
+    service = FileWorkflowService()
+    result = service._scan_path(monitored_path, db_session)
+
+    # Symlink must survive
+    assert symlink.exists()
+    assert symlink.is_symlink()
+
+    assert result["to_cold"] == []
+    assert result["to_hot"] == []
+
+
+@patch("app.services.file_workflow_service.CriteriaMatcher.match_file")
+@patch("app.services.file_workflow_service.FileWorkflowService._recursive_scandir")
+@patch("app.services.file_workflow_service.FileWorkflowService._update_file_inventory")
+@patch("app.services.file_workflow_service.check_atime_availability", return_value=(True, None))
+def test_scan_path_move_op_unlink_failure_does_not_abort_scan(
+    mock_check_atime,
+    mock_update_inventory,
+    mock_scandir,
+    mock_match_file,
+    monitored_path,
+    db_session,
+    tmp_path,
+):
+    """If deleting an orphaned symlink fails (e.g. permission error), the scan
+    continues processing remaining files rather than crashing."""
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir()
+    cold_path = tmp_path / "cold"
+    cold_path.mkdir()
+
+    monitored_path.source_path = str(hot_path)
+    monitored_path.operation_type = "move"
+    monitored_path.storage_locations[0].path = str(cold_path)
+    db_session.commit()
+
+    cold_file = cold_path / "protected.mkv"
+    cold_file.write_text("content")
+    orphaned_symlink = hot_path / "protected.mkv"
+    orphaned_symlink.symlink_to(cold_file)
+
+    regular_file = hot_path / "normal.txt"
+    regular_file.write_text("content")
+
+    mock_scandir.side_effect = [
+        [
+            MagicMock(
+                path=str(orphaned_symlink),
+                is_symlink=lambda: True,
+                stat=lambda **kw: orphaned_symlink.lstat(),
+            ),
+            MagicMock(
+                path=str(regular_file),
+                is_symlink=lambda: False,
+                stat=lambda **kw: regular_file.stat(),
+            ),
+        ],
+        [],  # cold scan
+    ]
+
+    # Regular file should be moved to cold
+    mock_match_file.return_value = (False, [])
+
+    service = FileWorkflowService()
+
+    with patch.object(orphaned_symlink.__class__, "unlink", side_effect=OSError("permission denied")):
+        # Should not raise — OSError is caught internally
+        result = service._scan_path(monitored_path, db_session)
+
+    # Regular file still queued for freezing
+    assert (regular_file, []) in result["to_cold"]
+
+
+@patch("app.services.file_workflow_service.CriteriaMatcher.match_file")
+@patch("app.services.file_workflow_service.FileWorkflowService._recursive_scandir")
+@patch("app.services.file_workflow_service.FileWorkflowService._update_file_inventory")
+@patch("app.services.file_workflow_service.check_atime_availability", return_value=(True, None))
+def test_scan_path_copy_op_thaws_orphaned_symlinks_when_inactive(
+    mock_check_atime,
+    mock_update_inventory,
+    mock_scandir,
+    mock_match_file,
+    monitored_path,
+    db_session,
+    tmp_path,
+):
+    """When operation_type is COPY and a symlink-to-cold exists, the file must be
+    thawed even when criteria say it is inactive (should be cold). COPY semantics
+    require a real file in hot storage, so the two-step migration is:
+      scan 1: thaw cold → hot (remove symlink, restore real file)
+      scan 2: freeze hot → cold as a proper copy (hot copy kept)
+    """
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir()
+    cold_path = tmp_path / "cold"
+    cold_path.mkdir()
+
+    monitored_path.source_path = str(hot_path)
+    monitored_path.operation_type = "copy"
+    monitored_path.storage_locations[0].path = str(cold_path)
+    db_session.commit()
+
+    cold_file = cold_path / "report.pdf"
+    cold_file.write_text("cold content")
+    orphaned_symlink = hot_path / "report.pdf"
+    orphaned_symlink.symlink_to(cold_file)
+
+    mock_scandir.side_effect = [
+        [
+            MagicMock(
+                path=str(orphaned_symlink),
+                is_symlink=lambda: True,
+                stat=lambda **kw: orphaned_symlink.lstat(),
+            )
+        ],
+        [],  # cold scan
+    ]
+
+    # Criteria says file is inactive (old enough to be cold) — the sticky case
+    mock_match_file.return_value = (False, [])
+
+    service = FileWorkflowService()
+    result = service._scan_path(monitored_path, db_session)
+
+    # Must be queued for thawing so the next scan can re-freeze it as a real copy
+    assert result["to_hot"] == [(orphaned_symlink, cold_file)]
+    assert result["to_cold"] == []

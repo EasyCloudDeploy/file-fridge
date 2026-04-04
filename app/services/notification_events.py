@@ -21,6 +21,7 @@ class NotificationEventType(str, Enum):
     # Storage health events
     DISK_SPACE_CAUTION = "DISK_SPACE_CAUTION"  # Free space drops below caution threshold
     DISK_SPACE_CRITICAL = "DISK_SPACE_CRITICAL"  # Free space drops below critical threshold
+    STORAGE_PERMISSION_ERROR = "STORAGE_PERMISSION_ERROR"  # Read/write permission denied on storage path
 
 
 # Event data models (for type safety and validation)
@@ -74,6 +75,15 @@ class PathDeletedData(BaseModel):
     deleted_by: Optional[str] = None
 
 
+class StoragePermissionErrorData(BaseModel):
+    """Data for STORAGE_PERMISSION_ERROR event."""
+
+    storage_type: str  # "hot" or "cold"
+    location_name: str
+    location_path: str
+    missing_permissions: list[str]  # e.g. ["read", "write"]
+
+
 class DiskSpaceCautionData(BaseModel):
     """Data for DISK_SPACE_CAUTION event."""
 
@@ -107,4 +117,5 @@ EventData = Union[
     PathDeletedData,
     DiskSpaceCautionData,
     DiskSpaceCriticalData,
+    StoragePermissionErrorData,
 ]

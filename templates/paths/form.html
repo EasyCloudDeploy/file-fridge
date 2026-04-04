@@ -53,9 +53,9 @@
                                     <option value="symlink">Move & Create Symlink</option>
                                 </select>
                                 <small class="form-text text-muted">
-                                    Move: Move file to cold storage<br>
-                                    Copy: Copy file, keep original<br>
-                                    Symlink: Move file, create symlink at original location
+                                    <strong>Move</strong> — file is relocated to cold storage and removed from hot storage.<br>
+                                    <strong>Copy</strong> — file is copied to cold storage; the original remains in hot storage.<br>
+                                    <strong>Move &amp; Symlink</strong> — file is moved to cold storage and a symlink is left at the original location, so existing paths still resolve.
                                 </small>
                             </div>
 
