@@ -76,14 +76,11 @@ class ColdStorageLocationBase(BaseModel):
     )
 
     @validator("critical_threshold_percent")
-    @classmethod
     def validate_critical_less_than_caution(cls, v, values):
         """Ensure critical threshold < caution threshold."""
-        if "caution_threshold_percent" in values:
-            if v >= values["caution_threshold_percent"]:
-                raise ValueError(
-                    "critical_threshold_percent must be less than caution_threshold_percent"
-                )
+        if "caution_threshold_percent" in values and v >= values["caution_threshold_percent"]:
+            msg = "critical_threshold_percent must be less than caution_threshold_percent"
+            raise ValueError(msg)
         return v
 
 
@@ -135,7 +132,6 @@ class MonitoredPathBase(BaseModel):
         3, ge=1, description="Maximum number of concurrent file migrations"
     )
     error_message: Optional[str] = None  # Error state message
-    permissions_error: Optional[str] = None  # Set when read/write permissions are denied
     last_scan_at: Optional[datetime] = None  # When the last scan finished
     last_scan_status: Optional[ScanStatus] = None  # Status of the last scan
 
@@ -167,6 +163,7 @@ class MonitoredPath(MonitoredPathBase):
     """Schema for monitored path response."""
 
     id: int
+    permissions_error: Optional[str] = None  # Set when read/write permissions are denied
     created_at: datetime
     updated_at: Optional[datetime]
     criteria: List[Criteria] = []
@@ -181,6 +178,7 @@ class MonitoredPathSummary(MonitoredPathBase):
     """Schema for monitored path summary response."""
 
     id: int
+    permissions_error: Optional[str] = None  # Set when read/write permissions are denied
     created_at: datetime
     updated_at: Optional[datetime]
     file_count: int
@@ -530,14 +528,17 @@ class NotifierBase(BaseModel):
             try:
                 TypeAdapter(EmailStr).validate_python(v)
             except Exception as e:
-                raise ValueError(f"Invalid email address: {e}")
+                raise ValueError(f"Invalid email address: {e}") from e
         elif notifier_type == NotifierType.GENERIC_WEBHOOK:
             try:
                 url = HttpUrl(v)
                 if url.scheme != "https":
-                    raise ValueError("Webhook URLs must use HTTPS for security")
+                    msg = "Webhook URLs must use HTTPS for security"
+                    raise ValueError(msg)
             except Exception as e:
-                raise ValueError(f"Invalid webhook URL: {e}")
+                if isinstance(e, ValueError) and str(e) == "Webhook URLs must use HTTPS for security":
+                    raise
+                raise ValueError(f"Invalid webhook URL: {e}") from e
         return v
 
     @validator("subscribed_events")

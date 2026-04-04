@@ -1,6 +1,6 @@
 
 import os
-import sys
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -11,7 +11,6 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import User
 from app.security import hash_password
-from app.config import settings
 
 # Set required environment variables for testing
 os.environ["SECRET_KEY"] = "test-secret-key"

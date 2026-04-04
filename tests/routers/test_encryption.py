@@ -24,11 +24,11 @@ class TestEncryptionRouter:
         # Must have at least 2 keys
         authenticated_client.post("/api/v1/encryption/keys")
         authenticated_client.post("/api/v1/encryption/keys")
-        
+
         keys = db_session.query(ServerEncryptionKey).all()
         assert len(keys) >= 2
         key_id = keys[0].id
-        
+
         response = authenticated_client.delete(f"/api/v1/encryption/keys/{key_id}")
         assert response.status_code == 204
         assert db_session.get(ServerEncryptionKey, key_id) is None
@@ -38,11 +38,11 @@ class TestEncryptionRouter:
         # Ensure only 1 key exists
         db_session.query(ServerEncryptionKey).delete()
         authenticated_client.post("/api/v1/encryption/keys")
-        
+
         keys = db_session.query(ServerEncryptionKey).all()
         assert len(keys) == 1
         key_id = keys[0].id
-        
+
         response = authenticated_client.delete(f"/api/v1/encryption/keys/{key_id}")
         assert response.status_code == 400
         assert "last encryption key" in response.json()["detail"].lower()

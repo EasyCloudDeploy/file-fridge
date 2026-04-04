@@ -310,7 +310,7 @@ class SchedulerService:
             logger.exception(f"Error adding disk space monitoring job: {e}")
 
 
-    def _add_storage_permissions_job(self):
+    def _add_storage_permissions_job(self) -> None:
         """Add scheduled job for storage permissions checking (runs every hour)."""
         if not self.scheduler.running:
             logger.warning("Scheduler not running, skipping storage permissions job addition")
@@ -430,6 +430,9 @@ def rotate_remote_code_job_func():
 
 def _check_path_permissions(path: str) -> list[str]:
     """Return list of missing permissions ('read', 'write') for the given path."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Path does not exist: {path}")
+
     missing = []
     if not os.access(path, os.R_OK):
         missing.append("read")
@@ -438,7 +441,7 @@ def _check_path_permissions(path: str) -> list[str]:
     return missing
 
 
-def check_storage_permissions_job_func():
+def check_storage_permissions_job_func() -> None:
     """Background job to verify read/write access on all hot and cold storage paths (runs every hour)."""
     from app.models import ColdStorageLocation, MonitoredPath
 

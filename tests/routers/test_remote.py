@@ -1,32 +1,23 @@
-import itertools
-import json
-import time
 import base64
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, ANY
+import time
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import httpx
 import pytest
-from fastapi.testclient import TestClient
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.main import app
 from app.models import (
+    ColdStorageLocation,
     FileInventory,
     FileStatus,
-    MonitoredPath,
     RemoteConnection,
-    RemoteTransferJob,
-    TransferDirection,
-    TransferMode,
-    TransferStatus,
-    TrustStatus,
-    ColdStorageLocation,
     StorageType,
+    TransferMode,
+    TrustStatus,
 )
-from app.schemas import RemoteConnectionCreate, RemoteTransferJob as RemoteTransferJobSchema
 from app.utils.remote_signature import verify_remote_signature
 
 # Assume authenticated_client, monitored_path_factory, storage_location fixtures are available from conftest.
@@ -196,7 +187,7 @@ def test_bulk_cancel_transfers(mock_cancel, authenticated_client: TestClient, re
     job2 = remote_transfer_job_factory(status="PENDING")
     mock_cancel.return_value = True
 
-    response = authenticated_client.post(f"/api/v1/remote/transfers/bulk/cancel", json=[job1.id, job2.id])
+    response = authenticated_client.post("/api/v1/remote/transfers/bulk/cancel", json=[job1.id, job2.id])
     assert response.status_code == 200
 
 
@@ -409,7 +400,7 @@ def test_get_base_directory_no_cold_storage(authenticated_client: TestClient, mo
     # The factory adds one default location, we need to remove it
     path.storage_locations = []
     db_session.commit()
-    
+
     response = authenticated_client.get(
         f"/api/v1/remote/transfer-status?relative_path=f.txt&remote_path_id={path.id}&storage_type=cold"
     )
@@ -498,7 +489,7 @@ def test_connect_with_invalid_code(client: TestClient, monkeypatch):
     """Test connection request with an invalid connection code."""
     from app.utils.remote_auth import remote_auth
     monkeypatch.setattr(remote_auth, "get_code", lambda: "correct-code")
-    
+
     from app.services.instance_config_service import instance_config_service
     monkeypatch.setattr(instance_config_service, "get_instance_url", lambda db: "http://local")
 

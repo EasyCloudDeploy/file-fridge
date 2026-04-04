@@ -1,6 +1,5 @@
 import os
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Set SECRET_KEY for testing if not set
 if "SECRET_KEY" not in os.environ:
@@ -10,9 +9,11 @@ if "SECRET_KEY" not in os.environ:
 os.environ["DATABASE_PATH"] = ":memory:"
 
 from fastapi.testclient import TestClient
+
+from app.database import get_db
 from app.main import app
 from app.utils.rate_limiter import _login_rate_limiter
-from app.database import get_db
+
 
 # Override database dependency to avoid DB connection errors
 def mock_get_db():

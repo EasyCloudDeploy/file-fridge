@@ -1,5 +1,6 @@
-import pytest
 from pathlib import Path
+
+import pytest
 
 from app.models import ColdStorageLocation
 
@@ -43,13 +44,13 @@ class TestStorageRouter:
         """Test getting storage statistics."""
         # Ensure path exists
         Path(storage_location.path).mkdir(parents=True, exist_ok=True)
-        
+
         response = authenticated_client.get("/api/v1/storage/stats")
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
         assert len(data) >= 1
-        
+
         paths = [s["path"] for s in data]
         assert storage_location.path in paths
         assert "total_bytes" in data[0]
@@ -63,7 +64,7 @@ class TestStorageRouter:
         """Test updating a storage location."""
         payload = {"name": "Newly Updated Name"}
         response = authenticated_client.put(
-            f"/api/v1/storage/locations/{storage_location.id}", 
+            f"/api/v1/storage/locations/{storage_location.id}",
             json=payload
         )
         assert response.status_code == 200
@@ -76,7 +77,7 @@ class TestStorageRouter:
         loc = ColdStorageLocation(name="Delete API", path=str(loc_path))
         db_session.add(loc)
         db_session.commit()
-        
+
         response = authenticated_client.delete(f"/api/v1/storage/locations/{loc.id}")
         assert response.status_code == 200
         assert db_session.get(ColdStorageLocation, loc.id) is None
@@ -85,7 +86,7 @@ class TestStorageRouter:
         """Test deleting a storage location that is in use (should fail without force)."""
         # monitored_path_factory uses the storage_location fixture
         monitored_path_factory("In Use Path", "/tmp/hot_in_use")
-        
+
         response = authenticated_client.delete(f"/api/v1/storage/locations/{storage_location.id}")
         assert response.status_code == 400
         assert "still associated" in response.json()["detail"].lower()
@@ -97,7 +98,7 @@ class TestStorageRouter:
         loc_path.mkdir(parents=True, exist_ok=True)
         test_file = loc_path / "to_be_purged.txt"
         test_file.write_text("goodbye world")
-        
+
         response = authenticated_client.delete(f"/api/v1/storage/locations/{storage_location.id}?force=true")
         assert response.status_code == 200
         assert not test_file.exists()
@@ -109,10 +110,10 @@ class TestStorageRouter:
         # Mock scheduler to avoid actual background job triggering errors
         from app.services.scheduler import scheduler_service
         monkeypatch.setattr(scheduler_service, "trigger_encryption_job", lambda x: None)
-        
+
         payload = {"is_encrypted": True}
         response = authenticated_client.put(
-            f"/api/v1/storage/locations/{storage_location.id}", 
+            f"/api/v1/storage/locations/{storage_location.id}",
             json=payload
         )
         assert response.status_code == 200
@@ -125,16 +126,16 @@ class TestStorageRouter:
         # Mock scheduler
         from app.services.scheduler import scheduler_service
         monkeypatch.setattr(scheduler_service, "trigger_decryption_job", lambda x: None)
-        
+
         # Manually set to encrypted state first
         loc = db_session.get(ColdStorageLocation, storage_location.id)
         loc.is_encrypted = True
         loc.encryption_status = "encrypted"
         db_session.commit()
-        
+
         payload = {"is_encrypted": False}
         response = authenticated_client.put(
-            f"/api/v1/storage/locations/{storage_location.id}", 
+            f"/api/v1/storage/locations/{storage_location.id}",
             json=payload
         )
         assert response.status_code == 200

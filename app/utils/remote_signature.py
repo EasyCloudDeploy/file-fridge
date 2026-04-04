@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # This is now configurable via settings.signature_timestamp_tolerance
 
 
-def _escape_component(value: Union[str, int, float]) -> str:
+def _escape_component(value: Union[str, float]) -> str:
     """
     Escape special characters to prevent canonicalization attacks.
     We escape '%' first to prevent double-encoding, then '|' which is our delimiter.

@@ -10,8 +10,8 @@ from app.models import (
     Notifier,
     NotifierType,
     OperationType,
-    TagRule,
     StorageType,
+    TagRule,
 )
 
 

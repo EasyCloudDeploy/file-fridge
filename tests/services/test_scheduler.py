@@ -1,14 +1,15 @@
-import pytest
 import time
 from unittest.mock import MagicMock
 
-from app.models import RequestNonce, MonitoredPath, ColdStorageLocation, FileInventory, StorageType
+import pytest
+
+from app.models import ColdStorageLocation, MonitoredPath, RequestNonce, StorageType
 from app.services.scheduler import (
-    cleanup_old_nonces_job_func, 
-    rotate_remote_code_job_func, 
-    scan_path_job_func,
+    cleanup_old_nonces_job_func,
+    decrypt_location_job_func,
     encrypt_location_job_func,
-    decrypt_location_job_func
+    rotate_remote_code_job_func,
+    scan_path_job_func,
 )
 
 
@@ -19,7 +20,7 @@ class TestSchedulerService:
         """Mock SchedulerSessionLocal to use the test db_session."""
         # Prevent the job from actually closing the session
         monkeypatch.setattr(db_session, "close", lambda: None)
-        
+
         mock_session_factory = MagicMock(return_value=db_session)
         monkeypatch.setattr("app.services.scheduler.SchedulerSessionLocal", mock_session_factory)
         return mock_session_factory
@@ -31,9 +32,9 @@ class TestSchedulerService:
         new_nonce = RequestNonce(nonce="new-nonce", fingerprint="fp2", timestamp=now)
         db_session.add_all([old_nonce, new_nonce])
         db_session.commit()
-        
+
         cleanup_old_nonces_job_func()
-        
+
         # Verify old one is gone, new one remains
         remaining = db_session.query(RequestNonce).all()
         assert len(remaining) == 1
@@ -44,7 +45,7 @@ class TestSchedulerService:
         from app.utils.remote_auth import remote_auth
         mock_rotate = MagicMock()
         monkeypatch.setattr(remote_auth, "rotate_code", mock_rotate)
-        
+
         rotate_remote_code_job_func()
         assert mock_rotate.called
 
@@ -56,11 +57,11 @@ class TestSchedulerService:
     def test_scan_path_job_success(self, db_session, monitored_path_factory, monkeypatch):
         """Test the path scan job function."""
         path = monitored_path_factory("Scan Job Path", "/tmp/hot_job")
-        
+
         from app.services.file_workflow_service import file_workflow_service
         mock_process = MagicMock(return_value={"files_moved": 5, "bytes_saved": 500, "errors": []})
         monkeypatch.setattr(file_workflow_service, "process_path", mock_process)
-        
+
         scan_path_job_func(path.id)
         assert mock_process.called
 
@@ -69,25 +70,25 @@ class TestSchedulerService:
         # Setup files in location
         storage_location.is_encrypted = False
         db_session.commit()
-        
+
         inv = file_inventory_factory(
-            path="/tmp/cold/f1.txt", 
-            storage_type=StorageType.COLD, 
+            path="/tmp/cold/f1.txt",
+            storage_type=StorageType.COLD,
             is_encrypted=False,
             cold_storage_location=storage_location
         )
-        
+
         # Mock file encryption service
         from app.services.encryption_service import file_encryption_service
         monkeypatch.setattr(file_encryption_service, "encrypt_file", MagicMock())
-        
+
         # Mock Path.exists and unlink
         from pathlib import Path
         monkeypatch.setattr(Path, "exists", lambda self: True)
         monkeypatch.setattr(Path, "unlink", MagicMock())
-        
+
         encrypt_location_job_func(storage_location.id)
-        
+
         db_session.refresh(inv)
         assert inv.is_encrypted is True
         db_session.refresh(storage_location)
@@ -97,23 +98,23 @@ class TestSchedulerService:
         """Test the bulk decryption job function."""
         storage_location.is_encrypted = True
         db_session.commit()
-        
+
         inv = file_inventory_factory(
-            path="/tmp/cold/f1.txt.ffenc", 
-            storage_type=StorageType.COLD, 
+            path="/tmp/cold/f1.txt.ffenc",
+            storage_type=StorageType.COLD,
             is_encrypted=True,
             cold_storage_location=storage_location
         )
-        
+
         from app.services.encryption_service import file_encryption_service
         monkeypatch.setattr(file_encryption_service, "decrypt_file", MagicMock())
-        
+
         from pathlib import Path
         monkeypatch.setattr(Path, "exists", lambda self: True)
         monkeypatch.setattr(Path, "unlink", MagicMock())
-        
+
         decrypt_location_job_func(storage_location.id)
-        
+
         db_session.refresh(inv)
         assert inv.is_encrypted is False
         db_session.refresh(storage_location)
@@ -136,7 +137,7 @@ class TestCheckStoragePermissionsJob:
         return loc
 
     def _make_hot_path(self, db_session, path: str, name: str = "Hot Path") -> MonitoredPath:
-        from app.models import MonitoredPath, ColdStorageLocation
+        from app.models import ColdStorageLocation, MonitoredPath
         cold = ColdStorageLocation(name=f"Cold for {name}", path="/tmp/cold_dummy")
         db_session.add(cold)
         db_session.flush()
@@ -250,7 +251,6 @@ class TestCheckStoragePermissionsJob:
     def test_dispatches_notification_on_first_error(self, db_session, tmp_path, monkeypatch):
         """A STORAGE_PERMISSION_ERROR notification is dispatched the first time an error is detected."""
         from app.services.scheduler import check_storage_permissions_job_func
-        from app.services import notification_service as ns_module
 
         cold_path = tmp_path / "cold"
         cold_path.mkdir()

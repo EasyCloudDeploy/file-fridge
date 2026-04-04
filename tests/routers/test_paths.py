@@ -2,7 +2,7 @@ import random
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,7 +12,6 @@ from app.models import (
     ColdStorageLocation,
     FileInventory,
     FileStatus,
-    MonitoredPath,
     ScanStatus,
     StorageType,
 )

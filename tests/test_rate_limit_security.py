@@ -1,10 +1,11 @@
 
-import pytest
 import os
 from unittest.mock import patch
-from fastapi import FastAPI, Request, Depends
+
+from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from app.utils.rate_limiter import check_login_rate_limit, _login_rate_limiter
+
+from app.utils.rate_limiter import _login_rate_limiter, check_login_rate_limit
 
 # Create a dummy app for testing
 app = FastAPI()

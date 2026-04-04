@@ -1,6 +1,6 @@
 import pytest
 
-from app.models import Tag, FileTag, FileInventory
+from app.models import FileTag, Tag
 
 
 @pytest.mark.unit
@@ -61,7 +61,7 @@ class TestTagsRouter:
         file_id = inv.id
         tag = create_tag("File Tag")
         tag_id = tag.id
-        
+
         payload = {"tag_id": tag_id, "tagged_by": "test_user"}
         response = authenticated_client.post(f"/api/v1/tags/files/{file_id}/tags", json=payload)
         assert response.status_code == 201
@@ -77,7 +77,7 @@ class TestTagsRouter:
         file_tag = FileTag(file_id=file_id, tag_id=tag_id)
         db_session.add(file_tag)
         db_session.commit()
-        
+
         response = authenticated_client.delete(f"/api/v1/tags/files/{file_id}/tags/{tag_id}")
         assert response.status_code == 204
         # Verify gone
@@ -89,7 +89,7 @@ class TestTagsRouter:
         inv1 = file_inventory_factory(path="/tmp/bulk1.txt")
         inv2 = file_inventory_factory(path="/tmp/bulk2.txt", path_name="other_p")
         tag = create_tag("Bulk Add Tag")
-        
+
         payload = {"tag_id": tag.id, "file_ids": [inv1.id, inv2.id]}
         response = authenticated_client.post("/api/v1/tags/bulk/add", json=payload)
         assert response.status_code == 200
@@ -101,17 +101,17 @@ class TestTagsRouter:
         inv1 = file_inventory_factory(path="/tmp/bulk_rem1.txt")
         inv2 = file_inventory_factory(path="/tmp/bulk_rem2.txt", path_name="other_p2")
         tag = create_tag("Bulk Rem Tag")
-        
+
         # Add tags first
         db_session.add(FileTag(file_id=inv1.id, tag_id=tag.id))
         db_session.add(FileTag(file_id=inv2.id, tag_id=tag.id))
         db_session.commit()
-        
+
         payload = {"tag_id": tag.id, "file_ids": [inv1.id, inv2.id]}
         response = authenticated_client.post("/api/v1/tags/bulk/remove", json=payload)
         assert response.status_code == 200
         assert response.json()["successful"] == 2
-        
+
         assert db_session.query(FileTag).filter_by(tag_id=tag.id).count() == 0
 
     def test_add_tag_to_file_not_found(self, authenticated_client, create_tag):

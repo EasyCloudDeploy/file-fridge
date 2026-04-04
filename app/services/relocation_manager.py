@@ -6,11 +6,11 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
 
+from app.database import SessionLocal
 from app.models import (
     ColdStorageLocation,
     FileInventory,
@@ -22,7 +22,6 @@ from app.models import (
     RelocationTaskStatus,
 )
 from app.services.file_mover import FileMover
-from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 
