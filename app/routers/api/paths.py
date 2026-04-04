@@ -5,13 +5,14 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Annotated, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app import schemas
+from app.constants import MSG_PATH_NOT_FOUND
 from app.database import get_db
 from app.models import ColdStorageLocation, CriterionType, FileInventory, MonitoredPath
 from app.services.scan_progress import scan_progress_manager
@@ -114,7 +115,9 @@ def validate_path_configuration(path: MonitoredPath, db: Session) -> None:
 
 
 @router.get("", response_model=List[schemas.MonitoredPathSummary])
-def list_paths(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def list_paths(
+    skip: int = 0, limit: int = 100, db: Annotated[Session, Depends(get_db)] = None
+):
     """List all monitored paths with a summary of their contents."""
     file_count_subquery = (
         select(func.count(FileInventory.id))
@@ -166,7 +169,7 @@ def _identify_unique_volumes(paths: List[MonitoredPath]) -> dict:
             if device_id not in unique_volumes:
                 unique_volumes[device_id] = path_str
         except (FileNotFoundError, PermissionError) as e:
-            msg = "Permission denied" if isinstance(e, PermissionError) else "Path not found"
+            msg = "Permission denied" if isinstance(e, PermissionError) else MSG_PATH_NOT_FOUND
             if isinstance(e, PermissionError):
                 logger.exception(f"Permission denied accessing path {path_str}")
             
@@ -180,7 +183,7 @@ def _identify_unique_volumes(paths: List[MonitoredPath]) -> dict:
 
 
 @router.get("/stats", response_model=List[schemas.StorageStats])
-def get_hot_storage_stats(db: Session = Depends(get_db)):
+def get_hot_storage_stats(db: Annotated[Session, Depends(get_db)] = None):
     """Get storage statistics for all monitored paths (hot storage)."""
     paths = db.query(MonitoredPath).all()
     unique_volumes = _identify_unique_volumes(paths)
@@ -191,7 +194,7 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
             for p in path_info:
                 stats_list.append(
                     schemas.StorageStats(
-                        path=p, total_bytes=0, used_bytes=0, free_bytes=0, error="Path not found"
+                        path=p, total_bytes=0, used_bytes=0, free_bytes=0, error=MSG_PATH_NOT_FOUND
                     )
                 )
             continue
@@ -228,7 +231,7 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=schemas.MonitoredPath, status_code=status.HTTP_201_CREATED)
-def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)):
+def create_path(path: schemas.MonitoredPathCreate, db: Annotated[Session, Depends(get_db)]):
     """Create a new monitored path."""
     # Validate source path exists and has proper permissions
     is_valid, error_msg = validate_path_access(path.source_path)
@@ -311,7 +314,7 @@ def create_path(path: schemas.MonitoredPathCreate, db: Session = Depends(get_db)
 
 
 @router.get("/{path_id}", response_model=schemas.MonitoredPathSummary)
-def get_path(path_id: int, db: Session = Depends(get_db)):
+def get_path(path_id: int, db: Annotated[Session, Depends(get_db)]):
     """Get a single monitored path with a summary of its contents."""
     db_path = (
         db.query(MonitoredPath)
@@ -345,7 +348,7 @@ def update_path(
         False, description="Confirm cold storage path change"
     ),
     migration_action: str = Query(None, description="Migration action: 'move' or 'abandon'"),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Update a monitored path."""
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
@@ -457,7 +460,7 @@ def delete_path(
     undo_operations: bool = Query(
         False, description="If True, move all files back from cold storage before deleting"
     ),
-    db: Session = Depends(get_db),
+    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Delete a monitored path.
@@ -524,7 +527,7 @@ def delete_path(
 
 
 @router.post("/{path_id}/scan", status_code=status.HTTP_202_ACCEPTED)
-def trigger_scan(path_id: int, db: Session = Depends(get_db)):
+def trigger_scan(path_id: int, db: Annotated[Session, Depends(get_db)]):
     """
     Manually trigger a scan for a path.
 
@@ -567,7 +570,7 @@ def trigger_scan(path_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{path_id}/scan/progress")
-def get_scan_progress(path_id: int, db: Session = Depends(get_db)):
+def get_scan_progress(path_id: int, db: Annotated[Session, Depends(get_db)]):
     """
     Get real-time progress of the current scan for a path.
 
@@ -615,7 +618,7 @@ def get_scan_progress(path_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{path_id}/scan/stop", status_code=status.HTTP_200_OK)
-def stop_scan(path_id: int, db: Session = Depends(get_db)):
+def stop_scan(path_id: int, db: Annotated[Session, Depends(get_db)]):
     """
     Request that the currently-running scan for a path stops after completing
     any in-flight file operations.
@@ -647,7 +650,7 @@ def stop_scan(path_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/{path_id}/scan-errors", response_model=schemas.PathScanErrors)
-def get_scan_errors(path_id: int, db: Session = Depends(get_db)):
+def get_scan_errors(path_id: int, db: Annotated[Session, Depends(get_db)]):
     """
     Get the error log from the last scan for a path.
 

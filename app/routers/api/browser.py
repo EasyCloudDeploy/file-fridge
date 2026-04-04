@@ -17,14 +17,15 @@ from app.utils.db_utils import escape_like_string
 
 router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
-
-
+from typing import Annotated, Dict
+...
 @router.get("/list", response_model=BrowserResponse)
 def list_directory(
     path: str = Query("/", description="Directory path to browse"),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[Session, Depends(get_db)] = None,
+    current_user: Annotated[User, Depends(get_current_user)] = None,
 ):
+
     """
     Browse a directory and return its contents with inventory status.
 

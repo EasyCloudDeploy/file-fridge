@@ -2,7 +2,7 @@
 """API routes for tag management."""
 
 import logging
-from typing import List
+from typing import Annotated, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api/v1/tags", tags=["tags"])
 
 
 @router.get("", response_model=List[TagWithCount])
-def list_tags(db: Session = Depends(get_db)):
+def list_tags(db: Annotated[Session, Depends(get_db)]):
     """List all tags with file counts."""
     tags_with_counts = (
         db.query(Tag, func.count(FileTag.id).label("file_count"))
@@ -55,7 +55,7 @@ def list_tags(db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=TagSchema, status_code=status.HTTP_201_CREATED)
-def create_tag(tag: TagCreate, db: Session = Depends(get_db)):
+def create_tag(tag: TagCreate, db: Annotated[Session, Depends(get_db)]):
     """Create a new tag."""
     existing_tag = db.query(Tag).filter(Tag.name == tag.name).first()
     if existing_tag:
@@ -73,7 +73,7 @@ def create_tag(tag: TagCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/{tag_id}", response_model=TagSchema)
-def get_tag(tag_id: int, db: Session = Depends(get_db)):
+def get_tag(tag_id: int, db: Annotated[Session, Depends(get_db)]):
     """Get a specific tag by ID."""
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not tag:
@@ -84,7 +84,7 @@ def get_tag(tag_id: int, db: Session = Depends(get_db)):
 
 
 @router.patch("/{tag_id}", response_model=TagSchema)
-def update_tag(tag_id: int, tag_update: TagUpdate, db: Session = Depends(get_db)):
+def update_tag(tag_id: int, tag_update: TagUpdate, db: Annotated[Session, Depends(get_db)]):
     """Update a tag."""
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not tag:
@@ -102,7 +102,7 @@ def update_tag(tag_id: int, tag_update: TagUpdate, db: Session = Depends(get_db)
 
 
 @router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_tag(tag_id: int, db: Session = Depends(get_db)):
+def delete_tag(tag_id: int, db: Annotated[Session, Depends(get_db)]):
     """Delete a tag."""
     tag = db.query(Tag).filter(Tag.id == tag_id).first()
     if not tag:
@@ -117,7 +117,7 @@ def delete_tag(tag_id: int, db: Session = Depends(get_db)):
 @router.post(
     "/files/{file_id}/tags", response_model=FileTagResponse, status_code=status.HTTP_201_CREATED
 )
-def add_tag_to_file(file_id: int, tag_data: FileTagCreate, db: Session = Depends(get_db)):
+def add_tag_to_file(file_id: int, tag_data: FileTagCreate, db: Annotated[Session, Depends(get_db)]):
     """Add a tag to a file."""
     file_inv = db.query(FileInventory).filter(FileInventory.id == file_id).first()
     if not file_inv:
@@ -149,7 +149,7 @@ def add_tag_to_file(file_id: int, tag_data: FileTagCreate, db: Session = Depends
 
 
 @router.delete("/files/{file_id}/tags/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
-def remove_tag_from_file(file_id: int, tag_id: int, db: Session = Depends(get_db)):
+def remove_tag_from_file(file_id: int, tag_id: int, db: Annotated[Session, Depends(get_db)]):
     """Remove a tag from a file."""
     file_tag = (
         db.query(FileTag).filter(FileTag.file_id == file_id, FileTag.tag_id == tag_id).first()
@@ -163,7 +163,7 @@ def remove_tag_from_file(file_id: int, tag_id: int, db: Session = Depends(get_db
 
 
 @router.get("/files/{file_id}/tags", response_model=List[FileTagResponse])
-def get_file_tags(file_id: int, db: Session = Depends(get_db)):
+def get_file_tags(file_id: int, db: Annotated[Session, Depends(get_db)]):
     """Get all tags for a file."""
     file_inv = db.query(FileInventory).filter(FileInventory.id == file_id).first()
     if not file_inv:
@@ -178,7 +178,7 @@ def get_file_tags(file_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/bulk/add", response_model=BulkActionResponse)
-def bulk_add_tag(request: BulkTagRequest, db: Session = Depends(get_db)):
+def bulk_add_tag(request: BulkTagRequest, db: Annotated[Session, Depends(get_db)]):
     """
     Add a tag to multiple files.
 
@@ -252,7 +252,7 @@ def bulk_add_tag(request: BulkTagRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/bulk/remove", response_model=BulkActionResponse)
-def bulk_remove_tag(request: BulkTagRequest, db: Session = Depends(get_db)):
+def bulk_remove_tag(request: BulkTagRequest, db: Annotated[Session, Depends(get_db)]):
     """
     Remove a tag from multiple files.
 

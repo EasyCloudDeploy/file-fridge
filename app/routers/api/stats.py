@@ -2,7 +2,7 @@
 """API routes for statistics."""
 
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/v1/stats", tags=["stats"])
 
 
 @router.get("", response_model=Statistics)
-def get_statistics(db: Session = Depends(get_db)):
+def get_statistics(db: Annotated[Session, Depends(get_db)]):
     """Get overall statistics."""
     total_files = db.query(func.count(FileRecord.id)).scalar() or 0
     total_size = db.query(func.sum(FileRecord.file_size)).scalar() or 0
@@ -53,7 +53,7 @@ def get_statistics(db: Session = Depends(get_db)):
 
 
 @router.get("/detailed", response_model=DetailedStatistics)
-def get_detailed_statistics(days: Optional[int] = None, db: Session = Depends(get_db)):
+def get_detailed_statistics(days: Optional[int] = None, db: Annotated[Session, Depends(get_db)]):
     """Get comprehensive statistics with detailed metrics and trends."""
     if days is None:
         days = settings.stats_retention_days
@@ -250,14 +250,14 @@ def get_detailed_statistics(days: Optional[int] = None, db: Session = Depends(ge
 
 
 @router.post("/cleanup")
-def cleanup_old_stats(db: Session = Depends(get_db)):
+def cleanup_old_stats(db: Annotated[Session, Depends(get_db)]):
     """Manually trigger cleanup of old statistics data."""
     return stats_cleanup_service.cleanup_old_records(db)
 
 
 @router.get("/aggregated")
 def get_aggregated_stats(
-    period: str = "daily", days: int = 30, db: Session = Depends(get_db)  # daily, weekly, monthly
+    period: str = "daily", days: int = 30, db: Annotated[Session, Depends(get_db)]  # daily, weekly, monthly
 ):
     """Get time-based aggregated statistics."""
     end_date = datetime.now(tz=timezone.utc)
