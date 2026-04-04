@@ -277,8 +277,8 @@ def test_move_with_rollback_creates_destination_parent(mock_move, mock_verifier,
 @patch("app.services.file_mover.checksum_verifier")
 @patch("app.services.file_mover._move")
 def test_move_with_rollback_checksum_mismatch(
-    mock_move, mock_verifier, source_and_dest, mocker
-):  # Removed mock_unlink, added mocker
+    mock_move, mock_verifier, source_and_dest
+):
     """Test move_with_rollback with checksum mismatch triggers rollback."""
     source, dest = source_and_dest
     mock_move.return_value = (True, None)
@@ -287,27 +287,34 @@ def test_move_with_rollback_checksum_mismatch(
     # Create the destination file so checksum_verifier doesn't fail immediately
     dest.touch()
 
-    # Capture the real Path.exists BEFORE patching
-    _original_path_exists = Path.exists
-
-    # Patch Path.exists and Path.unlink at the class level
-    mock_path_exists = mocker.patch("pathlib.Path.exists", autospec=True)
-    mock_path_unlink = mocker.patch("pathlib.Path.unlink", autospec=True)
-
-    # Return True for the dest path in rollback check; delegate to the real method otherwise
-    def custom_exists_side_effect(path_obj):
-        if path_obj == dest:
-            return True
-        return _original_path_exists(path_obj)
-
-    mock_path_exists.side_effect = custom_exists_side_effect
-
     success, error, checksum = move_with_rollback(source, dest, OperationType.MOVE)
     assert success is False
     assert "Checksum verification failed" in error
     assert checksum == "checksum1"
-    # Ensure unlink was called on the correct destination path
-    mock_path_unlink.assert_called_once_with(dest)
+    assert dest.exists() is False
+
+
+@patch("app.services.file_mover.checksum_verifier")
+@patch("app.services.file_mover._move")
+def test_move_with_rollback_cleans_partial_destination_on_operation_failure(
+    mock_move, mock_verifier, tmp_path
+):
+    """Operation failures should clean up any partially written destination."""
+    source = tmp_path / "source.txt"
+    source.write_text("Hello, world!")
+    dest = tmp_path / "nested" / "partial.txt"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text("partial")
+
+    mock_move.return_value = (False, "simulated failure")
+
+    success, error, checksum = move_with_rollback(source, dest, OperationType.MOVE)
+
+    assert success is False
+    assert error == "simulated failure"
+    assert checksum is None
+    assert dest.exists() is False
+    mock_verifier.calculate_checksum.assert_called_once_with(source)
 
 def test_move_symlink_direct(tmp_path):
     """Test _move_symlink when it points to an absolute path."""
