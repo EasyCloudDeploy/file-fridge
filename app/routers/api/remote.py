@@ -20,6 +20,8 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
+from app.config import settings
+from app.constants import RESOURCE_REMOTE_CONNECTIONS
 from app.database import get_db
 from app.models import (
     FileInventory,
@@ -72,7 +74,7 @@ from app.utils.remote_signature import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/remote", tags=["Remote Connections"])
+router = APIRouter(prefix="/api/v1/remote", tags=[RESOURCE_REMOTE_CONNECTIONS])
 INVALID_PATH_MSG = "Invalid relative path"
 
 
@@ -214,10 +216,10 @@ async def _decompress_chunk(chunk: bytes) -> bytes:
 # --- New Handshake and Connection Endpoints ---
 
 
-@router.get("/status", tags=["Remote Connections"])
+@router.get("/status", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def get_remote_status(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Check if remote connections are properly configured."""
     _ = current_user
@@ -235,21 +237,21 @@ def get_remote_status(
     }
 
 
-@router.get("/config", tags=["Remote Connections"])
+@router.get("/config", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def get_instance_config(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Get instance configuration including source information (environment vs database)."""
     _ = current_user
     return instance_config_service.get_config_info(db)
 
 
-@router.post("/config", tags=["Remote Connections"])
+@router.post("/config", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def update_instance_config(
     config_data: dict,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """
     Update instance configuration (database values).
@@ -269,7 +271,7 @@ def update_instance_config(
     return instance_config_service.get_config_info(db)
 
 
-@router.get("/identity", response_model=RemoteConnectionIdentity, tags=["Remote Connections"])
+@router.get("/identity", response_model=RemoteConnectionIdentity, tags=[RESOURCE_REMOTE_CONNECTIONS])
 def get_public_identity(db: Session = Depends(get_db)):
     """Return the public identity of this File Fridge instance."""
     instance_url = instance_config_service.get_instance_url(db)
@@ -290,10 +292,10 @@ def get_public_identity(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/connection-code", response_model=ConnectionCodeResponse, tags=["Remote Connections"])
+@router.get("/connection-code", response_model=ConnectionCodeResponse, tags=[RESOURCE_REMOTE_CONNECTIONS])
 def get_connection_code(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """
     Get the current rotating connection code for this instance.
@@ -315,11 +317,12 @@ def get_connection_code(
 @router.post(
     "/connections/fetch-identity",
     response_model=RemoteConnectionIdentity,
-    tags=["Remote Connections"],
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
+    responses={400: {"description": "Failed to fetch identity from remote instance"}},
 )
 async def fetch_remote_identity(
     data: RemoteConnectionCreate,
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Fetch the public identity of a remote instance to initiate a connection."""
     _ = current_user
@@ -329,11 +332,19 @@ async def fetch_remote_identity(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.post("/connect", response_model=RemoteConnectionSchema, tags=["Remote Connections"])
+@router.post(
+    "/connect",
+    response_model=RemoteConnectionSchema,
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
+    responses={
+        400: {"description": "Connection failed or invalid remote response"},
+        500: {"description": "Internal server error"},
+    },
+)
 async def connect_with_code(
     connection_data: RemoteConnectionCreate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """
     Establish a connection using a connection code.
@@ -369,12 +380,17 @@ async def connect_with_code(
         ) from e
 
 
-@router.post("/connections", response_model=RemoteConnectionSchema, tags=["Remote Connections"])
+@router.post(
+    "/connections",
+    response_model=RemoteConnectionSchema,
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
+    responses={400: {"description": "Invalid connection parameters or connection failed"}},
+)
 async def create_connection(
     name: str,
     remote_identity: RemoteConnectionIdentity,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Establish a trusted connection with a remote instance after verifying its identity."""
     _ = current_user
@@ -385,7 +401,13 @@ async def create_connection(
 
 
 @router.post(
-    "/connection-request", response_model=RemoteConnectionResponse, tags=["Remote Connections"]
+    "/connection-request",
+    response_model=RemoteConnectionResponse,
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
+    responses={
+        400: {"description": "Invalid request, signature verification failed, or duplicate fingerprint"},
+        500: {"description": "Internal server error"},
+    },
 )
 async def handle_connection_request(
     request_data: RemoteConnectionRequest, db: Session = Depends(get_db)
@@ -402,22 +424,22 @@ async def handle_connection_request(
 
 
 @router.get(
-    "/connections", response_model=List[RemoteConnectionSchema], tags=["Remote Connections"]
+    "/connections", response_model=List[RemoteConnectionSchema], tags=[RESOURCE_REMOTE_CONNECTIONS]
 )
 def list_connections(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """List all remote connections."""
     _ = current_user
     return remote_connection_service.list_connections(db)
 
 
-@router.delete("/connections/{connection_id}", tags=["Remote Connections"])
+@router.delete("/connections/{connection_id}", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def delete_connection(
     connection_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Delete a remote connection."""
     _ = current_user
@@ -431,12 +453,12 @@ async def delete_connection(
 @router.post(
     "/connections/{connection_id}/trust",
     response_model=RemoteConnectionSchema,
-    tags=["Remote Connections"],
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
 )
 def trust_connection(
     connection_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ) -> RemoteConnectionSchema:
     """Manually trust a PENDING remote connection."""
     _ = current_user
@@ -449,12 +471,12 @@ def trust_connection(
 @router.post(
     "/connections/{connection_id}/reject",
     response_model=RemoteConnectionSchema,
-    tags=["Remote Connections"],
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
 )
 def reject_connection(
     connection_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ) -> RemoteConnectionSchema:
     """Reject a PENDING remote connection."""
     _ = current_user
@@ -467,13 +489,13 @@ def reject_connection(
 @router.patch(
     "/connections/{connection_id}",
     response_model=RemoteConnectionSchema,
-    tags=["Remote Connections"],
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
 )
 async def update_connection(
     connection_id: int,
     update_data: RemoteConnectionUpdate,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ) -> RemoteConnectionSchema:
     """Update a remote connection's name and/or transfer mode."""
     _ = current_user
@@ -509,7 +531,7 @@ async def update_connection(
 # --- Endpoints Requiring Signature Verification ---
 
 
-@router.post("/terminate-connection", tags=["Remote Connections"])
+@router.post("/terminate-connection", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def terminate_connection(
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
     db: Session = Depends(get_db),
@@ -521,12 +543,12 @@ async def terminate_connection(
 
 @router.get(
     "/connections/{connection_id}/paths",
-    tags=["Remote Connections"],
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
 )
 async def get_remote_paths(
     connection_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Fetch available MonitoredPaths from a remote instance."""
     _ = current_user
@@ -546,11 +568,11 @@ async def get_remote_paths(
             raise HTTPException(status_code=500, detail="Failed to fetch paths from remote") from e
 
 
-@router.post("/migrate", response_model=RemoteTransferJobSchema, tags=["Remote Connections"])
+@router.post("/migrate", response_model=RemoteTransferJobSchema, tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def migrate_file(
     migration_data: RemoteTransferJobBase,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Trigger a file migration to a remote instance."""
     _ = current_user
@@ -573,11 +595,11 @@ async def migrate_file(
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@router.post("/migrate/bulk", response_model=BulkActionResponse, tags=["Remote Connections"])
+@router.post("/migrate/bulk", response_model=BulkActionResponse, tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def bulk_migrate_files(
     migration_data: BulkRemoteMigrationRequest,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Trigger bulk file migration to a remote instance."""
     _ = current_user
@@ -610,21 +632,21 @@ async def bulk_migrate_files(
     )
 
 
-@router.get("/transfers", response_model=List[RemoteTransferJobSchema], tags=["Remote Connections"])
+@router.get("/transfers", response_model=List[RemoteTransferJobSchema], tags=[RESOURCE_REMOTE_CONNECTIONS])
 def list_transfers(
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """List all remote transfer jobs."""
     _ = current_user
     return db.query(RemoteTransferJob).order_by(RemoteTransferJob.id.desc()).all()
 
 
-@router.post("/transfers/bulk/cancel", tags=["Remote Connections"])
+@router.post("/transfers/bulk/cancel", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def bulk_cancel_transfers(
     job_ids: List[int],
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Cancel multiple remote transfer jobs."""
     _ = current_user
@@ -640,12 +662,12 @@ def bulk_cancel_transfers(
 @router.post(
     "/transfers/bulk/retry",
     response_model=BulkRetryTransfersResponse,
-    tags=["Remote Connections"],
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
 )
 def bulk_retry_transfers(
     request: BulkRetryTransfersRequest,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ) -> BulkRetryTransfersResponse:
     """Retry multiple failed remote transfer jobs."""
     _ = current_user
@@ -681,11 +703,11 @@ def bulk_retry_transfers(
     return BulkRetryTransfersResponse(succeeded=succeeded, failed=failed)
 
 
-@router.post("/transfers/bulk/delete", tags=["Remote Connections"])
+@router.post("/transfers/bulk/delete", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def bulk_delete_transfers(
     job_ids: List[int],
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Delete multiple transfer job records."""
     _ = current_user
@@ -708,11 +730,11 @@ def bulk_delete_transfers(
     return results
 
 
-@router.post("/transfers/{job_id}/cancel", tags=["Remote Connections"])
+@router.post("/transfers/{job_id}/cancel", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def cancel_transfer(
     job_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Cancel a remote transfer job."""
     _ = current_user
@@ -737,11 +759,11 @@ def cancel_transfer(
     return {"status": "success", "message": f"Transfer {job_id} cancelled"}
 
 
-@router.delete("/transfers/{job_id}", tags=["Remote Connections"])
+@router.delete("/transfers/{job_id}", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def delete_transfer(
     job_id: int,
     db: Session = Depends(get_db),
-    current_user: dict = Depends(PermissionChecker("Remote Connections")),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Delete a transfer job record (for failed/completed/cancelled transfers)."""
     _ = current_user
@@ -794,7 +816,7 @@ class ReceiveHeader:
         self.signature = x_signature
 
 
-@router.post("/receive", tags=["Remote Connections"])
+@router.post("/receive", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def receive_chunk(
     request: Request,
     headers: ReceiveHeader = Depends(ReceiveHeader),
@@ -901,7 +923,7 @@ async def receive_chunk(
     return {"status": "success", "chunk": headers.chunk_index}
 
 
-@router.post("/verify-transfer", tags=["Remote Connections"])
+@router.post("/verify-transfer", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def verify_transfer(
     data: dict,
     background_tasks: BackgroundTasks,
@@ -947,7 +969,7 @@ async def verify_transfer(
     return {"status": "success"}
 
 
-@router.get("/transfer-status", tags=["Remote Connections"])
+@router.get("/transfer-status", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def get_transfer_status(
     relative_path: str,
     remote_path_id: int,
@@ -976,7 +998,7 @@ async def get_transfer_status(
     return {"size": 0, "status": "not_found"}
 
 
-@router.get("/exposed-paths", tags=["Remote Connections"])
+@router.get("/exposed-paths", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def get_exposed_paths(
     db: Session = Depends(get_db),
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
@@ -1011,7 +1033,7 @@ def _get_relative_path(file_obj: FileInventory, monitored_path: MonitoredPath) -
     return fp.name
 
 
-@router.get("/browse-files", tags=["Remote Connections"])
+@router.get("/browse-files", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def browse_remote_files(
     path_id: int,
     skip: int = 0,
@@ -1071,7 +1093,7 @@ def browse_remote_files(
     }
 
 
-@router.post("/serve-transfer", tags=["Remote Connections"])
+@router.post("/serve-transfer", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def serve_transfer_request(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -1124,7 +1146,7 @@ async def serve_transfer_request(
     return {"status": "accepted", "job_id": job.id}
 
 
-@router.post("/sync-transfer-mode", tags=["Remote Connections"])
+@router.post("/sync-transfer-mode", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def sync_transfer_mode(
     request: Request,
     db: Session = Depends(get_db),
@@ -1160,7 +1182,7 @@ async def sync_transfer_mode(
 
 @router.get(
     "/connections/{connection_id}/browse-files",
-    tags=["Remote Connections"],
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
 )
 async def browse_remote_instance_files(
     connection_id: int,
@@ -1215,7 +1237,7 @@ async def browse_remote_instance_files(
             ) from e
 
 
-@router.post("/pull", tags=["Remote Connections"])
+@router.post("/pull", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def pull_file(
     pull_data: PullTransferRequest,
     db: Session = Depends(get_db),

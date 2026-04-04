@@ -7,7 +7,7 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -128,7 +128,137 @@ def _serialize_file(
     return file_dict
 
 
-@router.get("")
+def _parse_tag_ids(tag_ids: Optional[str]) -> Optional[List[int]]:
+    """Parse comma-separated tag IDs string into a list of integers."""
+    if not tag_ids:
+        return None
+    try:
+        return [int(tid.strip()) for tid in tag_ids.split(",") if tid.strip()]
+    except ValueError:
+        raise ValueError("Invalid tag_ids format. Must be comma-separated integers.")
+
+
+def _apply_filters(
+    query,
+    db: Session,
+    path_id: Optional[int] = None,
+    storage_type: Optional[StorageTypeSchema] = None,
+    file_status: Optional[str] = None,
+    search: Optional[str] = None,
+    extension: Optional[str] = None,
+    mime_type: Optional[str] = None,
+    has_checksum: Optional[bool] = None,
+    tag_id_list: Optional[List[int]] = None,
+    is_pinned: Optional[bool] = None,
+    min_size: Optional[int] = None,
+    max_size: Optional[int] = None,
+    min_mtime: Optional[datetime] = None,
+    max_mtime: Optional[datetime] = None,
+    storage_location_id: Optional[int] = None,
+):
+    """Apply various filters to the FileInventory query."""
+    from app.models import FileTag
+
+    if path_id:
+        query = query.filter(FileInventory.path_id == path_id)
+    if storage_type:
+        query = query.filter(FileInventory.storage_type == storage_type)
+    if file_status:
+        query = query.filter(FileInventory.status == file_status)
+    if search:
+        escaped_search = escape_like_string(search)
+        search_pattern = f"%{escaped_search}%"
+        query = query.filter(FileInventory.file_path.ilike(search_pattern, escape="\\"))
+    if extension:
+        ext = extension if extension.startswith(".") else f".{extension}"
+        query = query.filter(FileInventory.file_extension == ext.lower())
+    if mime_type:
+        escaped_mime = escape_like_string(mime_type)
+        query = query.filter(FileInventory.mime_type.ilike(f"%{escaped_mime}%", escape="\\"))
+    if has_checksum is not None:
+        if has_checksum:
+            query = query.filter(FileInventory.checksum.isnot(None))
+        else:
+            query = query.filter(FileInventory.checksum.is_(None))
+    if tag_id_list:
+        query = query.join(FileInventory.tags).filter(FileTag.tag_id.in_(tag_id_list)).distinct()
+    if is_pinned is not None:
+        pinned_subquery = db.query(PinnedFile.file_path)
+        if is_pinned:
+            query = query.filter(FileInventory.file_path.in_(pinned_subquery))
+        else:
+            query = query.filter(FileInventory.file_path.notin_(pinned_subquery))
+    if min_size is not None:
+        query = query.filter(FileInventory.file_size >= min_size)
+    if max_size is not None:
+        query = query.filter(FileInventory.file_size <= max_size)
+    if min_mtime is not None:
+        query = query.filter(FileInventory.file_mtime >= min_mtime)
+    if max_mtime is not None:
+        query = query.filter(FileInventory.file_mtime <= max_mtime)
+    if storage_location_id is not None:
+        query = query.filter(FileInventory.cold_storage_location_id == storage_location_id)
+    return query
+
+
+def _apply_cursor_pagination(query, sort_field, cursor_data, is_descending):
+    """Apply keyset pagination based on cursor data."""
+    last_id = cursor_data.get("id")
+    last_sort_value = cursor_data.get("sort_value")
+
+    if last_id is None or last_sort_value is None:
+        return query
+
+    if is_descending:
+        if last_sort_value is None:
+            return query.filter(and_(sort_field.is_(None), FileInventory.id < last_id))
+        return query.filter(
+            or_(
+                sort_field < last_sort_value,
+                sort_field.is_(None),
+                and_(sort_field == last_sort_value, FileInventory.id < last_id),
+            )
+        )
+
+    if last_sort_value is None:
+        return query.filter(
+            or_(
+                sort_field.isnot(None),
+                and_(sort_field.is_(None), FileInventory.id > last_id),
+            )
+        )
+    return query.filter(
+        or_(
+            sort_field > last_sort_value,
+            and_(sort_field == last_sort_value, FileInventory.id > last_id),
+        )
+    )
+
+
+def _generate_next_cursor(files_list, sort_by, valid_sort_fields):
+    """Generate a base64-encoded cursor for the next page of results."""
+    if not files_list:
+        return None
+
+    last_file = files_list[-1]
+    sort_value_raw = (
+        getattr(last_file, sort_by, None)
+        if sort_by in valid_sort_fields
+        else last_file.last_seen
+    )
+
+    if hasattr(sort_value_raw, "isoformat"):
+        sort_value = sort_value_raw.isoformat()
+    elif hasattr(sort_value_raw, "value"):
+        sort_value = sort_value_raw.value
+    else:
+        sort_value = sort_value_raw
+
+    cursor_obj = {"id": last_file.id, "sort_value": sort_value}
+    return base64.b64encode(json.dumps(cursor_obj).encode("utf-8")).decode("utf-8")
+
+
+@router.get("", responses={400: {"description": "Invalid query parameters"}})
 def list_files(
     path_id: Optional[int] = Query(None, description="Filter by monitored path ID"),
     storage_type: Optional[StorageTypeSchema] = Query(
@@ -173,114 +303,54 @@ def list_files(
     # Validate query parameters
     if min_size is not None and min_size < 0:
         raise HTTPException(status_code=400, detail="min_size must be non-negative (>= 0)")
-
     if max_size is not None and max_size < 0:
         raise HTTPException(status_code=400, detail="max_size must be non-negative (>= 0)")
-
     if min_size is not None and max_size is not None and min_size > max_size:
         raise HTTPException(
             status_code=400,
             detail=f"min_size ({min_size}) cannot be greater than max_size ({max_size})",
         )
-
     if min_mtime is not None and max_mtime is not None and min_mtime > max_mtime:
         raise HTTPException(
             status_code=400,
             detail=f"min_mtime ({min_mtime.isoformat()}) cannot be greater than max_mtime ({max_mtime.isoformat()})",
         )
 
-    from app.models import FileTag
-
     def generate_ndjson() -> Generator[str, None, None]:
         start_time = time.time()
         count = 0
 
         try:
-            # Parse tag IDs if provided
-            tag_id_list = None
-            if tag_ids:
-                try:
-                    tag_id_list = [int(tid.strip()) for tid in tag_ids.split(",") if tid.strip()]
-                except ValueError:
-                    yield json.dumps(
-                        {
-                            "type": "error",
-                            "message": "Invalid tag_ids format. Must be comma-separated integers.",
-                            "partial_count": 0,
-                        }
-                    ) + "\n"
-                    return
-
-            # Build base query
-            query = db.query(FileInventory)
+            # Parse tag IDs
+            try:
+                tag_id_list = _parse_tag_ids(tag_ids)
+            except ValueError as e:
+                yield json.dumps({"type": "error", "message": str(e), "partial_count": 0}) + "\n"
+                return
 
             # Apply filters
-            if path_id:
-                query = query.filter(FileInventory.path_id == path_id)
+            query = _apply_filters(
+                db.query(FileInventory),
+                db,
+                path_id,
+                storage_type,
+                file_status,
+                search,
+                extension,
+                mime_type,
+                has_checksum,
+                tag_id_list,
+                is_pinned,
+                min_size,
+                max_size,
+                min_mtime,
+                max_mtime,
+                storage_location_id,
+            )
 
-            if storage_type:
-                query = query.filter(FileInventory.storage_type == storage_type)
-
-            if file_status:
-                query = query.filter(FileInventory.status == file_status)
-
-            if search:
-                escaped_search = escape_like_string(search)
-                search_pattern = f"%{escaped_search}%"
-                query = query.filter(FileInventory.file_path.ilike(search_pattern, escape="\\"))
-
-            if extension:
-                ext = extension if extension.startswith(".") else f".{extension}"
-                query = query.filter(FileInventory.file_extension == ext.lower())
-
-            if mime_type:
-                escaped_mime = escape_like_string(mime_type)
-                query = query.filter(
-                    FileInventory.mime_type.ilike(f"%{escaped_mime}%", escape="\\")
-                )
-
-            if has_checksum is not None:
-                if has_checksum:
-                    query = query.filter(FileInventory.checksum.isnot(None))
-                else:
-                    query = query.filter(FileInventory.checksum.is_(None))
-
-            if tag_id_list:
-                query = (
-                    query.join(FileInventory.tags)
-                    .filter(FileTag.tag_id.in_(tag_id_list))
-                    .distinct()
-                )
-
-            if is_pinned is not None:
-                if is_pinned:
-                    # Filter for files that are in the PinnedFile table
-                    query = query.filter(
-                        FileInventory.file_path.in_(db.query(PinnedFile.file_path))
-                    )
-                else:
-                    # Filter for files that are NOT in the PinnedFile table
-                    query = query.filter(
-                        FileInventory.file_path.notin_(db.query(PinnedFile.file_path))
-                    )
-
-            if min_size is not None:
-                query = query.filter(FileInventory.file_size >= min_size)
-            if max_size is not None:
-                query = query.filter(FileInventory.file_size <= max_size)
-
-            if min_mtime is not None:
-                query = query.filter(FileInventory.file_mtime >= min_mtime)
-            if max_mtime is not None:
-                query = query.filter(FileInventory.file_mtime <= max_mtime)
-
-            if storage_location_id is not None:
-                query = query.filter(FileInventory.cold_storage_location_id == storage_location_id)
-
-            # Get total count first
             total_count = query.count()
 
-            # Apply sorting
+            # Sorting setup
             valid_sort_fields = {
                 "file_path": FileInventory.file_path,
                 "file_size": FileInventory.file_size,
@@ -291,161 +361,76 @@ def list_files(
                 "file_extension": FileInventory.file_extension,
                 "status": FileInventory.status,
             }
-
             sort_field = valid_sort_fields.get(sort_by, FileInventory.last_seen)
             is_descending = sort_order.lower() != "asc"
 
-            # Decode cursor if provided for keyset pagination
-            cursor_data = None
+            # Cursor-based pagination
             if cursor:
                 try:
-                    cursor_json = base64.b64decode(cursor).decode("utf-8")
-                    cursor_data = json.loads(cursor_json)
+                    cursor_data = json.loads(base64.b64decode(cursor).decode("utf-8"))
+                    query = _apply_cursor_pagination(query, sort_field, cursor_data, is_descending)
                 except (ValueError, json.JSONDecodeError) as e:
                     yield json.dumps(
-                        {
-                            "type": "error",
-                            "message": f"Invalid cursor format: {e}",
-                            "partial_count": 0,
-                        }
+                        {"type": "error", "message": f"Invalid cursor: {e}", "partial_count": 0}
                     ) + "\n"
                     return
 
-            # Apply cursor-based pagination (keyset pagination)
-            if cursor_data:
-                last_id = cursor_data.get("id")
-                last_sort_value = cursor_data.get("sort_value")
-
-                if last_id is not None and last_sort_value is not None:
-                    # For nullable fields, handle None values
-                    if is_descending:
-                        # DESC: get rows where (sort_value < last) OR (sort_value == last AND id < last_id)
-                        if last_sort_value is None:
-                            # If last value was None, only filter by id
-                            query = query.filter(
-                                and_(sort_field.is_(None), FileInventory.id < last_id)
-                            )
-                        else:
-                            query = query.filter(
-                                or_(
-                                    sort_field < last_sort_value,
-                                    sort_field.is_(None),
-                                    and_(sort_field == last_sort_value, FileInventory.id < last_id),
-                                )
-                            )
-                    # ASC: get rows where (sort_value > last) OR (sort_value == last AND id > last_id)
-                    elif last_sort_value is None:
-                        # If last value was None, get non-null values or higher ids with null
-                        query = query.filter(
-                            or_(
-                                sort_field.isnot(None),
-                                and_(sort_field.is_(None), FileInventory.id > last_id),
-                            )
-                        )
-                    else:
-                        query = query.filter(
-                            or_(
-                                sort_field > last_sort_value,
-                                and_(sort_field == last_sort_value, FileInventory.id > last_id),
-                            )
-                        )
-
-            # Apply sorting with secondary sort by id for stable pagination
+            # Final ordering and execution
             if is_descending:
                 query = query.order_by(sort_field.desc(), FileInventory.id.desc())
             else:
                 query = query.order_by(sort_field.asc(), FileInventory.id.asc())
 
-            # Limit to page_size + 1 to detect if there are more results
-            query = query.limit(page_size + 1)
+            files_list = list(query.limit(page_size + 1).all())
+            has_more = len(files_list) > page_size
+            if has_more:
+                files_list = files_list[:page_size]
 
-            # Pre-fetch all monitored paths to avoid N+1 queries
-            all_paths = db.query(MonitoredPath).all()
-            paths_map = {p.id: p for p in all_paths}
+            next_cursor = (
+                _generate_next_cursor(files_list, sort_by, valid_sort_fields) if has_more else None
+            )
 
-            # Pre-fetch all pinned file paths for efficient lookup
-            pinned_files = db.query(PinnedFile.file_path).all()
-            pinned_paths_set = {p.file_path for p in pinned_files}
-
+            # Metadata and Context
+            paths_map = {p.id: p for p in db.query(MonitoredPath).all()}
+            pinned_paths_set = {p.file_path for p in db.query(PinnedFile.file_path).all()}
             operation_lookup = {
                 (op["path_id"], op.get("file_path"), op["operation"]): op
                 for op in scan_progress_manager.get_all_current_operations()
             }
 
-            # Collect results to check for has_more and generate cursor
-            files_list = list(query.all())
-            has_more = len(files_list) > page_size
-            if has_more:
-                files_list = files_list[:page_size]  # Remove the extra item
+            yield json.dumps(
+                {
+                    "type": "metadata",
+                    "total": total_count,
+                    "page_size": page_size,
+                    "has_more": has_more,
+                    "next_cursor": next_cursor,
+                    "filters": {
+                        "path_id": path_id,
+                        "storage_type": storage_type.value if storage_type else None,
+                        "status": file_status,
+                        "search": search,
+                        "tag_ids": tag_id_list,
+                        "is_pinned": is_pinned,
+                    },
+                    "sort": {"by": sort_by, "order": sort_order},
+                }
+            ) + "\n"
 
-            # Generate next cursor if there are more results
-            next_cursor = None
-            if has_more and files_list:
-                last_file = files_list[-1]
-                # Get the sort value for cursor
-                sort_value_raw = (
-                    getattr(last_file, sort_by, None)
-                    if sort_by in valid_sort_fields
-                    else last_file.last_seen
-                )
-                # Convert datetime/enum to string for JSON serialization
-                if hasattr(sort_value_raw, "isoformat"):
-                    sort_value = sort_value_raw.isoformat()
-                elif hasattr(sort_value_raw, "value"):
-                    sort_value = sort_value_raw.value
-                else:
-                    sort_value = sort_value_raw
-
-                cursor_obj = {"id": last_file.id, "sort_value": sort_value}
-                next_cursor = base64.b64encode(json.dumps(cursor_obj).encode("utf-8")).decode(
-                    "utf-8"
-                )
-
-            # Send metadata first (with pagination info)
-            metadata = {
-                "type": "metadata",
-                "total": total_count,
-                "page_size": page_size,
-                "has_more": has_more,
-                "next_cursor": next_cursor,
-                "filters": {
-                    "path_id": path_id,
-                    "storage_type": storage_type.value if storage_type else None,
-                    "status": file_status,
-                    "search": search,
-                    "extension": extension,
-                    "mime_type": mime_type,
-                    "has_checksum": has_checksum,
-                    "tag_ids": tag_id_list,
-                    "is_pinned": is_pinned,
-                    "min_size": min_size,
-                    "max_size": max_size,
-                    "min_mtime": min_mtime.isoformat() if min_mtime else None,
-                    "max_mtime": max_mtime.isoformat() if max_mtime else None,
-                    "storage_location_id": storage_location_id,
-                },
-                "sort": {"by": sort_by, "order": sort_order},
-            }
-            yield json.dumps(metadata) + "\n"
-
-            # Stream files from the collected list
+            # Stream results
             for file in files_list:
                 try:
                     file_dict = _serialize_file(file, paths_map, pinned_paths_set, operation_lookup)
                     yield json.dumps({"type": "file", "data": file_dict}) + "\n"
                     count += 1
                 except Exception as e:
-                    # Log serialization error but continue streaming
                     logger.warning(f"Error serializing file {file.id}: {e}")
-                    continue
 
-            # Send completion message
-            duration_ms = int((time.time() - start_time) * 1000)
             yield json.dumps(
                 {
                     "type": "complete",
                     "count": count,
-                    "duration_ms": duration_ms,
+                    "duration_ms": int((time.time() - start_time) * 1000),
                     "has_more": has_more,
                     "next_cursor": next_cursor,
                 }
@@ -458,7 +443,7 @@ def list_files(
     return StreamingResponse(
         generate_ndjson(),
         media_type="application/x-ndjson",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},  # Disable nginx buffering
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

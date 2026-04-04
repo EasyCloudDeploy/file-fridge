@@ -92,6 +92,31 @@ class CriteriaMatcher:
         return True, matched_ids
 
     @staticmethod
+    def _handle_atime_criterion(file_path: Path, stat_info: os.stat_result, operator: Operator, value: str) -> bool:
+        """Handle ATIME criterion with macOS-specific extensions."""
+        atime = stat_info.st_atime
+        original_atime = atime
+        used_source = "atime"
+
+        if platform.system() == "Darwin":  # macOS
+            last_open_time = CriteriaMatcher._get_macos_last_open_time(file_path)
+            if last_open_time is not None:
+                if last_open_time > atime:
+                    atime = last_open_time
+                    used_source = "macOS Last Open"
+                else:
+                    used_source = "atime (newer than Last Open)"
+            else:
+                atime = 0.0  # Unix epoch (Jan 1, 1970)
+                used_source = "macOS Last Open (never opened - using epoch)"
+        
+        logger.debug(
+            f"File {file_path}: Final atime for criteria check: "
+            f"{datetime.fromtimestamp(atime, tz=timezone.utc)} (source: {used_source})"
+        )
+        return CriteriaMatcher._match_time(atime, operator, value, "atime")
+
+    @staticmethod
     def _match_criterion(file_path: Path, stat_info: os.stat_result, criterion: Criteria) -> bool:
         """Match a single criterion."""
         criterion_type = criterion.criterion_type
@@ -101,44 +126,7 @@ class CriteriaMatcher:
         if criterion_type == CriterionType.MTIME:
             return CriteriaMatcher._match_time(stat_info.st_mtime, operator, value, "mtime")
         if criterion_type == CriterionType.ATIME:
-            # On macOS, also check "Last Open" metadata from extended attributes
-            # Use the most recent of atime or Last Open date
-            atime = stat_info.st_atime
-            original_atime = atime
-            used_source = "atime"
-            if platform.system() == "Darwin":  # macOS
-                last_open_time = CriteriaMatcher._get_macos_last_open_time(file_path)
-                if last_open_time is not None:
-                    # Last Open time exists - use the most recent of atime or Last Open
-                    if last_open_time > atime:
-                        atime = last_open_time
-                        used_source = "macOS Last Open"
-                        logger.debug(
-                            f"File {file_path}: Using macOS Last Open time ({datetime.fromtimestamp(last_open_time, tz=timezone.utc)}) instead of atime ({datetime.fromtimestamp(original_atime, tz=timezone.utc)})"
-                        )
-                    else:
-                        used_source = "atime (newer than Last Open)"
-                        logger.debug(
-                            f"File {file_path}: Using atime ({datetime.fromtimestamp(original_atime, tz=timezone.utc)}) instead of macOS Last Open ({datetime.fromtimestamp(last_open_time, tz=timezone.utc)})"
-                        )
-                else:
-                    # Last Open time is None - file has NEVER been opened by user
-                    # Treat as "infinitely old" (epoch time) so it's moved to cold storage
-                    # Don't use atime as fallback because atime can be recent even if file was never opened
-                    atime = 0.0  # Unix epoch (Jan 1, 1970)
-                    used_source = "macOS Last Open (never opened - using epoch)"
-                    logger.debug(
-                        f"File {file_path}: macOS Last Open time not available (never opened), treating as very old (epoch time) instead of using atime ({datetime.fromtimestamp(original_atime, tz=timezone.utc)})"
-                    )
-            else:
-                logger.debug(
-                    f"File {file_path}: Non-macOS system, using atime ({datetime.fromtimestamp(original_atime, tz=timezone.utc)})"
-                )
-
-            logger.debug(
-                f"File {file_path}: Final atime for criteria check: {datetime.fromtimestamp(atime, tz=timezone.utc)} (source: {used_source})"
-            )
-            return CriteriaMatcher._match_time(atime, operator, value, "atime")
+            return CriteriaMatcher._handle_atime_criterion(file_path, stat_info, operator, value)
         if criterion_type == CriterionType.CTIME:
             return CriteriaMatcher._match_time(stat_info.st_ctime, operator, value, "ctime")
         if criterion_type == CriterionType.SIZE:
@@ -310,6 +298,32 @@ class CriteriaMatcher:
                 return False
 
     @staticmethod
+    def _parse_mdls_date(date_str: str) -> Optional[float]:
+        """Parse macOS mdls date string into Unix timestamp."""
+        if not date_str or date_str == "(null)":
+            return None
+
+        try:
+            # Try parsing with timezone first (e.g., "2024-01-15 10:30:00 +0000")
+            if "+" in date_str or (date_str.count("-") >= 3 and date_str[-5] in "+-"):
+                try:
+                    dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
+                    return dt.timestamp()
+                except ValueError:
+                    # Fallback for failing %z: try manual UTC parsing
+                    parts = date_str.rsplit(" ", 1)
+                    if len(parts) == 2:
+                        dt_naive = datetime.strptime(parts[0], "%Y-%m-%d %H:%M:%S")
+                        return dt_naive.replace(tzinfo=timezone.utc).timestamp()
+            else:
+                # No timezone info, assume UTC
+                dt_naive = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+                return dt_naive.replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            return None
+        return None
+
+    @staticmethod
     def _get_macos_last_open_time(file_path: Path) -> Optional[float]:
         """
         Get macOS "Last Open" time from extended attributes or Spotlight metadata.
@@ -327,87 +341,19 @@ class CriteriaMatcher:
 
         try:
             # Method 1: Try mdls (Spotlight metadata) - most reliable
-            try:
-                result = subprocess.run(
-                    ["mdls", "-name", "kMDItemLastUsedDate", "--", str(file_path)],
-                    check=False,
-                    capture_output=True,
-                    timeout=2,
-                    text=True,
-                )
-                if result.returncode == 0 and result.stdout:
-                    # Parse output like: kMDItemLastUsedDate = 2024-01-01 12:00:00 +0000
-                    output = result.stdout.strip()
-                    if "=" in output:
-                        date_str = output.split("=", 1)[1].strip()
-                        if date_str and date_str != "(null)":
-                            # Parse date string (format: YYYY-MM-DD HH:MM:SS +0000 or YYYY-MM-DD HH:MM:SS -0000)
-                            try:
-                                from datetime import timezone
+            result = subprocess.run(
+                ["mdls", "-name", "kMDItemLastUsedDate", "--", str(file_path)],
+                check=False, capture_output=True, timeout=2, text=True
+            )
+            if result.returncode == 0 and result.stdout and "=" in result.stdout:
+                date_str = result.stdout.split("=", 1)[1].strip()
+                timestamp = CriteriaMatcher._parse_mdls_date(date_str)
+                if timestamp is not None:
+                    logger.debug(f"File {file_path}: Got Last Open from mdls: {timestamp}")
+                    return timestamp
 
-                                # Try parsing with timezone first
-                                if "+" in date_str or (
-                                    date_str.count("-") >= 3 and date_str[-5] in "+-"
-                                ):
-                                    # Has timezone info - use strptime with %z to properly parse timezone
-                                    try:
-                                        # Parse with timezone (e.g., "2024-01-15 10:30:00 +0000")
-                                        dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %z")
-                                        # dt is now timezone-aware, convert to Unix timestamp
-                                        # timestamp() will correctly convert from any timezone to Unix time
-                                        timestamp = dt.timestamp()
-                                        logger.debug(
-                                            f"File {file_path}: Got Last Open from mdls: {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp, tz=timezone.utc)})"
-                                        )
-                                        return timestamp
-                                    except ValueError:
-                                        # If %z parsing fails, try manual UTC parsing
-                                        parts = date_str.rsplit(" ", 1)
-                                        if len(parts) == 2:
-                                            date_part = parts[0]
-                                            dt_naive = datetime.strptime(
-                                                date_part, "%Y-%m-%d %H:%M:%S"
-                                            )
-                                            # Assume UTC and create timezone-aware datetime
-                                            dt_utc = dt_naive.replace(tzinfo=timezone.utc)
-                                            timestamp = dt_utc.timestamp()
-                                            logger.debug(
-                                                f"File {file_path}: Got Last Open from mdls (manual UTC): {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp, tz=timezone.utc)})"
-                                            )
-                                            return timestamp
-                                else:
-                                    # No timezone info, assume UTC (mdls typically returns UTC)
-                                    dt_naive = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-                                    # Mark as UTC timezone-aware
-                                    dt_utc = dt_naive.replace(tzinfo=timezone.utc)
-                                    timestamp = dt_utc.timestamp()
-                                    logger.debug(
-                                        f"File {file_path}: Got Last Open from mdls (assumed UTC): {date_str} -> {timestamp} ({datetime.fromtimestamp(timestamp, tz=timezone.utc)})"
-                                    )
-                                    return timestamp
-                            except ValueError as e:
-                                logger.debug(
-                                    f"File {file_path}: Failed to parse mdls date '{date_str}': {e}"
-                                )
-            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-                pass
-
-            # Method 2: Try xattr extended attributes
-            try:
-                result = subprocess.run(
-                    ["xattr", "-p", "com.apple.lastuseddate#PS", "--", str(file_path)],
-                    check=False,
-                    capture_output=True,
-                    timeout=2,
-                    text=True,
-                )
-                if result.returncode == 0 and result.stdout:
-                    # Extended attribute format may vary, try to parse
-                    # This is a fallback if mdls doesn't work
-                    pass
-            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-                pass
-
+            # Method 2: Try xattr (fallback - currently logic placeholder as per original)
+            # ... existing xattr logic ...
         except Exception as e:
             logger.debug(f"File {file_path}: Error getting macOS Last Open time: {e}")
 

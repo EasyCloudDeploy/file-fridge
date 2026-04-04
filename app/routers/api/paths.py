@@ -146,49 +146,44 @@ def list_paths(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     return result
 
 
-@router.get("/stats", response_model=List[schemas.StorageStats])
-def get_hot_storage_stats(db: Session = Depends(get_db)):
-    """Get storage statistics for all monitored paths (hot storage)."""
-    paths = db.query(MonitoredPath).all()
-
+def _identify_unique_volumes(paths: List[MonitoredPath]) -> dict:
+    """Identify unique storage volumes from a list of monitored paths."""
     unique_volumes = {}
     for path in paths:
         path_str = path.source_path
         try:
-            # Validate path is a directory before attempting to stat
             path_obj = Path(path_str)
             if not path_obj.exists():
-                if "not_found" not in unique_volumes:
-                    unique_volumes["not_found"] = []
-                unique_volumes["not_found"].append(path_str)
+                unique_volumes.setdefault("not_found", []).append(path_str)
                 continue
 
             if not path_obj.is_dir():
-                if "error" not in unique_volumes:
-                    unique_volumes["error"] = []
-                unique_volumes["error"].append((path_str, "Not a directory"))
+                unique_volumes.setdefault("error", []).append((path_str, "Not a directory"))
                 continue
 
             # Get the device ID for the path
-            device_id = Path(path_str).stat().st_dev
+            device_id = path_obj.stat().st_dev
             if device_id not in unique_volumes:
                 unique_volumes[device_id] = path_str
-        except FileNotFoundError:
-            # Handle cases where the path doesn't exist
-            if "not_found" not in unique_volumes:
-                unique_volumes["not_found"] = []
-            unique_volumes["not_found"].append(path_str)
-        except PermissionError:
-            logger.exception(f"Permission denied accessing path {path_str}")
-            if "error" not in unique_volumes:
-                unique_volumes["error"] = []
-            unique_volumes["error"].append((path_str, "Permission denied"))
+        except (FileNotFoundError, PermissionError) as e:
+            msg = "Permission denied" if isinstance(e, PermissionError) else "Path not found"
+            if isinstance(e, PermissionError):
+                logger.exception(f"Permission denied accessing path {path_str}")
+            
+            key = "not_found" if isinstance(e, FileNotFoundError) else "error"
+            val = path_str if key == "not_found" else (path_str, msg)
+            unique_volumes.setdefault(key, []).append(val)
         except Exception as e:
-            # Handle other potential errors
             logger.exception(f"Error stating path {path_str}")
-            if "error" not in unique_volumes:
-                unique_volumes["error"] = []
-            unique_volumes["error"].append((path_str, str(e)))
+            unique_volumes.setdefault("error", []).append((path_str, str(e)))
+    return unique_volumes
+
+
+@router.get("/stats", response_model=List[schemas.StorageStats])
+def get_hot_storage_stats(db: Session = Depends(get_db)):
+    """Get storage statistics for all monitored paths (hot storage)."""
+    paths = db.query(MonitoredPath).all()
+    unique_volumes = _identify_unique_volumes(paths)
 
     stats_list = []
     for device_id, path_info in unique_volumes.items():
@@ -210,7 +205,6 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
                 )
             continue
 
-        # path_info is a string for valid device_ids
         path_str = path_info
         try:
             total, used, free = shutil.disk_usage(path_str)
@@ -226,11 +220,7 @@ def get_hot_storage_stats(db: Session = Depends(get_db)):
             logger.exception(f"Error getting disk usage for {path_str}")
             stats_list.append(
                 schemas.StorageStats(
-                    path=path_str,
-                    total_bytes=0,
-                    used_bytes=0,
-                    free_bytes=0,
-                    error=f"Disk usage error: {e}",
+                    path=path_str, total_bytes=0, used_bytes=0, free_bytes=0, error=f"Disk usage error: {e}"
                 )
             )
 

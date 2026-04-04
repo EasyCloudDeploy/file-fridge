@@ -13,6 +13,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.constants import RESOURCE_REMOTE_CONNECTIONS
 from app.database import get_db
 from app.models import User
 
@@ -104,7 +105,7 @@ ROLE_PERMISSIONS = {
         "tags:read",
         "storage:read",
         "authentication:read",
-        "Remote Connections:read",
+        f"{RESOURCE_REMOTE_CONNECTIONS}:read",
     ],
     "manager": [
         "files:*",
@@ -115,7 +116,7 @@ ROLE_PERMISSIONS = {
         "cleanup:*",
         "notifiers:*",
         "Encryption:read",
-        "Remote Connections:*",
+        f"{RESOURCE_REMOTE_CONNECTIONS}:*",
     ],
 }
 
