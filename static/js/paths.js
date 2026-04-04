@@ -49,7 +49,7 @@ async function loadPathsList() {
             if (tableBody) {
                 paths.forEach(path => {
                     const row = tableBody.insertRow();
-                    if (path.error_message) {
+                    if (path.error_message || path.permissions_error) {
                         row.classList.add('table-danger');
                     }
                     // Format last scan info
@@ -73,6 +73,11 @@ async function loadPathsList() {
                                     <i class="bi bi-exclamation-triangle-fill"></i> <strong>Error:</strong> ${escapeHtml(path.error_message)}
                                 </div>
                             ` : ''}
+                            ${path.permissions_error ? `
+                                <div class="alert alert-danger alert-sm mt-1 mb-0 py-1 px-2 d-none d-md-block" role="alert">
+                                    <i class="bi bi-shield-exclamation"></i> <strong>Permission Error:</strong> ${escapeHtml(path.permissions_error)}
+                                </div>
+                            ` : ''}
                         </td>
                         <td class="d-none d-md-table-cell"><code class="small">${escapeHtml(path.source_path)}</code></td>
                         <td class="d-none d-lg-table-cell">
@@ -93,6 +98,11 @@ async function loadPathsList() {
                             ${path.error_message ? `
                                 <br><span class="badge bg-danger mt-1">
                                     <i class="bi bi-exclamation-triangle-fill"></i><span class="d-none d-sm-inline"> Error</span>
+                                </span>
+                            ` : ''}
+                            ${path.permissions_error ? `
+                                <br><span class="badge bg-danger mt-1">
+                                    <i class="bi bi-shield-exclamation"></i><span class="d-none d-sm-inline"> Permission Error</span>
                                 </span>
                             ` : ''}
                         </td>
@@ -1260,7 +1270,70 @@ async function loadPathForEdit(pathId) {
         // Populate form
         document.getElementById('name').value = path.name;
         document.getElementById('source_path').value = path.source_path;
-        document.getElementById('operation_type').value = path.operation_type;
+        const opTypeSelect = document.getElementById('operation_type');
+        opTypeSelect.value = path.operation_type;
+
+        // Show a migration notice whenever the user picks a different operation type,
+        // so they understand what will happen to already-frozen files.
+        if (path.cold_file_count > 0 || path.hot_file_count > 0) {
+            const originalOpType = path.operation_type;
+
+            const MIGRATION_MESSAGES = {
+                move: {
+                    copy:
+                        `<strong>${path.cold_file_count} file(s) currently in cold storage</strong> will be ` +
+                        `thawed back to hot, then re-frozen as copies on the following scan ` +
+                        `(2 scan cycles). Hot copies will be preserved going forward.`,
+                    symlink:
+                        `<strong>${path.cold_file_count} file(s) currently in cold storage</strong> will be ` +
+                        `thawed back to hot, then re-frozen with symlinks on the following scan ` +
+                        `(2 scan cycles).`,
+                },
+                copy: {
+                    move:
+                        `<strong>${path.cold_file_count} file(s) exist in both hot and cold storage.</strong> ` +
+                        `On the next scan their hot copies will be moved to cold, removing them from hot storage. ` +
+                        `Existing cold copies will be overwritten with identical content.`,
+                    symlink:
+                        `<strong>${path.cold_file_count} file(s) exist in both hot and cold storage.</strong> ` +
+                        `On the next scan their hot copies will be moved to cold and replaced with symlinks. ` +
+                        `Existing cold copies will be overwritten with identical content.`,
+                },
+                symlink: {
+                    move:
+                        `<strong>${path.cold_file_count} file(s) were frozen using Move &amp; Symlink.</strong> ` +
+                        `Orphaned symlinks in hot storage will be automatically deleted on the next scan. ` +
+                        `Files remain safely in cold storage.`,
+                    copy:
+                        `<strong>${path.cold_file_count} file(s) were frozen using Move &amp; Symlink.</strong> ` +
+                        `They will be thawed back to hot, then re-frozen as real copies on the following scan ` +
+                        `(2 scan cycles).`,
+                },
+            };
+
+            // copy→move removes hot files — use warning; everything else is informational
+            const DANGER_TRANSITIONS = new Set(['copy→move', 'copy→symlink']);
+
+            opTypeSelect.addEventListener('change', function () {
+                const existing = document.getElementById('op-type-migration-notice');
+                if (existing) existing.remove();
+
+                if (this.value === originalOpType) return;
+
+                const messages = MIGRATION_MESSAGES[originalOpType];
+                if (!messages || !messages[this.value]) return;
+
+                const isDanger = DANGER_TRANSITIONS.has(`${originalOpType}→${this.value}`);
+                const notice = document.createElement('div');
+                notice.id = 'op-type-migration-notice';
+                notice.className = `alert alert-${isDanger ? 'warning' : 'info'} mt-2`;
+                notice.innerHTML =
+                    `<i class="bi bi-${isDanger ? 'exclamation-triangle-fill' : 'info-circle-fill'}"></i> ` +
+                    messages[this.value];
+                this.closest('.mb-3').appendChild(notice);
+            });
+        }
+
         document.getElementById('check_interval_seconds').value = path.check_interval_seconds;
         document.getElementById('max_concurrent_migrations').value = path.max_concurrent_migrations;
         document.getElementById('enabled').checked = path.enabled;

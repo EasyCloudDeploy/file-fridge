@@ -118,3 +118,179 @@ class TestSchedulerService:
         assert inv.is_encrypted is False
         db_session.refresh(storage_location)
         assert storage_location.encryption_status == "none"
+
+
+class TestCheckStoragePermissionsJob:
+    """Tests for check_storage_permissions_job_func."""
+
+    @pytest.fixture(autouse=True)
+    def mock_scheduler_session(self, monkeypatch, db_session):
+        monkeypatch.setattr(db_session, "close", lambda: None)
+        monkeypatch.setattr("app.services.scheduler.SchedulerSessionLocal", MagicMock(return_value=db_session))
+
+    def _make_cold_location(self, db_session, path: str, name: str = "Cold Storage") -> ColdStorageLocation:
+        loc = ColdStorageLocation(name=name, path=path)
+        db_session.add(loc)
+        db_session.commit()
+        db_session.refresh(loc)
+        return loc
+
+    def _make_hot_path(self, db_session, path: str, name: str = "Hot Path") -> MonitoredPath:
+        from app.models import MonitoredPath, ColdStorageLocation
+        cold = ColdStorageLocation(name=f"Cold for {name}", path="/tmp/cold_dummy")
+        db_session.add(cold)
+        db_session.flush()
+        mp = MonitoredPath(name=name, source_path=path, storage_locations=[cold])
+        db_session.add(mp)
+        db_session.commit()
+        db_session.refresh(mp)
+        return mp
+
+    def test_sets_permissions_error_on_cold_location_when_not_writable(self, db_session, tmp_path, monkeypatch):
+        """permissions_error is populated when the cold storage path is not writable."""
+        from app.services.scheduler import check_storage_permissions_job_func
+
+        cold_path = tmp_path / "cold"
+        cold_path.mkdir()
+        loc = self._make_cold_location(db_session, str(cold_path))
+
+        # Simulate missing write permission
+        monkeypatch.setattr("app.services.scheduler.os.access", lambda path, mode: mode != 2)  # W_OK == 2
+
+        check_storage_permissions_job_func()
+
+        db_session.refresh(loc)
+        assert loc.permissions_error is not None
+        assert "write" in loc.permissions_error
+
+    def test_clears_permissions_error_when_permissions_restored(self, db_session, tmp_path, monkeypatch):
+        """permissions_error is cleared once the path becomes accessible again."""
+        from app.services.scheduler import check_storage_permissions_job_func
+
+        cold_path = tmp_path / "cold"
+        cold_path.mkdir()
+        loc = self._make_cold_location(db_session, str(cold_path))
+        loc.permissions_error = "Missing write permission on cold storage path"
+        db_session.commit()
+
+        # All access checks pass
+        monkeypatch.setattr("app.services.scheduler.os.access", lambda path, mode: True)
+
+        check_storage_permissions_job_func()
+
+        db_session.refresh(loc)
+        assert loc.permissions_error is None
+
+    def test_sets_permissions_error_on_monitored_path_when_not_readable(self, db_session, tmp_path, monkeypatch):
+        """permissions_error is set on a MonitoredPath when its source is not readable."""
+        from app.services.scheduler import check_storage_permissions_job_func
+
+        hot_path = tmp_path / "hot"
+        hot_path.mkdir()
+        mp = self._make_hot_path(db_session, str(hot_path))
+
+        # Simulate missing read permission only for the hot path
+        def fake_access(path, mode):
+            if path == str(hot_path):
+                return False  # deny all
+            return True
+
+        monkeypatch.setattr("app.services.scheduler.os.access", fake_access)
+
+        check_storage_permissions_job_func()
+
+        db_session.refresh(mp)
+        assert mp.permissions_error is not None
+        assert "read" in mp.permissions_error or "write" in mp.permissions_error
+
+    def test_sets_permissions_error_on_missing_cold_path(self, db_session, tmp_path, monkeypatch):
+        """permissions_error is set when the cold storage path does not exist."""
+        from app.services.scheduler import check_storage_permissions_job_func
+
+        loc = self._make_cold_location(db_session, "/nonexistent/cold/path/xyz")
+
+        # os.access raises FileNotFoundError for non-existent paths on some systems;
+        # simulate that by having it raise directly.
+        original_access = __import__("os").access
+
+        def fake_access(path, mode):
+            if "nonexistent" in str(path):
+                raise FileNotFoundError(f"No such file: {path}")
+            return True
+
+        monkeypatch.setattr("app.services.scheduler.os.access", fake_access)
+
+        check_storage_permissions_job_func()
+
+        db_session.refresh(loc)
+        assert loc.permissions_error is not None
+        assert "not found" in loc.permissions_error.lower() or "nonexistent" in loc.permissions_error
+
+    def test_no_error_for_fully_accessible_paths(self, db_session, tmp_path, monkeypatch):
+        """No permissions_error is set when both hot and cold paths are fully accessible."""
+        from app.services.scheduler import check_storage_permissions_job_func
+
+        cold_path = tmp_path / "cold"
+        cold_path.mkdir()
+        hot_path = tmp_path / "hot"
+        hot_path.mkdir()
+
+        loc = self._make_cold_location(db_session, str(cold_path))
+        mp = self._make_hot_path(db_session, str(hot_path))
+
+        monkeypatch.setattr("app.services.scheduler.os.access", lambda path, mode: True)
+
+        check_storage_permissions_job_func()
+
+        db_session.refresh(loc)
+        db_session.refresh(mp)
+        assert loc.permissions_error is None
+        assert mp.permissions_error is None
+
+    def test_dispatches_notification_on_first_error(self, db_session, tmp_path, monkeypatch):
+        """A STORAGE_PERMISSION_ERROR notification is dispatched the first time an error is detected."""
+        from app.services.scheduler import check_storage_permissions_job_func
+        from app.services import notification_service as ns_module
+
+        cold_path = tmp_path / "cold"
+        cold_path.mkdir()
+        loc = self._make_cold_location(db_session, str(cold_path))
+
+        monkeypatch.setattr("app.services.scheduler.os.access", lambda path, mode: mode != 2)
+
+        dispatched = []
+        monkeypatch.setattr(
+            "app.services.scheduler.notification_service.dispatch_event_sync",
+            lambda **kwargs: dispatched.append(kwargs),
+        )
+
+        check_storage_permissions_job_func()
+
+        assert len(dispatched) >= 1
+        from app.services.notification_events import NotificationEventType
+        assert dispatched[0]["event_type"] == NotificationEventType.STORAGE_PERMISSION_ERROR
+
+    def test_does_not_redispatch_notification_when_error_unchanged(self, db_session, tmp_path, monkeypatch):
+        """Notification is not re-dispatched on subsequent runs when the error message is unchanged."""
+        from app.services.scheduler import check_storage_permissions_job_func
+
+        cold_path = tmp_path / "cold"
+        cold_path.mkdir()
+        loc = self._make_cold_location(db_session, str(cold_path))
+
+        monkeypatch.setattr("app.services.scheduler.os.access", lambda path, mode: mode != 2)
+
+        dispatched = []
+        monkeypatch.setattr(
+            "app.services.scheduler.notification_service.dispatch_event_sync",
+            lambda **kwargs: dispatched.append(kwargs),
+        )
+
+        # First run sets the error and dispatches
+        check_storage_permissions_job_func()
+        first_run_count = len(dispatched)
+        assert first_run_count >= 1
+
+        # Second run — same error — must NOT re-dispatch
+        check_storage_permissions_job_func()
+        assert len(dispatched) == first_run_count

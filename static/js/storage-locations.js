@@ -68,8 +68,18 @@ function renderStorageLocations() {
 
     tbody.innerHTML = allLocations.map(location => `
         <tr>
-            <td><strong>${escapeHtml(location.name)}</strong></td>
-            <td><code>${escapeHtml(location.path)}</code></td>
+            <td>
+                <strong>${escapeHtml(location.name)}</strong>
+                ${location.permissions_error ? `
+                    <br><span class="badge bg-danger mt-1" title="${escapeHtml(location.permissions_error)}">
+                        <i class="bi bi-shield-exclamation"></i> Permission Error
+                    </span>` : ''}
+            </td>
+            <td>
+                <code>${escapeHtml(location.path)}</code>
+                ${location.permissions_error ? `
+                    <br><small class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> ${escapeHtml(location.permissions_error)}</small>` : ''}
+            </td>
             <td>
                 <span class="badge bg-secondary">${location.path_count} paths</span>
             </td>

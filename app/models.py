@@ -232,6 +232,7 @@ class ColdStorageLocation(Base):
     encryption_status = Column(
         SQLEnum(EncryptionStatus), nullable=False, default=EncryptionStatus.NONE
     )
+    permissions_error = Column(Text, nullable=True)  # Set when read/write permissions are denied
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -268,6 +269,7 @@ class MonitoredPath(Base):
     error_message = Column(
         Text, nullable=True
     )  # Error state message (e.g., atime unavailable on network mount)
+    permissions_error = Column(Text, nullable=True)  # Set when read/write permissions are denied
     last_scan_at = Column(DateTime(timezone=True), nullable=True)  # When the last scan finished
     last_scan_status = Column(
         SQLEnum(ScanStatus), nullable=True

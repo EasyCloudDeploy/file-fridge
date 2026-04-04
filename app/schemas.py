@@ -106,6 +106,7 @@ class ColdStorageLocation(ColdStorageLocationBase):
 
     id: int
     encryption_status: EncryptionStatus
+    permissions_error: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime]
 
@@ -134,6 +135,7 @@ class MonitoredPathBase(BaseModel):
         3, ge=1, description="Maximum number of concurrent file migrations"
     )
     error_message: Optional[str] = None  # Error state message
+    permissions_error: Optional[str] = None  # Set when read/write permissions are denied
     last_scan_at: Optional[datetime] = None  # When the last scan finished
     last_scan_status: Optional[ScanStatus] = None  # Status of the last scan
 
