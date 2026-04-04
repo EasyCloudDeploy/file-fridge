@@ -1,6 +1,21 @@
 // Remote Files browser JavaScript
 const API_BASE_URL = '/api/v1';
 
+async function waitForAgGrid(maxWaitMs = 5000) {
+    if (window.agGrid) {
+        return;
+    }
+
+    const startTime = Date.now();
+    while (!window.agGrid) {
+        if (Date.now() - startTime >= maxWaitMs) {
+            throw new Error('AG Grid library did not finish loading in time');
+        }
+
+        await new Promise(resolve => window.setTimeout(resolve, 50));
+    }
+}
+
 // State
 let gridApi = null;
 let connectionId = null;
@@ -87,6 +102,8 @@ async function initRemoteFilesPage() {
         return;
     }
 
+    await waitForAgGrid();
+
     const connectionEl = document.getElementById('connection-id');
     if (!connectionEl) {
         console.error('Connection ID element not found');
@@ -107,7 +124,7 @@ async function initRemoteFilesPage() {
     remoteFilesInitialized = true;
 
     // Init AG Grid
-    gridApi = agGrid.createGrid(gridDiv, gridOptions);
+    gridApi = window.agGrid.createGrid(gridDiv, gridOptions);
 
     // Load initial data
     await Promise.all([
@@ -150,7 +167,9 @@ async function initRemoteFilesPage() {
 }
 
 window.runWhenFileFridgeReady(() => {
-    void initRemoteFilesPage();
+    void initRemoteFilesPage().catch(error => {
+        console.error('Failed to initialize remote files page:', error);
+    });
 });
 
 async function loadConnectionDetails() {
