@@ -19,6 +19,66 @@ PROGRESS_THRESHOLD_MB = 10
 PROGRESS_UPDATE_BYTES = 1024 * 1024
 
 
+def _cleanup_partial_destination(
+    source: Path, destination: Path, error: Optional[str], context: str
+) -> None:
+    """Best-effort cleanup for partially created destinations."""
+    try:
+        if destination.is_symlink():
+            logger.warning(
+                "Attempting rollback cleanup of partial symlink: source=%s destination=%s error=%s context=%s",
+                source,
+                destination,
+                error,
+                context,
+            )
+            os.remove(destination)
+            logger.info(
+                "Rollback cleanup removed partial symlink: source=%s destination=%s context=%s",
+                source,
+                destination,
+                context,
+            )
+            return
+
+        if not destination.exists():
+            logger.debug(
+                "No partial destination found during rollback cleanup: source=%s destination=%s error=%s context=%s",
+                source,
+                destination,
+                error,
+                context,
+            )
+            return
+
+        logger.warning(
+            "Attempting rollback cleanup of partial destination: source=%s destination=%s error=%s context=%s",
+            source,
+            destination,
+            error,
+            context,
+        )
+        if destination.is_dir():
+            shutil.rmtree(destination)
+        else:
+            os.remove(destination)
+        logger.info(
+            "Rollback cleanup completed: source=%s destination=%s context=%s",
+            source,
+            destination,
+            context,
+        )
+    except Exception as cleanup_error:
+        logger.exception(
+            "Rollback cleanup failed: source=%s destination=%s error=%s context=%s cleanup_error=%s",
+            source,
+            destination,
+            error,
+            context,
+            cleanup_error,
+        )
+
+
 def move_file(
     source: Path,
     destination: Path,
@@ -256,6 +316,7 @@ def move_with_rollback(
         return False, f"Unknown operation type: {operation_type}", None
 
     if not success:
+        _cleanup_partial_destination(source, destination, error, "operation_failure")
         logger.error("File move failed: %s -> %s (%s)", source, destination, error)
         return False, error, None
 
@@ -272,13 +333,9 @@ def move_with_rollback(
             logger.error(
                 f"Checksum mismatch after move: {source_checksum[:16] if source_checksum else 'None'}... != {dest_checksum[:16] if dest_checksum else 'None'}..."
             )
-            # Rollback: delete destination to avoid inconsistent state
-            try:
-                if destination.exists():
-                    destination.unlink()
-                logger.info(f"Rolled back move by deleting destination: {destination}")
-            except Exception as e:
-                logger.error(f"Failed to rollback: {e}")
+            _cleanup_partial_destination(
+                source, destination, "Checksum verification failed", "checksum_mismatch"
+            )
 
             return False, "Checksum verification failed", source_checksum
 
