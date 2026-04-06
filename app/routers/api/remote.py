@@ -20,7 +20,6 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.constants import RESOURCE_REMOTE_CONNECTIONS
 from app.database import get_db
 from app.models import (

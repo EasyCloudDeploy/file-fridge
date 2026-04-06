@@ -7,9 +7,12 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Dict, Generator, List, Optional
+from typing import Annotated, Any, Dict, Generator, List, Optional, TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query as FastAPIQuery, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -136,14 +139,14 @@ def _parse_tag_ids(tag_ids: Optional[str]) -> Optional[List[int]]:
     try:
         return [int(tid.strip()) for tid in tag_ids.split(",") if tid.strip()]
     except ValueError:
-        raise ValueError("Invalid tag_ids format. Must be comma-separated integers.")
+        raise ValueError("Invalid tag_ids format. Must be comma-separated integers.") from None
 
 
 def _apply_filters(
-    query,
+    query: "Query",
     db: Session,
     criteria: FilterCriteria,
-):
+) -> "Query":
     """Apply various filters to the FileInventory query."""
     from app.models import FileTag
 
@@ -190,7 +193,7 @@ def _apply_filters(
     return query
 
 
-def _apply_cursor_pagination(query, sort_field, cursor_data, is_descending):
+def _apply_cursor_pagination(query: "Query", sort_field, cursor_data, is_descending) -> "Query":
     """Apply keyset pagination based on cursor data."""
     last_id = cursor_data.get("id")
     last_sort_value = cursor_data.get("sort_value")
@@ -224,7 +227,7 @@ def _apply_cursor_pagination(query, sort_field, cursor_data, is_descending):
     )
 
 
-def _generate_next_cursor(files_list, sort_by, valid_sort_fields):
+def _generate_next_cursor(files_list: List[FileInventory], sort_by: str, valid_sort_fields: List[str]) -> Optional[str]:
     """Generate a base64-encoded cursor for the next page of results."""
     if not files_list:
         return None
@@ -249,24 +252,24 @@ def _generate_next_cursor(files_list, sort_by, valid_sort_fields):
 
 @router.get("", responses={400: {"description": "Invalid query parameters"}})
 def list_files(
-    path_id: Annotated[Optional[int], Query(description="Filter by monitored path ID")] = None,
-    storage_type: Annotated[Optional[StorageTypeSchema], Query(description="Filter by storage type (hot/cold)")] = None,
-    file_status: Annotated[Optional[str], Query(alias="status", description="Filter by file status")] = None,
-    search: Annotated[Optional[str], Query(description="Search in file path")] = None,
-    extension: Annotated[Optional[str], Query(description="Filter by file extension (e.g., .pdf, .jpg)")] = None,
-    mime_type: Annotated[Optional[str], Query(description="Filter by MIME type")] = None,
-    has_checksum: Annotated[Optional[bool], Query(description="Filter files with/without checksum")] = None,
-    tag_ids: Annotated[Optional[str], Query(description="Filter by tag IDs (comma-separated)")] = None,
-    is_pinned: Annotated[Optional[bool], Query(description="Filter by pinned status")] = None,
-    min_size: Annotated[Optional[int], Query(description="Minimum file size in bytes")] = None,
-    max_size: Annotated[Optional[int], Query(description="Maximum file size in bytes")] = None,
-    min_mtime: Annotated[Optional[datetime], Query(description="Minimum modification time")] = None,
-    max_mtime: Annotated[Optional[datetime], Query(description="Maximum modification time")] = None,
-    storage_location_id: Annotated[Optional[int], Query(description="Filter by cold storage location ID")] = None,
-    sort_by: Annotated[str, Query(description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)")] = "last_seen",
-    sort_order: Annotated[str, Query(description="Sort order (asc/desc)")] = "desc",
-    page_size: Annotated[int, Query(ge=10, le=500, description="Number of items per page (for pagination)")] = 100,
-    cursor: Annotated[Optional[str], Query(description="Pagination cursor (base64 encoded)")] = None,
+    path_id: Annotated[Optional[int], FastAPIQuery(description="Filter by monitored path ID")] = None,
+    storage_type: Annotated[Optional[StorageTypeSchema], FastAPIQuery(description="Filter by storage type (hot/cold)")] = None,
+    file_status: Annotated[Optional[str], FastAPIQuery(alias="status", description="Filter by file status")] = None,
+    search: Annotated[Optional[str], FastAPIQuery(description="Search in file path")] = None,
+    extension: Annotated[Optional[str], FastAPIQuery(description="Filter by file extension (e.g., .pdf, .jpg)")] = None,
+    mime_type: Annotated[Optional[str], FastAPIQuery(description="Filter by MIME type")] = None,
+    has_checksum: Annotated[Optional[bool], FastAPIQuery(description="Filter files with/without checksum")] = None,
+    tag_ids: Annotated[Optional[str], FastAPIQuery(description="Filter by tag IDs (comma-separated)")] = None,
+    is_pinned: Annotated[Optional[bool], FastAPIQuery(description="Filter by pinned status")] = None,
+    min_size: Annotated[Optional[int], FastAPIQuery(description="Minimum file size in bytes")] = None,
+    max_size: Annotated[Optional[int], FastAPIQuery(description="Maximum file size in bytes")] = None,
+    min_mtime: Annotated[Optional[datetime], FastAPIQuery(description="Minimum modification time")] = None,
+    max_mtime: Annotated[Optional[datetime], FastAPIQuery(description="Maximum modification time")] = None,
+    storage_location_id: Annotated[Optional[int], FastAPIQuery(description="Filter by cold storage location ID")] = None,
+    sort_by: Annotated[str, FastAPIQuery(description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)")] = "last_seen",
+    sort_order: Annotated[str, FastAPIQuery(description="Sort order (asc/desc)")] = "desc",
+    page_size: Annotated[int, FastAPIQuery(ge=10, le=500, description="Number of items per page (for pagination)")] = 100,
+    cursor: Annotated[Optional[str], FastAPIQuery(description="Pagination cursor (base64 encoded)")] = None,
     db: Annotated[Session, Depends(get_db)] = None,
     current_user: Annotated[User, Depends(get_current_user)] = None,
 ):
@@ -673,8 +676,8 @@ def get_freeze_options(inventory_id: int, db: Annotated[Session, Depends(get_db)
 def freeze_file(
     inventory_id: int,
     db: Annotated[Session, Depends(get_db)],
-    storage_location_id: int = Query(..., description="Target cold storage location ID"),
-    pin: bool = Query(False, description="Pin file after freezing"),
+    storage_location_id: int = FastAPIQuery(..., description="Target cold storage location ID"),
+    pin: bool = FastAPIQuery(False, description="Pin file after freezing"),
 ):
     """
     Freeze a file (move from hot storage to cold storage).
@@ -909,8 +912,8 @@ def get_relocate_options(inventory_id: int, db: Annotated[Session, Depends(get_d
 
 @router.get("/relocate/tasks")
 def get_relocation_tasks(
-    active_only: bool = Query(False, description="Only return active (pending/running) tasks"),
-    limit: int = Query(20, ge=1, le=100, description="Maximum number of tasks to return"),
+    active_only: bool = FastAPIQuery(False, description="Only return active (pending/running) tasks"),
+    limit: int = FastAPIQuery(20, ge=1, le=100, description="Maximum number of tasks to return"),
 ):
     """Get list of relocation tasks."""
     from app.services.relocation_manager import relocation_manager
@@ -952,8 +955,8 @@ def get_file_relocation_status(inventory_id: int):
 def backfill_metadata(
     db: Annotated[Session, Depends(get_db)],
     path_id: Optional[int] = None,
-    batch_size: int = Query(100, ge=1, le=1000, description="Files to process per batch"),
-    compute_checksum: bool = Query(True, description="Whether to compute file checksums"),
+    batch_size: int = FastAPIQuery(100, ge=1, le=1000, description="Files to process per batch"),
+    compute_checksum: bool = FastAPIQuery(True, description="Whether to compute file checksums"),
 ):
     """Backfill metadata (extension, MIME type, checksum) for existing files."""
     from app.services.metadata_backfill import MetadataBackfillService
@@ -977,7 +980,7 @@ def backfill_metadata(
 def bulk_thaw_files(
     request: BulkFileActionRequest,
     db: Annotated[Session, Depends(get_db)],
-    pin: bool = Query(False, description="Pin files after thawing"),
+    pin: bool = FastAPIQuery(False, description="Pin files after thawing"),
 ):
     """
     Bulk thaw multiple files from cold storage to hot storage.
