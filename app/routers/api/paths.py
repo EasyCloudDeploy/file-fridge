@@ -1,4 +1,3 @@
-# ruff: noqa: B008
 """API routes for path management."""
 
 import logging
@@ -115,9 +114,7 @@ def validate_path_configuration(path: MonitoredPath, db: Session) -> None:
 
 
 @router.get("", response_model=List[schemas.MonitoredPathSummary])
-def list_paths(
-    skip: int = 0, limit: int = 100, db: Annotated[Session, Depends(get_db)] = None
-):
+def list_paths(skip: int = 0, limit: int = 100, db: Annotated[Session, Depends(get_db)] = None):
     """List all monitored paths with a summary of their contents."""
     file_count_subquery = (
         select(func.count(FileInventory.id))
@@ -194,7 +191,7 @@ def get_hot_storage_stats(db: Annotated[Session, Depends(get_db)] = None):
     stats_list = []
     for device_id, path_info in unique_volumes.items():
         if device_id == "not_found":
-            for p in path_info:  # type: ignore
+            for p in path_info:  # type: ignore[union-attr]
                 stats_list.append(
                     schemas.StorageStats(
                         path=p, total_bytes=0, used_bytes=0, free_bytes=0, error=MSG_PATH_NOT_FOUND
@@ -203,7 +200,7 @@ def get_hot_storage_stats(db: Annotated[Session, Depends(get_db)] = None):
             continue
 
         if device_id == "error":
-            for p, err_msg in path_info:  # type: ignore
+            for p, err_msg in path_info:  # type: ignore[union-attr, misc]
                 stats_list.append(
                     schemas.StorageStats(
                         path=p, total_bytes=0, used_bytes=0, free_bytes=0, error=err_msg
@@ -211,7 +208,7 @@ def get_hot_storage_stats(db: Annotated[Session, Depends(get_db)] = None):
                 )
             continue
 
-        path_str = path_info  # type: ignore
+        path_str = path_info  # type: ignore[assignment]
         try:
             total, used, free = shutil.disk_usage(path_str)
             stats_list.append(
@@ -469,7 +466,6 @@ def delete_path(
         False, description="If True, move all files back from cold storage before deleting"
     ),
 ):
-
     """
     Delete a monitored path.
 

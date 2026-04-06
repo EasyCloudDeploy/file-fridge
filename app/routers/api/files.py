@@ -1,18 +1,18 @@
-# ruff: noqa: B008
 """API routes for file management."""
 
 import base64
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any, Dict, Generator, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Generator, List, Optional
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Query
 
-from fastapi import APIRouter, Depends, HTTPException, Query as FastAPIQuery, status
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import Query as FastAPIQuery
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
@@ -172,7 +172,11 @@ def _apply_filters(
         else:
             query = query.filter(FileInventory.checksum.is_(None))
     if criteria.tag_id_list:
-        query = query.join(FileInventory.tags).filter(FileTag.tag_id.in_(criteria.tag_id_list)).distinct()
+        query = (
+            query.join(FileInventory.tags)
+            .filter(FileTag.tag_id.in_(criteria.tag_id_list))
+            .distinct()
+        )
     if criteria.is_pinned is not None:
         pinned_subquery = db.query(PinnedFile.file_path)
         if criteria.is_pinned:
@@ -227,16 +231,16 @@ def _apply_cursor_pagination(query: "Query", sort_field, cursor_data, is_descend
     )
 
 
-def _generate_next_cursor(files_list: List[FileInventory], sort_by: str, valid_sort_fields: List[str]) -> Optional[str]:
+def _generate_next_cursor(
+    files_list: List[FileInventory], sort_by: str, valid_sort_fields: List[str]
+) -> Optional[str]:
     """Generate a base64-encoded cursor for the next page of results."""
     if not files_list:
         return None
 
     last_file = files_list[-1]
     sort_value_raw = (
-        getattr(last_file, sort_by, None)
-        if sort_by in valid_sort_fields
-        else last_file.last_seen
+        getattr(last_file, sort_by, None) if sort_by in valid_sort_fields else last_file.last_seen
     )
 
     if hasattr(sort_value_raw, "isoformat"):
@@ -252,24 +256,57 @@ def _generate_next_cursor(files_list: List[FileInventory], sort_by: str, valid_s
 
 @router.get("", responses={400: {"description": "Invalid query parameters"}})
 def list_files(
-    path_id: Annotated[Optional[int], FastAPIQuery(description="Filter by monitored path ID")] = None,
-    storage_type: Annotated[Optional[StorageTypeSchema], FastAPIQuery(description="Filter by storage type (hot/cold)")] = None,
-    file_status: Annotated[Optional[str], FastAPIQuery(alias="status", description="Filter by file status")] = None,
+    path_id: Annotated[
+        Optional[int], FastAPIQuery(description="Filter by monitored path ID")
+    ] = None,
+    storage_type: Annotated[
+        Optional[StorageTypeSchema], FastAPIQuery(description="Filter by storage type (hot/cold)")
+    ] = None,
+    file_status: Annotated[
+        Optional[str], FastAPIQuery(alias="status", description="Filter by file status")
+    ] = None,
     search: Annotated[Optional[str], FastAPIQuery(description="Search in file path")] = None,
-    extension: Annotated[Optional[str], FastAPIQuery(description="Filter by file extension (e.g., .pdf, .jpg)")] = None,
+    extension: Annotated[
+        Optional[str], FastAPIQuery(description="Filter by file extension (e.g., .pdf, .jpg)")
+    ] = None,
     mime_type: Annotated[Optional[str], FastAPIQuery(description="Filter by MIME type")] = None,
-    has_checksum: Annotated[Optional[bool], FastAPIQuery(description="Filter files with/without checksum")] = None,
-    tag_ids: Annotated[Optional[str], FastAPIQuery(description="Filter by tag IDs (comma-separated)")] = None,
-    is_pinned: Annotated[Optional[bool], FastAPIQuery(description="Filter by pinned status")] = None,
-    min_size: Annotated[Optional[int], FastAPIQuery(description="Minimum file size in bytes")] = None,
-    max_size: Annotated[Optional[int], FastAPIQuery(description="Maximum file size in bytes")] = None,
-    min_mtime: Annotated[Optional[datetime], FastAPIQuery(description="Minimum modification time")] = None,
-    max_mtime: Annotated[Optional[datetime], FastAPIQuery(description="Maximum modification time")] = None,
-    storage_location_id: Annotated[Optional[int], FastAPIQuery(description="Filter by cold storage location ID")] = None,
-    sort_by: Annotated[str, FastAPIQuery(description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)")] = "last_seen",
+    has_checksum: Annotated[
+        Optional[bool], FastAPIQuery(description="Filter files with/without checksum")
+    ] = None,
+    tag_ids: Annotated[
+        Optional[str], FastAPIQuery(description="Filter by tag IDs (comma-separated)")
+    ] = None,
+    is_pinned: Annotated[
+        Optional[bool], FastAPIQuery(description="Filter by pinned status")
+    ] = None,
+    min_size: Annotated[
+        Optional[int], FastAPIQuery(description="Minimum file size in bytes")
+    ] = None,
+    max_size: Annotated[
+        Optional[int], FastAPIQuery(description="Maximum file size in bytes")
+    ] = None,
+    min_mtime: Annotated[
+        Optional[datetime], FastAPIQuery(description="Minimum modification time")
+    ] = None,
+    max_mtime: Annotated[
+        Optional[datetime], FastAPIQuery(description="Maximum modification time")
+    ] = None,
+    storage_location_id: Annotated[
+        Optional[int], FastAPIQuery(description="Filter by cold storage location ID")
+    ] = None,
+    sort_by: Annotated[
+        str,
+        FastAPIQuery(
+            description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)"
+        ),
+    ] = "last_seen",
     sort_order: Annotated[str, FastAPIQuery(description="Sort order (asc/desc)")] = "desc",
-    page_size: Annotated[int, FastAPIQuery(ge=10, le=500, description="Number of items per page (for pagination)")] = 100,
-    cursor: Annotated[Optional[str], FastAPIQuery(description="Pagination cursor (base64 encoded)")] = None,
+    page_size: Annotated[
+        int, FastAPIQuery(ge=10, le=500, description="Number of items per page (for pagination)")
+    ] = 100,
+    cursor: Annotated[
+        Optional[str], FastAPIQuery(description="Pagination cursor (base64 encoded)")
+    ] = None,
     db: Annotated[Session, Depends(get_db)] = None,
     current_user: Annotated[User, Depends(get_current_user)] = None,
 ):
@@ -357,9 +394,12 @@ def list_files(
                     cursor_data = json.loads(base64.b64decode(cursor).decode("utf-8"))
                     query = _apply_cursor_pagination(query, sort_field, cursor_data, is_descending)
                 except (ValueError, json.JSONDecodeError) as e:
-                    yield json.dumps(
-                        {"type": "error", "message": f"Invalid cursor: {e}", "partial_count": 0}
-                    ) + "\n"
+                    yield (
+                        json.dumps(
+                            {"type": "error", "message": f"Invalid cursor: {e}", "partial_count": 0}
+                        )
+                        + "\n"
+                    )
                     return
 
             # Final ordering and execution
@@ -385,24 +425,27 @@ def list_files(
                 for op in scan_progress_manager.get_all_current_operations()
             }
 
-            yield json.dumps(
-                {
-                    "type": "metadata",
-                    "total": total_count,
-                    "page_size": page_size,
-                    "has_more": has_more,
-                    "next_cursor": next_cursor,
-                    "filters": {
-                        "path_id": path_id,
-                        "storage_type": storage_type.value if storage_type else None,
-                        "status": file_status,
-                        "search": search,
-                        "tag_ids": tag_id_list,
-                        "is_pinned": is_pinned,
-                    },
-                    "sort": {"by": sort_by, "order": sort_order},
-                }
-            ) + "\n"
+            yield (
+                json.dumps(
+                    {
+                        "type": "metadata",
+                        "total": total_count,
+                        "page_size": page_size,
+                        "has_more": has_more,
+                        "next_cursor": next_cursor,
+                        "filters": {
+                            "path_id": path_id,
+                            "storage_type": storage_type.value if storage_type else None,
+                            "status": file_status,
+                            "search": search,
+                            "tag_ids": tag_id_list,
+                            "is_pinned": is_pinned,
+                        },
+                        "sort": {"by": sort_by, "order": sort_order},
+                    }
+                )
+                + "\n"
+            )
 
             # Stream results
             for file in files_list:
@@ -413,15 +456,18 @@ def list_files(
                 except Exception as e:
                     logger.warning(f"Error serializing file {file.id}: {e}")
 
-            yield json.dumps(
-                {
-                    "type": "complete",
-                    "count": count,
-                    "duration_ms": int((time.time() - start_time) * 1000),
-                    "has_more": has_more,
-                    "next_cursor": next_cursor,
-                }
-            ) + "\n"
+            yield (
+                json.dumps(
+                    {
+                        "type": "complete",
+                        "count": count,
+                        "duration_ms": int((time.time() - start_time) * 1000),
+                        "has_more": has_more,
+                        "next_cursor": next_cursor,
+                    }
+                )
+                + "\n"
+            )
 
         except Exception as e:
             logger.exception("Error streaming files")
@@ -589,9 +635,7 @@ def browse_files(
 
 
 @router.post("/thaw/{inventory_id}")
-def thaw_file(
-    inventory_id: int, db: Annotated[Session, Depends(get_db)], pin: bool = False
-):
+def thaw_file(inventory_id: int, db: Annotated[Session, Depends(get_db)], pin: bool = False):
     """Thaw a file (move back from cold storage to hot storage)."""
     inventory_entry = (
         db.query(FileInventory)
@@ -755,7 +799,9 @@ def freeze_file(
 
 
 @router.post("/relocate/{inventory_id}", status_code=status.HTTP_202_ACCEPTED)
-def relocate_file(inventory_id: int, request: FileRelocateRequest, db: Annotated[Session, Depends(get_db)]):
+def relocate_file(
+    inventory_id: int, request: FileRelocateRequest, db: Annotated[Session, Depends(get_db)]
+):
     """
     Start an async relocation of a file from one cold storage location to another.
 
@@ -912,7 +958,9 @@ def get_relocate_options(inventory_id: int, db: Annotated[Session, Depends(get_d
 
 @router.get("/relocate/tasks")
 def get_relocation_tasks(
-    active_only: bool = FastAPIQuery(False, description="Only return active (pending/running) tasks"),
+    active_only: bool = FastAPIQuery(
+        False, description="Only return active (pending/running) tasks"
+    ),
     limit: int = FastAPIQuery(20, ge=1, le=100, description="Maximum number of tasks to return"),
 ):
     """Get list of relocation tasks."""
