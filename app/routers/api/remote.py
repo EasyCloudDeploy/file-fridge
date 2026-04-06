@@ -270,7 +270,9 @@ def update_instance_config(
     return instance_config_service.get_config_info(db)
 
 
-@router.get("/identity", response_model=RemoteConnectionIdentity, tags=[RESOURCE_REMOTE_CONNECTIONS])
+@router.get(
+    "/identity", response_model=RemoteConnectionIdentity, tags=[RESOURCE_REMOTE_CONNECTIONS]
+)
 def get_public_identity(db: Annotated[Session, Depends(get_db)]):
     """Return the public identity of this File Fridge instance."""
     instance_url = instance_config_service.get_instance_url(db)
@@ -291,7 +293,9 @@ def get_public_identity(db: Annotated[Session, Depends(get_db)]):
     }
 
 
-@router.get("/connection-code", response_model=ConnectionCodeResponse, tags=[RESOURCE_REMOTE_CONNECTIONS])
+@router.get(
+    "/connection-code", response_model=ConnectionCodeResponse, tags=[RESOURCE_REMOTE_CONNECTIONS]
+)
 def get_connection_code(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
@@ -404,7 +408,9 @@ async def create_connection(
     response_model=RemoteConnectionResponse,
     tags=[RESOURCE_REMOTE_CONNECTIONS],
     responses={
-        400: {"description": "Invalid request, signature verification failed, or duplicate fingerprint"},
+        400: {
+            "description": "Invalid request, signature verification failed, or duplicate fingerprint"
+        },
         500: {"description": "Internal server error"},
     },
 )
@@ -631,7 +637,9 @@ async def bulk_migrate_files(
     )
 
 
-@router.get("/transfers", response_model=List[RemoteTransferJobSchema], tags=[RESOURCE_REMOTE_CONNECTIONS])
+@router.get(
+    "/transfers", response_model=List[RemoteTransferJobSchema], tags=[RESOURCE_REMOTE_CONNECTIONS]
+)
 def list_transfers(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],

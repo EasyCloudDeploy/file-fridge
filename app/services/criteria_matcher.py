@@ -4,6 +4,7 @@ import fnmatch
 import logging
 import os
 import platform
+import plistlib
 import re
 import stat
 import subprocess
@@ -92,7 +93,9 @@ class CriteriaMatcher:
         return True, matched_ids
 
     @staticmethod
-    def _handle_atime_criterion(file_path: Path, stat_info: os.stat_result, operator: Operator, value: str) -> bool:
+    def _handle_atime_criterion(
+        file_path: Path, stat_info: os.stat_result, operator: Operator, value: str
+    ) -> bool:
         """Handle ATIME criterion with macOS-specific extensions."""
         atime = stat_info.st_atime
         used_source = "atime"
@@ -108,7 +111,7 @@ class CriteriaMatcher:
             else:
                 atime = 0.0  # Unix epoch (Jan 1, 1970)
                 used_source = "macOS Last Open (never opened - using epoch)"
-        
+
         logger.debug(
             f"File {file_path}: Final atime for criteria check: "
             f"{datetime.fromtimestamp(atime, tz=timezone.utc)} (source: {used_source})"
@@ -313,11 +316,13 @@ class CriteriaMatcher:
                     parts = date_str.rsplit(" ", 1)
                     if len(parts) == 2:
                         dt_naive = datetime.strptime(parts[0], "%Y-%m-%d %H:%M:%S")
-                        return dt_naive.replace(tzinfo=timezone.utc).timestamp()
+                        return dt_naive.timestamp()
             else:
                 # No timezone info, assume UTC
-                dt_naive = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-                return dt_naive.replace(tzinfo=timezone.utc).timestamp()
+                dt_naive = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").replace(
+                    tzinfo=timezone.utc
+                )
+                return dt_naive.timestamp()
         except ValueError:
             return None
         return None
@@ -342,7 +347,10 @@ class CriteriaMatcher:
             # Method 1: Try mdls (Spotlight metadata) - most reliable
             result = subprocess.run(
                 ["mdls", "-name", "kMDItemLastUsedDate", "--", str(file_path)],
-                check=False, capture_output=True, timeout=2, text=True
+                check=False,
+                capture_output=True,
+                timeout=2,
+                text=True,
             )
             if result.returncode == 0 and result.stdout and "=" in result.stdout:
                 date_str = result.stdout.split("=", 1)[1].strip()
@@ -354,18 +362,21 @@ class CriteriaMatcher:
             # Method 2: Try xattr (fallback)
             xattr_result = subprocess.run(
                 ["xattr", "-p", "com.apple.lastuseddate#PS", str(file_path)],
-                check=False, capture_output=True, timeout=2
+                check=False,
+                capture_output=True,
+                timeout=2,
             )
             if xattr_result.returncode == 0 and xattr_result.stdout:
                 try:
-                    import plistlib
                     data = plistlib.loads(xattr_result.stdout)
                     if isinstance(data, dict):
                         # The plist may contain a datetime object directly or under a key
                         for val in data.values():
                             if isinstance(val, datetime):
                                 timestamp = val.timestamp()
-                                logger.debug(f"File {file_path}: Got Last Open from xattr: {timestamp}")
+                                logger.debug(
+                                    f"File {file_path}: Got Last Open from xattr: {timestamp}"
+                                )
                                 return timestamp
                 except Exception as ex:
                     logger.debug(f"File {file_path}: Error parsing xattr plist: {ex}")
