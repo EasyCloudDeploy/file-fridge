@@ -3,6 +3,7 @@
 import enum
 import os
 import threading
+from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 from typing import Optional
 
 import sqlalchemy as sa
@@ -55,7 +56,6 @@ class EncryptionManager:
         if self._multi_cipher is not None:
             return self._multi_cipher
 
-        from cryptography.fernet import MultiFernet
         from sqlalchemy import text
         from sqlalchemy.orm import Session
 

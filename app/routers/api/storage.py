@@ -95,7 +95,9 @@ def get_storage_stats(db: Annotated[Session, Depends(get_db)]):
 
 
 @router.get("/locations", response_model=List[ColdStorageLocationWithStats])
-def list_storage_locations(skip: int = 0, limit: int = 100, db: Annotated[Session, Depends(get_db)]):
+def list_storage_locations(
+    db: Annotated[Session, Depends(get_db)], skip: int = 0, limit: int = 100
+):
     """List all cold storage locations."""
     locations = db.query(ColdStorageLocation).offset(skip).limit(limit).all()
 
@@ -315,8 +317,8 @@ def update_storage_location(
 @router.delete("/locations/{location_id}", status_code=status.HTTP_200_OK)
 def delete_storage_location(
     location_id: int,
-    force: bool = Query(False, description="Force delete the location even if it's not empty"),
     db: Annotated[Session, Depends(get_db)],
+    force: bool = Query(False, description="Force delete the location even if it's not empty"),
 ):
     """
     Delete a cold storage location.

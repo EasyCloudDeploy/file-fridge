@@ -343,12 +343,12 @@ def get_path(path_id: int, db: Annotated[Session, Depends(get_db)]):
 @router.put("/{path_id}", response_model=schemas.MonitoredPath)
 def update_path(
     path_id: int,
+    db: Annotated[Session, Depends(get_db)],
     path_update: schemas.MonitoredPathUpdate,
     confirm_cold_storage_change: bool = Query(
         False, description="Confirm cold storage path change"
     ),
     migration_action: str = Query(None, description="Migration action: 'move' or 'abandon'"),
-    db: Annotated[Session, Depends(get_db)],
 ):
     """Update a monitored path."""
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
@@ -457,11 +457,12 @@ def update_path(
 @router.delete("/{path_id}", status_code=status.HTTP_200_OK)
 def delete_path(
     path_id: int,
+    db: Annotated[Session, Depends(get_db)],
     undo_operations: bool = Query(
         False, description="If True, move all files back from cold storage before deleting"
     ),
-    db: Annotated[Session, Depends(get_db)],
 ):
+
     """
     Delete a monitored path.
 

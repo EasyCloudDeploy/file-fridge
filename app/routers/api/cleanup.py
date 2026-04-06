@@ -13,19 +13,25 @@ router = APIRouter(prefix="/api/v1/cleanup", tags=["cleanup"])
 
 
 @router.post("")
-def cleanup_missing_files(path_id: Optional[int] = Query(None), db: Annotated[Session, Depends(get_db)]):
+def cleanup_missing_files(
+    db: Annotated[Session, Depends(get_db)], path_id: Optional[int] = Query(None)
+):
     """Clean up FileRecord entries for files that no longer exist."""
     return FileCleanup.cleanup_missing_files(db, path_id=path_id)
 
 
 @router.post("/duplicates")
-def cleanup_duplicates(path_id: Optional[int] = Query(None), db: Annotated[Session, Depends(get_db)]):
+def cleanup_duplicates(
+    db: Annotated[Session, Depends(get_db)], path_id: Optional[int] = Query(None)
+):
     """Clean up duplicate FileRecord entries."""
     return FileCleanup.cleanup_duplicates(db, path_id=path_id)
 
 
 @router.post("/symlinks")
-def cleanup_symlinks(path_id: Optional[int] = Query(None), db: Annotated[Session, Depends(get_db)]):
+def cleanup_symlinks(
+    db: Annotated[Session, Depends(get_db)], path_id: Optional[int] = Query(None)
+):
     """
     Clean up symlink entries from FileInventory.
 

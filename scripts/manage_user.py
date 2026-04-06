@@ -4,7 +4,7 @@ import os
 import sys
 
 # Add the project root to the Python path
-project_root = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 
@@ -38,8 +38,10 @@ def reset_password(username: str, new_password: str):
         db.close()
 
 
-def create_user(username: str, password: str):
+def create_user(username: str, password: str, roles: list = None):
     """Create a new user."""
+    if roles is None:
+        roles = ["admin"]
     db = SessionLocal()
     try:
         existing = db.query(User).filter(User.username == username).first()
@@ -47,10 +49,10 @@ def create_user(username: str, password: str):
             logger.error(f"User '{username}' already exists.")
             return
 
-        new_user = User(username=username, password_hash=hash_password(password))
+        new_user = User(username=username, password_hash=hash_password(password), roles=roles)
         db.add(new_user)
         db.commit()
-        logger.info(f"User '{username}' created successfully.")
+        logger.info(f"User '{username}' created successfully with roles: {roles}")
     finally:
         db.close()
 
@@ -69,13 +71,14 @@ def main():
     create_parser = subparsers.add_parser("create-user", help="Create a new user.")
     create_parser.add_argument("username", help="The username of the user.")
     create_parser.add_argument("password", help="The password for the user.")
+    create_parser.add_argument("--role", action="append", dest="roles", help="Role(s) to assign to the user (can be specified multiple times). Defaults to ['admin'].")
 
     args = parser.parse_args()
 
     if args.command == "reset-password":
         reset_password(args.username, args.new_password)
     elif args.command == "create-user":
-        create_user(args.username, args.password)
+        create_user(args.username, args.password, args.roles)
 
 
 if __name__ == "__main__":

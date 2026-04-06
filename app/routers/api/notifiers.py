@@ -71,7 +71,9 @@ def _validate_notifier_config(
 
 
 @router.get("", response_model=List[Notifier])
-def list_notifiers(skip: int = 0, limit: int = 100, db: Annotated[Session, Depends(get_db)]):
+def list_notifiers(
+    db: Annotated[Session, Depends(get_db)], skip: int = 0, limit: int = 100
+):
     """
     List all configured notifiers.
 

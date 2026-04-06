@@ -5,9 +5,9 @@ import base64
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Generator, List, Optional
+from typing import Annotated, Any, Dict, Generator, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -502,7 +502,9 @@ def move_file(
 
 @router.get("/browse")
 def browse_files(
-    directory: str, storage_type: Optional[str] = "hot", db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_db)],
+    directory: str,
+    storage_type: Optional[str] = "hot",
 ):
     """Browse files in a directory. Restricted to configured paths."""
     try:
@@ -584,7 +586,9 @@ def browse_files(
 
 
 @router.post("/thaw/{inventory_id}")
-def thaw_file(inventory_id: int, pin: bool = False, db: Annotated[Session, Depends(get_db)]):
+def thaw_file(
+    inventory_id: int, db: Annotated[Session, Depends(get_db)], pin: bool = False
+):
     """Thaw a file (move back from cold storage to hot storage)."""
     inventory_entry = (
         db.query(FileInventory)
@@ -668,9 +672,9 @@ def get_freeze_options(inventory_id: int, db: Annotated[Session, Depends(get_db)
 @router.post("/freeze/{inventory_id}")
 def freeze_file(
     inventory_id: int,
+    db: Annotated[Session, Depends(get_db)],
     storage_location_id: int = Query(..., description="Target cold storage location ID"),
     pin: bool = Query(False, description="Pin file after freezing"),
-    db: Annotated[Session, Depends(get_db)],
 ):
     """
     Freeze a file (move from hot storage to cold storage).
@@ -946,10 +950,10 @@ def get_file_relocation_status(inventory_id: int):
 
 @router.post("/metadata/backfill", status_code=status.HTTP_200_OK)
 def backfill_metadata(
+    db: Annotated[Session, Depends(get_db)],
     path_id: Optional[int] = None,
     batch_size: int = Query(100, ge=1, le=1000, description="Files to process per batch"),
     compute_checksum: bool = Query(True, description="Whether to compute file checksums"),
-    db: Annotated[Session, Depends(get_db)],
 ):
     """Backfill metadata (extension, MIME type, checksum) for existing files."""
     from app.services.metadata_backfill import MetadataBackfillService
@@ -972,8 +976,8 @@ def backfill_metadata(
 @router.post("/bulk/thaw", response_model=BulkActionResponse)
 def bulk_thaw_files(
     request: BulkFileActionRequest,
-    pin: bool = Query(False, description="Pin files after thawing"),
     db: Annotated[Session, Depends(get_db)],
+    pin: bool = Query(False, description="Pin files after thawing"),
 ):
     """
     Bulk thaw multiple files from cold storage to hot storage.

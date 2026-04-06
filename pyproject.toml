@@ -48,6 +48,7 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-timeout>=2.2.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
     "pytest-factoryboy>=2.6.0",
@@ -72,6 +73,7 @@ pattern = "(?P<version>.*)"
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "pytest-timeout>=2.2.0",
     "black>=23.0.0",
     "ruff>=0.1.0",
     "pytest-factoryboy>=2.6.0",
@@ -100,8 +102,31 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
+timeout = 300
 markers = [
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
 ]
+
+[tool.coverage.run]
+omit = [
+    "alembic/*",
+    "app/main.py",
+    "tests/*",
+    "*/__pycache__/*",
+    ".venv/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.debug:",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == \"__main__\":",
+]
+ignore_errors = true
 

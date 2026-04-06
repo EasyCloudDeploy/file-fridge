@@ -957,9 +957,9 @@ class RelocationTaskBase(BaseModel):
     inventory_id: int
     file_path: str
     source_location_id: int
-    source_label: str
+    source_location_name: str
     target_location_id: int
-    target_label: str
+    target_location_name: str
     status: str
     bytes_total: int
     bytes_transferred: int

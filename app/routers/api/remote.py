@@ -533,8 +533,8 @@ async def update_connection(
 
 @router.post("/terminate-connection", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def terminate_connection(
-    remote_conn: RemoteConnection = Depends(verify_remote_signature),
     db: Annotated[Session, Depends(get_db)],
+    remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """Handle an incoming termination request."""
     remote_connection_service.handle_terminate_connection(db, remote_conn.remote_fingerprint)
@@ -819,8 +819,8 @@ class ReceiveHeader:
 @router.post("/receive", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def receive_chunk(
     request: Request,
-    headers: ReceiveHeader = Depends(ReceiveHeader),
     db: Annotated[Session, Depends(get_db)],
+    headers: ReceiveHeader = Depends(ReceiveHeader),
 ):
     """Inter-instance endpoint to receive file chunks."""
     logger.info(
@@ -1036,11 +1036,11 @@ def _get_relative_path(file_obj: FileInventory, monitored_path: MonitoredPath) -
 @router.get("/browse-files", tags=[RESOURCE_REMOTE_CONNECTIONS])
 def browse_remote_files(
     path_id: int,
+    db: Annotated[Session, Depends(get_db)],
     skip: int = 0,
     limit: int = 100,
     search: Optional[str] = Query(None, description="Search in file path"),
     storage_type: Optional[StorageTypeSchema] = Query(None, description="Filter by storage type"),
-    db: Annotated[Session, Depends(get_db)],
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """
@@ -1187,11 +1187,11 @@ async def sync_transfer_mode(
 async def browse_remote_instance_files(
     connection_id: int,
     path_id: int,
+    db: Annotated[Session, Depends(get_db)],
     skip: int = 0,
     limit: int = 100,
     search: Optional[str] = Query(None),
     storage_type: Optional[str] = Query(None),
-    db: Annotated[Session, Depends(get_db)],
     current_user: dict = Depends(get_current_user),
 ):
     """Browse files on a remote instance for pull transfer."""
