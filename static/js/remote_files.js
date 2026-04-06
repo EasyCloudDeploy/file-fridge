@@ -82,6 +82,7 @@ const columnDefs = [
 
 // AG Grid Options
 const gridOptions = {
+    theme: 'legacy',
     columnDefs: columnDefs,
     rowData: [],
     defaultColDef: {

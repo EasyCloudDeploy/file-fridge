@@ -21,7 +21,7 @@ def get_active_migrations(db: Annotated[Session, Depends(get_db)]) -> List[Dict[
 
 @router.get("/recent", response_model=List[RelocationTaskOut])
 def get_recent_migrations(
-    limit: int = 20, db: Annotated[Session, Depends(get_db)]
+    db: Annotated[Session, Depends(get_db)], limit: int = 20
 ) -> List[Dict[str, Any]]:  # NOSONAR
     """Get recent file migrations."""
     return relocation_manager.get_recent_tasks(limit, db)

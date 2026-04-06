@@ -53,7 +53,9 @@ def get_statistics(db: Annotated[Session, Depends(get_db)]):
 
 
 @router.get("/detailed", response_model=DetailedStatistics)
-def get_detailed_statistics(days: Optional[int] = None, db: Annotated[Session, Depends(get_db)]):
+def get_detailed_statistics(
+    db: Annotated[Session, Depends(get_db)], days: Optional[int] = None
+):
     """Get comprehensive statistics with detailed metrics and trends."""
     if days is None:
         days = settings.stats_retention_days
@@ -257,7 +259,7 @@ def cleanup_old_stats(db: Annotated[Session, Depends(get_db)]):
 
 @router.get("/aggregated")
 def get_aggregated_stats(
-    period: str = "daily", days: int = 30, db: Annotated[Session, Depends(get_db)]  # daily, weekly, monthly
+    db: Annotated[Session, Depends(get_db)], period: str = "daily", days: int = 30
 ):
     """Get time-based aggregated statistics."""
     end_date = datetime.now(tz=timezone.utc)

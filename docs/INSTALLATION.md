@@ -133,14 +133,16 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Once installed, refer to the **[Usage Guide](USAGE.md)** to configure your storage locations, monitored paths, and criteria.
 
 ### Creating an Initial User
-If you have authentication enabled, you'll need to create a user using the `manage_user.py` script:
+
+If you have authentication enabled, you'll need to create a user using the `scripts/manage_user.py` script:
 
 **Using uv:**
 ```bash
-uv run python manage_user.py create --username admin --password secret
+uv run python scripts/manage_user.py create-user admin secret
 ```
 
 **Using Docker:**
 ```bash
-docker exec -it file-fridge python manage_user.py create --username admin --password secret
+docker exec -it file-fridge python scripts/manage_user.py create-user admin secret
 ```
+

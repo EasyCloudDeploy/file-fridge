@@ -18,4 +18,18 @@ export default defineConfig({
         video: 'retain-on-failure',
     },
     reporter: [['list'], ['html', { open: 'never' }]],
+    webServer: {
+        command: 'uv run uvicorn app.main:app --host 127.0.0.1 --port 8000',
+        url: 'http://127.0.0.1:8000/health',
+        reuseExistingServer: !process.env.CI,
+        stdout: 'pipe',
+        stderr: 'pipe',
+        timeout: 120_000,
+        env: {
+            SECRET_KEY: 'dummy_key_for_e2e_testing',
+            DATABASE_PATH: 'data/test_file_fridge.db',
+            DISABLE_RATE_LIMIT: 'true',
+            TESTING: 'true'
+        },
+    },
 });

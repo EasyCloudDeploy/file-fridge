@@ -1,7 +1,7 @@
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 
-const username = process.env.FILE_FRIDGE_E2E_USERNAME;
-const password = process.env.FILE_FRIDGE_E2E_PASSWORD;
+const username = process.env.FILE_FRIDGE_E2E_USERNAME || 'admin';
+const password = process.env.FILE_FRIDGE_E2E_PASSWORD || 'secret123';
 let cachedToken: string | null = null;
 
 export function getCredentials(): { username: string; password: string } {
@@ -18,11 +18,32 @@ export async function loginViaUi(page: Page): Promise<void> {
     const credentials = getCredentials();
 
     await page.goto('/login');
-    await page.getByLabel(/username/i).fill(credentials.username);
-    await page.getByLabel(/password/i).fill(credentials.password);
-    await page.getByRole('button', { name: /login|create account/i }).click();
-    await page.waitForURL('**/');
+    await page.locator('#username').fill(credentials.username);
+    await page.locator('#password').fill(credentials.password);
+    
+    await page.locator('#submit-btn').click();
+    
+    // Wait for either success (redirection) or error message
+    await Promise.race([
+        page.waitForURL(/\/$/),
+        page.waitForSelector('#error-message:not(.d-none)'),
+    ]);
+
+    const errorVisible = await page.locator('#error-message').isVisible();
+    if (errorVisible) {
+        const errorText = await page.locator('#error-text').textContent();
+        throw new Error(`Login failed via UI: ${errorText}`);
+    }
+
     await expect(page.locator('#app-shell')).toBeVisible();
+}
+
+/**
+ * Fast login by obtaining a token via API and seeding it into sessionStorage.
+ */
+export async function fastLogin(page: Page, request: APIRequestContext): Promise<void> {
+    const token = await apiLogin(request);
+    await seedAuthToken(page, token);
 }
 
 export async function apiLogin(request: APIRequestContext): Promise<string> {

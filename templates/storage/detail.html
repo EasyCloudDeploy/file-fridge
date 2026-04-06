@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block title %}Storage Location Details - File Fridge{% endblock %}
+{% block page_title %}Storage Location Details{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <h5 id="storage-name">Loading...</h5>
+                    <p id="storage-path" class="text-muted"></p>
+                    <hr>
+                    <div id="storage-details">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">Loading...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="/storage-locations" class="btn btn-secondary">Back to List</a>
+                    <a id="edit-link" href="#" class="btn btn-primary">Edit</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const locationId = window.location.pathname.split('/').pop();
+    document.getElementById('edit-link').href = `/storage-locations/${locationId}/edit`;
+
+    async function loadStorageDetails() {
+        try {
+            const response = await authenticatedFetch(`/api/v1/storage/locations/${locationId}`);
+            if (!response.ok) throw new Error('Failed to load storage details');
+            const data = await response.json();
+            
+            document.getElementById('storage-name').textContent = data.name;
+            document.getElementById('storage-path').textContent = data.path;
+            
+            let detailsHtml = `
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-group-item"><strong>Encryption:</strong> ${data.is_encrypted ? 'Enabled' : 'Disabled'}</li>
+                    <li class="list-group-item"><strong>Caution Threshold:</strong> ${data.caution_threshold_percent}%</li>
+                    <li class="list-group-item"><strong>Critical Threshold:</strong> ${data.critical_threshold_percent}%</li>
+                </ul>
+            `;
+            document.getElementById('storage-details').innerHTML = detailsHtml;
+        } catch (error) {
+            document.getElementById('storage-details').innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+        }
+    }
+
+    window.runWhenFileFridgeReady(loadStorageDetails);
+</script>
+{% endblock %}
