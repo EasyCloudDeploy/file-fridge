@@ -95,7 +95,6 @@ class CriteriaMatcher:
     def _handle_atime_criterion(file_path: Path, stat_info: os.stat_result, operator: Operator, value: str) -> bool:
         """Handle ATIME criterion with macOS-specific extensions."""
         atime = stat_info.st_atime
-        original_atime = atime
         used_source = "atime"
 
         if platform.system() == "Darwin":  # macOS
@@ -352,8 +351,24 @@ class CriteriaMatcher:
                     logger.debug(f"File {file_path}: Got Last Open from mdls: {timestamp}")
                     return timestamp
 
-            # Method 2: Try xattr (fallback - currently logic placeholder as per original)
-            # ... existing xattr logic ...
+            # Method 2: Try xattr (fallback)
+            xattr_result = subprocess.run(
+                ["xattr", "-p", "com.apple.lastuseddate#PS", str(file_path)],
+                check=False, capture_output=True, timeout=2
+            )
+            if xattr_result.returncode == 0 and xattr_result.stdout:
+                try:
+                    import plistlib
+                    data = plistlib.loads(xattr_result.stdout)
+                    if isinstance(data, dict):
+                        # The plist may contain a datetime object directly or under a key
+                        for val in data.values():
+                            if isinstance(val, datetime):
+                                timestamp = val.timestamp()
+                                logger.debug(f"File {file_path}: Got Last Open from xattr: {timestamp}")
+                                return timestamp
+                except Exception as ex:
+                    logger.debug(f"File {file_path}: Error parsing xattr plist: {ex}")
         except Exception as e:
             logger.debug(f"File {file_path}: Error getting macOS Last Open time: {e}")
 

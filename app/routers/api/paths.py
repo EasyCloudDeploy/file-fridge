@@ -5,7 +5,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Annotated, List, Optional, Tuple
+from typing import Annotated, Any, Dict, List, Optional, Tuple, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
@@ -149,9 +149,11 @@ def list_paths(
     return result
 
 
-def _identify_unique_volumes(paths: List[MonitoredPath]) -> dict:
+def _identify_unique_volumes(
+    paths: List[MonitoredPath],
+) -> Dict[Union[int, str], Union[str, List[str], List[Tuple[str, str]]]]:
     """Identify unique storage volumes from a list of monitored paths."""
-    unique_volumes = {}
+    unique_volumes: Dict[Union[int, str], Any] = {}
     for path in paths:
         path_str = path.source_path
         try:
@@ -169,15 +171,16 @@ def _identify_unique_volumes(paths: List[MonitoredPath]) -> dict:
             if device_id not in unique_volumes:
                 unique_volumes[device_id] = path_str
         except (FileNotFoundError, PermissionError) as e:
-            msg = "Permission denied" if isinstance(e, PermissionError) else MSG_PATH_NOT_FOUND
-            if isinstance(e, PermissionError):
-                logger.exception(f"Permission denied accessing path {path_str}")
-            
-            key = "not_found" if isinstance(e, FileNotFoundError) else "error"
-            val = path_str if key == "not_found" else (path_str, msg)
+            is_perm = isinstance(e, PermissionError)
+            msg = "Permission denied" if is_perm else MSG_PATH_NOT_FOUND
+            if is_perm:
+                logger.exception("Permission denied accessing path %s", path_str)
+
+            key = "error" if is_perm else "not_found"
+            val = (path_str, msg) if is_perm else path_str
             unique_volumes.setdefault(key, []).append(val)
         except Exception as e:
-            logger.exception(f"Error stating path {path_str}")
+            logger.exception("Error stating path %s", path_str)
             unique_volumes.setdefault("error", []).append((path_str, str(e)))
     return unique_volumes
 
@@ -191,7 +194,7 @@ def get_hot_storage_stats(db: Annotated[Session, Depends(get_db)] = None):
     stats_list = []
     for device_id, path_info in unique_volumes.items():
         if device_id == "not_found":
-            for p in path_info:
+            for p in path_info:  # type: ignore
                 stats_list.append(
                     schemas.StorageStats(
                         path=p, total_bytes=0, used_bytes=0, free_bytes=0, error=MSG_PATH_NOT_FOUND
@@ -200,7 +203,7 @@ def get_hot_storage_stats(db: Annotated[Session, Depends(get_db)] = None):
             continue
 
         if device_id == "error":
-            for p, err_msg in path_info:
+            for p, err_msg in path_info:  # type: ignore
                 stats_list.append(
                     schemas.StorageStats(
                         path=p, total_bytes=0, used_bytes=0, free_bytes=0, error=err_msg
@@ -208,7 +211,7 @@ def get_hot_storage_stats(db: Annotated[Session, Depends(get_db)] = None):
                 )
             continue
 
-        path_str = path_info
+        path_str = path_info  # type: ignore
         try:
             total, used, free = shutil.disk_usage(path_str)
             stats_list.append(
@@ -220,10 +223,14 @@ def get_hot_storage_stats(db: Annotated[Session, Depends(get_db)] = None):
                 )
             )
         except Exception as e:
-            logger.exception(f"Error getting disk usage for {path_str}")
+            logger.exception("Error getting disk usage for %s", path_str)
             stats_list.append(
                 schemas.StorageStats(
-                    path=path_str, total_bytes=0, used_bytes=0, free_bytes=0, error=f"Disk usage error: {e}"
+                    path=path_str,
+                    total_bytes=0,
+                    used_bytes=0,
+                    free_bytes=0,
+                    error=f"Disk usage error: {e}",
                 )
             )
 
