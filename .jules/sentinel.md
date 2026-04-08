@@ -34,3 +34,7 @@
 **Vulnerability:** The tag creation endpoint (`/api/v1/tags`) returned an HTTP error detail containing unsanitized user input (`tag.name`) when attempting to create a duplicate tag, which could result in reflected/stored XSS and information disclosure.
 **Learning:** Any user input reflected in an API response, even within an error message or exception detail, can pose an injection or XSS risk. Input should not be echoed back to the user blindly.
 **Prevention:** Avoid reflecting user input in error messages. Log the event server-side with proper sanitization (e.g., using `sanitize_for_log`) while returning generic error messages to the client.
+## 2026-03-24 - [HIGH] Fix Command-Line Argument/Option Injection
+**Vulnerability:** The application executed the `xattr` command via `subprocess.run` passing a variable file path (`["xattr", "-p", "com.apple.lastuseddate#PS", str(file_path)]`). If the file path started with a `-`, it could be interpreted as an option by the `xattr` command, leading to Command-Line Argument/Option Injection (CWE-88).
+**Learning:** Any variable input to a command execution that could start with a dash (`-`) might be interpreted as an option, potentially altering the command's behavior or introducing security vulnerabilities, even if shell execution is disabled (`shell=False`).
+**Prevention:** Always use `--` to signify the end of command options before passing any variable input (especially paths or filenames) to subprocess commands. For example: `["xattr", "-p", "com.apple.lastuseddate#PS", "--", str(file_path)]`.
