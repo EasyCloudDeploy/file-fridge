@@ -115,10 +115,14 @@ function dateCellRenderer(params) {
 function statusCellRenderer(params) {
     const file = params.data;
     let statusBadgeClass = 'bg-secondary';
+    let statusText = file.status;
     if (file.status === 'active') {
         statusBadgeClass = 'bg-success';
     } else if (file.status === 'migrating') {
         statusBadgeClass = 'bg-warning text-dark';
+    } else if (file.status === 'dry_run') {
+        statusBadgeClass = 'bg-info text-dark';
+        statusText = 'dry_run (to move)';
     } else if (file.status === 'missing' || file.status === 'deleted') {
         statusBadgeClass = 'bg-danger';
     }
@@ -127,7 +131,7 @@ function statusCellRenderer(params) {
         ? '<i class="bi bi-pin-fill text-secondary me-1" title="File is pinned"></i>'
         : '';
 
-    return `${pinIndicator}<span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span>`;
+    return `${pinIndicator}<span class="badge ${statusBadgeClass}">${escapeHtml(statusText)}</span>`;
 }
 
 function tagsCellRenderer(params) {

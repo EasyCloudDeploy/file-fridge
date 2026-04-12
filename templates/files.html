@@ -77,7 +77,7 @@
 <!-- Search and Filters -->
 <section class="panel-section mb-3">
 <div class="row g-3 filters-row">
-    <div class="col-12 col-md-6 mb-2 mb-md-0">
+    <div class="col-12 col-md-4 mb-2 mb-md-0">
         <div class="input-group">
             <span class="input-group-text"><i class="bi bi-search"></i></span>
             <input type="text" class="form-control" id="search_input" placeholder="Search file paths..."
@@ -92,7 +92,7 @@
             </button>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-md-2">
         <div class="input-group">
             <label class="input-group-text d-none d-sm-flex" for="path_id_filter">Path:</label>
             <select class="form-select" id="path_id_filter" aria-label="Filter by path">
@@ -107,6 +107,18 @@
                 <option value="">All</option>
                 <option value="hot">Hot</option>
                 <option value="cold">Cold</option>
+            </select>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="input-group">
+            <label class="input-group-text d-none d-sm-flex" for="status_filter">Status:</label>
+            <select class="form-select" id="status_filter" aria-label="Filter by status">
+                <option value="">All</option>
+                <option value="active">Active</option>
+                <option value="dry_run">Dry Run</option>
+                <option value="migrating">Migrating</option>
+                <option value="missing">Missing/Deleted</option>
             </select>
         </div>
     </div>
