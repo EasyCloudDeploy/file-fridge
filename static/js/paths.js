@@ -685,6 +685,14 @@ function startProgressPolling(pathId) {
         stopBtn.onclick = () => stopScan(pathId);
     }
 
+    const stopBtnHeader = document.getElementById('stop-scan-btn-header');
+    if (stopBtnHeader) {
+        stopBtnHeader.style.display = '';
+        stopBtnHeader.disabled = false;
+        stopBtnHeader.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Scan';
+        stopBtnHeader.onclick = () => stopScan(pathId);
+    }
+
     // Clear any existing interval
     if (progressPollingInterval) {
         clearInterval(progressPollingInterval);
@@ -703,6 +711,11 @@ async function stopScan(pathId) {
         stopBtn.disabled = true;
         stopBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Stopping...';
     }
+    const stopBtnHeader = document.getElementById('stop-scan-btn-header');
+    if (stopBtnHeader) {
+        stopBtnHeader.disabled = true;
+        stopBtnHeader.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Stopping...';
+    }
 
     try {
         const response = await authenticatedFetch(`${API_BASE_URL}/paths/${pathId}/scan/stop`, {
@@ -718,6 +731,10 @@ async function stopScan(pathId) {
                 stopBtn.disabled = false;
                 stopBtn.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Scan';
             }
+            if (stopBtnHeader) {
+                stopBtnHeader.disabled = false;
+                stopBtnHeader.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Scan';
+            }
         }
     } catch (error) {
         console.error('Error stopping scan:', error);
@@ -725,6 +742,10 @@ async function stopScan(pathId) {
         if (stopBtn) {
             stopBtn.disabled = false;
             stopBtn.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Scan';
+        }
+        if (stopBtnHeader) {
+            stopBtnHeader.disabled = false;
+            stopBtnHeader.innerHTML = '<i class="bi bi-stop-circle"></i> Stop Scan';
         }
     }
 }
@@ -755,6 +776,10 @@ async function pollProgress(pathId) {
             const stopBtn = document.getElementById('stop-scan-btn');
             if (stopBtn) {
                 stopBtn.style.display = 'none';
+            }
+            const stopBtnHeader = document.getElementById('stop-scan-btn-header');
+            if (stopBtnHeader) {
+                stopBtnHeader.style.display = 'none';
             }
 
             // Hide progress after a delay
