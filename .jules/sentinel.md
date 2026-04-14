@@ -34,3 +34,8 @@
 **Vulnerability:** The tag creation endpoint (`/api/v1/tags`) returned an HTTP error detail containing unsanitized user input (`tag.name`) when attempting to create a duplicate tag, which could result in reflected/stored XSS and information disclosure.
 **Learning:** Any user input reflected in an API response, even within an error message or exception detail, can pose an injection or XSS risk. Input should not be echoed back to the user blindly.
 **Prevention:** Avoid reflecting user input in error messages. Log the event server-side with proper sanitization (e.g., using `sanitize_for_log`) while returning generic error messages to the client.
+
+## 2026-04-14 - [CRITICAL] Fix Command-Line Argument Injection in subprocess call
+**Vulnerability:** The `CriteriaMatcher._get_macos_last_open` function called `xattr` via `subprocess.run` passing `str(file_path)` directly after `-p` option without a `--` separator. This allows Command-Line Argument/Option Injection (CWE-88) if a user-controlled file path starts with `-`, potentially executing arbitrary options.
+**Learning:** Whenever using `subprocess.run` (or similar functions) to invoke command-line utilities with file paths or user input that might start with a dash (`-`), the `--` separator must be used to unambiguously denote the end of command options.
+**Prevention:** Always insert `--` before the file path argument in `subprocess` calls (e.g., `["command", "option", "--", str(file_path)]`).
