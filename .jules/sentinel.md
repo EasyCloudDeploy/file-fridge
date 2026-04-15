@@ -34,3 +34,8 @@
 **Vulnerability:** The tag creation endpoint (`/api/v1/tags`) returned an HTTP error detail containing unsanitized user input (`tag.name`) when attempting to create a duplicate tag, which could result in reflected/stored XSS and information disclosure.
 **Learning:** Any user input reflected in an API response, even within an error message or exception detail, can pose an injection or XSS risk. Input should not be echoed back to the user blindly.
 **Prevention:** Avoid reflecting user input in error messages. Log the event server-side with proper sanitization (e.g., using `sanitize_for_log`) while returning generic error messages to the client.
+
+## 2026-04-15 - [CRITICAL] Fix Command-Line Argument Injection (CWE-88)
+**Vulnerability:** The application used `subprocess.run` with variable file paths without using `--` to mark the end of options. This allowed Command-Line Argument/Option Injection if a file path started with a `-` (e.g., `-name`), potentially leading to arbitrary code execution or unintended command behavior.
+**Learning:** When passing user-controlled or variable data (like file paths) to a shell command via `subprocess`, always use `--` before the data arguments. This explicitly tells the command line parser that all subsequent arguments are not options, regardless of their prefix.
+**Prevention:** Always insert `--` before variable arguments in `subprocess.run` or similar functions to prevent option injection.
