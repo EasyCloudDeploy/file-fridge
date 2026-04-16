@@ -1,6 +1,7 @@
 """SQLAlchemy database models."""
 
 import enum
+import json
 import os
 import threading
 from cryptography.fernet import Fernet, MultiFernet, InvalidToken
@@ -207,6 +208,14 @@ class EncryptionStatus(str, enum.Enum):
     DECRYPTING = "decrypting"  # Decryption in progress
 
 
+class ColdStorageBackendType(str, enum.Enum):
+    """Cold storage backend types."""
+
+    LOCAL = "local"
+    S3 = "s3"
+    GDRIVE = "gdrive"
+
+
 # Association table for many-to-many relationship between MonitoredPath and ColdStorageLocation
 path_storage_location_association = Table(
     "path_storage_location_association",
@@ -226,6 +235,11 @@ class ColdStorageLocation(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, unique=True, index=True)
     path = Column(String, nullable=False, unique=True)
+    backend_type = Column(
+        SQLEnum(ColdStorageBackendType), nullable=False, default=ColdStorageBackendType.LOCAL
+    )
+    operation_mode = Column(SQLEnum(OperationType), nullable=False, default=OperationType.MOVE)
+    backend_config_encrypted = Column(Text, nullable=True)
     caution_threshold_percent = Column(Integer, nullable=False, default=20)  # Warn at 20% free
     critical_threshold_percent = Column(Integer, nullable=False, default=10)  # Critical at 10% free
     is_encrypted = Column(Boolean, nullable=False, default=False)
@@ -233,6 +247,17 @@ class ColdStorageLocation(Base):
         SQLEnum(EncryptionStatus), nullable=False, default=EncryptionStatus.NONE
     )
     permissions_error = Column(Text, nullable=True)  # Set when read/write permissions are denied
+    local_drive_identifier = Column(String, nullable=True, index=True)
+    local_drive_label = Column(String, nullable=True)
+    local_drive_mount_path = Column(String, nullable=True)
+    local_drive_is_removable = Column(Boolean, nullable=False, default=False)
+    local_drive_is_connected = Column(Boolean, nullable=False, default=True)
+    local_drive_last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    allow_offline = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )  # If true, missing/disconnected storage is treated as expected (deep-cold removable media)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -242,6 +267,25 @@ class ColdStorageLocation(Base):
         secondary=path_storage_location_association,
         back_populates="storage_locations",
     )
+
+    def get_backend_config(self) -> dict:
+        """Return decrypted backend config JSON payload for this location."""
+        if not self.backend_config_encrypted:
+            return {}
+        decrypted = encryption_manager.decrypt(self.backend_config_encrypted)
+        if not decrypted:
+            return {}
+        try:
+            return json.loads(decrypted)
+        except json.JSONDecodeError:
+            return {}
+
+    def set_backend_config(self, config: dict) -> None:
+        """Encrypt and persist backend config JSON payload."""
+        if not config:
+            self.backend_config_encrypted = None
+            return
+        self.backend_config_encrypted = encryption_manager.encrypt(json.dumps(config))
 
 
 class MonitoredPath(Base):

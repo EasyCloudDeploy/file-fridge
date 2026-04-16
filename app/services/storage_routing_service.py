@@ -15,6 +15,7 @@ from app.models import (
     FileTransactionHistory,
     MonitoredPath,
 )
+from app.services.cold_storage_backends import get_backend
 
 logger = logging.getLogger(__name__)
 
@@ -107,15 +108,18 @@ class StorageRoutingService:
 
         for location in monitored_path.storage_locations:
             try:
-                path = Path(location.path)
-
-                if not path.exists() or not path.is_dir():
+                backend = get_backend(location)
+                is_valid, _validation_error = backend.validate_location(location)
+                if not is_valid:
                     logger.warning(f"Storage location not accessible: {location.path}")
                     continue
 
-                # Get disk usage
-                stat = shutil.disk_usage(path)
-                free_space = stat.free
+                if backend.capabilities().supports_local_path_stats:
+                    stat = shutil.disk_usage(Path(location.path))
+                    free_space = stat.free
+                else:
+                    # Allow non-local backends without reliable disk stats.
+                    free_space = 10**15
 
                 # Minimum space check
                 min_space = StorageRoutingService.MIN_FREE_SPACE_MB * 1024 * 1024
@@ -225,11 +229,15 @@ class StorageRoutingService:
             True if location has sufficient space
         """
         try:
-            path = Path(location.path)
-            if not path.exists():
+            backend = get_backend(location)
+            is_valid, _validation_error = backend.validate_location(location)
+            if not is_valid:
                 return False
 
-            stat = shutil.disk_usage(path)
+            if not backend.capabilities().supports_local_path_stats:
+                return True
+
+            stat = shutil.disk_usage(Path(location.path))
             min_space = StorageRoutingService.MIN_FREE_SPACE_MB * 1024 * 1024
             required_space = file_size_bytes + (1024 * 1024)  # +1MB buffer
 
@@ -255,18 +263,18 @@ class StorageRoutingService:
             Dictionary with health metrics
         """
         try:
-            path = Path(location.path)
-
-            if not path.exists() or not path.is_dir():
+            backend = get_backend(location)
+            is_valid, validation_error = backend.validate_location(location)
+            if not is_valid:
                 return {
                     "healthy": False,
-                    "reason": "Location not accessible",
+                    "reason": validation_error or "Location not accessible",
                     "free_space_bytes": 0,
                     "file_count": 0,
                     "recent_errors": 0,
                 }
-
-            stat = shutil.disk_usage(path)
+            has_local_stats = backend.capabilities().supports_local_path_stats
+            stat = shutil.disk_usage(Path(location.path)) if has_local_stats else None
 
             file_count = (
                 db.query(FileInventory)
@@ -291,20 +299,25 @@ class StorageRoutingService:
                 .count()
             )
 
-            healthy = (
-                stat.free > StorageRoutingService.MIN_FREE_SPACE_MB * 1024 * 1024
-                and recent_errors == 0
-            )
+            enough_space = True
+            if stat is not None:
+                enough_space = stat.free > StorageRoutingService.MIN_FREE_SPACE_MB * 1024 * 1024
+            healthy = enough_space and recent_errors == 0
 
             return {
                 "healthy": healthy,
                 "reason": (
                     None
                     if healthy
-                    else f"{'Low space' if stat.free < StorageRoutingService.MIN_FREE_SPACE_MB * 1024 * 1024 else 'Recent errors'}"
+                    else (
+                        "Low space"
+                        if stat is not None
+                        and stat.free < StorageRoutingService.MIN_FREE_SPACE_MB * 1024 * 1024
+                        else "Recent errors"
+                    )
                 ),
-                "free_space_bytes": stat.free,
-                "free_space_gb": stat.free / (1024**3),
+                "free_space_bytes": stat.free if stat is not None else None,
+                "free_space_gb": (stat.free / (1024**3)) if stat is not None else None,
                 "file_count": file_count,
                 "recent_errors": recent_errors,
             }

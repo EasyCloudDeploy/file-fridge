@@ -24,7 +24,7 @@ def get_recent_migrations(
     db: Annotated[Session, Depends(get_db)], limit: int = 20
 ) -> List[Dict[str, Any]]:  # NOSONAR
     """Get recent file migrations."""
-    return relocation_manager.get_recent_tasks(limit, db)
+    return migrations_service.get_recent_migrations(db, limit)
 
 
 @router.get("/freezing", response_model=List[FreezingFileSchema])

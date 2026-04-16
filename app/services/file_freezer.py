@@ -1,6 +1,7 @@
 """File freezing service - move files from hot storage to cold storage."""
 
 import logging
+import tempfile
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -18,6 +19,7 @@ from app.models import (
 )
 from app.services.audit_trail_service import audit_trail_service
 from app.services.checksum_verifier import checksum_verifier
+from app.services.cold_storage_backends import get_backend
 from app.services.file_mover import preserve_directory_structure
 
 logger = logging.getLogger(__name__)
@@ -72,16 +74,41 @@ class FileFreezer:
 
             # Calculate destination path preserving directory structure
             base_source = Path(monitored_path.source_path)
-            base_destination = Path(storage_location.path)
-            destination_path = preserve_directory_structure(
-                source_path, base_source, base_destination
-            )
+            operation_mode = storage_location.operation_mode or monitored_path.operation_type
+            # Backward compatibility: if a location still has default MOVE but the path
+            # is configured differently, preserve existing path-level behavior.
+            if (
+                operation_mode == OperationType.MOVE
+                and monitored_path.operation_type in (OperationType.COPY, OperationType.SYMLINK)
+            ):
+                operation_mode = monitored_path.operation_type
+            try:
+                relative_path = source_path.relative_to(base_source)
+            except ValueError:
+                relative_path = Path(source_path.name)
+            backend = get_backend(storage_location)
+            capabilities = backend.capabilities()
+            if operation_mode == OperationType.SYMLINK and not capabilities.supports_symlink:
+                return (
+                    False,
+                    f"Operation '{operation_mode.value}' is not supported by backend '{backend.backend_name()}'",
+                    None,
+                )
+
+            if backend.backend_name() == "local":
+                destination_path = preserve_directory_structure(
+                    source_path,
+                    base_source,
+                    Path(storage_location.path),
+                )
+            else:
+                destination_path = relative_path
             logger.info(
                 "Preparing manual freeze: file_id=%s source=%s destination=%s operation=%s storage_location=%s",
                 locked_file.id,
                 source_path,
                 destination_path,
-                monitored_path.operation_type,
+                operation_mode,
                 storage_location.path,
             )
 
@@ -90,18 +117,19 @@ class FileFreezer:
             if encrypt_file:
                 destination_path = destination_path.with_suffix(destination_path.suffix + ".ffenc")
 
-            # Ensure destination directory exists
-            destination_parent_existed = destination_path.parent.exists()
-            destination_path.parent.mkdir(parents=True, exist_ok=True)
-            logger.debug(
-                "Manual freeze destination parent ready: path=%s existed_before=%s",
-                destination_path.parent,
-                destination_parent_existed,
-            )
+            if backend.backend_name() == "local":
+                # Ensure destination directory exists
+                destination_parent_existed = destination_path.parent.exists()
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                logger.debug(
+                    "Manual freeze destination parent ready: path=%s existed_before=%s",
+                    destination_path.parent,
+                    destination_parent_existed,
+                )
 
-            # Check if destination already exists
-            if destination_path.exists():
-                return False, f"Destination already exists: {destination_path}", None
+                # Check if destination already exists
+                if destination_path.exists():
+                    return False, f"Destination already exists: {destination_path}", None
 
             # Calculate checksum before move for verification
             checksum_before = checksum_verifier.calculate_checksum(source_path)
@@ -116,27 +144,66 @@ class FileFreezer:
                 if encrypt_file:
                     from app.services.encryption_service import file_encryption_service
 
-                    try:
-                        file_encryption_service.encrypt_file(db, source_path, destination_path)
-                        # Delete original if move (not copy)
-                        if monitored_path.operation_type == OperationType.MOVE:
-                            source_path.unlink()
+                    if backend.backend_name() == "local":
+                        try:
+                            file_encryption_service.encrypt_file(db, source_path, destination_path)
+                            # Delete original if move (not copy)
+                            if operation_mode == OperationType.MOVE:
+                                source_path.unlink()
 
-                        checksum_after = checksum_verifier.calculate_checksum(destination_path)
-                    except Exception as e:
-                        # Rollback status change
-                        locked_file.status = old_status
-                        db.commit()
-                        return False, f"Failed to encrypt/move file: {e}", None
+                            checksum_after = checksum_verifier.calculate_checksum(destination_path)
+                            storage_reference = str(destination_path)
+                        except Exception as e:
+                            # Rollback status change
+                            locked_file.status = old_status
+                            db.commit()
+                            return False, f"Failed to encrypt/move file: {e}", None
+                    else:
+                        encrypted_temp_path = None
+                        storage_reference = None
+                        try:
+                            encrypted_relative_path = relative_path.with_suffix(
+                                relative_path.suffix + ".ffenc"
+                            )
+                            with tempfile.NamedTemporaryFile(
+                                prefix="file-fridge-", suffix=".ffenc", delete=False
+                            ) as encrypted_tmp:
+                                encrypted_temp_path = Path(encrypted_tmp.name)
+
+                            file_encryption_service.encrypt_file(db, source_path, encrypted_temp_path)
+                            success, error, storage_reference, _checksum_after_remote = backend.freeze_file(
+                                source_path=encrypted_temp_path,
+                                relative_path=encrypted_relative_path,
+                                location=storage_location,
+                                # Copy encrypted temp into backend, then apply requested behavior to original.
+                                operation_mode=OperationType.COPY,
+                            )
+                            if not success:
+                                locked_file.status = old_status
+                                db.commit()
+                                return False, f"Failed to move file: {error}", None
+
+                            if operation_mode == OperationType.MOVE:
+                                source_path.unlink()
+
+                            checksum_after = (
+                                checksum_verifier.calculate_checksum(source_path)
+                                if source_path.exists()
+                                else None
+                            )
+                        except Exception as e:
+                            locked_file.status = old_status
+                            db.commit()
+                            return False, f"Failed to encrypt/move file: {e}", None
+                        finally:
+                            if encrypted_temp_path and encrypted_temp_path.exists():
+                                encrypted_temp_path.unlink()
                 else:
-                    # Move file using the path's operation type with rollback
-                    from app.services.file_mover import move_with_rollback
-
-                    success, error, checksum_after = move_with_rollback(
-                        source_path,
-                        destination_path,
-                        monitored_path.operation_type,
-                        verify_checksum=True,
+                    success, error, storage_reference, checksum_after = backend.freeze_file(
+                        source_path=source_path,
+                        relative_path=relative_path,
+                        location=storage_location,
+                        operation_mode=operation_mode,
                     )
 
                     if not success:
@@ -144,21 +211,34 @@ class FileFreezer:
                         locked_file.status = old_status
                         db.commit()
                         logger.error(
-                            "Freeze move failed for %s -> %s: %s",
+                            "Freeze move failed for %s (op=%s): %s",
                             source_path,
-                            destination_path,
+                            operation_mode,
                             error,
                         )
                         return False, f"Failed to move file: {error}", None
+                    if storage_reference:
+                        destination_path = (
+                            Path(storage_reference)
+                            if backend.backend_name() == "local"
+                            else destination_path
+                        )
+                    else:
+                        storage_reference = str(destination_path)
 
                 # Create FileRecord entry
+                cold_storage_path = (
+                    str(destination_path)
+                    if backend.backend_name() == "local"
+                    else (storage_reference or str(destination_path))
+                )
                 file_record = FileRecord(
                     path_id=monitored_path.id,
                     original_path=str(source_path),
-                    cold_storage_path=str(destination_path),
+                    cold_storage_path=cold_storage_path,
                     cold_storage_location_id=storage_location.id,
                     file_size=locked_file.file_size,
-                    operation_type=monitored_path.operation_type,
+                    operation_type=operation_mode,
                     criteria_matched="manual_freeze",
                 )
                 db.add(file_record)
@@ -169,15 +249,16 @@ class FileFreezer:
                 locked_file.status = FileStatus.ACTIVE
                 locked_file.is_encrypted = encrypt_file
 
-                # For SYMLINK operation, the original path stays (symlink points to cold)
-                # For MOVE/COPY, update the file_path to the cold storage location
-                if monitored_path.operation_type != OperationType.SYMLINK:
-                    locked_file.file_path = str(destination_path)
+                # For COPY, the real file stays in hot storage, so we keep the original file_path.
+                # For MOVE and SYMLINK, the actual data has moved to cold storage, so the
+                # inventory must track the cold path (for SYMLINK, the hot path is just a pointer).
+                if operation_mode != OperationType.COPY:
+                    locked_file.file_path = cold_storage_path
 
                 # If pinning, add to pinned files
                 if pin:
                     # Use the cold storage path for pinning (so it won't be auto-thawed)
-                    pin_path = str(destination_path)
+                    pin_path = cold_storage_path
                     existing = db.query(PinnedFile).filter(PinnedFile.file_path == pin_path).first()
 
                     if not existing:
@@ -204,7 +285,7 @@ class FileFreezer:
                     f"Froze file: {source_path} -> {destination_path} "
                     f"(location: {storage_location.name}, pinned: {pin})"
                 )
-                return True, None, str(destination_path)
+                return True, None, cold_storage_path
 
             except Exception as move_error:
                 # Rollback status change on failure

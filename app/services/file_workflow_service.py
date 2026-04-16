@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import engine
 from app.models import (
+    ColdStorageLocation,
     CriterionType,
     FileInventory,
     FileRecord,
@@ -24,11 +25,13 @@ from app.models import (
     ScanStatus,
     StorageType,
 )
-from app.services.audit_trail_service import audit_trail_service
-from app.services.checksum_verifier import checksum_verifier
+from app.services.audit_trail_service import audit_trail_service  # Backward-compatible test patch target
+from app.services.checksum_verifier import checksum_verifier  # Backward-compatible test patch target
+from app.services.cold_storage_backends import get_backend
 from app.services.criteria_matcher import CriteriaMatcher
 from app.services.file_cleanup import FileCleanup
-from app.services.file_mover import FileMover
+from app.services.file_freezer import FileFreezer
+from app.services.file_mover import FileMover  # Backward-compatible test patch target
 from app.services.file_reconciliation import FileReconciliation
 from app.services.file_thawer import FileThawer
 from app.services.scan_progress import scan_progress_manager
@@ -66,12 +69,13 @@ class FileWorkflowService:
             dict with scan results including:
             - scan_skipped: True if scan was skipped because one is already running
         """
-        scan_id, scan_started = scan_progress_manager.start_scan(path.id, total_files=0)
+        path_id = path.id
+        scan_id, scan_started = scan_progress_manager.start_scan(path_id, total_files=0)
 
         if not scan_started:
-            logger.warning(f"Scan already running for path {path.id}, skipping")
+            logger.warning(f"Scan already running for path {path_id}, skipping")
             return {
-                "path_id": path.id,
+                "path_id": path_id,
                 "files_found": 0,
                 "files_moved": 0,
                 "files_cleaned": 0,
@@ -80,7 +84,7 @@ class FileWorkflowService:
                 "scan_skipped_reason": "A scan is already running for this path",
             }
 
-        logger.info(f"Started scan {scan_id} for path {path.id}")
+        logger.info(f"Started scan {scan_id} for path {path_id}")
 
         # Mark scan as pending
         path.last_scan_status = ScanStatus.PENDING
@@ -91,7 +95,7 @@ class FileWorkflowService:
                 logger.warning(
                     f"Path {path.name} (ID: {path.id}) is in error state: {path.error_message}"
                 )
-                scan_progress_manager.finish_scan(path.id, status="failed")
+                scan_progress_manager.finish_scan(path_id, status="failed")
                 # Update scan status in database
                 error_log = f"Path is in error state: {path.error_message}"
                 path.last_scan_at = datetime.now(tz=timezone.utc)
@@ -99,7 +103,7 @@ class FileWorkflowService:
                 path.last_scan_error_log = error_log
                 db.commit()
                 return {
-                    "path_id": path.id,
+                    "path_id": path_id,
                     "files_found": 0,
                     "files_moved": 0,
                     "files_cleaned": 0,
@@ -107,7 +111,7 @@ class FileWorkflowService:
                 }
 
             results = {
-                "path_id": path.id,
+                "path_id": path_id,
                 "files_found": 0,
                 "files_moved": 0,
                 "files_cleaned": 0,
@@ -118,23 +122,23 @@ class FileWorkflowService:
 
             # Cleanup phase
             try:
-                cleanup_results = FileCleanup.cleanup_missing_files(db, path_id=path.id)
+                cleanup_results = FileCleanup.cleanup_missing_files(db, path_id=path_id)
                 results["files_cleaned"] = cleanup_results["removed"]
                 if cleanup_results["errors"]:
                     results["errors"].extend(cleanup_results["errors"])
 
-                duplicate_results = FileCleanup.cleanup_duplicates(db, path_id=path.id)
+                duplicate_results = FileCleanup.cleanup_duplicates(db, path_id=path_id)
                 results["files_cleaned"] += duplicate_results["removed"]
                 if duplicate_results["errors"]:
                     results["errors"].extend(duplicate_results["errors"])
 
                 # Clean up symlink entries from inventory
-                symlink_results = FileCleanup.cleanup_symlink_inventory_entries(db, path_id=path.id)
+                symlink_results = FileCleanup.cleanup_symlink_inventory_entries(db, path_id=path_id)
                 results["files_cleaned"] += symlink_results["removed"]
                 if symlink_results["errors"]:
                     results["errors"].extend(symlink_results["errors"])
             except Exception as e:
-                logger.warning(f"Error during cleanup for path {path.id}: {e!s}")
+                logger.warning(f"Error during cleanup for path {path_id}: {e!s}")
 
             try:
                 # Scan phase
@@ -148,7 +152,7 @@ class FileWorkflowService:
                 results["total_scanned"] = scan_results.get("total_scanned", 0)
 
                 total_files_to_process = len(matching_files) + len(files_to_thaw)
-                scan_progress_manager.update_total_files(path.id, total_files_to_process)
+                scan_progress_manager.update_total_files(path_id, total_files_to_process)
 
                 # Process thawing
                 if files_to_thaw:
@@ -183,19 +187,19 @@ class FileWorkflowService:
                                 results["errors"].append(f"Exception thawing {cold_path}: {e!s}")
 
                             # Check for stop request after each completed thaw
-                            if scan_progress_manager.is_stop_requested(path.id):
+                            if scan_progress_manager.is_stop_requested(path_id):
                                 logger.info(
                                     "Stop requested during thaw phase for path %s,"
                                     " cancelling remaining operations",
-                                    path.id,
+                                    path_id,
                                 )
                                 for f in future_to_thaw:
                                     f.cancel()
                                 break
 
                 # Bail out early if stop was requested during thaw phase
-                if scan_progress_manager.is_stop_requested(path.id):
-                    scan_progress_manager.finish_scan(path.id, status="stopped")
+                if scan_progress_manager.is_stop_requested(path_id):
+                    scan_progress_manager.finish_scan(path_id, status="stopped")
                     path.last_scan_at = datetime.now(tz=timezone.utc)
                     path.last_scan_status = ScanStatus.STOPPED
                     db.commit()
@@ -231,19 +235,19 @@ class FileWorkflowService:
                                 results["errors"].append(f"Exception processing {file_path}: {e!s}")
 
                             # Check for stop request after each completed freeze
-                            if scan_progress_manager.is_stop_requested(path.id):
+                            if scan_progress_manager.is_stop_requested(path_id):
                                 logger.info(
                                     "Stop requested during freeze phase for path %s,"
                                     " cancelling remaining operations",
-                                    path.id,
+                                    path_id,
                                 )
                                 for f in future_to_file:
                                     f.cancel()
                                 break
 
                 # Bail out early if stop was requested during freeze phase
-                if scan_progress_manager.is_stop_requested(path.id):
-                    scan_progress_manager.finish_scan(path.id, status="stopped")
+                if scan_progress_manager.is_stop_requested(path_id):
+                    scan_progress_manager.finish_scan(path_id, status="stopped")
                     path.last_scan_at = datetime.now(tz=timezone.utc)
                     path.last_scan_status = ScanStatus.STOPPED
                     db.commit()
@@ -251,7 +255,12 @@ class FileWorkflowService:
 
                 # Reconciliation phase
                 try:
-                    reconciliation_stats = FileReconciliation.reconcile_missing_symlinks(path, db)
+                    reconciliation_path = (
+                        db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first() or path
+                    )
+                    reconciliation_stats = FileReconciliation.reconcile_missing_symlinks(
+                        reconciliation_path, db
+                    )
                     if reconciliation_stats["symlinks_created"] > 0:
                         logger.info(
                             f"Created {reconciliation_stats['symlinks_created']} missing symlinks"
@@ -262,8 +271,8 @@ class FileWorkflowService:
                     results["errors"].append(f"Reconciliation error: {e!s}")
 
             except Exception as e:
-                results["errors"].append(f"Error processing path {path.id}: {e!s}")
-                scan_progress_manager.finish_scan(path.id, status="failed")
+                results["errors"].append(f"Error processing path {path_id}: {e!s}")
+                scan_progress_manager.finish_scan(path_id, status="failed")
                 # Update scan status in database
                 path.last_scan_at = datetime.now(tz=timezone.utc)
                 path.last_scan_status = ScanStatus.FAILURE
@@ -271,7 +280,7 @@ class FileWorkflowService:
                 db.commit()
                 return results
 
-            scan_progress_manager.finish_scan(path.id, status="completed")
+            scan_progress_manager.finish_scan(path_id, status="completed")
             # Update scan status in database - success
             path.last_scan_at = datetime.now(tz=timezone.utc)
             if results["errors"]:
@@ -286,9 +295,9 @@ class FileWorkflowService:
 
         except Exception as e:
             logger.error(
-                f"Unexpected error in process_path for path {path.id}: {e!s}", exc_info=True
+                f"Unexpected error in process_path for path {path_id}: {e!s}", exc_info=True
             )
-            scan_progress_manager.finish_scan(path.id, status="failed")
+            scan_progress_manager.finish_scan(path_id, status="failed")
             # Update scan status in database
             error_log = f"Unexpected error: {e!s}"
             try:
@@ -298,9 +307,9 @@ class FileWorkflowService:
                 db.commit()
             except Exception:
                 # If we can't update the database, log and continue
-                logger.warning(f"Could not update scan status for path {path.id}")
+                logger.warning(f"Could not update scan status for path {path_id}")
             return {
-                "path_id": path.id,
+                "path_id": path_id,
                 "files_found": 0,
                 "files_moved": 0,
                 "files_cleaned": 0,
@@ -318,7 +327,6 @@ class FileWorkflowService:
         cold_files_metadata = []
 
         source_path = Path(path.source_path)
-        dest_base = Path(path.cold_storage_path)
 
         if not source_path.exists() or not source_path.is_dir():
             logger.warning(f"Path {path.name}: Source path unreachable: {source_path}")
@@ -334,18 +342,31 @@ class FileWorkflowService:
         enabled_criteria = [c for c in path.criteria if c.enabled]
         atime_used = any(c.criterion_type == CriterionType.ATIME for c in enabled_criteria)
         if atime_used:
-            atime_available, error_msg = check_atime_availability(path.cold_storage_path)
-            if not atime_available:
-                path.error_message = error_msg
-                db.commit()
-                logger.error(f"Scan aborted for {path.name}: {error_msg}")
-                return {
-                    "to_cold": [],
-                    "to_hot": [],
-                    "inventory_updated": 0,
-                    "skipped_hot": 0,
-                    "skipped_cold": 0,
-                }
+            local_symlink_locations = []
+            for location in path.storage_locations:
+                try:
+                    backend = get_backend(location)
+                except Exception:
+                    continue
+                if (
+                    backend.backend_name() == "local"
+                    and location.operation_mode == OperationType.SYMLINK
+                ):
+                    local_symlink_locations.append(location)
+
+            for location in local_symlink_locations:
+                atime_available, error_msg = check_atime_availability(location.path)
+                if not atime_available:
+                    path.error_message = error_msg
+                    db.commit()
+                    logger.error(f"Scan aborted for {path.name}: {error_msg}")
+                    return {
+                        "to_cold": [],
+                        "to_hot": [],
+                        "inventory_updated": 0,
+                        "skipped_hot": 0,
+                        "skipped_cold": 0,
+                    }
             if path.error_message:
                 path.error_message = None
                 db.commit()
@@ -353,9 +374,17 @@ class FileWorkflowService:
         # Load pinned files
         pinned = db.query(PinnedFile).filter(PinnedFile.path_id == path.id).all()
         pinned_paths = {Path(p.file_path) for p in pinned}
+        pinned_path_strings = {str(p.file_path) for p in pinned}
 
         # Cold storage roots for symlink detection
-        cold_roots = [Path(loc.path) for loc in path.storage_locations]
+        cold_roots = []
+        for location in path.storage_locations:
+            try:
+                backend = get_backend(location)
+            except Exception:
+                continue
+            if backend.backend_name() == "local":
+                cold_roots.append(Path(location.path))
 
         # Scan hot storage
         file_count = 0
@@ -403,8 +432,7 @@ class FileWorkflowService:
                 except (OSError, RuntimeError):
                     continue
 
-            # Orphaned symlink: was created by a previous SYMLINK operation but the path has
-            # since been changed to MOVE. Delete it so the cold file is the only copy.
+            # Backward-compatibility path-mode behavior for orphaned symlinks.
             if is_symlink_to_cold and path.operation_type == OperationType.MOVE:
                 try:
                     file_path.unlink()
@@ -428,13 +456,7 @@ class FileWorkflowService:
                 elif not is_symlink_to_cold:
                     matching_files.append((file_path, matched_ids))
                 elif path.operation_type == OperationType.COPY and actual_file_path:
-                    # COPY requires a real file in hot storage, not just a symlink.
-                    # Thaw the file so the next scan can re-freeze it as a proper copy
-                    # (keeping the original in hot and writing a copy to cold).
-                    logger.info(
-                        f"Thawing {file_path} to convert orphaned symlink to a real copy "
-                        f"(operation_type changed from symlink to copy)"
-                    )
+                    # COPY requires a real file in hot storage, not a symlink.
                     files_to_thaw.append((file_path, actual_file_path))
                 else:
                     files_skipped_cold += 1
@@ -442,19 +464,24 @@ class FileWorkflowService:
                 logger.debug(f"Access error for {file_path}: {e}")
                 continue
 
-        # Scan cold storage directly (for MOVE operations)
-        if dest_base.exists() and dest_base.is_dir():
-            for entry in self._recursive_scandir(dest_base):
-                cold_file_path = Path(entry.path)
+        # Scan local cold storage locations for metadata sync.
+        for location in path.storage_locations:
+            try:
+                backend = get_backend(location)
+            except Exception:
+                continue
+            if backend.backend_name() != "local":
+                continue
+            location_base = Path(location.path)
+            if not location_base.exists() or not location_base.is_dir():
+                continue
+            for entry in self._recursive_scandir(location_base):
                 file_count += 1
-
-                stat_info = None
                 try:
                     stat_info = entry.stat(follow_symlinks=False)
                 except OSError:
                     continue
 
-                # Collect metadata for inventory sync
                 if not entry.is_symlink():
                     cold_files_metadata.append(
                         {
@@ -466,28 +493,16 @@ class FileWorkflowService:
                         }
                     )
 
-                try:
-                    relative_path = cold_file_path.relative_to(dest_base)
-                    hot_file_path = source_path / relative_path
-                except ValueError:
-                    continue
-
-                if hot_file_path.exists():
-                    continue
-
-                if cold_file_path in pinned_paths or hot_file_path in pinned_paths:
-                    continue
-
-                try:
-                    is_active, _ = CriteriaMatcher.match_file(
-                        hot_file_path, path.criteria, cold_file_path
-                    )
-                    if is_active:
-                        files_to_thaw.append((hot_file_path, cold_file_path))
-                    else:
-                        files_skipped_cold += 1
-                except (OSError, PermissionError):
-                    continue
+        # Evaluate thaw candidates from tracked cold inventory/records. This supports mixed
+        # local + remote backends because the decision is based on backend-specific access.
+        thaw_candidates, thaw_skipped = self._collect_cold_thaw_candidates(
+            path=path,
+            db=db,
+            pinned_paths=pinned_paths,
+            pinned_path_strings=pinned_path_strings,
+        )
+        files_to_thaw.extend(thaw_candidates)
+        files_skipped_cold += thaw_skipped
 
         # Update inventory using collected metadata (Avoid redundant walks!)
         inventory_updated = self._update_file_inventory(
@@ -500,7 +515,7 @@ class FileWorkflowService:
 
         return {
             "to_cold": matching_files,
-            "to_hot": files_to_thaw,
+            "to_hot": list(dict.fromkeys(files_to_thaw)),
             "inventory_updated": inventory_updated,
             "skipped_hot": files_skipped_hot,
             "skipped_cold": files_skipped_cold,
@@ -511,247 +526,189 @@ class FileWorkflowService:
         self, file_path: Path, matched_criteria_ids: list, path: MonitoredPath
     ) -> dict:
         """Process a single file: move it to cold storage and record in database."""
-        result = {
-            "success": False,
-            "file_path": str(file_path),
-            "error": None,
-            "file_record_id": None,
-        }
-
+        result = {"success": False, "file_path": str(file_path), "error": None, "file_record_id": None}
         db = SessionFactory()
+        operation_id = None
+        path_id = path.id
         try:
-            source_base = Path(path.source_path)
+            db_path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
+            if not db_path:
+                result["error"] = f"Path not found: {path_id}"
+                return result
 
-            # Pre-check: verify file still exists
             if not file_path.exists():
-                # File disappeared between scan and processing
                 logger.debug(f"File no longer exists, skipping: {file_path}")
                 result["success"] = True
                 result["skipped"] = True
                 return result
 
-            # Get file size with retry for transient network errors
             file_size = None
             for attempt in range(3):
                 try:
-                    if file_path.is_symlink():
-                        try:
-                            actual_file = file_path.resolve(strict=True)
-                            file_size = actual_file.stat().st_size
-                        except (OSError, RuntimeError):
-                            file_size = file_path.stat().st_size
-                    else:
-                        file_size = file_path.stat().st_size
-                    break  # Success, exit retry loop
+                    file_size = file_path.stat().st_size
+                    break
                 except (OSError, FileNotFoundError) as e:
                     if attempt < 2:
-                        # Wait briefly and retry (helps with network mount transient errors)
                         time.sleep(0.1 * (attempt + 1))
                         continue
-                    # File genuinely doesn't exist or is inaccessible
                     if not file_path.exists():
-                        logger.debug(f"File disappeared during processing: {file_path}")
                         result["success"] = True
                         result["skipped"] = True
                         return result
                     result["error"] = f"Cannot stat source file: {e}"
                     return result
-
             if file_size is None:
                 result["error"] = "Could not determine file size"
                 return result
 
-            # Select storage location using routing service
-            storage_location = storage_routing_service.select_storage_location(db, path, file_size)
-
+            storage_location = storage_routing_service.select_storage_location(db, db_path, file_size)
             if not storage_location:
                 result["error"] = "No suitable storage location available"
                 return result
 
-            dest_base = Path(storage_location.path)
-            dest_path = FileMover.preserve_directory_structure(file_path, source_base, dest_base)
-            logger.info(
-                "Preparing automatic freeze: path_id=%s inventory_source=%s destination=%s operation=%s storage_location=%s file_size=%s",
-                path.id,
-                file_path,
-                dest_path,
-                path.operation_type,
-                storage_location.path,
+            operation_mode = self._resolve_operation_mode(storage_location, db_path)
+            operation_id = scan_progress_manager.start_file_operation(
+                path_id,
+                file_path.name,
+                "move_to_cold",
                 file_size,
+                file_path=str(file_path),
+                destination_path=storage_location.path,
             )
 
-            # Lock file inventory record for update
             inventory_entry = (
                 db.query(FileInventory)
                 .with_for_update()
-                .filter(FileInventory.path_id == path.id, FileInventory.file_path == str(file_path))
+                .filter(FileInventory.path_id == db_path.id, FileInventory.file_path == str(file_path))
                 .first()
             )
-
             if not inventory_entry:
-                # File not in inventory - might have been deleted or moved by another process
-                logger.warning(f"File not found in inventory: {file_path}")
                 result["success"] = True
                 result["skipped"] = True
                 return result
 
-            # Mark file as MIGRATING
-            old_status = inventory_entry.status
-            inventory_entry.status = FileStatus.MIGRATING
-            db.commit()
-
+            backend = None
             try:
-                # Get original stats before moving
-                original_stat = None
-                try:
-                    if file_path.is_symlink():
-                        try:
-                            actual_file = file_path.resolve(strict=True)
-                            original_stat = actual_file.stat()
-                            file_size = original_stat.st_size
-                        except (OSError, RuntimeError):
-                            original_stat = file_path.stat()
-                            file_size = original_stat.st_size
-                    else:
-                        original_stat = file_path.stat()
-                        file_size = original_stat.st_size
-                except (OSError, FileNotFoundError) as e:
-                    # Rollback status
-                    inventory_entry.status = old_status
-                    db.commit()
-                    result["error"] = f"Cannot stat source file: {e}"
-                    return result
+                backend = get_backend(storage_location)
+            except Exception:
+                backend = None
 
-                # Progress tracking
-                file_name = file_path.name
-
-                operation_id = scan_progress_manager.start_file_operation(
-                    path.id,
-                    file_name,
-                    "move_to_cold",
-                    file_size,
-                    file_path=str(file_path),
-                    destination_path=str(dest_path),
-                )
+            if backend is None:
+                source_base = Path(db_path.source_path)
+                dest_base = Path(storage_location.path)
+                dest_path = FileMover.preserve_directory_structure(file_path, source_base, dest_base)
+                checksum_before = checksum_verifier.calculate_checksum(file_path)
 
                 def progress_callback(bytes_transferred: int):
-                    scan_progress_manager.update_file_progress(
-                        path.id, operation_id, bytes_transferred
-                    )
+                    scan_progress_manager.update_file_progress(path_id, operation_id, bytes_transferred)
 
-                # Calculate checksum before move
-                checksum_before = checksum_verifier.calculate_checksum(file_path)
-                logger.debug(
-                    "Starting automatic freeze execution: inventory_id=%s operation_id=%s source=%s destination=%s checksum_prefix=%s",
-                    inventory_entry.id,
-                    operation_id,
-                    file_path,
-                    dest_path,
-                    checksum_before[:16] if checksum_before else None,
-                )
-
-                # Move file with transaction pattern and checksum verification
                 success, error, checksum_after = FileMover.move_with_rollback(
                     file_path,
                     dest_path,
-                    path.operation_type,
+                    db_path.operation_type,
                     verify_checksum=True,
                     progress_callback=progress_callback,
                 )
-
-                if success:
-                    # Preserve timestamps
-                    try:
-                        if original_stat and dest_path.exists():
-                            os.utime(dest_path, (original_stat.st_atime, original_stat.st_mtime))
-                    except OSError as e:
-                        logger.warning(f"Could not preserve timestamps for {dest_path}: {e}")
-
-                    # Record in database
-                    file_record_id = self._record_file_in_db(
-                        db,
-                        path,
-                        file_path,
-                        dest_path,
-                        file_size,
-                        matched_criteria_ids,
-                        storage_location.id,
-                    )
-
-                    # Update inventory entry
-                    # COPY keeps the hot file active; only MOVE/SYMLINK transitions to COLD
-                    if path.operation_type in ["move", "symlink"]:
-                        inventory_entry.storage_type = StorageType.COLD
-                        inventory_entry.cold_storage_location_id = storage_location.id
-                        inventory_entry.file_path = str(dest_path)
-                    inventory_entry.status = FileStatus.ACTIVE
-                    db.commit()
-
-                    # Log to audit trail
-                    audit_trail_service.log_freeze_operation(
-                        db=db,
-                        file=inventory_entry,
-                        source_path=file_path,
-                        dest_path=dest_path,
-                        storage_location_id=storage_location.id,
-                        checksum_before=checksum_before,
-                        checksum_after=checksum_after,
-                        success=True,
-                        initiated_by="automatic_scan",
-                    )
-
-                    result["success"] = True
-                    result["file_record_id"] = file_record_id
-                    scan_progress_manager.complete_file_operation(
-                        path.id, operation_id, "move_to_cold", success=True
-                    )
-                else:
-                    # Rollback status on failure
-                    inventory_entry.status = old_status
-                    db.commit()
-                    logger.error(
-                        "Automatic freeze failed for %s -> %s: %s",
-                        file_path,
-                        dest_path,
-                        error,
-                    )
-
-                    # Log failed operation to audit trail
-                    audit_trail_service.log_freeze_operation(
-                        db=db,
-                        file=inventory_entry,
-                        source_path=file_path,
-                        dest_path=dest_path,
-                        storage_location_id=storage_location.id,
-                        checksum_before=checksum_before,
-                        checksum_after=None,
-                        success=False,
-                        error_message=error,
-                        initiated_by="automatic_scan",
-                    )
-
+                if not success:
                     result["error"] = f"Failed to move {file_path}: {error}"
                     scan_progress_manager.complete_file_operation(
-                        path.id, operation_id, "move_to_cold", success=False, error=error
+                        path_id,
+                        operation_id,
+                        "move_to_cold",
+                        success=False,
+                        error=result["error"],
                     )
+                    return result
 
-            except Exception as move_error:
-                # Rollback status on exception
-                inventory_entry.status = old_status
+                file_record_id = self._record_file_in_db(
+                    db,
+                    db_path,
+                    file_path,
+                    dest_path,
+                    file_size,
+                    matched_criteria_ids,
+                    storage_location.id,
+                )
+                result["file_record_id"] = file_record_id
+                audit_trail_service.log_freeze_operation(
+                    db=db,
+                    file=inventory_entry,
+                    source_path=file_path,
+                    dest_path=dest_path,
+                    storage_location_id=storage_location.id,
+                    checksum_before=checksum_before,
+                    checksum_after=checksum_after,
+                    success=True,
+                    initiated_by="automatic_scan",
+                )
+                result["success"] = True
+                scan_progress_manager.complete_file_operation(
+                    path_id, operation_id, "move_to_cold", success=True
+                )
+                return result
+
+            success, error, _cold_storage_path = FileFreezer.freeze_file(
+                file=inventory_entry,
+                monitored_path=db_path,
+                storage_location=storage_location,
+                pin=False,
+                db=db,
+                initiated_by="automatic_scan",
+            )
+            if not success:
+                result["error"] = f"Failed to move {file_path}: {error}"
+                scan_progress_manager.complete_file_operation(
+                    path_id,
+                    operation_id,
+                    "move_to_cold",
+                    success=False,
+                    error=result["error"],
+                )
+                return result
+
+            latest_record = (
+                db.query(FileRecord)
+                .filter(
+                    FileRecord.path_id == db_path.id,
+                    FileRecord.original_path == str(file_path),
+                    FileRecord.cold_storage_location_id == storage_location.id,
+                )
+                .order_by(FileRecord.moved_at.desc())
+                .first()
+            )
+            if latest_record:
+                latest_record.criteria_matched = json.dumps(matched_criteria_ids)
+                latest_record.operation_type = operation_mode
+                result["file_record_id"] = latest_record.id
                 db.commit()
-                raise move_error
 
+            # Preserve historical workflow behavior: COPY keeps hot inventory entry.
+            if operation_mode == OperationType.COPY:
+                refreshed = db.query(FileInventory).filter(FileInventory.id == inventory_entry.id).first()
+                if refreshed:
+                    refreshed.storage_type = StorageType.HOT
+                    refreshed.status = FileStatus.ACTIVE
+                    refreshed.cold_storage_location_id = None
+                    refreshed.file_path = str(file_path)
+                    db.commit()
+
+            result["success"] = True
+            scan_progress_manager.complete_file_operation(
+                path_id, operation_id, "move_to_cold", success=True
+            )
+            return result
         except Exception as e:
             result["error"] = f"Error processing {file_path}: {e!s}"
             logger.exception(f"Error processing {file_path}")
+            if operation_id is not None:
+                scan_progress_manager.complete_file_operation(
+                    path_id, operation_id, "move_to_cold", success=False, error=result["error"]
+                )
+            return result
         finally:
             db.close()
 
-        return result
-
-    def _thaw_single_file(
-        self, symlink_path: Path, cold_storage_path: Path, path: MonitoredPath
-    ) -> dict:
+    def _thaw_single_file(self, symlink_path, cold_storage_path, path: MonitoredPath) -> dict:
         """Thaw a single file (move back from cold to hot storage)."""
         result = {
             "success": False,
@@ -762,224 +719,318 @@ class FileWorkflowService:
 
         db = SessionFactory()
         operation_id = None
-        operation_completed = False
-        file_size = 0
+        path_id = path.id
         try:
-            try:
-                file_size = cold_storage_path.stat().st_size
-            except OSError:
-                file_size = 0
-
-            operation_id = scan_progress_manager.start_file_operation(
-                path.id,
-                symlink_path.name,
-                "move_to_hot",
-                file_size,
-                file_path=str(cold_storage_path),
-                destination_path=str(symlink_path),
-            )
-
-            def progress_callback(bytes_transferred: int):
-                scan_progress_manager.update_file_progress(path.id, operation_id, bytes_transferred)
-
-            # Get file inventory record with lock
+            hot_path = Path(str(symlink_path))
+            cold_reference = str(cold_storage_path)
             inventory_entry = (
                 db.query(FileInventory)
                 .with_for_update()
                 .filter(
-                    FileInventory.path_id == path.id,
+                    FileInventory.path_id == path_id,
                     FileInventory.storage_type == StorageType.COLD,
-                    FileInventory.file_path.in_([str(cold_storage_path), str(symlink_path)]),
+                    FileInventory.file_path.in_([cold_reference, str(hot_path)]),
                 )
                 .first()
             )
+            cold_path_for_size = Path(cold_reference)
+            if cold_path_for_size.exists():
+                try:
+                    file_size = cold_path_for_size.stat().st_size
+                except OSError:
+                    file_size = inventory_entry.file_size if inventory_entry else 0
+            else:
+                file_size = inventory_entry.file_size if inventory_entry else 0
 
-            if inventory_entry:
-                # Mark as MIGRATING
-                old_status = inventory_entry.status
-                inventory_entry.status = FileStatus.MIGRATING
-                db.commit()
+            operation_id = scan_progress_manager.start_file_operation(
+                path_id,
+                hot_path.name,
+                "move_to_hot",
+                file_size,
+                file_path=cold_reference,
+                destination_path=str(hot_path),
+            )
+
+            def progress_callback(bytes_transferred: int):
+                scan_progress_manager.update_file_progress(path_id, operation_id, bytes_transferred)
+
+            file_record = (
+                db.query(FileRecord)
+                .filter(
+                    FileRecord.path_id == path_id,
+                    (
+                        (FileRecord.cold_storage_path == cold_reference)
+                        | (FileRecord.original_path == str(hot_path))
+                    ),
+                )
+                .order_by(FileRecord.moved_at.desc())
+                .first()
+            )
+            if not file_record:
+                local_cold_path = Path(cold_reference)
+                if not local_cold_path.exists():
+                    result["success"] = True
+                    result["skipped"] = True
+                    scan_progress_manager.complete_file_operation(
+                        path_id, operation_id, "move_to_hot", success=True
+                    )
+                    return result
 
                 try:
-                    if symlink_path.exists() and symlink_path.is_symlink():
-                        symlink_path.unlink()
+                    if hot_path.exists() and hot_path.is_symlink():
+                        hot_path.unlink()
+                    hot_path.parent.mkdir(parents=True, exist_ok=True)
 
+                    checksum_before = checksum_verifier.calculate_checksum(local_cold_path)
                     try:
-                        symlink_path.parent.mkdir(parents=True, exist_ok=True)
-
-                        # Calculate checksum before move
-                        checksum_before = checksum_verifier.calculate_checksum(cold_storage_path)
-
-                        # Move file with verification
-                        prepared_path = symlink_path
-                        prepared_stat = None
-                        try:
-                            cold_storage_path.rename(symlink_path)
-                        except OSError:
-                            prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
-                                cold_storage_path,
-                                symlink_path,
-                                progress_callback=progress_callback,
-                            )
-
-                        # Verify checksum after move
+                        local_cold_path.rename(hot_path)
+                        checksum_after = checksum_verifier.calculate_checksum(hot_path)
+                    except OSError:
+                        prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
+                            local_cold_path,
+                            hot_path,
+                            progress_callback=progress_callback,
+                        )
                         checksum_after = checksum_verifier.calculate_checksum(prepared_path)
-                        if checksum_before and checksum_after != checksum_before:
-                            logger.error(
-                                f"Checksum mismatch after thaw: {checksum_before[:16]}... != {checksum_after[:16]}..."
-                            )
-                            if prepared_path != symlink_path:
-                                FileThawer._cleanup_temp_destination(prepared_path, symlink_path)
-                            elif symlink_path.exists():
-                                symlink_path.unlink()
-                            inventory_entry.status = old_status
-                            db.commit()
-                            result["error"] = "Checksum verification failed after thaw"
-                            scan_progress_manager.complete_file_operation(
-                                path.id,
-                                operation_id,
-                                "move_to_hot",
-                                success=False,
-                                error=result["error"],
-                            )
-                            operation_completed = True
-                            return result
-
-                        if prepared_path != symlink_path:
+                        if prepared_path != hot_path:
                             FileThawer._finalize_staged_move(
-                                cold_storage_path,
+                                local_cold_path,
                                 prepared_path,
-                                symlink_path,
+                                hot_path,
                                 prepared_stat,
                             )
 
-                        file_record = (
-                            db.query(FileRecord)
-                            .filter(FileRecord.cold_storage_path == str(cold_storage_path))
-                            .first()
-                        )
-
-                        if file_record:
-                            db.delete(file_record)
-
-                        # Update inventory
-                        inventory_entry.file_path = str(symlink_path)
+                    if inventory_entry:
+                        inventory_entry.file_path = str(hot_path)
                         inventory_entry.storage_type = StorageType.HOT
                         inventory_entry.status = FileStatus.ACTIVE
                         inventory_entry.cold_storage_location_id = None
                         db.commit()
-
-                        # Log to audit trail
                         audit_trail_service.log_thaw_operation(
                             db=db,
                             file=inventory_entry,
-                            source_path=cold_storage_path,
-                            dest_path=symlink_path,
+                            source_path=local_cold_path,
+                            dest_path=hot_path,
                             checksum_before=checksum_before,
                             checksum_after=checksum_after,
                             success=True,
                             initiated_by="automatic_scan",
                         )
 
-                        result["success"] = True
-                        scan_progress_manager.update_file_progress(path.id, operation_id, file_size)
-                        scan_progress_manager.complete_file_operation(
-                            path.id, operation_id, "move_to_hot", success=True
-                        )
-                        operation_completed = True
+                    result["success"] = True
+                    scan_progress_manager.update_file_progress(path_id, operation_id, file_size)
+                    scan_progress_manager.complete_file_operation(
+                        path_id, operation_id, "move_to_hot", success=True
+                    )
+                    return result
+                except Exception as local_thaw_error:
+                    result["error"] = f"Failed to move file back {cold_reference}: {local_thaw_error!s}"
+                    scan_progress_manager.complete_file_operation(
+                        path_id, operation_id, "move_to_hot", success=False, error=result["error"]
+                    )
+                    return result
 
-                    except Exception as e:
-                        # Rollback status on failure
-                        inventory_entry.status = old_status
-                        db.commit()
-                        result["error"] = f"Failed to move file back {cold_storage_path}: {e!s}"
-                        scan_progress_manager.complete_file_operation(
-                            path.id,
-                            operation_id,
-                            "move_to_hot",
-                            success=False,
-                            error=result["error"],
-                        )
-                        operation_completed = True
+            old_status = None
+            if inventory_entry:
+                old_status = inventory_entry.status
+                inventory_entry.status = FileStatus.MIGRATING
+                db.commit()
 
-                except Exception as move_error:
-                    # Rollback status on exception
+            success, error = FileThawer.thaw_file(
+                file_record=file_record,
+                pin=False,
+                db=db,
+                initiated_by="automatic_scan",
+                progress_callback=progress_callback,
+            )
+            if not success:
+                if inventory_entry and old_status is not None:
                     inventory_entry.status = old_status
                     db.commit()
-                    scan_progress_manager.complete_file_operation(
-                        path.id,
-                        operation_id,
-                        "move_to_hot",
-                        success=False,
-                        error=str(move_error),
-                    )
-                    operation_completed = True
-                    raise move_error
-            else:
-                # No inventory record - proceed without tracking
-                try:
-                    if symlink_path.exists() and symlink_path.is_symlink():
-                        symlink_path.unlink()
+                result["error"] = error or f"Failed to move file back {cold_reference}"
+                scan_progress_manager.complete_file_operation(
+                    path_id, operation_id, "move_to_hot", success=False, error=result["error"]
+                )
+                return result
 
-                    symlink_path.parent.mkdir(parents=True, exist_ok=True)
-                    checksum_before = checksum_verifier.calculate_checksum(cold_storage_path)
-
-                    try:
-                        cold_storage_path.rename(symlink_path)
-                    except OSError:
-                        prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
-                            cold_storage_path,
-                            symlink_path,
-                            progress_callback=progress_callback,
-                        )
-                        checksum_after = checksum_verifier.calculate_checksum(prepared_path)
-                        if checksum_before and checksum_after != checksum_before:
-                            FileThawer._cleanup_temp_destination(prepared_path, symlink_path)
-                            result["error"] = "Checksum verification failed after thaw"
-                            scan_progress_manager.complete_file_operation(
-                                path.id,
-                                operation_id,
-                                "move_to_hot",
-                                success=False,
-                                error=result["error"],
-                            )
-                            operation_completed = True
-                            return result
-                        FileThawer._finalize_staged_move(
-                            cold_storage_path,
-                            prepared_path,
-                            symlink_path,
-                            prepared_stat,
-                        )
-
-                    result["success"] = True
-                    scan_progress_manager.update_file_progress(path.id, operation_id, file_size)
-                    scan_progress_manager.complete_file_operation(
-                        path.id, operation_id, "move_to_hot", success=True
-                    )
-                    operation_completed = True
-
-                except Exception as e:
-                    result["error"] = f"Failed to move file back {cold_storage_path}: {e!s}"
-                    scan_progress_manager.complete_file_operation(
-                        path.id,
-                        operation_id,
-                        "move_to_hot",
-                        success=False,
-                        error=result["error"],
-                    )
-                    operation_completed = True
-
+            result["success"] = True
+            scan_progress_manager.update_file_progress(path_id, operation_id, file_size)
+            scan_progress_manager.complete_file_operation(path_id, operation_id, "move_to_hot", success=True)
+            return result
         except Exception as e:
             result["error"] = f"Error thawing {cold_storage_path}: {e!s}"
-            if operation_id is not None and not operation_completed:
+            if operation_id is not None:
                 scan_progress_manager.complete_file_operation(
-                    path.id, operation_id, "move_to_hot", success=False, error=result["error"]
+                    path_id, operation_id, "move_to_hot", success=False, error=result["error"]
                 )
+            return result
         finally:
             db.close()
 
-        return result
+    @staticmethod
+    def _resolve_operation_mode(
+        storage_location: ColdStorageLocation, monitored_path: MonitoredPath
+    ) -> OperationType:
+        operation_mode = storage_location.operation_mode or monitored_path.operation_type
+        if (
+            operation_mode == OperationType.MOVE
+            and monitored_path.operation_type in (OperationType.COPY, OperationType.SYMLINK)
+        ):
+            return monitored_path.operation_type
+        return operation_mode
+
+    def _collect_cold_thaw_candidates(
+        self,
+        path: MonitoredPath,
+        db: Session,
+        pinned_paths: set[Path],
+        pinned_path_strings: set[str],
+    ) -> tuple[list[tuple[Path, str | Path]], int]:
+        """Find cold files that now match criteria and should be thawed."""
+        candidates: list[tuple[Path, str | Path]] = []
+        skipped = 0
+
+        file_records = db.query(FileRecord).filter(FileRecord.path_id == path.id).all()
+        if not file_records:
+            return candidates, skipped
+
+        records_by_cold = {record.cold_storage_path: record for record in file_records}
+        records_by_original = {record.original_path: record for record in file_records}
+        location_ids = {
+            record.cold_storage_location_id
+            for record in file_records
+            if record.cold_storage_location_id is not None
+        }
+        location_map = {
+            location.id: location
+            for location in db.query(ColdStorageLocation)
+            .filter(ColdStorageLocation.id.in_(location_ids))
+            .all()
+        }
+
+        cold_inventory_entries = (
+            db.query(FileInventory)
+            .filter(
+                FileInventory.path_id == path.id,
+                FileInventory.storage_type == StorageType.COLD,
+                FileInventory.status == FileStatus.ACTIVE,
+            )
+            .all()
+        )
+
+        for entry in cold_inventory_entries:
+            file_record = records_by_cold.get(entry.file_path) or records_by_original.get(
+                entry.file_path
+            )
+            if not file_record:
+                skipped += 1
+                continue
+
+            hot_path = Path(file_record.original_path)
+            cold_reference = file_record.cold_storage_path
+
+            if (
+                hot_path in pinned_paths
+                or Path(cold_reference) in pinned_paths
+                or str(hot_path) in pinned_path_strings
+                or cold_reference in pinned_path_strings
+            ):
+                skipped += 1
+                continue
+
+            location = location_map.get(file_record.cold_storage_location_id)
+            if location is None:
+                skipped += 1
+                continue
+
+            is_active = False
+            try:
+                backend = get_backend(location)
+                if backend.backend_name() == "local" and Path(cold_reference).exists():
+                    is_active, _ = CriteriaMatcher.match_file(
+                        hot_path, path.criteria, Path(cold_reference)
+                    )
+                else:
+                    is_active, _ = self._match_inventory_criteria(
+                        hot_path=hot_path,
+                        inventory_entry=entry,
+                        criteria=path.criteria,
+                    )
+            except Exception:
+                logger.exception("Error evaluating thaw criteria for %s", cold_reference)
+                skipped += 1
+                continue
+
+            if is_active:
+                cold_value: str | Path = (
+                    Path(cold_reference) if backend.backend_name() == "local" else cold_reference
+                )
+                candidates.append((hot_path, cold_value))
+            else:
+                skipped += 1
+
+        return candidates, skipped
+
+    def _match_inventory_criteria(
+        self, hot_path: Path, inventory_entry: FileInventory, criteria: list
+    ) -> tuple[bool, list[int]]:
+        """Evaluate criteria from stored metadata when backend path isn't directly stat-able."""
+        enabled_criteria = [criterion for criterion in criteria if criterion.enabled]
+        if not enabled_criteria:
+            return True, []
+
+        matched_ids: list[int] = []
+        for criterion in enabled_criteria:
+            operator = criterion.operator
+            value = criterion.value
+            criterion_type = criterion.criterion_type
+
+            if criterion_type == CriterionType.MTIME:
+                timestamp = (
+                    inventory_entry.file_mtime.timestamp() if inventory_entry.file_mtime else None
+                )
+                matches = (
+                    CriteriaMatcher._match_time(timestamp, operator, value, "mtime")
+                    if timestamp is not None
+                    else False
+                )
+            elif criterion_type == CriterionType.ATIME:
+                timestamp = (
+                    inventory_entry.file_atime.timestamp() if inventory_entry.file_atime else None
+                )
+                matches = (
+                    CriteriaMatcher._match_time(timestamp, operator, value, "atime")
+                    if timestamp is not None
+                    else False
+                )
+            elif criterion_type == CriterionType.CTIME:
+                timestamp = (
+                    inventory_entry.file_ctime.timestamp() if inventory_entry.file_ctime else None
+                )
+                matches = (
+                    CriteriaMatcher._match_time(timestamp, operator, value, "ctime")
+                    if timestamp is not None
+                    else False
+                )
+            elif criterion_type == CriterionType.SIZE:
+                matches = CriteriaMatcher._match_size(inventory_entry.file_size, operator, value)
+            elif criterion_type == CriterionType.NAME:
+                matches = CriteriaMatcher._match_name(hot_path.name, operator, value, case_sensitive=True)
+            elif criterion_type == CriterionType.INAME:
+                matches = CriteriaMatcher._match_name(
+                    hot_path.name, operator, value, case_sensitive=False
+                )
+            elif criterion_type == CriterionType.TYPE:
+                matches = value in {"f", "file"}
+            else:
+                # Conservative behavior: unsupported criteria cannot prove "hot" eligibility.
+                matches = False
+
+            if not matches:
+                return False, []
+            matched_ids.append(criterion.id)
+
+        return True, matched_ids
 
     def _record_file_in_db(
         self,
@@ -1097,7 +1148,15 @@ class FileWorkflowService:
         if cold_files is not None:
             updated_count += self._update_db_entries_batch(path, cold_files, StorageType.COLD, db)
         else:
-            cold_files_list = self._scan_flat_list(path.cold_storage_path)
+            cold_files_list = []
+            for location in path.storage_locations:
+                try:
+                    backend = get_backend(location)
+                except Exception:
+                    continue
+                if backend.backend_name() != "local":
+                    continue
+                cold_files_list.extend(self._scan_flat_list(location.path))
             updated_count += self._update_db_entries_batch(
                 path, cold_files_list, StorageType.COLD, db
             )
@@ -1111,6 +1170,7 @@ class FileWorkflowService:
             FileInventory.path_id == path.id,
             FileInventory.last_seen < cutoff,
             FileInventory.status == FileStatus.ACTIVE,
+            FileInventory.storage_type == StorageType.HOT,
         )
 
         # Get the count of records to be deleted before deleting them

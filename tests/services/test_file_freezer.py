@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from app.models import (
+    ColdStorageBackendType,
     FileRecord,
     FileStatus,
     MonitoredPath,
@@ -116,9 +117,10 @@ class TestFileFreezer:
         assert hot_file.is_symlink()
         assert os.path.realpath(hot_file) == os.path.realpath(cold_path)
 
-        # For SYMLINK, inv.file_path should NOT change (stays as the symlink path)
+        # For SYMLINK, the real file is in cold storage, so the inventory must point there.
+        # The hot path becomes a symlink (a pointer), not the authoritative location.
         db_session.refresh(inv)
-        assert inv.file_path == str(hot_file)
+        assert inv.file_path == cold_path
 
     def test_freeze_file_pin_success(self, db_session, tmp_path, file_inventory_factory, storage_location):
         """Test freezing and pinning a file."""
@@ -230,5 +232,61 @@ class TestFileFreezer:
         assert Path(cold_path).read_bytes() != b"content to encrypt"
 
         db_session.refresh(inv)
+        assert inv.is_encrypted is True
+        assert inv.file_path == cold_path
+
+    def test_freeze_file_encrypted_remote_backend_success(
+        self, db_session, tmp_path, file_inventory_factory, storage_location, monkeypatch
+    ):
+        """Test encrypted freeze flow for non-local backends (e.g., S3/GDrive)."""
+        hot_dir = tmp_path / "hot"
+        hot_dir.mkdir()
+        hot_file = hot_dir / "remote-test.txt"
+        hot_file.write_text("remote encryption content")
+
+        storage_location.backend_type = ColdStorageBackendType.S3
+        storage_location.path = "s3://bucket/archive"
+        storage_location.is_encrypted = True
+        db_session.add(storage_location)
+        db_session.commit()
+
+        inv = file_inventory_factory(path=str(hot_file), storage_type=StorageType.HOT)
+        monitored_path = db_session.get(MonitoredPath, inv.path_id)
+        monitored_path.source_path = str(hot_dir)
+        monitored_path.operation_type = OperationType.MOVE
+
+        captured = {}
+
+        class DummyBackend:
+            def backend_name(self):
+                return "s3"
+
+            def capabilities(self):
+                from app.services.cold_storage_backends.base import ColdStorageCapabilities
+
+                return ColdStorageCapabilities(supports_move=True, supports_copy=True)
+
+            def freeze_file(self, source_path, relative_path, location, operation_mode):
+                captured["source_path"] = source_path
+                captured["relative_path"] = relative_path
+                captured["operation_mode"] = operation_mode
+                captured["location"] = location
+                assert source_path.exists()
+                return True, None, f"s3://bucket/archive/{relative_path.as_posix()}", None
+
+        monkeypatch.setattr("app.services.file_freezer.get_backend", lambda _location: DummyBackend())
+
+        success, error, cold_path = FileFreezer.freeze_file(
+            inv, monitored_path, storage_location, db=db_session
+        )
+
+        assert success is True, f"Freezer failed: {error}"
+        assert cold_path == "s3://bucket/archive/remote-test.txt.ffenc"
+        assert captured["relative_path"].as_posix().endswith(".ffenc")
+        assert captured["operation_mode"] == OperationType.COPY
+        assert not hot_file.exists()
+
+        db_session.refresh(inv)
+        assert inv.storage_type == StorageType.COLD
         assert inv.is_encrypted is True
         assert inv.file_path == cold_path

@@ -32,7 +32,7 @@ File Fridge supports find-compatible criteria:
 - **Symlink**: Moves the file to cold storage and leaves a symbolic link at the original location. This allows applications to still "see" the file while the actual data resides on cheaper storage.
 
 ### 4. Storage Management
-- **Tiered Storage**: Support for multiple cold storage locations.
+- **Tiered Storage**: Support for multiple cold storage locations per monitored path — local directories, Amazon S3 buckets, and Google Drive folders. When more than one location is attached to a path, the application automatically routes each file to the best available location using a scoring algorithm (see [Storage Routing](CONFIGURATION_GUIDE.md#storage-routing-multi-location)).
 - **File Inventory**: A centralized database tracking every file across all monitored paths and storage locations.
 - **Status Tracking**: Monitor file states: Active, Moved, Deleted, Missing, or Migrating.
 - **Checksums**: SHA256 hashing for file integrity and deduplication.

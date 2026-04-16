@@ -185,6 +185,7 @@ app.include_router(api_cleanup.router, dependencies=[Depends(PermissionChecker("
 app.include_router(api_tags.router, dependencies=[Depends(PermissionChecker("tags"))])
 app.include_router(api_tag_rules.router, dependencies=[Depends(PermissionChecker("tag-rules"))])
 app.include_router(api_storage.router, dependencies=[Depends(PermissionChecker("storage"))])
+app.include_router(api_storage.public_router)
 app.include_router(api_notifiers.router, dependencies=[Depends(PermissionChecker("notifiers"))])
 app.include_router(api_encryption.router, dependencies=[Depends(PermissionChecker("Encryption"))])
 app.include_router(api_migrations.router, dependencies=[Depends(PermissionChecker("migrations"))])

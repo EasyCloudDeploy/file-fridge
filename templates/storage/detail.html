@@ -44,15 +44,93 @@
             
             let detailsHtml = `
                 <ul class="list-group list-group-flush">
+                    <li class="list-group-item"><strong>Backend:</strong> ${data.backend_type}</li>
+                    <li class="list-group-item"><strong>Operation Mode:</strong> ${data.operation_mode}</li>
+                    <li class="list-group-item"><strong>Allow Offline:</strong> ${data.allow_offline ? 'Yes' : 'No'}</li>
                     <li class="list-group-group-item"><strong>Encryption:</strong> ${data.is_encrypted ? 'Enabled' : 'Disabled'}</li>
                     <li class="list-group-item"><strong>Caution Threshold:</strong> ${data.caution_threshold_percent}%</li>
                     <li class="list-group-item"><strong>Critical Threshold:</strong> ${data.critical_threshold_percent}%</li>
+                    ${data.backend_type === 'local' ? `<li class="list-group-item"><strong>Drive Status:</strong> ${data.local_drive_is_connected ? 'Connected' : 'Offline'}</li>` : ''}
+                    ${data.backend_type === 'local' && data.local_drive_label ? `<li class="list-group-item"><strong>Drive Label:</strong> ${escapeHtml(data.local_drive_label)}</li>` : ''}
+                    ${data.backend_type === 'local' && data.local_drive_identifier ? `<li class="list-group-item"><strong>Drive ID:</strong> <code>${escapeHtml(data.local_drive_identifier)}</code></li>` : ''}
+                    ${data.backend_type === 'local' && data.local_drive_mount_path ? `<li class="list-group-item"><strong>Last Seen Mount:</strong> <code>${escapeHtml(data.local_drive_mount_path)}</code></li>` : ''}
+                    ${data.backend_type === 'local' && data.local_drive_last_seen_at ? `<li class="list-group-item"><strong>Last Seen:</strong> ${escapeHtml(new Date(data.local_drive_last_seen_at).toLocaleString())}</li>` : ''}
+                    ${data.backend_type === 'gdrive' ? `<li class="list-group-item"><strong>Google Connected:</strong> ${data.backend_status?.gdrive_connected ? 'Yes' : 'No'}</li>` : ''}
                 </ul>
             `;
+
+            if (data.backend_type === 'gdrive') {
+                const [statsResponse, filesResponse] = await Promise.all([
+                    authenticatedFetch(`/api/v1/storage/locations/${locationId}/gdrive/stats`),
+                    authenticatedFetch(`/api/v1/storage/locations/${locationId}/gdrive/files?limit=20`)
+                ]);
+
+                if (statsResponse.ok) {
+                    const stats = await statsResponse.json();
+                    detailsHtml += `
+                        <hr>
+                        <h6>Google Drive Usage</h6>
+                        <ul class="list-group list-group-flush mb-3">
+                            <li class="list-group-item"><strong>Drive Used:</strong> ${formatBytes(stats.drive_used_bytes)}</li>
+                            <li class="list-group-item"><strong>Drive Free:</strong> ${formatBytes(stats.drive_free_bytes)}</li>
+                            <li class="list-group-item"><strong>File Fridge App Used:</strong> ${formatBytes(stats.app_used_bytes)}</li>
+                        </ul>
+                    `;
+                }
+
+                if (filesResponse.ok) {
+                    const filesData = await filesResponse.json();
+                    const files = filesData.files || [];
+                    detailsHtml += `
+                        <h6>Google Drive Files (Managed by File Fridge)</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped align-middle">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Relative Path</th>
+                                        <th class="text-end">Size</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${files.length ? files.map(file => `
+                                        <tr>
+                                            <td>${escapeHtml(file.name || file.id)}</td>
+                                            <td><code>${escapeHtml(file.relative_path || '-')}</code></td>
+                                            <td class="text-end">${formatBytes(file.size)}</td>
+                                        </tr>
+                                    `).join('') : `<tr><td colspan="3" class="text-muted">No managed files found.</td></tr>`}
+                                </tbody>
+                            </table>
+                        </div>
+                    `;
+                }
+            }
             document.getElementById('storage-details').innerHTML = detailsHtml;
         } catch (error) {
             document.getElementById('storage-details').innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
         }
+    }
+
+    function formatBytes(value) {
+        const bytes = Number(value);
+        if (!Number.isFinite(bytes) || bytes < 0) return 'N/A';
+        if (bytes === 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+        const scaled = bytes / Math.pow(1024, idx);
+        return `${scaled.toFixed(idx === 0 ? 0 : 2)} ${units[idx]}`;
+    }
+
+    function escapeHtml(value) {
+        if (value === null || value === undefined) return '';
+        return value
+            .toString()
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
     }
 
     window.runWhenFileFridgeReady(loadStorageDetails);

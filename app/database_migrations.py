@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 INITIAL_REVISION = "726412e8862d"
 MAX_CONCURRENT_MIGRATIONS_REVISION = "6b398cde9d3e"
 RELOCATION_TASK_REVISION = "4cb41a7faab6"
-HEAD_REVISION = "764abe6a5a03"
+HEAD_REVISION = "c3e1d8f7aa42"
+BACKEND_MODULES_REVISION = "9f3d6e2aa1b1"
+LOCAL_DRIVE_IDENTITY_REVISION = "b17d9f43c2aa"
+ALLOW_OFFLINE_REVISION = "c3e1d8f7aa42"
 
 
 def _determine_schema_revision(inspector) -> str:
@@ -25,6 +28,16 @@ def _determine_schema_revision(inspector) -> str:
             column["name"] for column in inspector.get_columns("monitored_paths")
         }
         if "permissions_error" in monitored_path_columns:
+            if "cold_storage_locations" in tables:
+                cold_storage_columns = {
+                    column["name"] for column in inspector.get_columns("cold_storage_locations")
+                }
+                if "allow_offline" in cold_storage_columns:
+                    return ALLOW_OFFLINE_REVISION
+                if "local_drive_identifier" in cold_storage_columns:
+                    return LOCAL_DRIVE_IDENTITY_REVISION
+                if "backend_type" in cold_storage_columns:
+                    return BACKEND_MODULES_REVISION
             return HEAD_REVISION
 
     if "relocation_tasks" in tables:

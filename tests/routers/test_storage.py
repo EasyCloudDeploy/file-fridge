@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from app.models import ColdStorageLocation
+from app.models import ColdStorageBackendType, ColdStorageLocation, OperationType
 
 
 @pytest.mark.unit
@@ -69,6 +69,16 @@ class TestStorageRouter:
         )
         assert response.status_code == 200
         assert response.json()["name"] == "Newly Updated Name"
+
+    def test_update_storage_location_allow_offline_toggle(self, authenticated_client, storage_location):
+        """Test enabling allow_offline on a local storage location."""
+        payload = {"allow_offline": True}
+        response = authenticated_client.put(
+            f"/api/v1/storage/locations/{storage_location.id}",
+            json=payload,
+        )
+        assert response.status_code == 200
+        assert response.json()["allow_offline"] is True
 
     def test_delete_storage_location_success(self, authenticated_client, db_session, tmp_path):
         """Test deleting an unused storage location."""
@@ -142,3 +152,107 @@ class TestStorageRouter:
         data = response.json()
         assert data["is_encrypted"] is False
         assert data["encryption_status"] == "decrypting"
+
+    def test_google_oauth_callback_is_public(self, client):
+        """Google OAuth callback should not require API authentication."""
+        response = client.get("/api/v1/storage/gdrive/oauth/callback", follow_redirects=False)
+        assert response.status_code in (302, 307)
+        assert response.headers["location"] == "/storage-locations?gdrive_oauth=error&reason=missing_code"
+
+    def test_google_drive_files_listing_endpoint(
+        self, authenticated_client, db_session, monkeypatch
+    ):
+        """Test listing managed Google Drive files for a storage location."""
+        location = ColdStorageLocation(
+            name="Google Drive Test Location",
+            path="gdrive://file-fridge-folder",
+            backend_type=ColdStorageBackendType.GDRIVE,
+            operation_mode=OperationType.MOVE,
+        )
+        location.set_backend_config(
+            {
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "refresh_token": "refresh-token",
+                "folder_id": "file-fridge-folder",
+            }
+        )
+        db_session.add(location)
+        db_session.commit()
+        db_session.refresh(location)
+
+        from app.services.cold_storage_backends.gdrive_backend import GoogleDriveColdStorageBackend
+
+        monkeypatch.setattr(
+            GoogleDriveColdStorageBackend,
+            "list_managed_files",
+            lambda _self, _location, page_size=100, page_token=None: {
+                "files": [
+                    {
+                        "id": "file-1",
+                        "name": "archive.zip",
+                        "size": 1024,
+                        "mime_type": "application/zip",
+                        "relative_path": "backups/archive.zip",
+                    }
+                ],
+                "next_page_token": None,
+            },
+        )
+
+        response = authenticated_client.get(f"/api/v1/storage/locations/{location.id}/gdrive/files")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["location_id"] == location.id
+        assert len(payload["files"]) == 1
+        assert payload["files"][0]["id"] == "file-1"
+        assert payload["files"][0]["size"] == 1024
+
+    def test_google_drive_stats_endpoint(self, authenticated_client, db_session, monkeypatch):
+        """Test Google Drive usage stats endpoint."""
+        location = ColdStorageLocation(
+            name="Google Drive Stats Location",
+            path="gdrive://file-fridge-folder",
+            backend_type=ColdStorageBackendType.GDRIVE,
+            operation_mode=OperationType.MOVE,
+        )
+        location.set_backend_config(
+            {
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "refresh_token": "refresh-token",
+                "folder_id": "file-fridge-folder",
+            }
+        )
+        db_session.add(location)
+        db_session.commit()
+        db_session.refresh(location)
+
+        from app.services.cold_storage_backends.gdrive_backend import GoogleDriveColdStorageBackend
+
+        monkeypatch.setattr(
+            GoogleDriveColdStorageBackend,
+            "get_usage_stats",
+            lambda _self, _location: {
+                "total_limit_bytes": 10000,
+                "total_used_bytes": 2500,
+                "free_bytes": 7500,
+                "usage_in_drive_bytes": 2400,
+                "usage_in_drive_trash_bytes": 100,
+                "app_used_bytes": None,
+            },
+        )
+        monkeypatch.setattr(
+            GoogleDriveColdStorageBackend,
+            "get_app_usage_bytes",
+            lambda _self, _location: 1024,
+        )
+
+        response = authenticated_client.get(f"/api/v1/storage/locations/{location.id}/gdrive/stats")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["location_id"] == location.id
+        assert payload["drive_total_bytes"] == 10000
+        assert payload["drive_used_bytes"] == 2500
+        assert payload["drive_free_bytes"] == 7500
+        assert payload["app_used_bytes"] == 1024

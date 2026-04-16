@@ -173,6 +173,68 @@ size > 1G       (keep large files in hot storage)
 5. **Adjust intervals** as needed
 6. **Check application logs** for warnings
 
+---
+
+## Storage Routing (Multi-Location)
+
+When a monitored path has more than one cold storage location attached to it, File Fridge automatically selects the best destination for each file using a **scored candidate** algorithm. You never need to configure routing rules manually — the system adapts in real time to available space and recent health.
+
+### How a Location Is Selected
+
+For every file that is ready to freeze, the routing service runs these steps:
+
+**Step 1 — Eliminate ineligible locations**
+
+A location is skipped if any of the following are true:
+- It fails backend validation (path does not exist, S3 credentials are invalid, Google Drive token cannot be refreshed, etc.)
+- Available free space is below the **1 GB minimum threshold**
+- Available free space is less than `file_size + 1 MB` (not enough room for this specific file)
+
+**Step 2 — Score surviving candidates**
+
+Each remaining location receives a composite score:
+
+| Component | Formula | Max points |
+|---|---|---|
+| Space score | `min(50, 50 × (free_GB / 10) ^ 0.5)` | 50 |
+| Load score | `max(0, 30 × (1 − file_count / 10 000))` | 30 |
+| Error penalty | `−10 × recent_errors` (last 15 minutes) | unbounded |
+
+**Space score** grows logarithmically: a 10 GB drive scores 50, a 40 GB drive also scores 50 (capped). A 2 GB drive scores ~22. This rewards locations with plenty of room without over-weighting enormous drives.
+
+**Load score** spreads files evenly across locations. An empty location scores 30; one holding 5 000 files scores 15; at 10 000+ files the load score reaches zero.
+
+**Error penalty** deprioritizes flaky locations automatically. A location that failed two transfers in the last 15 minutes loses 20 points, effectively steering traffic away until its error window clears.
+
+**Step 3 — Pick the winner**
+
+The location with the highest total score receives the file. Ties are broken by the order locations appear in the database.
+
+### Remote Backends (S3 and Google Drive)
+
+S3 and Google Drive do not expose reliable disk-usage statistics, so they receive a synthetic free-space value of `10^15 bytes` (roughly 1 petabyte). This means their **space score is always 50**. The load score and error penalty then act as the primary differentiators between two remote locations.
+
+Practical consequence: a healthy, lightly-used S3 bucket will always beat a nearly-full local drive (space score ~5), but will lose to a healthy local drive with 50+ GB free (both score 50, but the local drive may win on load if it has fewer files).
+
+### Example: Two Local Locations + One S3 Bucket
+
+| Location | Free space | Files stored | Recent errors | Score |
+|---|---|---|---|---|
+| Local SSD (500 GB) | 80 GB | 200 | 0 | 50 + 29.4 = **79.4** |
+| Local HDD (4 TB) | 2 TB | 50 | 0 | 50 + 29.9 = **79.9** |
+| S3 bucket | synthetic | 150 | 1 | 50 + 29.6 − 10 = **69.6** |
+
+The HDD wins by a small margin (fewer files). S3 is penalized for its recent error.
+
+### Configuration Tips
+
+- **Attach multiple locations** to spread the load across drives or mix local and cloud storage.
+- **Let errors self-heal** — the 15-minute error grace period clears automatically; no manual intervention is needed.
+- **Balance file counts** — if one location consistently wins on space, it will accumulate files until its load score drops and the others become competitive again.
+- **Monitor health** via the API endpoint `GET /api/v1/storage/{id}/health` which exposes free space, file count, and recent error counts for each location.
+
+---
+
 ## Summary
 
 **DO:**

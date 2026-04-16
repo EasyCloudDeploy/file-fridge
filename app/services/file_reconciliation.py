@@ -6,7 +6,13 @@ from typing import Dict
 
 from sqlalchemy.orm import Session
 
-from app.models import FileInventory, MonitoredPath, OperationType, StorageType
+from app.models import (
+    ColdStorageBackendType,
+    FileInventory,
+    MonitoredPath,
+    OperationType,
+    StorageType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,17 +48,37 @@ class FileReconciliation:
             "errors": [],
         }
 
-        # Only reconcile symlinks if operation type is symlink
-        if path.operation_type != OperationType.SYMLINK:
+        def _is_symlink_location(loc, path: MonitoredPath) -> bool:
+            """Return True if this location effectively operates in SYMLINK mode.
+
+            A location is a symlink location when:
+            - Its own operation_mode is explicitly SYMLINK, OR
+            - Its operation_mode is MOVE (the historical default) and the path's
+              operation_type is SYMLINK (backward-compat: operation_mode was added
+              later; older setups store the mode only on the path).
+            """
+            if loc.backend_type != ColdStorageBackendType.LOCAL:
+                return False
+            if loc.operation_mode == OperationType.SYMLINK:
+                return True
+            return loc.operation_mode == OperationType.MOVE and path.operation_type == OperationType.SYMLINK
+
+        symlink_location = next(
+            (loc for loc in path.storage_locations if _is_symlink_location(loc, path)),
+            None,
+        )
+
+        # Only reconcile symlinks when a local SYMLINK backend location exists.
+        if symlink_location is None:
             logger.debug(
-                f"Skipping symlink reconciliation for {path.name} - operation type is {path.operation_type.value}"
+                f"Skipping symlink reconciliation for {path.name} - no local SYMLINK location"
             )
             return stats
 
         logger.info(f"Starting symlink reconciliation for path: {path.name}")
 
         source_base = Path(path.source_path)
-        dest_base = Path(path.cold_storage_path)
+        dest_base = Path(symlink_location.path)
 
         # Get all files in cold storage from inventory
         cold_files = (
@@ -104,7 +130,7 @@ class FileReconciliation:
             except ValueError:
                 # File path is not under cold storage base
                 try:
-                    cold_file_path.relative_to(source_path)
+                    cold_file_path.relative_to(source_base)
                     # File is already in hot storage, skip
                     stats["symlinks_skipped"] += 1
                     continue

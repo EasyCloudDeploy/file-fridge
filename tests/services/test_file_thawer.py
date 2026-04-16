@@ -1,7 +1,14 @@
 
 import pytest
 
-from app.models import FileRecord, FileStatus, OperationType, PinnedFile, StorageType
+from app.models import (
+    ColdStorageBackendType,
+    FileRecord,
+    FileStatus,
+    OperationType,
+    PinnedFile,
+    StorageType,
+)
 from app.services.file_thawer import FileThawer
 
 
@@ -180,3 +187,65 @@ class TestFileThawer:
 
         assert success is False
         assert "not found" in error.lower()
+
+    def test_thaw_file_encrypted_remote_backend_success(
+        self, db_session, tmp_path, file_inventory_factory, storage_location, monkeypatch
+    ):
+        """Test encrypted thaw flow for non-local backends (e.g., S3/GDrive)."""
+        from app.services.encryption_service import file_encryption_service
+
+        hot_dir = tmp_path / "hot"
+        hot_dir.mkdir(parents=True, exist_ok=True)
+        hot_file = hot_dir / "remote-thaw.txt"
+
+        storage_location.backend_type = ColdStorageBackendType.S3
+        storage_location.path = "s3://bucket/archive"
+        db_session.add(storage_location)
+        db_session.commit()
+        db_session.refresh(storage_location)
+
+        cold_ref = "s3://bucket/archive/remote-thaw.txt.ffenc"
+        inv = file_inventory_factory(
+            path=cold_ref, storage_type=StorageType.COLD, is_encrypted=True
+        )
+        inv.cold_storage_location_id = storage_location.id
+        db_session.commit()
+
+        record = FileRecord(
+            path_id=inv.path_id,
+            original_path=str(hot_file),
+            cold_storage_path=cold_ref,
+            cold_storage_location_id=storage_location.id,
+            file_size=23,
+            operation_type=OperationType.MOVE,
+        )
+        db_session.add(record)
+        db_session.commit()
+
+        class DummyBackend:
+            def backend_name(self):
+                return "s3"
+
+            def exists(self, storage_reference, location):
+                _ = (storage_reference, location)
+                return True
+
+            def thaw_file(self, storage_reference, destination_path, location, operation_mode):
+                _ = (storage_reference, location, operation_mode)
+                temp_plain = tmp_path / "remote-plain.txt"
+                temp_plain.write_text("remote encrypted payload")
+                file_encryption_service.encrypt_file(db_session, temp_plain, destination_path)
+                return True, None
+
+        monkeypatch.setattr("app.services.file_thawer.get_backend", lambda _location: DummyBackend())
+
+        success, error = FileThawer.thaw_file(record, db=db_session)
+
+        assert success is True, f"Thaw failed: {error}"
+        assert hot_file.exists()
+        assert hot_file.read_text() == "remote encrypted payload"
+
+        db_session.refresh(inv)
+        assert inv.storage_type == StorageType.HOT
+        assert inv.is_encrypted is False
+        assert inv.file_path == str(hot_file)

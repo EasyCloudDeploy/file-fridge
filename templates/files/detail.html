@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block title %}File Details - File Fridge{% endblock %}
+{% block page_title %}File Details{% endblock %}
+{% block page_description %}Inspect file metadata, storage location, drive identity, and recent migration history.{% endblock %}
+{% block page_actions %}
+<a href="/files" class="btn btn-outline-secondary">Back to Files</a>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div id="file-details-alerts"></div>
+    </div>
+</div>
+<div class="row g-3">
+    <div class="col-12 col-lg-7">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Overview</h5>
+                <div id="file-details-overview">
+                    <div class="spinner-border spinner-border-sm" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-lg-5">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Storage</h5>
+                <div id="file-details-storage">
+                    <div class="spinner-border spinner-border-sm" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Recent Activity</h5>
+                <div id="file-details-history">
+                    <div class="spinner-border spinner-border-sm" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    const fileId = window.location.pathname.split('/').pop();
+
+    function esc(value) {
+        if (value === null || value === undefined) return '';
+        return value.toString()
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function fmtDate(value) {
+        if (!value) return 'N/A';
+        return new Date(value).toLocaleString();
+    }
+
+    function fmtBytes(bytes) {
+        const n = Number(bytes);
+        if (!Number.isFinite(n) || n < 0) return 'N/A';
+        if (n === 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+        const idx = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
+        return `${(n / Math.pow(1024, idx)).toFixed(idx === 0 ? 0 : 2)} ${units[idx]}`;
+    }
+
+    async function loadFileDetails() {
+        try {
+            const response = await authenticatedFetch(`/api/v1/files/details/${fileId}`);
+            if (!response.ok) {
+                const error = await response.json().catch(() => ({}));
+                throw new Error(error.detail || 'Failed to load file details');
+            }
+            const payload = await response.json();
+            const file = payload.file || {};
+            const storage = file.storage_location || null;
+
+            document.getElementById('file-details-overview').innerHTML = `
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item"><strong>Path:</strong> <code>${esc(file.file_path)}</code></li>
+                    <li class="list-group-item"><strong>Monitored Path:</strong> ${esc(file.path_name || 'N/A')}</li>
+                    <li class="list-group-item"><strong>Storage Type:</strong> ${esc(file.storage_type || 'N/A')}</li>
+                    <li class="list-group-item"><strong>Status:</strong> ${esc(file.status || 'N/A')}</li>
+                    <li class="list-group-item"><strong>Size:</strong> ${fmtBytes(file.file_size)}</li>
+                    <li class="list-group-item"><strong>Modified:</strong> ${fmtDate(file.file_mtime)}</li>
+                    <li class="list-group-item"><strong>Accessed:</strong> ${fmtDate(file.file_atime)}</li>
+                    <li class="list-group-item"><strong>Changed:</strong> ${fmtDate(file.file_ctime)}</li>
+                    <li class="list-group-item"><strong>Last Seen:</strong> ${fmtDate(file.last_seen)}</li>
+                    <li class="list-group-item"><strong>Pinned:</strong> ${file.is_pinned ? 'Yes' : 'No'}</li>
+                </ul>
+            `;
+
+            document.getElementById('file-details-storage').innerHTML = storage ? `
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item"><strong>Location:</strong> ${esc(storage.name || 'N/A')}</li>
+                    <li class="list-group-item"><strong>Backend:</strong> ${esc(storage.backend_type || 'N/A')}</li>
+                    <li class="list-group-item"><strong>Operation:</strong> ${esc(storage.operation_mode || 'N/A')}</li>
+                    <li class="list-group-item"><strong>Available:</strong> ${storage.available ? 'Yes' : 'No'}</li>
+                    <li class="list-group-item"><strong>Storage Path:</strong> <code>${esc(storage.path || 'N/A')}</code></li>
+                    ${storage.backend_type === 'local' ? `<li class="list-group-item"><strong>Drive Label:</strong> ${esc(storage.local_drive_label || 'N/A')}</li>` : ''}
+                    ${storage.backend_type === 'local' ? `<li class="list-group-item"><strong>Drive ID:</strong> <code>${esc(storage.local_drive_identifier || 'N/A')}</code></li>` : ''}
+                    ${storage.backend_type === 'local' ? `<li class="list-group-item"><strong>Connected:</strong> ${storage.local_drive_is_connected ? 'Yes' : 'No'}</li>` : ''}
+                    ${storage.backend_type === 'local' ? `<li class="list-group-item"><strong>Mount:</strong> <code>${esc(storage.local_drive_mount_path || 'N/A')}</code></li>` : ''}
+                </ul>
+            ` : '<p class="text-muted mb-0">No cold storage location metadata available for this file.</p>';
+
+            const history = payload.transactions || [];
+            document.getElementById('file-details-history').innerHTML = history.length ? `
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped align-middle">
+                        <thead>
+                            <tr>
+                                <th>Time</th>
+                                <th>Type</th>
+                                <th>Result</th>
+                                <th>From</th>
+                                <th>To</th>
+                                <th>By</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${history.map(txn => `
+                                <tr>
+                                    <td><small>${fmtDate(txn.created_at)}</small></td>
+                                    <td>${esc(txn.transaction_type || '')}</td>
+                                    <td>${txn.success ? '<span class="badge bg-success">Success</span>' : '<span class="badge bg-danger">Failed</span>'}</td>
+                                    <td><code>${esc(txn.old_path || '-')}</code></td>
+                                    <td><code>${esc(txn.new_path || '-')}</code></td>
+                                    <td>${esc(txn.initiated_by || 'system')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            ` : '<p class="text-muted mb-0">No transaction history recorded for this file yet.</p>';
+        } catch (error) {
+            document.getElementById('file-details-alerts').innerHTML = `
+                <div class="alert alert-danger">${esc(error.message)}</div>
+            `;
+            document.getElementById('file-details-overview').innerHTML = '';
+            document.getElementById('file-details-storage').innerHTML = '';
+            document.getElementById('file-details-history').innerHTML = '';
+        }
+    }
+
+    window.runWhenFileFridgeReady(loadFileDetails);
+</script>
+{% endblock %}

@@ -7,7 +7,9 @@ from typing import Dict, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import FileRecord, OperationType
+from app.models import ColdStorageLocation, FileRecord, OperationType
+from app.services.cold_storage_backends import get_backend
+from app.services.file_thawer import FileThawer
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +43,12 @@ class PathReverser:
 
             for file_record in file_records:
                 try:
-                    success, error = PathReverser._reverse_file_operation(file_record)
+                    success, error = PathReverser._reverse_file_operation(file_record, db)
                     if success:
                         results["files_reversed"] += 1
-                        # Delete the file record
-                        db.delete(file_record)
+                        existing = db.query(FileRecord).filter(FileRecord.id == file_record.id).first()
+                        if existing is not None:
+                            db.delete(existing)
                         logger.info(f"Reversed operation for file: {file_record.original_path}")
                     else:
                         results["errors"].append(
@@ -71,68 +74,68 @@ class PathReverser:
         return results
 
     @staticmethod
-    def _reverse_file_operation(file_record: FileRecord) -> tuple[bool, Optional[str]]:
+    def _reverse_file_operation(file_record: FileRecord, db: Session) -> tuple[bool, Optional[str]]:
         """
         Reverse a single file operation.
 
         Args:
             file_record: The FileRecord to reverse
+            db: Database session
 
         Returns:
             (success: bool, error_message: Optional[str])
         """
-        try:
-            cold_path = Path(file_record.cold_storage_path)
-            original_path = Path(file_record.original_path)
+        location = None
+        if file_record.cold_storage_location_id:
+            location = (
+                db.query(ColdStorageLocation)
+                .filter(ColdStorageLocation.id == file_record.cold_storage_location_id)
+                .first()
+            )
+        if location is not None:
+            backend = get_backend(location)
+            if backend.backend_name() != "local":
+                return FileThawer.thaw_file(
+                    file_record=file_record, pin=False, db=db, initiated_by="reverse"
+                )
 
-            # Check if file exists in cold storage
-            if not cold_path.exists():
-                return False, f"File not found in cold storage: {cold_path}"
+        cold_path = Path(file_record.cold_storage_path)
+        original_path = Path(file_record.original_path)
+        operation_type = file_record.operation_type
 
-            operation_type = file_record.operation_type
+        if not cold_path.exists():
+            return False, f"File not found in cold storage: {cold_path}"
 
-            if operation_type == OperationType.MOVE:
-                # Move file back from cold storage to original location
-                try:
-                    # Ensure destination directory exists
-                    original_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(cold_path), str(original_path))
-                    return True, None
-                except Exception as e:
-                    return False, f"Failed to move file back: {e!s}"
+        if operation_type == OperationType.MOVE:
+            try:
+                original_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(cold_path), str(original_path))
+                return True, None
+            except Exception as e:
+                return False, f"Failed to move file back: {e!s}"
 
-            elif operation_type == OperationType.COPY:
-                # For copy, the original should still exist, but if it doesn't, move from cold storage
-                if not original_path.exists():
-                    try:
-                        original_path.parent.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(cold_path), str(original_path))
-                        return True, None
-                    except Exception as e:
-                        return False, f"Failed to move file back: {e!s}"
-                else:
-                    # Original exists, just remove from cold storage
-                    try:
-                        cold_path.unlink()
-                        return True, None
-                    except Exception as e:
-                        return False, f"Failed to remove from cold storage: {e!s}"
-
-            elif operation_type == OperationType.SYMLINK:
-                # Remove the symlink at original location if it exists
-                if original_path.exists() and original_path.is_symlink():
-                    original_path.unlink()
-
-                # Move file back from cold storage to original location
+        if operation_type == OperationType.COPY:
+            if not original_path.exists():
                 try:
                     original_path.parent.mkdir(parents=True, exist_ok=True)
                     shutil.move(str(cold_path), str(original_path))
                     return True, None
                 except Exception as e:
                     return False, f"Failed to move file back: {e!s}"
+            try:
+                cold_path.unlink()
+                return True, None
+            except Exception as e:
+                return False, f"Failed to remove from cold storage: {e!s}"
 
-            else:
-                return False, f"Unknown operation type: {operation_type}"
+        if operation_type == OperationType.SYMLINK:
+            if original_path.exists() and original_path.is_symlink():
+                original_path.unlink()
+            try:
+                original_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(cold_path), str(original_path))
+                return True, None
+            except Exception as e:
+                return False, f"Failed to move file back: {e!s}"
 
-        except Exception as e:
-            return False, str(e)
+        return False, f"Unknown operation type: {operation_type}"

@@ -93,6 +93,14 @@ async def edit_storage_location_form(request: Request, location_id: int):
     )
 
 
+@router.get("/files/{inventory_id}", response_class=HTMLResponse)
+async def get_file_details(request: Request, inventory_id: int):
+    """File details page."""
+    return templates.TemplateResponse(
+        "files/detail.html", {"request": request, "active_page": "files"}
+    )
+
+
 # Legacy redirect routes (kept for backwards compatibility)
 @router.post("/cleanup")
 async def cleanup_redirect():

@@ -23,6 +23,8 @@ from app.services.notification_events import (
 from app.services.notification_service import notification_service
 from app.services.remote_transfer_service import remote_transfer_service
 from app.services.stats_cleanup import cleanup_old_stats_job_func
+from app.utils.local_drive_identity import update_local_drive_identity_fields
+from app.services.cold_storage_backends import get_backend
 from app.utils.remote_auth import remote_auth
 
 logger = logging.getLogger(__name__)
@@ -344,6 +346,10 @@ def _check_and_notify_disk_space(location, db: Session):
     Returns:
         Tuple of (result_level, free_percent) where result_level is "critical", "caution", or None
     """
+    backend = get_backend(location)
+    if not backend.capabilities().supports_local_path_stats:
+        return (None, None)
+
     total, _used, free = shutil.disk_usage(location.path)
     free_percent = (free / total) * 100
 
@@ -451,33 +457,89 @@ def check_storage_permissions_job_func() -> None:
         locations = db.query(ColdStorageLocation).all()
         for location in locations:
             try:
-                missing = _check_path_permissions(location.path)
-                if missing:
-                    error = f"Missing {' and '.join(missing)} permission on cold storage path: {location.path}"
-                    if location.permissions_error != error:
-                        location.permissions_error = error
-                        logger.warning(f"Permission issue on cold storage '{location.name}': {error}")
-                        try:
-                            notification_service.dispatch_event_sync(
-                                db=db,
-                                event_type=NotificationEventType.STORAGE_PERMISSION_ERROR,
-                                event_data=StoragePermissionErrorData(
-                                    storage_type="cold",
-                                    location_name=location.name,
-                                    location_path=location.path,
-                                    missing_permissions=missing,
-                                ),
-                            )
-                        except Exception as e:
-                            logger.error(f"Failed to dispatch STORAGE_PERMISSION_ERROR notification: {e}")
-                else:
+                backend = get_backend(location)
+                update_local_drive_identity_fields(location)
+                backend_type = (
+                    location.backend_type.value
+                    if hasattr(location.backend_type, "value")
+                    else str(location.backend_type)
+                )
+                expected_offline = (
+                    backend_type == "local"
+                    and location.allow_offline
+                    and location.local_drive_is_removable
+                    and location.local_drive_is_connected is False
+                )
+                if expected_offline:
                     if location.permissions_error is not None:
-                        logger.info(f"Permissions restored on cold storage '{location.name}'")
+                        logger.info(
+                            "Cold storage '%s' is offline by design (allow_offline); suppressing permission error",
+                            location.name,
+                        )
                     location.permissions_error = None
+                    continue
+                if backend.capabilities().supports_local_path_stats:
+                    missing = _check_path_permissions(location.path)
+                    if missing:
+                        error = (
+                            f"Missing {' and '.join(missing)} permission on cold storage path: {location.path}"
+                        )
+                        if location.permissions_error != error:
+                            location.permissions_error = error
+                            logger.warning(
+                                f"Permission issue on cold storage '{location.name}': {error}"
+                            )
+                            try:
+                                notification_service.dispatch_event_sync(
+                                    db=db,
+                                    event_type=NotificationEventType.STORAGE_PERMISSION_ERROR,
+                                    event_data=StoragePermissionErrorData(
+                                        storage_type="cold",
+                                        location_name=location.name,
+                                        location_path=location.path,
+                                        missing_permissions=missing,
+                                    ),
+                                )
+                            except Exception as e:
+                                logger.error(
+                                    f"Failed to dispatch STORAGE_PERMISSION_ERROR notification: {e}"
+                                )
+                    else:
+                        if location.permissions_error is not None:
+                            logger.info(f"Permissions restored on cold storage '{location.name}'")
+                        location.permissions_error = None
+                else:
+                    is_valid, validation_error = backend.validate_location(location)
+                    if not is_valid:
+                        location.permissions_error = validation_error or "Backend validation failed"
+                    else:
+                        if location.permissions_error is not None:
+                            logger.info(f"Permissions restored on cold storage '{location.name}'")
+                        location.permissions_error = None
             except FileNotFoundError:
-                error = f"Path not found: {location.path}"
-                location.permissions_error = error
-                logger.warning(f"Cold storage path not found for '{location.name}': {location.path}")
+                backend_type = (
+                    location.backend_type.value
+                    if hasattr(location.backend_type, "value")
+                    else str(location.backend_type)
+                )
+                expected_offline = (
+                    backend_type == "local"
+                    and location.allow_offline
+                    and location.local_drive_is_removable
+                    and location.local_drive_is_connected is False
+                )
+                if expected_offline:
+                    location.permissions_error = None
+                    logger.info(
+                        "Cold storage '%s' path is missing while offline is allowed; skipping error",
+                        location.name,
+                    )
+                else:
+                    error = f"Path not found: {location.path}"
+                    location.permissions_error = error
+                    logger.warning(
+                        f"Cold storage path not found for '{location.name}': {location.path}"
+                    )
             except Exception:
                 logger.exception(f"Error checking permissions for cold storage '{location.name}'")
 
@@ -541,6 +603,12 @@ def disk_space_monitoring_job_func():
                 elif result_level == "caution":
                     logger.warning(
                         f"CAUTION: Disk space on {location.name} at {free_percent:.1f}% free (threshold: {location.caution_threshold_percent}%)"
+                    )
+                elif free_percent is None:
+                    logger.debug(
+                        "Skipping local disk-space check for non-local cold storage '%s' (%s)",
+                        location.name,
+                        location.path,
                     )
             except FileNotFoundError:
                 logger.warning(
