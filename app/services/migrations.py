@@ -11,12 +11,12 @@ from app.models import (
     ColdStorageLocation,
     FileInventory,
     FileStatus,
+    FileTransactionHistory,
     MonitoredPath,
     RelocationTask,
     RelocationTaskStatus,
     StorageType,
     TransactionType,
-    FileTransactionHistory,
 )
 from app.schemas import FreezingFileSchema
 from app.services.relocation_manager import relocation_manager

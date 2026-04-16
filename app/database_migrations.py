@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 INITIAL_REVISION = "726412e8862d"
 MAX_CONCURRENT_MIGRATIONS_REVISION = "6b398cde9d3e"
 RELOCATION_TASK_REVISION = "4cb41a7faab6"
+PERMISSIONS_ERROR_REVISION = "764abe6a5a03"
 HEAD_REVISION = "c3e1d8f7aa42"
 BACKEND_MODULES_REVISION = "9f3d6e2aa1b1"
 LOCAL_DRIVE_IDENTITY_REVISION = "b17d9f43c2aa"
@@ -38,7 +39,7 @@ def _determine_schema_revision(inspector) -> str:
                     return LOCAL_DRIVE_IDENTITY_REVISION
                 if "backend_type" in cold_storage_columns:
                     return BACKEND_MODULES_REVISION
-            return HEAD_REVISION
+            return PERMISSIONS_ERROR_REVISION
 
     if "relocation_tasks" in tables:
         return RELOCATION_TASK_REVISION

@@ -9,8 +9,8 @@ Create Date: 2026-04-16 09:45:00.000000
 from typing import Sequence, Union
 
 import sqlalchemy as sa
-from alembic import op
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "b17d9f43c2aa"
@@ -27,10 +27,12 @@ def upgrade() -> None:
         return
 
     columns = {column["name"] for column in inspector.get_columns("cold_storage_locations")}
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes("cold_storage_locations")}
 
     with op.batch_alter_table("cold_storage_locations") as batch_op:
         if "local_drive_identifier" not in columns:
             batch_op.add_column(sa.Column("local_drive_identifier", sa.String(), nullable=True))
+        if "ix_cold_storage_locations_local_drive_identifier" not in existing_indexes:
             batch_op.create_index(
                 "ix_cold_storage_locations_local_drive_identifier",
                 ["local_drive_identifier"],
@@ -72,6 +74,7 @@ def downgrade() -> None:
         return
 
     columns = {column["name"] for column in inspector.get_columns("cold_storage_locations")}
+    existing_indexes = {idx["name"] for idx in inspector.get_indexes("cold_storage_locations")}
 
     with op.batch_alter_table("cold_storage_locations") as batch_op:
         if "local_drive_last_seen_at" in columns:
@@ -85,6 +88,7 @@ def downgrade() -> None:
         if "local_drive_label" in columns:
             batch_op.drop_column("local_drive_label")
         if "local_drive_identifier" in columns:
-            batch_op.drop_index("ix_cold_storage_locations_local_drive_identifier")
+            if "ix_cold_storage_locations_local_drive_identifier" in existing_indexes:
+                batch_op.drop_index("ix_cold_storage_locations_local_drive_identifier")
             batch_op.drop_column("local_drive_identifier")
 

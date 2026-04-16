@@ -60,12 +60,14 @@
             `;
 
             if (data.backend_type === 'gdrive') {
-                const [statsResponse, filesResponse] = await Promise.all([
+                const [statsResult, filesResult] = await Promise.allSettled([
                     authenticatedFetch(`/api/v1/storage/locations/${locationId}/gdrive/stats`),
                     authenticatedFetch(`/api/v1/storage/locations/${locationId}/gdrive/files?limit=20`)
                 ]);
+                const statsResponse = statsResult.status === 'fulfilled' ? statsResult.value : null;
+                const filesResponse = filesResult.status === 'fulfilled' ? filesResult.value : null;
 
-                if (statsResponse.ok) {
+                if (statsResponse && statsResponse.ok) {
                     const stats = await statsResponse.json();
                     detailsHtml += `
                         <hr>
@@ -78,7 +80,7 @@
                     `;
                 }
 
-                if (filesResponse.ok) {
+                if (filesResponse && filesResponse.ok) {
                     const filesData = await filesResponse.json();
                     const files = filesData.files || [];
                     detailsHtml += `

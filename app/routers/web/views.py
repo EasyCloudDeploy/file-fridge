@@ -97,7 +97,8 @@ async def edit_storage_location_form(request: Request, location_id: int):
 async def get_file_details(request: Request, inventory_id: int):
     """File details page."""
     return templates.TemplateResponse(
-        "files/detail.html", {"request": request, "active_page": "files"}
+        "files/detail.html",
+        {"request": request, "active_page": "files", "inventory_id": inventory_id},
     )
 
 

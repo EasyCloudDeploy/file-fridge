@@ -8,7 +8,14 @@ from typing import Callable, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models import ColdStorageLocation, FileRecord, FileStatus, OperationType, PinnedFile, StorageType
+from app.models import (
+    ColdStorageLocation,
+    FileRecord,
+    FileStatus,
+    OperationType,
+    PinnedFile,
+    StorageType,
+)
 from app.services.audit_trail_service import audit_trail_service
 from app.services.checksum_verifier import checksum_verifier
 from app.services.cold_storage_backends import get_backend
@@ -86,7 +93,10 @@ class FileThawer:
 
             file_inventory = (
                 db.query(FileInventory)
-                .filter(FileInventory.file_path == file_record.cold_storage_path)
+                .filter(
+                    (FileInventory.file_path == file_record.cold_storage_path)
+                    | (FileInventory.file_path == file_record.original_path)
+                )
                 .first()
             )
 
@@ -115,7 +125,9 @@ class FileThawer:
                         checksum_after = checksum_verifier.calculate_checksum(original_path)
                     else:
                         original_path.parent.mkdir(parents=True, exist_ok=True)
-                        encrypted_temp = original_path.with_name(f"{original_path.name}.ffenc.download")
+                        encrypted_temp = original_path.with_name(
+                            f"{original_path.name}.ffenc.download"
+                        )
                         decrypted_temp = original_path.with_suffix(original_path.suffix + ".tmp")
                         if encrypted_temp.exists():
                             encrypted_temp.unlink()
@@ -161,10 +173,14 @@ class FileThawer:
 
                 if pin:
                     existing = (
-                        db.query(PinnedFile).filter(PinnedFile.file_path == str(original_path)).first()
+                        db.query(PinnedFile)
+                        .filter(PinnedFile.file_path == str(original_path))
+                        .first()
                     )
                     if not existing:
-                        db.add(PinnedFile(path_id=file_record.path_id, file_path=str(original_path)))
+                        db.add(
+                            PinnedFile(path_id=file_record.path_id, file_path=str(original_path))
+                        )
 
                 db.commit()
 
@@ -195,13 +211,9 @@ class FileThawer:
                     if storage_location.local_drive_label:
                         drive_hint_parts.append(f"label={storage_location.local_drive_label}")
                     if storage_location.local_drive_identifier:
-                        drive_hint_parts.append(
-                            f"id={storage_location.local_drive_identifier}"
-                        )
+                        drive_hint_parts.append(f"id={storage_location.local_drive_identifier}")
                     if storage_location.local_drive_mount_path:
-                        drive_hint_parts.append(
-                            f"mount={storage_location.local_drive_mount_path}"
-                        )
+                        drive_hint_parts.append(f"mount={storage_location.local_drive_mount_path}")
                     drive_hint = (
                         f" (expected drive: {', '.join(drive_hint_parts)})"
                         if drive_hint_parts

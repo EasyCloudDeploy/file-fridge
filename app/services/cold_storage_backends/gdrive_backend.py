@@ -1,6 +1,5 @@
 """Google Drive cold storage backend."""
 
-import hashlib
 import json
 import logging
 import threading
@@ -13,6 +12,7 @@ from urllib.parse import quote, unquote, urlparse
 import httpx
 
 from app.models import ColdStorageLocation, OperationType
+from app.services.checksum_verifier import checksum_verifier
 from app.services.cold_storage_backends.base import ColdStorageBackend, ColdStorageCapabilities
 
 logger = logging.getLogger(__name__)
@@ -185,9 +185,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
         if parsed.scheme != "gdrive":
             raise RuntimeError(f"Invalid Google Drive storage reference: {storage_reference}")
         clean_path = unquote(parsed.path.lstrip("/"))
-        combined = "/".join(
-            part for part in [unquote(parsed.netloc), clean_path] if part
-        )
+        combined = "/".join(part for part in [unquote(parsed.netloc), clean_path] if part)
         if not combined:
             raise RuntimeError(f"Invalid Google Drive storage reference: {storage_reference}")
         file_id = combined.split("/")[-1]
@@ -246,7 +244,9 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
             content=json.dumps(metadata, separators=(",", ":")).encode("utf-8"),
             timeout=30.0,
         )
-        self._raise_for_status_with_google_detail(init_resp, "Google Drive resumable upload initiation failed")
+        self._raise_for_status_with_google_detail(
+            init_resp, "Google Drive resumable upload initiation failed"
+        )
         upload_url = init_resp.headers.get("Location")
         if not upload_url:
             raise RuntimeError("Google Drive resumable upload initiation returned no upload URL")
@@ -279,7 +279,9 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
                 if upload_resp.status_code in (200, 201):
                     file_id = upload_resp.json().get("id")
                     break
-                self._raise_for_status_with_google_detail(upload_resp, "Google Drive resumable upload chunk failed")
+                self._raise_for_status_with_google_detail(
+                    upload_resp, "Google Drive resumable upload chunk failed"
+                )
                 bytes_sent = end_byte + 1
 
         if not file_id:
@@ -375,7 +377,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
             timeout=20.0,
         )
         response.raise_for_status()
-        quota = (response.json().get("storageQuota") or {})
+        quota = response.json().get("storageQuota") or {}
 
         total_limit = int(quota.get("limit") or 0)
         total_used = int(quota.get("usage") or 0)
@@ -445,7 +447,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
                 metadata["parents"] = [folder_id]
 
             # Calculate checksum BEFORE upload/deletion so it is never None for MOVE.
-            checksum_before = hashlib.sha256(source_path.read_bytes()).hexdigest()
+            checksum_before = checksum_verifier.calculate_checksum(source_path)
 
             headers = self._auth_headers(location)
             file_size = source_path.stat().st_size
@@ -518,9 +520,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
                     headers=headers,
                     timeout=20.0,
                 )
-                self._raise_for_status_with_google_detail(
-                    delete_resp, "Google Drive delete failed"
-                )
+                self._raise_for_status_with_google_detail(delete_resp, "Google Drive delete failed")
                 return True, None
 
             destination_path.parent.mkdir(parents=True, exist_ok=True)
@@ -535,9 +535,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
                 headers=headers,
                 timeout=120.0,
             ) as response:
-                self._raise_for_status_with_google_detail(
-                    response, "Google Drive download failed"
-                )
+                self._raise_for_status_with_google_detail(response, "Google Drive download failed")
                 with temp_path.open("wb") as handle:
                     for chunk in response.iter_bytes():
                         if chunk:
@@ -552,9 +550,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
                     headers=headers,
                     timeout=20.0,
                 )
-                self._raise_for_status_with_google_detail(
-                    delete_resp, "Google Drive delete failed"
-                )
+                self._raise_for_status_with_google_detail(delete_resp, "Google Drive delete failed")
 
             return True, None
         except Exception as exc:
@@ -573,7 +569,9 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
         except Exception:
             return False
 
-    def delete(self, storage_reference: str, location: ColdStorageLocation) -> Tuple[bool, Optional[str]]:
+    def delete(
+        self, storage_reference: str, location: ColdStorageLocation
+    ) -> Tuple[bool, Optional[str]]:
         try:
             file_id = self._parse_reference(storage_reference)
             response = httpx.delete(

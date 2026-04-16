@@ -1,10 +1,10 @@
 """Factory for cold storage backend modules."""
 
 from app.models import ColdStorageBackendType, ColdStorageLocation
+from app.services.cold_storage_backends.base import ColdStorageBackend
 from app.services.cold_storage_backends.gdrive_backend import GoogleDriveColdStorageBackend
 from app.services.cold_storage_backends.local_backend import LocalColdStorageBackend
 from app.services.cold_storage_backends.s3_backend import S3ColdStorageBackend
-
 
 _BACKENDS = {
     ColdStorageBackendType.LOCAL: LocalColdStorageBackend(),
@@ -13,7 +13,8 @@ _BACKENDS = {
 }
 
 
-def get_backend(location: ColdStorageLocation):
+def get_backend(location: ColdStorageLocation) -> ColdStorageBackend:
+    """Return the backend implementation for the given ColdStorageLocation."""
     backend = _BACKENDS.get(location.backend_type)
     if backend is None:
         raise ValueError(f"Unsupported cold storage backend type: {location.backend_type}")

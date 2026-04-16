@@ -79,6 +79,8 @@ class TestFileFreezer:
         monitored_path.operation_type = OperationType.COPY
         monitored_path.source_path = str(hot_dir)
         db_session.add(monitored_path)
+        # Set the location's operation_mode explicitly (no longer derived from path).
+        storage_location.operation_mode = OperationType.COPY
         db_session.commit()
 
         success, error, cold_path = FileFreezer.freeze_file(
@@ -107,6 +109,8 @@ class TestFileFreezer:
         monitored_path.operation_type = OperationType.SYMLINK
         monitored_path.source_path = str(hot_dir)
         db_session.add(monitored_path)
+        # Set the location's operation_mode explicitly (no longer derived from path).
+        storage_location.operation_mode = OperationType.SYMLINK
         db_session.commit()
 
         success, error, cold_path = FileFreezer.freeze_file(

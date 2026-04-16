@@ -7,9 +7,9 @@ Create Date: 2026-04-04 00:30:24.436274
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '764abe6a5a03'
@@ -23,13 +23,13 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     tables = set(inspector.get_table_names())
-    
+
     # monitored_paths
     if "monitored_paths" in tables:
         column_names = {column["name"] for column in inspector.get_columns("monitored_paths")}
         if "permissions_error" not in column_names:
             op.add_column("monitored_paths", sa.Column("permissions_error", sa.Text(), nullable=True))
-        
+
     # cold_storage_locations
     if "cold_storage_locations" in tables:
         column_names = {column["name"] for column in inspector.get_columns("cold_storage_locations")}
@@ -43,14 +43,14 @@ def downgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     tables = set(inspector.get_table_names())
-    
+
     # monitored_paths
     if "monitored_paths" in tables:
         column_names = {column["name"] for column in inspector.get_columns("monitored_paths")}
         if "permissions_error" in column_names:
             with op.batch_alter_table("monitored_paths") as batch_op:
                 batch_op.drop_column("permissions_error")
-            
+
     # cold_storage_locations
     if "cold_storage_locations" in tables:
         column_names = {column["name"] for column in inspector.get_columns("cold_storage_locations")}

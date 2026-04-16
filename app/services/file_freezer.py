@@ -75,13 +75,6 @@ class FileFreezer:
             # Calculate destination path preserving directory structure
             base_source = Path(monitored_path.source_path)
             operation_mode = storage_location.operation_mode or monitored_path.operation_type
-            # Backward compatibility: if a location still has default MOVE but the path
-            # is configured differently, preserve existing path-level behavior.
-            if (
-                operation_mode == OperationType.MOVE
-                and monitored_path.operation_type in (OperationType.COPY, OperationType.SYMLINK)
-            ):
-                operation_mode = monitored_path.operation_type
             try:
                 relative_path = source_path.relative_to(base_source)
             except ValueError:
@@ -170,13 +163,17 @@ class FileFreezer:
                             ) as encrypted_tmp:
                                 encrypted_temp_path = Path(encrypted_tmp.name)
 
-                            file_encryption_service.encrypt_file(db, source_path, encrypted_temp_path)
-                            success, error, storage_reference, _checksum_after_remote = backend.freeze_file(
-                                source_path=encrypted_temp_path,
-                                relative_path=encrypted_relative_path,
-                                location=storage_location,
-                                # Copy encrypted temp into backend, then apply requested behavior to original.
-                                operation_mode=OperationType.COPY,
+                            file_encryption_service.encrypt_file(
+                                db, source_path, encrypted_temp_path
+                            )
+                            success, error, storage_reference, _checksum_after_remote = (
+                                backend.freeze_file(
+                                    source_path=encrypted_temp_path,
+                                    relative_path=encrypted_relative_path,
+                                    location=storage_location,
+                                    # Copy encrypted temp into backend, then apply requested behavior to original.
+                                    operation_mode=OperationType.COPY,
+                                )
                             )
                             if not success:
                                 locked_file.status = old_status
@@ -257,8 +254,14 @@ class FileFreezer:
 
                 # If pinning, add to pinned files
                 if pin:
-                    # Use the cold storage path for pinning (so it won't be auto-thawed)
-                    pin_path = cold_storage_path
+                    # For COPY mode the hot file stays in place, so pin the hot path to
+                    # prevent the scanner from auto-moving it. For MOVE/SYMLINK the data
+                    # is in cold storage, so pin the cold path.
+                    pin_path = (
+                        locked_file.file_path
+                        if operation_mode == OperationType.COPY
+                        else cold_storage_path
+                    )
                     existing = db.query(PinnedFile).filter(PinnedFile.file_path == pin_path).first()
 
                     if not existing:
