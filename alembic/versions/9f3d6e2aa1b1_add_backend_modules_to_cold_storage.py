@@ -9,8 +9,8 @@ Create Date: 2026-04-15 18:30:00.000000
 from typing import Sequence, Union
 
 import sqlalchemy as sa
-from alembic import op
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "9f3d6e2aa1b1"
@@ -55,31 +55,12 @@ def upgrade() -> None:
         """
     )
 
-    if {"monitored_paths", "path_storage_location_association"} <= tables:
-        op.execute(
-            """
-            UPDATE cold_storage_locations
-            SET operation_mode = COALESCE(
-                operation_mode,
-                (
-                    SELECT mp.operation_type
-                    FROM monitored_paths mp
-                    JOIN path_storage_location_association psa ON psa.path_id = mp.id
-                    WHERE psa.storage_location_id = cold_storage_locations.id
-                    ORDER BY mp.id
-                    LIMIT 1
-                ),
-                'move'
-            )
-            """
-        )
-    else:
-        op.execute(
-            """
-            UPDATE cold_storage_locations
-            SET operation_mode = COALESCE(operation_mode, 'move')
-            """
-        )
+    op.execute(
+        """
+        UPDATE cold_storage_locations
+        SET operation_mode = COALESCE(operation_mode, 'move')
+        """
+    )
 
 
 def downgrade() -> None:

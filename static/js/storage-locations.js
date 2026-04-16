@@ -75,7 +75,7 @@ function renderStorageLocations() {
                 ${location.allow_offline ? `<span class="badge bg-primary mt-1">Offline Allowed</span>` : ''}
                 ${location.backend_type === 'local' && location.local_drive_is_removable ? `
                     <span class="badge bg-dark mt-1">Removable</span>` : ''}
-                ${location.backend_type === 'local' ? `
+                ${location.backend_type === 'local' && location.local_drive_is_removable ? `
                     <span class="badge ${location.local_drive_is_connected ? 'bg-success' : 'bg-warning text-dark'} mt-1">
                         ${location.local_drive_is_connected ? 'Drive Connected' : 'Drive Offline'}
                     </span>` : ''}

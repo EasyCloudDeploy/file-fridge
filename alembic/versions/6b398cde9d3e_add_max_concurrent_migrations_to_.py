@@ -22,7 +22,7 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     tables = inspector.get_table_names()
-    
+
     if "monitored_paths" not in tables:
         return
 

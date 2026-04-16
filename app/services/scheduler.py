@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import engine
 from app.models import MonitoredPath
+from app.services.cold_storage_backends import get_backend
 from app.services.file_workflow_service import file_workflow_service
 from app.services.notification_events import (
     DiskSpaceCautionData,
@@ -24,7 +25,6 @@ from app.services.notification_service import notification_service
 from app.services.remote_transfer_service import remote_transfer_service
 from app.services.stats_cleanup import cleanup_old_stats_job_func
 from app.utils.local_drive_identity import update_local_drive_identity_fields
-from app.services.cold_storage_backends import get_backend
 from app.utils.remote_auth import remote_auth
 
 logger = logging.getLogger(__name__)

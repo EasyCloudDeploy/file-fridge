@@ -17,7 +17,8 @@ from app.utils.db_utils import escape_like_string
 
 router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
-from typing import Annotated, Dict
+from typing import Annotated
+
 ...
 @router.get("/list", response_model=BrowserResponse)
 def list_directory(

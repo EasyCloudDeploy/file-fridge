@@ -9,9 +9,9 @@ import logging
 import shutil
 import time
 from pathlib import Path
+from typing import Annotated, List, Optional
 from urllib.parse import quote as url_quote
 from urllib.parse import urlencode
-from typing import Annotated, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -20,7 +20,13 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import ColdStorageBackendType, ColdStorageLocation, EncryptionStatus, FileInventory, FileRecord
+from app.models import (
+    ColdStorageBackendType,
+    ColdStorageLocation,
+    EncryptionStatus,
+    FileInventory,
+    FileRecord,
+)
 from app.schemas import ColdStorageLocation as ColdStorageLocationSchema
 from app.schemas import (
     ColdStorageLocationCreate,
@@ -28,8 +34,8 @@ from app.schemas import (
     ColdStorageLocationWithStats,
     StorageStats,
 )
-from app.services.scheduler import scheduler_service
 from app.services.cold_storage_backends import get_backend
+from app.services.scheduler import scheduler_service
 from app.utils.db_utils import escape_like_string
 from app.utils.local_drive_identity import update_local_drive_identity_fields
 
@@ -71,9 +77,11 @@ def _location_to_schema(location: ColdStorageLocation, path_count: Optional[int]
         "operation_mode": location.operation_mode,
         "backend_config": _sanitize_backend_config(raw_backend_config),
         "backend_status": {
-            "gdrive_connected": bool(raw_backend_config.get("refresh_token"))
-            if location.backend_type == ColdStorageBackendType.GDRIVE
-            else None
+            "gdrive_connected": (
+                bool(raw_backend_config.get("refresh_token"))
+                if location.backend_type == ColdStorageBackendType.GDRIVE
+                else None
+            )
         },
         "backend_capabilities": {
             "supports_move": capabilities.supports_move,
@@ -115,12 +123,17 @@ def _can_tolerate_offline(location: ColdStorageLocation, validation_error: Optio
 
 
 def _make_gdrive_state(location_id: int) -> str:
+    if not (settings.secret_key or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Server secret key is not configured; cannot create OAuth state token",
+        )
     payload = {
         "location_id": location_id,
         "ts": int(time.time()),
     }
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    secret = (settings.secret_key or "").encode("utf-8")
+    secret = settings.secret_key.encode("utf-8")
     signature = hmac.new(secret, payload_bytes, hashlib.sha256).hexdigest()
     token = {
         "payload": payload,
@@ -138,13 +151,19 @@ def _parse_gdrive_state(state: str) -> int:
         payload = token["payload"]
         signature = token["sig"]
     except Exception as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state") from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state"
+        ) from exc
 
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    secret = (settings.secret_key or "").encode("utf-8")
+    if not (settings.secret_key or "").strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
+    secret = settings.secret_key.encode("utf-8")
     expected = hmac.new(secret, payload_bytes, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(signature, expected):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth signature")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth signature"
+        )
 
     ts = int(payload.get("ts", 0))
     if abs(int(time.time()) - ts) > 600:
@@ -152,7 +171,9 @@ def _parse_gdrive_state(state: str) -> int:
 
     location_id = int(payload.get("location_id", 0))
     if location_id <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth location")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth location"
+        )
     return location_id
 
 
@@ -196,7 +217,7 @@ def get_storage_stats(db: Annotated[Session, Depends(get_db)]):
                         free_bytes=0,
                         error="Path not found or error stating path.",
                     )
-            )
+                )
             continue
         if isinstance(device_id, str) and device_id.startswith("remote_"):
             location_id = int(device_id.removeprefix("remote_"))
@@ -384,7 +405,9 @@ def list_storage_locations(
 @router.post(
     "/locations", response_model=ColdStorageLocationSchema, status_code=status.HTTP_201_CREATED
 )
-def create_storage_location(location: ColdStorageLocationCreate, db: Annotated[Session, Depends(get_db)]):
+def create_storage_location(
+    location: ColdStorageLocationCreate, db: Annotated[Session, Depends(get_db)]
+):
     """Create a new cold storage location."""
     backend_config = location.backend_config or {}
     effective_path = location.path
@@ -394,6 +417,10 @@ def create_storage_location(location: ColdStorageLocationCreate, db: Annotated[S
         effective_path = f"s3://{bucket}/{prefix}" if prefix else f"s3://{bucket}"
     elif location.backend_type == ColdStorageBackendType.GDRIVE:
         folder_id = (backend_config.get("folder_id") or "").strip()
+        if not folder_id:
+            # Store the location name as the folder selector so Drive operations
+            # can find/create the right folder rather than uploading to Drive root.
+            backend_config["folder_id"] = location.name
         effective_path = f"gdrive://{folder_id or location.name}"
 
     # Check for duplicate name
@@ -466,7 +493,9 @@ def get_storage_location(location_id: int, db: Annotated[Session, Depends(get_db
 
 @router.put("/locations/{location_id}", response_model=ColdStorageLocationSchema)
 def update_storage_location(
-    location_id: int, location_update: ColdStorageLocationUpdate, db: Annotated[Session, Depends(get_db)]
+    location_id: int,
+    location_update: ColdStorageLocationUpdate,
+    db: Annotated[Session, Depends(get_db)],
 ):
     """Update a cold storage location."""
     location = db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
@@ -541,6 +570,9 @@ def update_storage_location(
     elif location.backend_type == ColdStorageBackendType.GDRIVE:
         cfg = location.get_backend_config()
         folder_id = (cfg.get("folder_id") or "").strip()
+        if not folder_id:
+            cfg["folder_id"] = location.name
+            location.set_backend_config(cfg)
         location.path = f"gdrive://{folder_id or location.name}"
     else:
         target_path = update_data.get("path", location.path)
@@ -689,7 +721,9 @@ def google_drive_oauth_callback(
 ):
     """Handle Google OAuth callback and persist refresh token."""
     if error:
-        return RedirectResponse(url=f"/storage-locations?gdrive_oauth=error&reason={url_quote(error)}")
+        return RedirectResponse(
+            url=f"/storage-locations?gdrive_oauth=error&reason={url_quote(error)}"
+        )
     if not code or not state:
         return RedirectResponse(url="/storage-locations?gdrive_oauth=error&reason=missing_code")
 
@@ -699,7 +733,9 @@ def google_drive_oauth_callback(
             db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
         )
         if not location or location.backend_type != ColdStorageBackendType.GDRIVE:
-            return RedirectResponse(url="/storage-locations?gdrive_oauth=error&reason=invalid_location")
+            return RedirectResponse(
+                url="/storage-locations?gdrive_oauth=error&reason=invalid_location"
+            )
 
         cfg = location.get_backend_config()
         client_id = cfg.get("client_id")
@@ -813,7 +849,10 @@ def delete_storage_location(
 
         # 3. Attempt to delete the actual files and directory from the filesystem
         try:
-            if location.backend_type == ColdStorageBackendType.LOCAL and Path(location.path).exists():
+            if (
+                location.backend_type == ColdStorageBackendType.LOCAL
+                and Path(location.path).exists()
+            ):
                 logger.info(f"Deleting files and directory: {location.path}")
                 shutil.rmtree(location.path)
         except FileNotFoundError:

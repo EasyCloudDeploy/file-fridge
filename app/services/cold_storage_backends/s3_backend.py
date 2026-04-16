@@ -1,11 +1,11 @@
 """Amazon S3 cold storage backend."""
 
-import hashlib
 from pathlib import Path
 from typing import Optional, Tuple
 from urllib.parse import quote, unquote, urlparse
 
 from app.models import ColdStorageLocation, OperationType
+from app.services.checksum_verifier import checksum_verifier
 from app.services.cold_storage_backends.base import ColdStorageBackend, ColdStorageCapabilities
 
 
@@ -92,7 +92,7 @@ class S3ColdStorageBackend(ColdStorageBackend):
             client = self._client(location)
 
             # Calculate checksum BEFORE upload/deletion so it is never None for MOVE.
-            checksum_before = hashlib.sha256(source_path.read_bytes()).hexdigest()
+            checksum_before = checksum_verifier.calculate_checksum(source_path)
 
             client.upload_file(str(source_path), bucket, key)
 
@@ -145,7 +145,9 @@ class S3ColdStorageBackend(ColdStorageBackend):
         except Exception:
             return False
 
-    def delete(self, storage_reference: str, location: ColdStorageLocation) -> Tuple[bool, Optional[str]]:
+    def delete(
+        self, storage_reference: str, location: ColdStorageLocation
+    ) -> Tuple[bool, Optional[str]]:
         try:
             bucket, key = self._parse_reference(storage_reference)
             client = self._client(location)

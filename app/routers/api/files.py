@@ -94,10 +94,14 @@ def _get_storage_location_for_file(
                 "name": loc.name,
                 "path": loc.path,
                 "backend_type": (
-                    loc.backend_type.value if hasattr(loc.backend_type, "value") else str(loc.backend_type)
+                    loc.backend_type.value
+                    if hasattr(loc.backend_type, "value")
+                    else str(loc.backend_type)
                 ),
                 "operation_mode": (
-                    loc.operation_mode.value if hasattr(loc.operation_mode, "value") else str(loc.operation_mode)
+                    loc.operation_mode.value
+                    if hasattr(loc.operation_mode, "value")
+                    else str(loc.operation_mode)
                 ),
                 "available": storage_available,
                 "local_drive_label": loc.local_drive_label,
@@ -797,9 +801,6 @@ def thaw_file(inventory_id: int, db: Annotated[Session, Depends(get_db)], pin: b
             detail="File thaw is already in progress",
         )
 
-    inventory_entry.status = FileStatus.MIGRATING
-    db.commit()
-
     file_record = (
         db.query(FileRecord)
         .filter(
@@ -817,6 +818,9 @@ def thaw_file(inventory_id: int, db: Annotated[Session, Depends(get_db)], pin: b
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No file record found for inventory entry {inventory_id}",
         )
+
+    inventory_entry.status = FileStatus.MIGRATING
+    db.commit()
 
     success, error = FileThawer.thaw_file(file_record, pin=pin, db=db)
 
@@ -869,7 +873,11 @@ def get_freeze_options(inventory_id: int, db: Annotated[Session, Depends(get_db)
         backend = get_backend(loc)
         caps = backend.capabilities()
         is_valid, _validation_error = backend.validate_location(loc)
-        op = loc.operation_mode
+        op = (
+            loc.operation_mode.value
+            if hasattr(loc.operation_mode, "value")
+            else str(loc.operation_mode)
+        )
         op_supported = (
             (op == "move" and caps.supports_move)
             or (op == "copy" and caps.supports_copy)
@@ -1053,7 +1061,11 @@ def relocate_file(
     current_location = None
     if inventory_entry.cold_storage_location_id:
         current_location = next(
-            (loc for loc in monitored_path.storage_locations if loc.id == inventory_entry.cold_storage_location_id),
+            (
+                loc
+                for loc in monitored_path.storage_locations
+                if loc.id == inventory_entry.cold_storage_location_id
+            ),
             None,
         )
     if not current_location:

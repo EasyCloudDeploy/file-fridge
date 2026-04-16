@@ -383,11 +383,11 @@ def test_thaw_file_success(
 
 
 def test_thaw_file_already_in_progress(
-    authenticated_client: TestClient, file_inventory_factory
+    authenticated_client: TestClient, file_inventory_factory, tmp_path
 ):
     """Second thaw attempt should be blocked while the file is already migrating."""
     cold_file = file_inventory_factory(
-        "/tmp/cold_in_progress.txt",
+        str(tmp_path / "cold_in_progress.txt"),
         storage_type=StorageType.COLD,
         status=FileStatus.MIGRATING,
     )

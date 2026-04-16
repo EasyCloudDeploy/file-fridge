@@ -25,8 +25,12 @@ from app.models import (
     ScanStatus,
     StorageType,
 )
-from app.services.audit_trail_service import audit_trail_service  # Backward-compatible test patch target
-from app.services.checksum_verifier import checksum_verifier  # Backward-compatible test patch target
+from app.services.audit_trail_service import (
+    audit_trail_service,  # Backward-compatible test patch target
+)
+from app.services.checksum_verifier import (
+    checksum_verifier,  # Backward-compatible test patch target
+)
 from app.services.cold_storage_backends import get_backend
 from app.services.criteria_matcher import CriteriaMatcher
 from app.services.file_cleanup import FileCleanup
@@ -526,7 +530,12 @@ class FileWorkflowService:
         self, file_path: Path, matched_criteria_ids: list, path: MonitoredPath
     ) -> dict:
         """Process a single file: move it to cold storage and record in database."""
-        result = {"success": False, "file_path": str(file_path), "error": None, "file_record_id": None}
+        result = {
+            "success": False,
+            "file_path": str(file_path),
+            "error": None,
+            "file_record_id": None,
+        }
         db = SessionFactory()
         operation_id = None
         path_id = path.id
@@ -561,7 +570,9 @@ class FileWorkflowService:
                 result["error"] = "Could not determine file size"
                 return result
 
-            storage_location = storage_routing_service.select_storage_location(db, db_path, file_size)
+            storage_location = storage_routing_service.select_storage_location(
+                db, db_path, file_size
+            )
             if not storage_location:
                 result["error"] = "No suitable storage location available"
                 return result
@@ -579,7 +590,9 @@ class FileWorkflowService:
             inventory_entry = (
                 db.query(FileInventory)
                 .with_for_update()
-                .filter(FileInventory.path_id == db_path.id, FileInventory.file_path == str(file_path))
+                .filter(
+                    FileInventory.path_id == db_path.id, FileInventory.file_path == str(file_path)
+                )
                 .first()
             )
             if not inventory_entry:
@@ -591,16 +604,24 @@ class FileWorkflowService:
             try:
                 backend = get_backend(storage_location)
             except Exception:
+                # Only silently fall back to the legacy local-path mover for LOCAL backends.
+                # For remote backends (S3, GDrive) a backend resolution failure is a real error.
+                if storage_location.backend_type and storage_location.backend_type.value != "local":
+                    raise
                 backend = None
 
             if backend is None:
                 source_base = Path(db_path.source_path)
                 dest_base = Path(storage_location.path)
-                dest_path = FileMover.preserve_directory_structure(file_path, source_base, dest_base)
+                dest_path = FileMover.preserve_directory_structure(
+                    file_path, source_base, dest_base
+                )
                 checksum_before = checksum_verifier.calculate_checksum(file_path)
 
                 def progress_callback(bytes_transferred: int):
-                    scan_progress_manager.update_file_progress(path_id, operation_id, bytes_transferred)
+                    scan_progress_manager.update_file_progress(
+                        path_id, operation_id, bytes_transferred
+                    )
 
                 success, error, checksum_after = FileMover.move_with_rollback(
                     file_path,
@@ -684,7 +705,9 @@ class FileWorkflowService:
 
             # Preserve historical workflow behavior: COPY keeps hot inventory entry.
             if operation_mode == OperationType.COPY:
-                refreshed = db.query(FileInventory).filter(FileInventory.id == inventory_entry.id).first()
+                refreshed = (
+                    db.query(FileInventory).filter(FileInventory.id == inventory_entry.id).first()
+                )
                 if refreshed:
                     refreshed.storage_type = StorageType.HOT
                     refreshed.status = FileStatus.ACTIVE
@@ -824,7 +847,9 @@ class FileWorkflowService:
                     )
                     return result
                 except Exception as local_thaw_error:
-                    result["error"] = f"Failed to move file back {cold_reference}: {local_thaw_error!s}"
+                    result["error"] = (
+                        f"Failed to move file back {cold_reference}: {local_thaw_error!s}"
+                    )
                     scan_progress_manager.complete_file_operation(
                         path_id, operation_id, "move_to_hot", success=False, error=result["error"]
                     )
@@ -855,7 +880,9 @@ class FileWorkflowService:
 
             result["success"] = True
             scan_progress_manager.update_file_progress(path_id, operation_id, file_size)
-            scan_progress_manager.complete_file_operation(path_id, operation_id, "move_to_hot", success=True)
+            scan_progress_manager.complete_file_operation(
+                path_id, operation_id, "move_to_hot", success=True
+            )
             return result
         except Exception as e:
             result["error"] = f"Error thawing {cold_storage_path}: {e!s}"
@@ -872,9 +899,9 @@ class FileWorkflowService:
         storage_location: ColdStorageLocation, monitored_path: MonitoredPath
     ) -> OperationType:
         operation_mode = storage_location.operation_mode or monitored_path.operation_type
-        if (
-            operation_mode == OperationType.MOVE
-            and monitored_path.operation_type in (OperationType.COPY, OperationType.SYMLINK)
+        if operation_mode == OperationType.MOVE and monitored_path.operation_type in (
+            OperationType.COPY,
+            OperationType.SYMLINK,
         ):
             return monitored_path.operation_type
         return operation_mode
@@ -1015,7 +1042,9 @@ class FileWorkflowService:
             elif criterion_type == CriterionType.SIZE:
                 matches = CriteriaMatcher._match_size(inventory_entry.file_size, operator, value)
             elif criterion_type == CriterionType.NAME:
-                matches = CriteriaMatcher._match_name(hot_path.name, operator, value, case_sensitive=True)
+                matches = CriteriaMatcher._match_name(
+                    hot_path.name, operator, value, case_sensitive=True
+                )
             elif criterion_type == CriterionType.INAME:
                 matches = CriteriaMatcher._match_name(
                     hot_path.name, operator, value, case_sensitive=False

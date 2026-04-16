@@ -4,11 +4,10 @@ import enum
 import json
 import os
 import threading
-from cryptography.fernet import Fernet, MultiFernet, InvalidToken
 from typing import Optional
 
 import sqlalchemy as sa
-from app.constants import COLD_STORAGE_LOCATIONS_ID
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from sqlalchemy import (
     JSON,
     Boolean,
@@ -25,6 +24,7 @@ from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
+from app.constants import COLD_STORAGE_LOCATIONS_ID
 from app.database import Base
 
 # Foreign key reference constants
@@ -221,9 +221,7 @@ path_storage_location_association = Table(
     "path_storage_location_association",
     Base.metadata,
     Column("path_id", Integer, ForeignKey("monitored_paths.id"), primary_key=True),
-    Column(
-        "storage_location_id", Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), primary_key=True
-    ),
+    Column("storage_location_id", Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), primary_key=True),
 )
 
 
@@ -276,7 +274,8 @@ class ColdStorageLocation(Base):
         if not decrypted:
             return {}
         try:
-            return json.loads(decrypted)
+            result = json.loads(decrypted)
+            return result if isinstance(result, dict) else {}
         except json.JSONDecodeError:
             return {}
 
@@ -486,12 +485,8 @@ class FileTransactionHistory(Base):
     new_status = Column(SQLEnum(FileStatus), nullable=True)
     old_path = Column(String, nullable=True)
     new_path = Column(String, nullable=True)
-    old_storage_location_id = Column(
-        Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=True
-    )
-    new_storage_location_id = Column(
-        Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=True
-    )
+    old_storage_location_id = Column(Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=True)
+    new_storage_location_id = Column(Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=True)
     file_size = Column(Integer, nullable=True)
     checksum_before = Column(String, nullable=True)
     checksum_after = Column(String, nullable=True)

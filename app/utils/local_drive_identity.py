@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import platform
 import plistlib
 import subprocess
 from datetime import datetime, timezone
@@ -14,6 +14,8 @@ from app.models import ColdStorageBackendType, ColdStorageLocation
 
 def _diskutil_info(path: Path) -> Dict:
     """Return diskutil plist info for a path on macOS, or empty dict if unavailable."""
+    if platform.system() != "Darwin":
+        return {}
     try:
         proc = subprocess.run(
             ["diskutil", "info", "-plist", str(path)],
