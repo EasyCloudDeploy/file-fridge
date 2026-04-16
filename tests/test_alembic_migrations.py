@@ -29,7 +29,7 @@ def alembic_config(tmp_path):
     return cfg, db_url
 
 
-def test_migrations_up_and_down(alembic_config):
+def test_migrations_up_and_down(alembic_config):  # noqa: PLR0915
     """
     Test that Alembic can successfully upgrade to head and downgrade back to base.
     This ensures that all migrations have valid syntax and correct rollback logic.
@@ -116,6 +116,18 @@ def test_migrations_up_and_down(alembic_config):
         column_names = [col["name"] for col in columns]
         assert "permissions_error" in column_names
 
+        # New columns from recent migrations
+        assert "backend_type" in column_names
+        assert "operation_mode" in column_names
+        assert "backend_config_encrypted" in column_names
+        assert "local_drive_identifier" in column_names
+        assert "local_drive_label" in column_names
+        assert "local_drive_mount_path" in column_names
+        assert "local_drive_is_removable" in column_names
+        assert "local_drive_is_connected" in column_names
+        assert "local_drive_last_seen_at" in column_names
+        assert "allow_offline" in column_names
+
         tables = inspector.get_table_names()
         assert "relocation_tasks" in tables
 
@@ -140,6 +152,18 @@ def test_migrations_up_and_down(alembic_config):
         columns = inspector.get_columns("cold_storage_locations")
         column_names = [col["name"] for col in columns]
         assert "permissions_error" not in column_names
+
+        # New columns from recent migrations should be removed
+        assert "backend_type" not in column_names
+        assert "operation_mode" not in column_names
+        assert "backend_config_encrypted" not in column_names
+        assert "local_drive_identifier" not in column_names
+        assert "local_drive_label" not in column_names
+        assert "local_drive_mount_path" not in column_names
+        assert "local_drive_is_removable" not in column_names
+        assert "local_drive_is_connected" not in column_names
+        assert "local_drive_last_seen_at" not in column_names
+        assert "allow_offline" not in column_names
 
         tables = inspector.get_table_names()
         assert "relocation_tasks" not in tables
@@ -204,8 +228,12 @@ def test_permissions_error_upgrade_is_idempotent(alembic_config):
         command.upgrade(cfg, "head")
 
         inspector = sa.inspect(engine)
-        assert "permissions_error" in [col["name"] for col in inspector.get_columns("monitored_paths")]
-        assert "permissions_error" in [col["name"] for col in inspector.get_columns("cold_storage_locations")]
+        assert "permissions_error" in [
+            col["name"] for col in inspector.get_columns("monitored_paths")
+        ]
+        assert "permissions_error" in [
+            col["name"] for col in inspector.get_columns("cold_storage_locations")
+        ]
 
 
 def _restore_snapshot(snapshot_name: str, tmp_path: Path) -> tuple[sa.Engine, str]:
@@ -225,9 +253,7 @@ def _restore_snapshot(snapshot_name: str, tmp_path: Path) -> tuple[sa.Engine, st
 
 
 @pytest.mark.parametrize("snapshot_name", ["pre_max_concurrent.sql", "drifted_max_concurrent.sql"])
-def test_run_startup_migrations_against_real_world_snapshots(
-    tmp_path, snapshot_name
-):
+def test_run_startup_migrations_against_real_world_snapshots(tmp_path, snapshot_name):
     """Upgrade persisted legacy snapshots all the way to head without errors."""
     engine, db_url = _restore_snapshot(snapshot_name, tmp_path)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -243,6 +269,22 @@ def test_run_startup_migrations_against_real_world_snapshots(
     monitored_path_columns = [col["name"] for col in inspector.get_columns("monitored_paths")]
     assert "max_concurrent_migrations" in monitored_path_columns
     assert "permissions_error" in monitored_path_columns
+
+    if "cold_storage_locations" in inspector.get_table_names():
+        cold_storage_columns = [
+            col["name"] for col in inspector.get_columns("cold_storage_locations")
+        ]
+        assert "permissions_error" in cold_storage_columns
+        assert "backend_type" in cold_storage_columns
+        assert "operation_mode" in cold_storage_columns
+        assert "backend_config_encrypted" in cold_storage_columns
+        assert "local_drive_identifier" in cold_storage_columns
+        assert "local_drive_label" in cold_storage_columns
+        assert "local_drive_mount_path" in cold_storage_columns
+        assert "local_drive_is_removable" in cold_storage_columns
+        assert "local_drive_is_connected" in cold_storage_columns
+        assert "local_drive_last_seen_at" in cold_storage_columns
+        assert "allow_offline" in cold_storage_columns
 
     with engine.connect() as connection:
         version = connection.execute(
