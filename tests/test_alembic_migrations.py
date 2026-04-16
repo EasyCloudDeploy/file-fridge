@@ -208,6 +208,64 @@ def test_permissions_error_upgrade_is_idempotent(alembic_config):
         assert "permissions_error" in [col["name"] for col in inspector.get_columns("cold_storage_locations")]
 
 
+def test_cold_storage_backend_values_normalize_on_upgrade(alembic_config):
+    """Upgrade should normalize lowercase backend_type/operation_mode values."""
+    cfg, db_url = alembic_config
+
+    with patch("app.config.Settings.database_url", new_callable=PropertyMock, return_value=db_url):
+        engine = sa.create_engine(db_url)
+
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    """
+                CREATE TABLE cold_storage_locations (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR NOT NULL,
+                    path VARCHAR NOT NULL,
+                    caution_threshold_percent INTEGER NOT NULL DEFAULT 20,
+                    critical_threshold_percent INTEGER NOT NULL DEFAULT 10,
+                    is_encrypted BOOLEAN NOT NULL DEFAULT 0,
+                    encryption_status VARCHAR(16) NOT NULL DEFAULT 'none',
+                    backend_type VARCHAR(16) NOT NULL DEFAULT 'local',
+                    operation_mode VARCHAR(16) NOT NULL DEFAULT 'move',
+                    created_at DATETIME,
+                    updated_at DATETIME
+                )
+            """
+                )
+            )
+            connection.execute(
+                sa.text(
+                    """
+                INSERT INTO cold_storage_locations (
+                    id, name, path, caution_threshold_percent, critical_threshold_percent,
+                    is_encrypted, encryption_status, backend_type, operation_mode
+                ) VALUES
+                    (1, 'legacy-lower', '/tmp/legacy-lower', 20, 10, 0, 'none', 'local', 'move'),
+                    (2, 'already-upper', '/tmp/already-upper', 20, 10, 0, 'none', 'S3', 'COPY')
+            """
+                )
+            )
+
+        command.stamp(cfg, "c3e1d8f7aa42")
+        command.upgrade(cfg, "head")
+
+        with engine.connect() as connection:
+            rows = connection.execute(
+                sa.text(
+                    """
+                    SELECT id, backend_type, operation_mode
+                    FROM cold_storage_locations
+                    ORDER BY id
+                    """
+                )
+            ).fetchall()
+
+        assert rows[0] == (1, "LOCAL", "MOVE")
+        assert rows[1] == (2, "S3", "COPY")
+
+
 def _restore_snapshot(snapshot_name: str, tmp_path: Path) -> tuple[sa.Engine, str]:
     """Restore a persisted SQL snapshot into a temporary SQLite database."""
     snapshot_path = SNAPSHOT_DIR / snapshot_name
