@@ -9,6 +9,20 @@ from app.models import ColdStorageLocation, MonitoredPath, User
 logger = logging.getLogger(__name__)
 
 
+def normalize_client_path(path_value: str) -> Path:
+    """Normalize a client-provided path without resolving symlinks."""
+    if "\x00" in path_value:
+        msg = "Path contains null bytes"
+        raise ValueError(msg)
+
+    candidate = Path(path_value).expanduser()
+    if not candidate.is_absolute():
+        msg = "Path must be absolute"
+        raise ValueError(msg)
+
+    return candidate.absolute()
+
+
 def check_path_permission(db: Session, current_user: User, resolved_path: Path) -> None:
     """
     Check if the current user has permission to access the resolved path.

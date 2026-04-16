@@ -42,7 +42,7 @@ from app.schemas import (
     StorageType as StorageTypeSchema,
 )
 from app.security import get_current_user
-from app.services.browser_service import check_path_permission
+from app.services.browser_service import check_path_permission, normalize_client_path
 from app.services.cold_storage_backends import get_backend
 from app.services.file_freezer import FileFreezer
 from app.services.file_mover import FileMover
@@ -698,11 +698,12 @@ def browse_files(
     try:
         try:
             # Resolve the path to handle any '..' or symlinks
-            resolved_path = Path(directory).resolve()
-        except (OSError, ValueError) as e:
+            resolved_path = normalize_client_path(directory)
+        except (OSError, ValueError) as err:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid directory path: {e!s}"
-            )
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid directory path",
+            ) from err
 
         # SECURITY: Validate that the requested path is within a configured monitored path or storage location
         monitored_paths = db.query(MonitoredPath.source_path).all()
@@ -723,7 +724,7 @@ def browse_files(
                 continue
 
         if not is_allowed:
-            logger.warning(f"Unauthorized directory browse attempt: {directory}")
+            logger.warning("Unauthorized directory browse attempt")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied: Directory is not within a configured monitored path or storage location",
@@ -732,7 +733,7 @@ def browse_files(
         if not resolved_path.exists() or not resolved_path.is_dir():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Directory does not exist: {directory}",
+                detail="Directory does not exist",
             )
 
         dir_path = resolved_path
@@ -769,7 +770,7 @@ def browse_files(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error browsing directory: {e!s}",
+            detail="Error browsing directory",
         ) from e
 
 

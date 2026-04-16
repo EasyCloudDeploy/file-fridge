@@ -28,13 +28,14 @@ class TestUsersRouter:
         assert response.status_code == 400
         assert "already taken" in response.json()["detail"].lower()
 
-    def test_update_user_roles_success(self, authenticated_client, db_session):
+    def test_update_user_roles_success(self, authenticated_client):
         """Test updating a user's roles."""
-        # Create a target user
-        user = User(username="roleuser", password_hash="hash", roles=["viewer"])
-        db_session.add(user)
-        db_session.commit()
-        user_id = user.id
+        create_response = authenticated_client.post(
+            "/api/v1/users",
+            json={"username": "roleuser", "password": "test-pass-123"},
+        )
+        assert create_response.status_code == 201
+        user_id = create_response.json()["id"]
 
         payload = ["viewer", "editor"]
         response = authenticated_client.put(f"/api/v1/users/{user_id}/roles", json=payload)
@@ -58,10 +59,12 @@ class TestUsersRouter:
 
     def test_delete_user_success(self, authenticated_client, db_session):
         """Test deleting a user."""
-        user = User(username="deleteuser", password_hash="hash", roles=["viewer"])
-        db_session.add(user)
-        db_session.commit()
-        user_id = user.id
+        create_response = authenticated_client.post(
+            "/api/v1/users",
+            json={"username": "deleteuser", "password": "test-pass-123"},
+        )
+        assert create_response.status_code == 201
+        user_id = create_response.json()["id"]
 
         response = authenticated_client.delete(f"/api/v1/users/{user_id}")
         assert response.status_code == 204

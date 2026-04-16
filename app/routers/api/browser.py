@@ -1,9 +1,9 @@
-# ruff: noqa: B008, PLR0912, TRY301
+# ruff: noqa: PLR0912, TRY301
 """API routes for file system browsing."""
 
 import logging
 from pathlib import Path
-from typing import Dict
+from typing import Annotated, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -12,14 +12,12 @@ from app.database import get_db
 from app.models import FileInventory, User
 from app.schemas import BrowserItem, BrowserResponse
 from app.security import get_current_user
-from app.services.browser_service import check_browser_permissions
+from app.services.browser_service import check_browser_permissions, normalize_client_path
 from app.utils.db_utils import escape_like_string
 
 router = APIRouter(prefix="/api/v1/browser", tags=["browser"])
 logger = logging.getLogger(__name__)
-from typing import Annotated
 
-...
 @router.get("/list", response_model=BrowserResponse)
 def list_directory(
     path: str = Query("/", description="Directory path to browse"),
@@ -47,7 +45,7 @@ def list_directory(
     try:
         # Resolve the path to handle any '..' or symlinks
         try:
-            resolved_path = Path(path).resolve()
+            resolved_path = normalize_client_path(path)
         except (OSError, ValueError) as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -89,8 +87,8 @@ def list_directory(
                     inventory_map[file_path] = (
                         storage_type.value if hasattr(storage_type, "value") else str(storage_type)
                     )
-        except Exception as e:
-            logger.warning(f"Failed to fetch inventory status: {e}")
+        except Exception:
+            logger.warning("Failed to fetch inventory status")
             # Continue without inventory status on error
 
         # List directory contents
@@ -140,7 +138,7 @@ def list_directory(
     except HTTPException:
         raise
     except Exception as e:
-        logger.exception(f"Error browsing directory {path}")
+        logger.exception("Error browsing directory")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error browsing directory",
