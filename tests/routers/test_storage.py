@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -158,6 +159,64 @@ class TestStorageRouter:
         response = client.get("/api/v1/storage/gdrive/oauth/callback", follow_redirects=False)
         assert response.status_code in (302, 307)
         assert response.headers["location"] == "/storage-locations?gdrive_oauth=error&reason=missing_code"
+
+    def test_google_oauth_metadata_prefers_configured_instance_url(
+        self, authenticated_client, monkeypatch
+    ):
+        """OAuth callback URL should use configured public instance URL when available."""
+        from app.routers.api import storage as storage_router
+
+        monkeypatch.setattr(
+            storage_router.instance_config_service,
+            "get_instance_url",
+            lambda _db: "https://filefridge.example.com",
+        )
+        response = authenticated_client.get("/api/v1/storage/gdrive/oauth/metadata")
+        assert response.status_code == 200
+        assert (
+            response.json()["callback_url"]
+            == "https://filefridge.example.com/api/v1/storage/gdrive/oauth/callback"
+        )
+
+    def test_google_oauth_start_uses_configured_instance_url_for_redirect_uri(
+        self, authenticated_client, db_session, monkeypatch
+    ):
+        """OAuth start URL should use public configured callback URL."""
+        from app.routers.api import storage as storage_router
+
+        location = ColdStorageLocation(
+            name="Google OAuth Start URL Location",
+            path="gdrive://oauth-start-test",
+            backend_type=ColdStorageBackendType.GDRIVE,
+            operation_mode=OperationType.MOVE,
+        )
+        location.set_backend_config(
+            {
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "folder_id": "oauth-start-test",
+            }
+        )
+        db_session.add(location)
+        db_session.commit()
+        db_session.refresh(location)
+
+        monkeypatch.setattr(
+            storage_router.instance_config_service,
+            "get_instance_url",
+            lambda _db: "https://filefridge.example.com",
+        )
+        response = authenticated_client.post(
+            f"/api/v1/storage/locations/{location.id}/gdrive/oauth/start"
+        )
+        assert response.status_code == 200
+
+        auth_url = response.json()["auth_url"]
+        parsed = urlparse(auth_url)
+        params = parse_qs(parsed.query)
+        assert params["redirect_uri"] == [
+            "https://filefridge.example.com/api/v1/storage/gdrive/oauth/callback"
+        ]
 
     def test_google_drive_files_listing_endpoint(
         self, authenticated_client, db_session, monkeypatch

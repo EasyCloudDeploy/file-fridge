@@ -35,6 +35,7 @@ from app.schemas import (
     StorageStats,
 )
 from app.services.cold_storage_backends import get_backend
+from app.services.instance_config_service import instance_config_service
 from app.services.scheduler import scheduler_service
 from app.utils.db_utils import escape_like_string
 from app.utils.local_drive_identity import update_local_drive_identity_fields
@@ -175,6 +176,14 @@ def _parse_gdrive_state(state: str) -> int:
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth location"
         )
     return location_id
+
+
+def _get_google_oauth_redirect_uri(request: Request, db: Session) -> str:
+    """Build a stable OAuth callback URL using configured public instance URL when available."""
+    instance_url = instance_config_service.get_instance_url(db)
+    if instance_url:
+        return f"{instance_url.rstrip('/')}/api/v1/storage/gdrive/oauth/callback"
+    return str(request.url_for("google_drive_oauth_callback"))
 
 
 @router.get("/stats", response_model=List[StorageStats])
@@ -385,9 +394,11 @@ def get_google_drive_stats(location_id: int, db: Annotated[Session, Depends(get_
 
 
 @router.get("/gdrive/oauth/metadata")
-def get_google_drive_oauth_metadata(request: Request):
+def get_google_drive_oauth_metadata(
+    request: Request, db: Annotated[Session, Depends(get_db)]
+):
     """Return Google OAuth metadata used by the storage setup UI."""
-    return {"callback_url": str(request.url_for("google_drive_oauth_callback"))}
+    return {"callback_url": _get_google_oauth_redirect_uri(request, db)}
 
 
 # ColdStorageLocation CRUD endpoints
@@ -705,7 +716,7 @@ def start_google_drive_oauth(
             detail="Set Google client ID and client secret before connecting",
         )
 
-    redirect_uri = str(request.url_for("google_drive_oauth_callback"))
+    redirect_uri = _get_google_oauth_redirect_uri(request, db)
     state = _make_gdrive_state(location_id)
     auth_query = urlencode(
         {
@@ -759,7 +770,7 @@ def google_drive_oauth_callback(
                 url=f"/storage-locations/{location_id}/edit?gdrive_oauth=error&reason=missing_client_credentials"
             )
 
-        redirect_uri = str(request.url_for("google_drive_oauth_callback"))
+        redirect_uri = _get_google_oauth_redirect_uri(request, db)
         token_resp = httpx.post(
             "https://oauth2.googleapis.com/token",
             data={
