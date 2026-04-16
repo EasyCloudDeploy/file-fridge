@@ -256,3 +256,48 @@ class TestStorageRouter:
         assert payload["drive_used_bytes"] == 2500
         assert payload["drive_free_bytes"] == 7500
         assert payload["app_used_bytes"] == 1024
+
+    def test_google_drive_update_does_not_clear_refresh_token_on_null(
+        self, authenticated_client, db_session
+    ):
+        """Null/empty token fields in generic updates must not drop OAuth credentials."""
+        location = ColdStorageLocation(
+            name="Google Drive Token Preserve Location",
+            path="gdrive://file-fridge-folder",
+            backend_type=ColdStorageBackendType.GDRIVE,
+            operation_mode=OperationType.MOVE,
+        )
+        location.set_backend_config(
+            {
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "refresh_token": "refresh-token",
+                "folder_id": "file-fridge-folder",
+            }
+        )
+        db_session.add(location)
+        db_session.commit()
+        db_session.refresh(location)
+
+        response = authenticated_client.put(
+            f"/api/v1/storage/locations/{location.id}",
+            json={
+                "backend_config": {
+                    "folder_id": "updated-folder-id",
+                    "refresh_token": None,
+                    "access_token": "",
+                    "access_token_expires_at": None,
+                }
+            },
+        )
+        assert response.status_code == 200
+
+        location_from_db = (
+            db_session.query(ColdStorageLocation)
+            .filter(ColdStorageLocation.id == location.id)
+            .first()
+        )
+        assert location_from_db is not None
+        cfg = location_from_db.get_backend_config()
+        assert cfg["folder_id"] == "updated-folder-id"
+        assert cfg["refresh_token"] == "refresh-token"

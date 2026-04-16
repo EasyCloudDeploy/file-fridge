@@ -553,8 +553,22 @@ def update_storage_location(
     if backend_config is not None:
         existing_config = location.get_backend_config()
         merged_config = dict(existing_config)
+        protected_gdrive_auth_keys = {
+            "refresh_token",
+            "access_token",
+            "access_token_expires_at",
+        }
         for key, value in backend_config.items():
             if value == "***REDACTED***":
+                continue
+            # Keep OAuth-issued Google auth tokens stable unless refreshed by the
+            # dedicated OAuth callback flow. Some clients may send null/empty
+            # values for hidden fields during generic edits.
+            if (
+                location.backend_type == ColdStorageBackendType.GDRIVE
+                and key in protected_gdrive_auth_keys
+                and (value is None or value == "")
+            ):
                 continue
             if value is None:
                 merged_config.pop(key, None)
