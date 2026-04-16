@@ -804,6 +804,9 @@ def google_drive_oauth_callback(
         location.set_backend_config(cfg)
         db.commit()
         return RedirectResponse(url=f"/storage-locations/{location_id}/edit?gdrive_oauth=success")
+    except httpx.ConnectError:
+        logger.exception("Google OAuth callback failed due to network connectivity")
+        return RedirectResponse(url="/storage-locations?gdrive_oauth=error&reason=network_unreachable")
     except Exception:
         logger.exception("Google OAuth callback failed")
         return RedirectResponse(url="/storage-locations?gdrive_oauth=error&reason=callback_failed")
