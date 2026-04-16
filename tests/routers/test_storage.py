@@ -160,6 +160,48 @@ class TestStorageRouter:
         assert response.status_code in (302, 307)
         assert response.headers["location"] == "/storage-locations?gdrive_oauth=error&reason=missing_code"
 
+    def test_google_oauth_callback_returns_network_unreachable_on_connect_error(
+        self, client, db_session, monkeypatch
+    ):
+        """Google OAuth callback should surface connectivity failures clearly."""
+        import httpx
+
+        from app.routers.api import storage as storage_router
+
+        location = ColdStorageLocation(
+            name="Google OAuth Callback Network Error Location",
+            path="gdrive://oauth-callback-test",
+            backend_type=ColdStorageBackendType.GDRIVE,
+            operation_mode=OperationType.MOVE,
+        )
+        location.set_backend_config(
+            {
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "folder_id": "oauth-callback-test",
+            }
+        )
+        db_session.add(location)
+        db_session.commit()
+        db_session.refresh(location)
+
+        state = storage_router._make_gdrive_state(location.id)
+
+        def _raise_connect_error(*_args, **_kwargs):
+            raise httpx.ConnectError("Network is unreachable")
+
+        monkeypatch.setattr(storage_router.httpx, "post", _raise_connect_error)
+
+        response = client.get(
+            f"/api/v1/storage/gdrive/oauth/callback?code=test-code&state={state}",
+            follow_redirects=False,
+        )
+        assert response.status_code in (302, 307)
+        assert (
+            response.headers["location"]
+            == "/storage-locations?gdrive_oauth=error&reason=network_unreachable"
+        )
+
     def test_google_oauth_metadata_prefers_configured_instance_url(
         self, authenticated_client, monkeypatch
     ):
