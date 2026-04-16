@@ -91,15 +91,42 @@ function storageCellRenderer(params) {
 
 function storageLocationCellRenderer(params) {
     const file = params.data;
-    if (file.storage_type !== 'cold' || !file.storage_location) {
+    if (!file) {
         return '<span class="text-muted">-</span>';
     }
-    if (file.storage_location.available === false) {
-        return `<span class="badge bg-danger" title="Storage unavailable - drive may be ejected">
-            <i class="bi bi-exclamation-triangle"></i> ${escapeHtml(file.storage_location.name)}
-        </span>`;
+    if (file.storage_type !== 'cold' || !file.storage_location) {
+        if (file.storage_type === 'hot' && file.path_name) {
+            return `<span class="badge bg-light text-dark border" title="Currently in monitored hot path">${escapeHtml(file.path_name)}</span>`;
+        }
+        return '<span class="text-muted">-</span>';
     }
-    return `<span class="badge bg-secondary">${escapeHtml(file.storage_location.name)}</span>`;
+    const location = file.storage_location;
+    const backendType = (location.backend_type || 'unknown').toUpperCase();
+    const locationName = escapeHtml(location.name || 'Unknown');
+    const backendPath = escapeHtml(location.path || '');
+    const isUnavailable = location.available === false;
+
+    const driveHint = location.backend_type === 'local'
+        ? (location.local_drive_label || location.local_drive_identifier || null)
+        : backendPath;
+
+    const driveHintHtml = driveHint
+        ? `<div><small class="text-muted">${escapeHtml(driveHint)}</small></div>`
+        : '';
+
+    if (isUnavailable) {
+        return `<div title="Storage unavailable - reconnect drive to perform operations">
+            <span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>${locationName}</span>
+            <span class="badge bg-dark ms-1">${escapeHtml(backendType)}</span>
+            ${driveHintHtml}
+        </div>`;
+    }
+
+    return `<div title="${backendPath}">
+        <span class="badge bg-secondary">${locationName}</span>
+        <span class="badge bg-light text-dark border ms-1">${escapeHtml(backendType)}</span>
+        ${driveHintHtml}
+    </div>`;
 }
 
 function sizeCellRenderer(params) {
@@ -160,9 +187,16 @@ function actionsCellRenderer(params) {
     }
 
     if (storageUnavailable) {
-        return `<span class="text-danger" title="Storage unavailable - reconnect drive to perform actions">
-            <i class="bi bi-hdd-network"></i><span class="d-none d-sm-inline"> Offline</span>
-        </span>`;
+        return `
+            <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn btn-outline-secondary" data-action="details" data-file-id="${file.id}" title="View file details">
+                    <i class="bi bi-info-circle"></i><span class="d-none d-lg-inline"> Details</span>
+                </button>
+                <button type="button" class="btn btn-outline-danger" disabled title="Storage unavailable - reconnect drive to thaw or relocate">
+                    <i class="bi bi-hdd-network"></i><span class="d-none d-lg-inline"> Offline</span>
+                </button>
+            </div>
+        `;
     }
 
     const isCold = file.storage_type === 'cold';
@@ -181,6 +215,7 @@ function actionsCellRenderer(params) {
                     <span class="visually-hidden">Toggle Dropdown</span>
                 </button>
                 <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+                    <li><button class="dropdown-item" type="button" data-action="details" data-file-id="${file.id}"><i class="bi bi-info-circle me-2"></i>Details</button></li>
                     ${isCold ? `<li><button class="dropdown-item" type="button" data-action="relocate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}"><i class="bi bi-arrow-right-circle me-2"></i>Relocate</button></li>` : ''}
                     <li><button class="dropdown-item" type="button" data-action="migrate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}"><i class="bi bi-hdd-network me-2"></i>Migrate</button></li>
                     <li><hr class="dropdown-divider"></li>
@@ -226,7 +261,7 @@ const columnDefs = [
     {
         headerName: 'Location',
         cellRenderer: storageLocationCellRenderer,
-        width: 130,
+        width: 250,
         sortable: false,
         resizable: true
     },
@@ -435,6 +470,9 @@ function handleActionClick(event) {
     const filePath = button.dataset.filePath;
 
     switch (action) {
+        case 'details':
+            window.location.href = `/files/${fileId}`;
+            break;
         case 'thaw':
             showThawModal(fileId, filePath);
             break;
@@ -1038,9 +1076,16 @@ function showThawModal(inventoryId, filePath) {
 // Thaw file action
 async function thawFile() {
     const button = document.getElementById('confirmThawBtn');
+    if (!button) return;
+    if (button.disabled) return;
+
     const inventoryId = button.dataset.inventoryId;
-    const pinRadio = document.querySelector('input[name="pin_file"]:checked');
-    const pin = pinRadio ? pinRadio.value === 'true' : false;
+    const pinCheckbox = document.getElementById('thawPinCheckbox');
+    const pin = pinCheckbox ? pinCheckbox.checked : false;
+
+    button.disabled = true;
+    const originalHtml = button.innerHTML;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Thawing...';
 
     try {
         const response = await authenticatedFetch(`${API_BASE_URL}/files/thaw/${inventoryId}?pin=${pin}`, {
@@ -1062,6 +1107,9 @@ async function thawFile() {
     } catch (error) {
         console.error('Error thawing file:', error);
         showNotification(`Error thawing file: ${error.message}`, 'error');
+    } finally {
+        button.disabled = false;
+        button.innerHTML = originalHtml;
     }
 }
 

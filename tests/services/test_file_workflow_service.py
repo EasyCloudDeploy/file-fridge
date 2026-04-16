@@ -273,7 +273,9 @@ def test_scan_path(
     result = service._scan_path(monitored_path, db_session)
 
     assert result["to_cold"] == [(file_to_freeze, [])]
-    assert result["to_hot"] == [(symlink_to_thaw, cold_file_for_thaw)]
+    # Default operation mode is MOVE, so stale symlinks are removed inline.
+    assert result["to_hot"] == []
+    assert not symlink_to_thaw.exists()
     assert result["skipped_hot"] == 1
     assert result["skipped_cold"] == 0
 

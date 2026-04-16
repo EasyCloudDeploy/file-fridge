@@ -13,6 +13,7 @@
                 <div class="card">
                     <div class="card-body">
                         <h5 class="card-title mb-3" id="form-title"><i class="bi bi-hdd"></i> Storage Location</h5>
+                        <div id="storage-form-alerts"></div>
                         <form id="storage-location-form">
                             <div class="mb-3">
                                 <label for="name" class="form-label">Name *</label>
@@ -31,6 +32,104 @@
                                 <small class="form-text text-muted">The absolute file system path to the storage location</small>
                             </div>
 
+                            <div id="local-drive-section" class="alert alert-secondary d-none">
+                                <h6 class="mb-2"><i class="bi bi-usb-drive"></i> Local Drive Identity</h6>
+                                <div class="small">
+                                    <div><strong>Status:</strong> <span id="local-drive-status">Unknown</span></div>
+                                    <div><strong>Label:</strong> <span id="local-drive-label">N/A</span></div>
+                                    <div><strong>Drive ID:</strong> <code id="local-drive-id">N/A</code></div>
+                                    <div><strong>Last Seen Mount:</strong> <code id="local-drive-mount">N/A</code></div>
+                                    <div><strong>Last Seen:</strong> <span id="local-drive-seen">N/A</span></div>
+                                </div>
+                                <small class="text-muted d-block mt-2">Use this identity to reconnect the correct deep-cold USB drive before thawing files.</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="backend_type" class="form-label">Backend Type *</label>
+                                <select class="form-select" id="backend_type" name="backend_type" required>
+                                    <option value="local">Local Filesystem</option>
+                                    <option value="s3">Amazon S3</option>
+                                    <option value="gdrive">Google Drive</option>
+                                </select>
+                                <small class="form-text text-muted">Storage backend module used for this location</small>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="operation_mode" class="form-label">Operation Mode *</label>
+                                <select class="form-select" id="operation_mode" name="operation_mode" required>
+                                    <option value="move">Move</option>
+                                    <option value="copy">Copy</option>
+                                    <option value="symlink">Move &amp; Symlink</option>
+                                </select>
+                                <small class="form-text text-muted">Operation behavior for files frozen to this location</small>
+                            </div>
+
+                            <div id="s3-config-section" class="border rounded p-3 mb-3 d-none">
+                                <h6 class="mb-3"><i class="bi bi-cloud"></i> S3 Configuration</h6>
+                                <div class="mb-2">
+                                    <label for="s3_bucket" class="form-label">Bucket *</label>
+                                    <input type="text" class="form-control" id="s3_bucket" name="s3_bucket">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="s3_region" class="form-label">Region</label>
+                                    <input type="text" class="form-control" id="s3_region" name="s3_region" placeholder="us-east-1">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="s3_prefix" class="form-label">Prefix</label>
+                                    <input type="text" class="form-control" id="s3_prefix" name="s3_prefix" placeholder="archive/files">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="s3_access_key_id" class="form-label">Access Key ID</label>
+                                    <input type="text" class="form-control" id="s3_access_key_id" name="s3_access_key_id" autocomplete="off">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="s3_secret_access_key" class="form-label">Secret Access Key</label>
+                                    <input type="password" class="form-control" id="s3_secret_access_key" name="s3_secret_access_key" autocomplete="new-password">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="s3_session_token" class="form-label">Session Token</label>
+                                    <input type="password" class="form-control" id="s3_session_token" name="s3_session_token" autocomplete="new-password">
+                                </div>
+                                <div class="mb-0">
+                                    <label for="s3_endpoint_url" class="form-label">Custom Endpoint URL</label>
+                                    <input type="url" class="form-control" id="s3_endpoint_url" name="s3_endpoint_url" placeholder="https://s3.us-east-1.amazonaws.com">
+                                </div>
+                                <small class="form-text text-muted">Credentials are encrypted and never returned in plain text.</small>
+                            </div>
+
+                            <div id="gdrive-config-section" class="border rounded p-3 mb-3 d-none">
+                                <h6 class="mb-3"><i class="bi bi-google"></i> Google Drive Configuration</h6>
+                                <div class="mb-2">
+                                    <label for="gdrive_client_id" class="form-label">OAuth Client ID</label>
+                                    <input type="text" class="form-control" id="gdrive_client_id" name="gdrive_client_id" autocomplete="off">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="gdrive_client_secret" class="form-label">OAuth Client Secret</label>
+                                    <input type="password" class="form-control" id="gdrive_client_secret" name="gdrive_client_secret" autocomplete="new-password">
+                                </div>
+                                <small class="form-text text-muted d-block mb-2">Leave client ID/secret blank to keep existing credentials when editing.</small>
+                                <div class="mb-2">
+                                    <label for="gdrive_folder_id" class="form-label">Drive Folder ID</label>
+                                    <input type="text" class="form-control" id="gdrive_folder_id" name="gdrive_folder_id" placeholder="Optional target folder ID">
+                                </div>
+                                <div class="mb-2">
+                                    <label for="gdrive_callback_url" class="form-label">OAuth Callback URL</label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" id="gdrive_callback_url" readonly>
+                                        <button type="button" class="btn btn-outline-secondary" id="copy-gdrive-callback-btn">
+                                            <i class="bi bi-clipboard"></i> Copy
+                                        </button>
+                                    </div>
+                                    <small class="form-text text-muted">Use this exact URL in your Google OAuth app redirect URI settings.</small>
+                                </div>
+                                <div class="d-flex gap-2 align-items-center">
+                                    <button type="button" class="btn btn-outline-primary btn-sm" id="gdrive-connect-btn" disabled>
+                                        <i class="bi bi-box-arrow-in-right"></i> Connect Google Account
+                                    </button>
+                                    <small id="gdrive-connect-status" class="text-muted">Save first, then connect your Google account.</small>
+                                </div>
+                            </div>
+
                             <div class="mb-3">
                                 <label for="caution_threshold_percent" class="form-label">Caution Threshold (%)</label>
                                 <input type="number" class="form-control" id="caution_threshold_percent" name="caution_threshold_percent" min="0" max="100" value="20">
@@ -41,6 +140,18 @@
                                 <label for="critical_threshold_percent" class="form-label">Critical Threshold (%)</label>
                                 <input type="number" class="form-control" id="critical_threshold_percent" name="critical_threshold_percent" min="0" max="100" value="10">
                                 <small class="form-text text-muted">Show critical alert when free space drops below this percentage (default: 10%)</small>
+                            </div>
+
+                            <div class="mb-3" id="allow-offline-section">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="allow_offline" name="allow_offline">
+                                    <label class="form-check-label" for="allow_offline">
+                                        Allow Offline / Ejected
+                                    </label>
+                                </div>
+                                <small class="form-text text-muted">
+                                    For deep-cold removable drives. If enabled, expected disconnects will not trigger storage permission alarms.
+                                </small>
                             </div>
 
                             <div class="mb-3">

@@ -23,6 +23,7 @@ from app.models import (
     FileInventory,
     FileRecord,
     FileStatus,
+    FileTransactionHistory,
     MonitoredPath,
     PinnedFile,
     StorageType,
@@ -42,6 +43,7 @@ from app.schemas import (
 )
 from app.security import get_current_user
 from app.services.browser_service import check_path_permission
+from app.services.cold_storage_backends import get_backend
 from app.services.file_freezer import FileFreezer
 from app.services.file_mover import FileMover
 from app.services.file_thawer import FileThawer
@@ -52,19 +54,56 @@ router = APIRouter(prefix="/api/v1/files", tags=["files"])
 logger = logging.getLogger(__name__)
 
 
-def _get_storage_location_for_file(file_path: str, monitored_path: MonitoredPath) -> Optional[dict]:
+def _get_storage_location_for_file(
+    file_path: str, monitored_path: MonitoredPath, storage_location_id: Optional[int] = None
+) -> Optional[dict]:
     """Determine the cold storage location for a file based on its path."""
     if not monitored_path or not monitored_path.storage_locations:
         return None
 
+    if storage_location_id is not None:
+        for loc in monitored_path.storage_locations:
+            if loc.id == storage_location_id:
+                is_valid, _ = get_backend(loc).validate_location(loc)
+                return {
+                    "id": loc.id,
+                    "name": loc.name,
+                    "path": loc.path,
+                    "backend_type": (
+                        loc.backend_type.value
+                        if hasattr(loc.backend_type, "value")
+                        else str(loc.backend_type)
+                    ),
+                    "operation_mode": (
+                        loc.operation_mode.value
+                        if hasattr(loc.operation_mode, "value")
+                        else str(loc.operation_mode)
+                    ),
+                    "available": is_valid,
+                    "local_drive_label": loc.local_drive_label,
+                    "local_drive_identifier": loc.local_drive_identifier,
+                    "local_drive_is_connected": loc.local_drive_is_connected,
+                    "local_drive_mount_path": loc.local_drive_mount_path,
+                }
+
     for loc in monitored_path.storage_locations:
         if file_path.startswith(loc.path):
-            storage_available = Path(loc.path).exists()
+            storage_available = get_backend(loc).validate_location(loc)[0]
             return {
                 "id": loc.id,
                 "name": loc.name,
                 "path": loc.path,
+                "backend_type": (
+                    loc.backend_type.value if hasattr(loc.backend_type, "value") else str(loc.backend_type)
+                ),
+                "operation_mode": (
+                    loc.operation_mode.value if hasattr(loc.operation_mode, "value") else str(loc.operation_mode)
+                ),
                 "available": storage_available,
+                "local_drive_label": loc.local_drive_label,
+                "local_drive_identifier": loc.local_drive_identifier,
+                "local_drive_is_connected": loc.local_drive_is_connected,
+                "local_drive_mount_path": loc.local_drive_mount_path,
             }
     return None
 
@@ -121,15 +160,111 @@ def _serialize_file(
             for ft in file.tags
         ],
         "storage_location": None,
+        "path_name": paths_map.get(file.path_id).name if paths_map.get(file.path_id) else None,
         "is_pinned": file.file_path in pinned_paths_set if pinned_paths_set else False,
     }
 
     if file.storage_type == StorageType.COLD:
         monitored_path = paths_map.get(file.path_id)
-        storage_loc = _get_storage_location_for_file(file.file_path, monitored_path)
+        storage_loc = _get_storage_location_for_file(
+            file.file_path, monitored_path, storage_location_id=file.cold_storage_location_id
+        )
         file_dict["storage_location"] = storage_loc
 
     return file_dict
+
+
+@router.get("/details/{inventory_id}")
+def get_file_details(
+    inventory_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    """Get detailed information for a single file inventory entry."""
+    _ = current_user
+
+    file = db.query(FileInventory).filter(FileInventory.id == inventory_id).first()
+    if not file:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File with inventory id {inventory_id} not found",
+        )
+
+    paths_map = {}
+    monitored_path = db.query(MonitoredPath).filter(MonitoredPath.id == file.path_id).first()
+    if monitored_path:
+        paths_map[monitored_path.id] = monitored_path
+    pinned_paths_set = {p.file_path for p in db.query(PinnedFile.file_path).all()}
+
+    file_data = _serialize_file(file, paths_map, pinned_paths_set, operation_lookup={})
+
+    file_record = (
+        db.query(FileRecord)
+        .filter(
+            (FileRecord.path_id == file.path_id)
+            & (
+                (FileRecord.cold_storage_path == file.file_path)
+                | (FileRecord.original_path == file.file_path)
+            )
+        )
+        .order_by(FileRecord.moved_at.desc())
+        .first()
+    )
+
+    transactions = (
+        db.query(FileTransactionHistory)
+        .filter(FileTransactionHistory.file_id == file.id)
+        .order_by(FileTransactionHistory.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    return {
+        "file": file_data,
+        "file_record": (
+            {
+                "id": file_record.id,
+                "original_path": file_record.original_path,
+                "cold_storage_path": file_record.cold_storage_path,
+                "cold_storage_location_id": file_record.cold_storage_location_id,
+                "operation_type": (
+                    file_record.operation_type.value
+                    if hasattr(file_record.operation_type, "value")
+                    else str(file_record.operation_type)
+                ),
+                "moved_at": file_record.moved_at.isoformat() if file_record.moved_at else None,
+            }
+            if file_record
+            else None
+        ),
+        "transactions": [
+            {
+                "id": txn.id,
+                "transaction_type": (
+                    txn.transaction_type.value
+                    if hasattr(txn.transaction_type, "value")
+                    else str(txn.transaction_type)
+                ),
+                "old_storage_type": (
+                    txn.old_storage_type.value
+                    if txn.old_storage_type and hasattr(txn.old_storage_type, "value")
+                    else (str(txn.old_storage_type) if txn.old_storage_type else None)
+                ),
+                "new_storage_type": (
+                    txn.new_storage_type.value
+                    if txn.new_storage_type and hasattr(txn.new_storage_type, "value")
+                    else (str(txn.new_storage_type) if txn.new_storage_type else None)
+                ),
+                "old_path": txn.old_path,
+                "new_path": txn.new_path,
+                "success": txn.success,
+                "error_message": txn.error_message,
+                "initiated_by": txn.initiated_by,
+                "created_at": txn.created_at.isoformat() if txn.created_at else None,
+            }
+            for txn in transactions
+        ],
+    }
 
 
 def _parse_tag_ids(tag_ids: Optional[str]) -> Optional[List[int]]:
@@ -639,19 +774,41 @@ def thaw_file(inventory_id: int, db: Annotated[Session, Depends(get_db)], pin: b
     """Thaw a file (move back from cold storage to hot storage)."""
     inventory_entry = (
         db.query(FileInventory)
+        .with_for_update()
         .filter(FileInventory.id == inventory_id, FileInventory.storage_type == StorageType.COLD)
         .first()
     )
 
     if not inventory_entry:
+        existing = db.query(FileInventory).filter(FileInventory.id == inventory_id).first()
+        if existing and existing.storage_type == StorageType.HOT:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="File is already in hot storage or thaw has already completed",
+            )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"File inventory entry with id {inventory_id} not found in cold storage",
         )
 
+    if inventory_entry.status == FileStatus.MIGRATING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="File thaw is already in progress",
+        )
+
+    inventory_entry.status = FileStatus.MIGRATING
+    db.commit()
+
     file_record = (
         db.query(FileRecord)
-        .filter(FileRecord.cold_storage_path == inventory_entry.file_path)
+        .filter(
+            (FileRecord.cold_storage_path == inventory_entry.file_path)
+            | (
+                (FileRecord.path_id == inventory_entry.path_id)
+                & (FileRecord.original_path == inventory_entry.file_path)
+            )
+        )
         .first()
     )
 
@@ -664,6 +821,10 @@ def thaw_file(inventory_id: int, db: Annotated[Session, Depends(get_db)], pin: b
     success, error = FileThawer.thaw_file(file_record, pin=pin, db=db)
 
     if not success:
+        refreshed_entry = db.query(FileInventory).filter(FileInventory.id == inventory_id).first()
+        if refreshed_entry and refreshed_entry.storage_type == StorageType.COLD:
+            refreshed_entry.status = FileStatus.ACTIVE
+            db.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=error or "Failed to thaw file"
         )
@@ -703,10 +864,40 @@ def get_freeze_options(inventory_id: int, db: Annotated[Session, Depends(get_db)
             detail=f"Monitored path not found for inventory entry {inventory_id}",
         )
 
-    available_locations = [
-        {"id": loc.id, "name": loc.name, "path": loc.path, "available": Path(loc.path).exists()}
-        for loc in monitored_path.storage_locations
-    ]
+    available_locations = []
+    for loc in monitored_path.storage_locations:
+        backend = get_backend(loc)
+        caps = backend.capabilities()
+        is_valid, _validation_error = backend.validate_location(loc)
+        op = loc.operation_mode
+        op_supported = (
+            (op == "move" and caps.supports_move)
+            or (op == "copy" and caps.supports_copy)
+            or (op == "symlink" and caps.supports_symlink)
+        )
+        available_locations.append(
+            {
+                "id": loc.id,
+                "name": loc.name,
+                "path": loc.path,
+                "backend_type": (
+                    loc.backend_type.value
+                    if hasattr(loc.backend_type, "value")
+                    else str(loc.backend_type)
+                ),
+                "operation_mode": (
+                    loc.operation_mode.value
+                    if hasattr(loc.operation_mode, "value")
+                    else str(loc.operation_mode)
+                ),
+                "capabilities": {
+                    "supports_move": caps.supports_move,
+                    "supports_copy": caps.supports_copy,
+                    "supports_symlink": caps.supports_symlink,
+                },
+                "available": bool(is_valid and op_supported),
+            }
+        )
 
     return {
         "inventory_id": inventory_id,
@@ -767,11 +958,13 @@ def freeze_file(
             detail=f"Storage location {storage_location_id} is not associated with this path. Valid locations: {valid_ids}",
         )
 
-    # Check storage location is accessible
-    if not Path(target_location.path).exists():
+    backend = get_backend(target_location)
+    is_valid, validation_error = backend.validate_location(target_location)
+    if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Storage location {target_location.name} is not accessible: {target_location.path}",
+            detail=validation_error
+            or f"Storage location {target_location.name} is not accessible: {target_location.path}",
         )
 
     # Freeze the file
@@ -858,10 +1051,16 @@ def relocate_file(
         )
 
     current_location = None
-    for loc in monitored_path.storage_locations:
-        if inventory_entry.file_path.startswith(loc.path):
-            current_location = loc
-            break
+    if inventory_entry.cold_storage_location_id:
+        current_location = next(
+            (loc for loc in monitored_path.storage_locations if loc.id == inventory_entry.cold_storage_location_id),
+            None,
+        )
+    if not current_location:
+        for loc in monitored_path.storage_locations:
+            if inventory_entry.file_path.startswith(loc.path):
+                current_location = loc
+                break
 
     if not current_location:
         raise HTTPException(
@@ -931,11 +1130,12 @@ def get_relocate_options(inventory_id: int, db: Annotated[Session, Depends(get_d
             detail=f"Monitored path not found for inventory entry {inventory_id}",
         )
 
-    current_location_id = None
-    for loc in monitored_path.storage_locations:
-        if inventory_entry.file_path.startswith(loc.path):
-            current_location_id = loc.id
-            break
+    current_location_id = inventory_entry.cold_storage_location_id
+    if current_location_id is None:
+        for loc in monitored_path.storage_locations:
+            if inventory_entry.file_path.startswith(loc.path):
+                current_location_id = loc.id
+                break
 
     available_locations = [
         {
@@ -1060,7 +1260,13 @@ def bulk_thaw_files(
             # Get the file record
             file_record = (
                 db.query(FileRecord)
-                .filter(FileRecord.cold_storage_path == inventory_entry.file_path)
+                .filter(
+                    (FileRecord.cold_storage_path == inventory_entry.file_path)
+                    | (
+                        (FileRecord.path_id == inventory_entry.path_id)
+                        & (FileRecord.original_path == inventory_entry.file_path)
+                    )
+                )
                 .first()
             )
 

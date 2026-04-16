@@ -6,7 +6,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import FileInventory, FileRecord, OperationType
+from app.models import ColdStorageLocation, FileInventory, FileRecord, OperationType
+from app.services.cold_storage_backends import get_backend
 
 logger = logging.getLogger(__name__)
 
@@ -65,34 +66,65 @@ class FileCleanup:
             for file_record in file_records:
                 try:
                     should_remove = False
+                    cold_location = None
+                    cold_exists = None
+
+                    if file_record.cold_storage_location_id:
+                        cold_location = (
+                            db.query(ColdStorageLocation)
+                            .filter(ColdStorageLocation.id == file_record.cold_storage_location_id)
+                            .first()
+                        )
+                        if cold_location:
+                            try:
+                                backend = get_backend(cold_location)
+                                if backend.backend_name() != "local":
+                                    cold_exists = backend.exists(
+                                        file_record.cold_storage_path, cold_location
+                                    )
+                            except Exception as backend_error:
+                                logger.warning(
+                                    "Backend existence check failed for FileRecord %s: %s",
+                                    file_record.id,
+                                    backend_error,
+                                )
 
                     # Check based on operation type
                     if file_record.operation_type == OperationType.MOVE:
                         # For move, file should be in cold storage
-                        cold_path = Path(file_record.cold_storage_path)
-                        if not check_path_exists(cold_path):
+                        if cold_exists is None:
+                            cold_path = Path(file_record.cold_storage_path)
+                            cold_exists = check_path_exists(cold_path)
+                        if not cold_exists:
                             should_remove = True
-                            logger.info(f"File not found in cold storage (move): {cold_path}")
+                            logger.info(
+                                "File not found in cold storage (move): %s",
+                                file_record.cold_storage_path,
+                            )
 
                     elif file_record.operation_type == OperationType.COPY:
                         # For copy, check if at least one copy exists
                         original_path = Path(file_record.original_path)
-                        cold_path = Path(file_record.cold_storage_path)
+                        if cold_exists is None:
+                            cold_path = Path(file_record.cold_storage_path)
+                            cold_exists = check_path_exists(cold_path)
 
                         # If both original and cold storage don't exist, remove record
-                        if not check_path_exists(original_path) and not check_path_exists(
-                            cold_path
-                        ):
+                        if not check_path_exists(original_path) and not cold_exists:
                             should_remove = True
                             logger.info(
-                                f"Both original and cold storage files missing (copy): {original_path}, {cold_path}"
+                                "Both original and cold storage files missing (copy): %s, %s",
+                                original_path,
+                                file_record.cold_storage_path,
                             )
                         # If at least one exists, keep the record
 
                     elif file_record.operation_type == OperationType.SYMLINK:
                         # For symlink, check if symlink exists or if cold storage file exists
                         original_path = Path(file_record.original_path)
-                        cold_path = Path(file_record.cold_storage_path)
+                        if cold_exists is None:
+                            cold_path = Path(file_record.cold_storage_path)
+                            cold_exists = check_path_exists(cold_path)
 
                         # If symlink exists, check if it points to existing file
                         if original_path.exists() and original_path.is_symlink():
@@ -107,11 +139,13 @@ class FileCleanup:
                             except Exception:
                                 should_remove = True
                                 logger.info(f"Symlink broken: {original_path}")
-                        elif not check_path_exists(cold_path):
+                        elif not cold_exists:
                             # Neither symlink nor cold storage file exists
                             should_remove = True
                             logger.info(
-                                f"Both symlink and cold storage missing: {original_path}, {cold_path}"
+                                "Both symlink and cold storage missing: %s, %s",
+                                original_path,
+                                file_record.cold_storage_path,
                             )
 
                     if should_remove:

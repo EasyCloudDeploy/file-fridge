@@ -89,7 +89,6 @@ async function loadPathsList() {
                                 : '<span class="text-muted">None</span>'
                             }
                         </td>
-                        <td class="d-none d-sm-table-cell"><span class="badge bg-info">${escapeHtml(path.operation_type)}</span></td>
                         <td class="d-none d-lg-table-cell">${Math.floor(path.check_interval_seconds / 60)} min</td>
                         <td>
                             <span class="badge bg-${path.enabled ? 'success' : 'secondary'}">
@@ -273,10 +272,6 @@ async function loadPathDetail(pathId) {
                             : '<span class="text-muted">No storage locations configured</span>'
                         }
                     </td>
-                </tr>
-                <tr>
-                    <th>Operation Type:</th>
-                    <td><span class="badge bg-info">${escapeHtml(path.operation_type)}</span></td>
                 </tr>
                 <tr>
                     <th>Check Interval:</th>
@@ -1085,7 +1080,6 @@ function setupPathForm() {
             name: formData.get('name'),
             source_path: formData.get('source_path'),
             storage_location_ids: storageLocationIds,
-            operation_type: formData.get('operation_type'),
             check_interval_seconds: parseInt(formData.get('check_interval_seconds')),
             max_concurrent_migrations: parseInt(formData.get('max_concurrent_migrations')),
             enabled: formData.get('enabled') === 'on',
@@ -1270,69 +1264,6 @@ async function loadPathForEdit(pathId) {
         // Populate form
         document.getElementById('name').value = path.name;
         document.getElementById('source_path').value = path.source_path;
-        const opTypeSelect = document.getElementById('operation_type');
-        opTypeSelect.value = path.operation_type;
-
-        // Show a migration notice whenever the user picks a different operation type,
-        // so they understand what will happen to already-frozen files.
-        if (path.cold_file_count > 0 || path.hot_file_count > 0) {
-            const originalOpType = path.operation_type;
-
-            const MIGRATION_MESSAGES = {
-                move: {
-                    copy:
-                        `<strong>${path.cold_file_count} file(s) currently in cold storage</strong> will be ` +
-                        `thawed back to hot, then re-frozen as copies on the following scan ` +
-                        `(2 scan cycles). Hot copies will be preserved going forward.`,
-                    symlink:
-                        `<strong>${path.cold_file_count} file(s) currently in cold storage</strong> will be ` +
-                        `thawed back to hot, then re-frozen with symlinks on the following scan ` +
-                        `(2 scan cycles).`,
-                },
-                copy: {
-                    move:
-                        `<strong>${path.cold_file_count} file(s) exist in both hot and cold storage.</strong> ` +
-                        `On the next scan their hot copies will be moved to cold, removing them from hot storage. ` +
-                        `Existing cold copies will be overwritten with identical content.`,
-                    symlink:
-                        `<strong>${path.cold_file_count} file(s) exist in both hot and cold storage.</strong> ` +
-                        `On the next scan their hot copies will be moved to cold and replaced with symlinks. ` +
-                        `Existing cold copies will be overwritten with identical content.`,
-                },
-                symlink: {
-                    move:
-                        `<strong>${path.cold_file_count} file(s) were frozen using Move &amp; Symlink.</strong> ` +
-                        `Orphaned symlinks in hot storage will be automatically deleted on the next scan. ` +
-                        `Files remain safely in cold storage.`,
-                    copy:
-                        `<strong>${path.cold_file_count} file(s) were frozen using Move &amp; Symlink.</strong> ` +
-                        `They will be thawed back to hot, then re-frozen as real copies on the following scan ` +
-                        `(2 scan cycles).`,
-                },
-            };
-
-            // copy→move removes hot files — use warning; everything else is informational
-            const DANGER_TRANSITIONS = new Set(['copy→move', 'copy→symlink']);
-
-            opTypeSelect.addEventListener('change', function () {
-                const existing = document.getElementById('op-type-migration-notice');
-                if (existing) existing.remove();
-
-                if (this.value === originalOpType) return;
-
-                const messages = MIGRATION_MESSAGES[originalOpType];
-                if (!messages || !messages[this.value]) return;
-
-                const isDanger = DANGER_TRANSITIONS.has(`${originalOpType}→${this.value}`);
-                const notice = document.createElement('div');
-                notice.id = 'op-type-migration-notice';
-                notice.className = `alert alert-${isDanger ? 'warning' : 'info'} mt-2`;
-                notice.innerHTML =
-                    `<i class="bi bi-${isDanger ? 'exclamation-triangle-fill' : 'info-circle-fill'}"></i> ` +
-                    messages[this.value];
-                this.closest('.mb-3').appendChild(notice);
-            });
-        }
 
         document.getElementById('check_interval_seconds').value = path.check_interval_seconds;
         document.getElementById('max_concurrent_migrations').value = path.max_concurrent_migrations;

@@ -8,7 +8,15 @@ from typing import Any
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import FileInventory, FileStatus, RelocationTask, RelocationTaskStatus, StorageType
+from app.models import (
+    FileInventory,
+    FileStatus,
+    FileTransactionHistory,
+    RelocationTask,
+    RelocationTaskStatus,
+    StorageType,
+    TransactionType,
+)
 from app.services.scan_progress import scan_progress_manager
 
 
@@ -105,6 +113,57 @@ def test_get_recent_migrations(
     statuses = [t["status"] for t in data]
     assert "running" in statuses
     assert "completed" in statuses
+
+
+def test_get_recent_migrations_includes_freeze_thaw_transactions(
+    authenticated_client: Any,
+    db_session: Session,
+    file_inventory_factory: Any,
+    storage_location: Any,
+) -> None:
+    """Recent migrations should include completed freeze/thaw history (including remote backends)."""
+    storage_location.name = "Google Drive Archive"
+    storage_location.path = "gdrive://file_fridge"
+    db_session.commit()
+    db_session.refresh(storage_location)
+
+    inventory = file_inventory_factory(
+        path="/tmp/recent-freeze-source.txt",
+        size=4096,
+        storage_type=StorageType.HOT,
+    )
+
+    tx = FileTransactionHistory(
+        file_id=inventory.id,
+        transaction_type=TransactionType.FREEZE,
+        old_storage_type=StorageType.HOT,
+        new_storage_type=StorageType.COLD,
+        old_status=FileStatus.ACTIVE,
+        new_status=FileStatus.ACTIVE,
+        old_path="/tmp/recent-freeze-source.txt",
+        new_path="gdrive://file_fridge/abc123",
+        old_storage_location_id=None,
+        new_storage_location_id=storage_location.id,
+        file_size=4096,
+        success=True,
+    )
+    db_session.add(tx)
+    db_session.commit()
+
+    response = authenticated_client.get("/api/v1/migrations/recent?limit=20")
+    assert response.status_code == 200
+    data = response.json()
+
+    matching = [row for row in data if row.get("task_id") == f"tx-{tx.id}"]
+    assert matching, "Expected freeze/thaw audit transaction to appear in recent migrations"
+    entry = matching[0]
+    assert entry["file_path"] == "/tmp/recent-freeze-source.txt"
+    assert entry["destination_path"] == "gdrive://file_fridge/abc123"
+    assert entry["source_location_name"] == "Hot Storage"
+    assert entry["target_location_name"] == "Google Drive Archive"
+    assert entry["status"] == "completed"
+    assert entry["bytes_total"] == 4096
+    assert entry["bytes_transferred"] == 4096
 
 
 def test_get_migrations_unauthorized(

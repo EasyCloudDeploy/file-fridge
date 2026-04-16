@@ -40,9 +40,16 @@ def create_criteria(path_id: int, criteria: CriteriaCreate, db: Annotated[Sessio
 
     # Validate: Check if atime criteria is being created and cold storage is a network mount
     if criteria.criterion_type == CriterionType.ATIME and criteria.enabled:
-        atime_available, error_msg = check_atime_availability(path.cold_storage_path)
+        atime_available, error_msg = check_atime_availability(path.source_path)
         if not atime_available:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        for location in path.storage_locations:
+            atime_available, error_msg = check_atime_availability(location.path)
+            if not atime_available:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{location.name}: {error_msg}",
+                )
 
     db_criteria = Criteria(path_id=path_id, **criteria.model_dump())
     db.add(db_criteria)
@@ -97,9 +104,16 @@ def update_criteria(
 
     # Validate: Check if atime criteria is being enabled and cold storage is a network mount
     if will_be_atime and will_be_enabled:
-        atime_available, error_msg = check_atime_availability(path.cold_storage_path)
+        atime_available, error_msg = check_atime_availability(path.source_path)
         if not atime_available:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        for location in path.storage_locations:
+            atime_available, error_msg = check_atime_availability(location.path)
+            if not atime_available:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"{location.name}: {error_msg}",
+                )
 
     for field, value in update_data.items():
         setattr(criteria, field, value)

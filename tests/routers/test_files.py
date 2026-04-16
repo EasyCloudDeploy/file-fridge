@@ -382,6 +382,21 @@ def test_thaw_file_success(
     mock_thaw_file.assert_called_once()
 
 
+def test_thaw_file_already_in_progress(
+    authenticated_client: TestClient, file_inventory_factory
+):
+    """Second thaw attempt should be blocked while the file is already migrating."""
+    cold_file = file_inventory_factory(
+        "/tmp/cold_in_progress.txt",
+        storage_type=StorageType.COLD,
+        status=FileStatus.MIGRATING,
+    )
+
+    response = authenticated_client.post(f"/api/v1/files/thaw/{cold_file.id}")
+    assert response.status_code == 409
+    assert "already in progress" in response.json()["detail"].lower()
+
+
 @patch("app.services.file_freezer.FileFreezer.freeze_file")
 def test_freeze_file_success(
     mock_freeze_file,

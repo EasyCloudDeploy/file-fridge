@@ -8,9 +8,10 @@ from typing import Callable, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models import FileRecord, FileStatus, PinnedFile, StorageType
+from app.models import ColdStorageLocation, FileRecord, FileStatus, OperationType, PinnedFile, StorageType
 from app.services.audit_trail_service import audit_trail_service
 from app.services.checksum_verifier import checksum_verifier
+from app.services.cold_storage_backends import get_backend
 
 logger = logging.getLogger(__name__)
 
@@ -71,19 +72,143 @@ class FileThawer:
             original_path = Path(file_record.original_path)
             prepared_path: Optional[Path] = None
             prepared_stat: Optional[os.stat_result] = None
-
-            # Check if file exists in cold storage
-            if not cold_path.exists():
-                return False, f"File not found in cold storage: {cold_path}"
+            storage_location = None
+            operation_mode = file_record.operation_type
+            if file_record.cold_storage_location_id:
+                storage_location = (
+                    db.query(ColdStorageLocation)
+                    .filter(ColdStorageLocation.id == file_record.cold_storage_location_id)
+                    .first()
+                )
 
             # Check inventory to see if it's encrypted
             from app.models import FileInventory
 
             file_inventory = (
-                db.query(FileInventory).filter(FileInventory.file_path == str(cold_path)).first()
+                db.query(FileInventory)
+                .filter(FileInventory.file_path == file_record.cold_storage_path)
+                .first()
             )
 
             is_encrypted = file_inventory.is_encrypted if file_inventory else False
+
+            backend = get_backend(storage_location) if storage_location else None
+            if backend and backend.backend_name() != "local":
+                if not backend.exists(file_record.cold_storage_path, storage_location):
+                    return False, f"File not found in cold storage: {file_record.cold_storage_path}"
+
+                checksum_before = file_inventory.checksum if file_inventory else None
+                checksum_after = None
+
+                if is_encrypted:
+                    from app.services.encryption_service import file_encryption_service
+
+                    if operation_mode == OperationType.COPY and original_path.exists():
+                        success, error = backend.thaw_file(
+                            storage_reference=file_record.cold_storage_path,
+                            destination_path=original_path,
+                            location=storage_location,
+                            operation_mode=operation_mode,
+                        )
+                        if not success:
+                            return False, error
+                        checksum_after = checksum_verifier.calculate_checksum(original_path)
+                    else:
+                        original_path.parent.mkdir(parents=True, exist_ok=True)
+                        encrypted_temp = original_path.with_name(f"{original_path.name}.ffenc.download")
+                        decrypted_temp = original_path.with_suffix(original_path.suffix + ".tmp")
+                        if encrypted_temp.exists():
+                            encrypted_temp.unlink()
+                        if decrypted_temp.exists():
+                            decrypted_temp.unlink()
+
+                        try:
+                            success, error = backend.thaw_file(
+                                storage_reference=file_record.cold_storage_path,
+                                destination_path=encrypted_temp,
+                                location=storage_location,
+                                operation_mode=operation_mode,
+                            )
+                            if not success:
+                                return False, error
+
+                            file_encryption_service.decrypt_file(db, encrypted_temp, decrypted_temp)
+                            decrypted_temp.replace(original_path)
+                            checksum_after = (
+                                checksum_verifier.calculate_checksum(original_path)
+                                if original_path.exists()
+                                else None
+                            )
+                        finally:
+                            if encrypted_temp.exists():
+                                encrypted_temp.unlink()
+                            if decrypted_temp.exists():
+                                decrypted_temp.unlink()
+                else:
+                    success, error = backend.thaw_file(
+                        storage_reference=file_record.cold_storage_path,
+                        destination_path=original_path,
+                        location=storage_location,
+                        operation_mode=operation_mode,
+                    )
+                    if not success:
+                        return False, error
+
+                    if original_path.exists():
+                        checksum_after = checksum_verifier.calculate_checksum(original_path)
+
+                db.delete(file_record)
+
+                if pin:
+                    existing = (
+                        db.query(PinnedFile).filter(PinnedFile.file_path == str(original_path)).first()
+                    )
+                    if not existing:
+                        db.add(PinnedFile(path_id=file_record.path_id, file_path=str(original_path)))
+
+                db.commit()
+
+                if file_inventory:
+                    file_inventory.storage_type = StorageType.HOT
+                    file_inventory.status = FileStatus.ACTIVE
+                    file_inventory.is_encrypted = False
+                    file_inventory.file_path = str(original_path)
+
+                    audit_trail_service.log_thaw_operation(
+                        db=db,
+                        file=file_inventory,
+                        source_path=file_record.cold_storage_path,
+                        dest_path=original_path,
+                        checksum_before=checksum_before,
+                        checksum_after=checksum_after,
+                        success=True,
+                        initiated_by=initiated_by or "manual",
+                    )
+                    db.commit()
+
+                return True, None
+
+            # Local backend path
+            if not cold_path.exists():
+                if storage_location and storage_location.backend_type.value == "local":
+                    drive_hint_parts = []
+                    if storage_location.local_drive_label:
+                        drive_hint_parts.append(f"label={storage_location.local_drive_label}")
+                    if storage_location.local_drive_identifier:
+                        drive_hint_parts.append(
+                            f"id={storage_location.local_drive_identifier}"
+                        )
+                    if storage_location.local_drive_mount_path:
+                        drive_hint_parts.append(
+                            f"mount={storage_location.local_drive_mount_path}"
+                        )
+                    drive_hint = (
+                        f" (expected drive: {', '.join(drive_hint_parts)})"
+                        if drive_hint_parts
+                        else ""
+                    )
+                    return False, f"File not found in cold storage: {cold_path}{drive_hint}"
+                return False, f"File not found in cold storage: {cold_path}"
 
             # Calculate checksum before move for verification
             checksum_before = checksum_verifier.calculate_checksum(cold_path)
@@ -95,7 +220,7 @@ class FileThawer:
                 try:
                     # For COPY operations where the original file still exists,
                     # skip decryption (don't overwrite) and just remove the cold storage copy
-                    if file_record.operation_type.value == "copy" and original_path.exists():
+                    if operation_mode.value == "copy" and original_path.exists():
                         cold_path.unlink()
                     else:
                         # Ensure destination directory exists
@@ -129,7 +254,7 @@ class FileThawer:
                     return False, f"Failed to decrypt/thaw file: {e}"
 
             # If original was a symlink, we need to handle it differently (and not encrypted)
-            elif file_record.operation_type.value == "symlink":
+            elif operation_mode.value == "symlink":
                 # Remove the symlink at original location if it exists
                 if original_path.exists() and original_path.is_symlink():
                     original_path.unlink()
@@ -140,13 +265,14 @@ class FileThawer:
                     )
                 except Exception as e:
                     return False, f"Failed to move file back: {e!s}"
-            elif file_record.operation_type.value == "copy":
+            elif operation_mode.value == "copy":
                 # For copy, file is still in original location, just remove from cold storage
                 # Actually, if it was copied, the original should still exist
                 # But if we're thawing, we might want to ensure it's in hot storage
                 if not original_path.exists():
                     # Original doesn't exist, move from cold storage, preserving timestamps
                     try:
+                        original_path.parent.mkdir(parents=True, exist_ok=True)
                         prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
                             cold_path, original_path, progress_callback
                         )

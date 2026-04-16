@@ -1,8 +1,9 @@
 """Service functions for file migration queries."""
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
@@ -14,8 +15,11 @@ from app.models import (
     RelocationTask,
     RelocationTaskStatus,
     StorageType,
+    TransactionType,
+    FileTransactionHistory,
 )
 from app.schemas import FreezingFileSchema
+from app.services.relocation_manager import relocation_manager
 from app.services.scan_progress import scan_progress_manager
 
 logger = logging.getLogger(__name__)
@@ -154,3 +158,104 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
         )
 
     return result
+
+
+def _coerce_iso_to_datetime(value: Any) -> datetime:
+    """Convert ISO datetime strings to timezone-aware datetimes for sorting."""
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str) and value:
+        try:
+            parsed = datetime.fromisoformat(value)
+            return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return datetime.min.replace(tzinfo=timezone.utc)
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def _serialize_freeze_thaw_transaction(
+    tx: FileTransactionHistory, locations_by_id: Dict[int, ColdStorageLocation]
+) -> Dict[str, Any]:
+    """Convert audit trail freeze/thaw entries to migration-row payload shape."""
+    if tx.transaction_type == TransactionType.FREEZE:
+        source_name = "Hot Storage"
+        target_location = locations_by_id.get(tx.new_storage_location_id) if tx.new_storage_location_id else None
+        target_name = target_location.name if target_location else "Cold Storage"
+        source_id = 0
+        target_id = tx.new_storage_location_id or 0
+    else:
+        source_location = locations_by_id.get(tx.old_storage_location_id) if tx.old_storage_location_id else None
+        source_name = source_location.name if source_location else "Cold Storage"
+        target_name = "Hot Storage"
+        source_id = tx.old_storage_location_id or 0
+        target_id = 0
+
+    file_size = tx.file_size or 0
+    is_success = bool(tx.success)
+
+    return {
+        "task_id": f"tx-{tx.id}",
+        "inventory_id": tx.file_id,
+        "file_path": tx.old_path or tx.new_path or "",
+        "source_location_id": source_id,
+        "source_location_name": source_name,
+        "target_location_id": target_id,
+        "target_location_name": target_name,
+        "status": "completed" if is_success else "failed",
+        "created_at": tx.created_at.isoformat() if tx.created_at else None,
+        "started_at": None,
+        "completed_at": tx.created_at.isoformat() if tx.created_at else None,
+        "bytes_total": file_size,
+        "bytes_transferred": file_size if is_success else 0,
+        "error_message": tx.error_message,
+        "new_file_path": tx.new_path,
+        "destination_path": tx.new_path,
+        "percent_complete": 100 if is_success else 0,
+        "_sort_time": tx.created_at.isoformat() if tx.created_at else None,
+    }
+
+
+def get_recent_migrations(db: Session, limit: int = 20) -> List[Dict[str, Any]]:
+    """Return recent migrations including relocations and freeze/thaw operations."""
+    relocation_recent = relocation_manager.get_recent_tasks(limit, db)
+    relocation_rows: List[Dict[str, Any]] = []
+    for item in relocation_recent:
+        row = dict(item)
+        row["destination_path"] = row.get("new_file_path")
+        row["_sort_time"] = row.get("completed_at") or row.get("started_at") or row.get("created_at")
+        relocation_rows.append(row)
+
+    freeze_thaw_txs = (
+        db.query(FileTransactionHistory)
+        .filter(
+            FileTransactionHistory.transaction_type.in_(
+                [TransactionType.FREEZE, TransactionType.THAW]
+            )
+        )
+        .order_by(FileTransactionHistory.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+    location_ids = set()
+    for tx in freeze_thaw_txs:
+        if tx.old_storage_location_id:
+            location_ids.add(tx.old_storage_location_id)
+        if tx.new_storage_location_id:
+            location_ids.add(tx.new_storage_location_id)
+
+    locations_by_id: Dict[int, ColdStorageLocation] = {}
+    if location_ids:
+        locations_by_id = {
+            loc.id: loc
+            for loc in db.query(ColdStorageLocation).filter(ColdStorageLocation.id.in_(location_ids)).all()
+        }
+
+    tx_rows = [_serialize_freeze_thaw_transaction(tx, locations_by_id) for tx in freeze_thaw_txs]
+
+    combined = relocation_rows + tx_rows
+    combined.sort(key=lambda row: _coerce_iso_to_datetime(row.get("_sort_time")), reverse=True)
+    trimmed = combined[:limit]
+    for row in trimmed:
+        row.pop("_sort_time", None)
+    return trimmed

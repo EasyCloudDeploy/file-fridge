@@ -46,20 +46,6 @@
                             </div>
 
                             <div class="mb-3">
-                                <label for="operation_type" class="form-label">Operation Type *</label>
-                                <select class="form-select" id="operation_type" name="operation_type" required>
-                                    <option value="move">Move</option>
-                                    <option value="copy">Copy</option>
-                                    <option value="symlink">Move & Create Symlink</option>
-                                </select>
-                                <small class="form-text text-muted">
-                                    <strong>Move</strong> — file is relocated to cold storage and removed from hot storage.<br>
-                                    <strong>Copy</strong> — file is copied to cold storage; the original remains in hot storage.<br>
-                                    <strong>Move &amp; Symlink</strong> — file is moved to cold storage and a symlink is left at the original location, so existing paths still resolve.
-                                </small>
-                            </div>
-
-                            <div class="mb-3">
                                 <label for="check_interval_seconds" class="form-label">Check Interval (seconds) *</label>
                                 <input type="number" class="form-control" id="check_interval_seconds" name="check_interval_seconds"
                                        value="3600" min="60" required>

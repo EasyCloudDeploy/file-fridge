@@ -165,3 +165,6 @@ logs/
 test_run/
 playwright-report/
 test-results/
+
+# Accidental local directory from gdrive:// path handling
+gdrive:/

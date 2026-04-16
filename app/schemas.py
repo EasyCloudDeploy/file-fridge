@@ -8,6 +8,7 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, TypeAdapter, validator
 
 from app.models import (
+    ColdStorageBackendType,
     ConflictResolution,
     CriterionType,
     DispatchStatus,
@@ -65,6 +66,15 @@ class ColdStorageLocationBase(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255)
     path: str = Field(..., min_length=1)
+    backend_type: ColdStorageBackendType = Field(
+        ColdStorageBackendType.LOCAL, description="Backend provider for this storage location"
+    )
+    operation_mode: OperationType = Field(
+        OperationType.MOVE, description="Operation mode used when freezing files to this location"
+    )
+    backend_config: Optional[dict] = Field(
+        None, description="Backend-specific configuration. Secrets are stored encrypted."
+    )
     caution_threshold_percent: int = Field(
         20, ge=0, le=100, description="Warn at this % free space"
     )
@@ -73,6 +83,13 @@ class ColdStorageLocationBase(BaseModel):
     )
     is_encrypted: bool = Field(
         False, description="Whether files in this location should be encrypted"
+    )
+    allow_offline: bool = Field(
+        False,
+        description=(
+            "If true, expected disconnects are allowed for this location "
+            "(for example, ejected long-term removable drives)"
+        ),
     )
 
     @validator("critical_threshold_percent")
@@ -93,9 +110,13 @@ class ColdStorageLocationUpdate(BaseModel):
 
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     path: Optional[str] = Field(None, min_length=1)
+    backend_type: Optional[ColdStorageBackendType] = None
+    operation_mode: Optional[OperationType] = None
+    backend_config: Optional[dict] = None
     caution_threshold_percent: Optional[int] = Field(None, ge=0, le=100)
     critical_threshold_percent: Optional[int] = Field(None, ge=0, le=100)
     is_encrypted: Optional[bool] = None
+    allow_offline: Optional[bool] = None
 
 
 class FilterCriteria(BaseModel):
@@ -121,6 +142,15 @@ class ColdStorageLocation(ColdStorageLocationBase):
     """Schema for cold storage location response."""
 
     id: int
+    backend_status: Optional[dict] = None
+    backend_capabilities: Optional[dict] = None
+    local_drive_identifier: Optional[str] = None
+    local_drive_label: Optional[str] = None
+    local_drive_mount_path: Optional[str] = None
+    local_drive_is_removable: bool = False
+    local_drive_is_connected: bool = True
+    local_drive_last_seen_at: Optional[datetime] = None
+    allow_offline: bool = False
     encryption_status: EncryptionStatus
     permissions_error: Optional[str] = None
     created_at: datetime
@@ -382,6 +412,7 @@ class StorageStats(BaseModel):
     total_bytes: int
     used_bytes: int
     free_bytes: int
+    app_used_bytes: Optional[int] = None
     error: Optional[str] = None
 
 
@@ -965,6 +996,7 @@ class RelocationTaskBase(BaseModel):
     bytes_transferred: int
     error_message: Optional[str] = None
     new_file_path: Optional[str] = None
+    destination_path: Optional[str] = None
     percent_complete: float = 0.0
 
     model_config = ConfigDict(from_attributes=True)

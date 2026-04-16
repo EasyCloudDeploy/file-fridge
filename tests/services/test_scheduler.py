@@ -227,6 +227,27 @@ class TestCheckStoragePermissionsJob:
         assert loc.permissions_error is not None
         assert "not found" in loc.permissions_error.lower() or "nonexistent" in loc.permissions_error
 
+    def test_missing_cold_path_is_ignored_when_allow_offline_enabled(
+        self, db_session, monkeypatch
+    ):
+        """Missing removable local path does not produce permissions_error when allow_offline is enabled."""
+        from app.services.scheduler import check_storage_permissions_job_func
+
+        loc = self._make_cold_location(db_session, "/nonexistent/deep-cold/path")
+        loc.allow_offline = True
+        loc.local_drive_is_removable = True
+        loc.local_drive_is_connected = False
+        loc.permissions_error = "Path not found: /nonexistent/deep-cold/path"
+        db_session.commit()
+
+        # Ensure identity refresh does not clobber removable/offline state in this test.
+        monkeypatch.setattr("app.services.scheduler.update_local_drive_identity_fields", lambda _loc: None)
+
+        check_storage_permissions_job_func()
+
+        db_session.refresh(loc)
+        assert loc.permissions_error is None
+
     def test_no_error_for_fully_accessible_paths(self, db_session, tmp_path, monkeypatch):
         """No permissions_error is set when both hot and cold paths are fully accessible."""
         from app.services.scheduler import check_storage_permissions_job_func

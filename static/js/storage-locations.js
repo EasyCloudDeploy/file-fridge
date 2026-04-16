@@ -70,6 +70,15 @@ function renderStorageLocations() {
         <tr>
             <td>
                 <strong>${escapeHtml(location.name)}</strong>
+                <br><span class="badge bg-info mt-1">${escapeHtml(location.backend_type || 'local')}</span>
+                <span class="badge bg-secondary mt-1">${escapeHtml(location.operation_mode || 'move')}</span>
+                ${location.allow_offline ? `<span class="badge bg-primary mt-1">Offline Allowed</span>` : ''}
+                ${location.backend_type === 'local' && location.local_drive_is_removable ? `
+                    <span class="badge bg-dark mt-1">Removable</span>` : ''}
+                ${location.backend_type === 'local' ? `
+                    <span class="badge ${location.local_drive_is_connected ? 'bg-success' : 'bg-warning text-dark'} mt-1">
+                        ${location.local_drive_is_connected ? 'Drive Connected' : 'Drive Offline'}
+                    </span>` : ''}
                 ${location.permissions_error ? `
                     <br><span class="badge bg-danger mt-1" title="${escapeHtml(location.permissions_error)}">
                         <i class="bi bi-shield-exclamation"></i> Permission Error
@@ -77,6 +86,8 @@ function renderStorageLocations() {
             </td>
             <td>
                 <code>${escapeHtml(location.path)}</code>
+                ${location.backend_type === 'local' && (location.local_drive_label || location.local_drive_identifier) ? `
+                    <br><small class="text-muted">Drive: ${escapeHtml(location.local_drive_label || 'Unnamed')} (${escapeHtml(location.local_drive_identifier || 'unknown-id')})</small>` : ''}
                 ${location.permissions_error ? `
                     <br><small class="text-danger"><i class="bi bi-exclamation-triangle-fill"></i> ${escapeHtml(location.permissions_error)}</small>` : ''}
             </td>
