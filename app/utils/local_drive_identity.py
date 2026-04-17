@@ -18,7 +18,7 @@ def _diskutil_info(path: Path) -> Dict:
         return {}
     try:
         proc = subprocess.run(
-            ["diskutil", "info", "-plist", str(path)],
+            ["diskutil", "info", "-plist", "--", str(path)],
             check=True,
             capture_output=True,
             text=False,
