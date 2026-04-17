@@ -21,6 +21,7 @@ from app.models import (
     RelocationTask,
     RelocationTaskStatus,
 )
+from app.services.cold_storage_backends import get_backend
 from app.services.file_mover import FileMover
 
 logger = logging.getLogger(__name__)
@@ -239,7 +240,11 @@ class RelocationTaskManager:
             except ValueError:
                 relative_path = current_file_path.name
 
-            new_file_path = Path(target_location.path) / relative_path
+            # Resolve backend for target location
+            target_backend = get_backend(target_location)
+            is_remote_backend = target_backend.backend_name() != "local"
+
+            new_file_path: Path | str = Path(target_location.path) / relative_path
 
             logger.info(f"Relocating file from {current_file_path} to {new_file_path}")
 
@@ -263,21 +268,33 @@ class RelocationTaskManager:
                     except Exception as e:
                         logger.warning(f"Failed to update progress for task {task_id}: {e}")
 
-            # Perform the move
-            success, error = FileMover.move_file(
-                current_file_path,
-                new_file_path,
-                OperationType.MOVE,
-                progress_callback=progress_callback,
-            )
-
-            if not success:
-                msg = f"File move failed: {error}"
-                raise Exception(msg)
+            # Perform the move — remote backends upload via their own API
+            if is_remote_backend:
+                success, error, storage_reference, _checksum = target_backend.freeze_file(
+                    source_path=current_file_path,
+                    relative_path=relative_path,
+                    location=target_location,
+                    operation_mode=OperationType.MOVE,
+                )
+                if not success:
+                    msg = f"File move failed: {error}"
+                    raise Exception(msg)
+                new_file_path = storage_reference
+            else:
+                success, error = FileMover.move_file(
+                    current_file_path,
+                    new_file_path,
+                    OperationType.MOVE,
+                    progress_callback=progress_callback,
+                )
+                if not success:
+                    msg = f"File move failed: {error}"
+                    raise Exception(msg)
 
             # Update the inventory entry
             old_path = inventory_entry.file_path
             inventory_entry.file_path = str(new_file_path)
+            inventory_entry.cold_storage_location_id = target_location.id
             inventory_entry.status = FileStatus.ACTIVE  # Reset status after successful migration
 
             # Create a file record for the relocation
