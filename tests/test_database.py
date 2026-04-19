@@ -1,3 +1,4 @@
+import sqlite3
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
@@ -9,6 +10,7 @@ from app.database_migrations import (
     HEAD_REVISION,
     MAX_CONCURRENT_MIGRATIONS_REVISION,
     NORMALIZE_COLD_STORAGE_ENUM_VALUES_REVISION,
+    _create_sqlite_backup,
     _determine_schema_revision,
     run_startup_migrations,
 )
@@ -62,7 +64,10 @@ def test_has_schema_objects_true_when_tables_exist(db_session):
 
 @patch("alembic.command.upgrade")
 @patch("alembic.command.stamp")
-def test_run_startup_migrations_empty_db(mock_stamp, mock_upgrade, db_session, monkeypatch):
+@patch("app.database_migrations._create_sqlite_backup")
+def test_run_startup_migrations_empty_db(
+    mock_create_backup, mock_stamp, mock_upgrade, db_session, monkeypatch
+):
     """Test migrations run on an empty database (no tables created by init_db)."""
     # Ensure no tables are present initially
     Base.metadata.drop_all(bind=engine)
@@ -77,6 +82,7 @@ def test_run_startup_migrations_empty_db(mock_stamp, mock_upgrade, db_session, m
     # upgrade should be called to head
     mock_upgrade.assert_called_once_with(ANY, "head")
     mock_stamp.assert_not_called()  # No stamping needed if no tables exist
+    mock_create_backup.assert_not_called()
 
 
 @patch("alembic.command.upgrade")
@@ -216,10 +222,74 @@ def test_determine_schema_revision_returns_normalized_revision_when_values_alrea
 
 
 @patch("alembic.command.upgrade", side_effect=RuntimeError("boom"))
-def test_run_startup_migrations_raises_on_failure(mock_upgrade, db_session, monkeypatch):
+@patch("app.database_migrations.Config")
+def test_run_startup_migrations_raises_on_failure(
+    mock_config, mock_upgrade, db_session, monkeypatch
+):
     monkeypatch.setattr("app.config.settings.database_path", ":memory:")
+    mock_alembic_cfg = MagicMock()
+    mock_config.return_value = mock_alembic_cfg
 
     with pytest.raises(RuntimeError, match="Startup migrations failed; aborting startup"):
         run_startup_migrations()
 
+    mock_config.assert_called_once_with("alembic.ini")
     mock_upgrade.assert_called_once()
+
+
+def test_create_sqlite_backup_returns_none_for_non_sqlite_engine(tmp_path):
+    mock_engine = MagicMock()
+    mock_engine.url.get_backend_name.return_value = "postgresql"
+    mock_engine.url.database = str(tmp_path / "db.sqlite")
+
+    with patch("app.database_migrations.engine", mock_engine):
+        backup = _create_sqlite_backup()
+
+    assert backup is None
+    assert not (tmp_path / "backups").exists()
+
+
+def test_create_sqlite_backup_returns_none_for_in_memory_database(tmp_path):
+    mock_engine = MagicMock()
+    mock_engine.url.get_backend_name.return_value = "sqlite"
+    mock_engine.url.database = ":memory:"
+
+    with patch("app.database_migrations.engine", mock_engine):
+        backup = _create_sqlite_backup()
+
+    assert backup is None
+    assert not (tmp_path / "backups").exists()
+
+
+def test_create_sqlite_backup_returns_none_when_source_missing(tmp_path):
+    source_path = tmp_path / "missing.db"
+    mock_engine = MagicMock()
+    mock_engine.url.get_backend_name.return_value = "sqlite"
+    mock_engine.url.database = str(source_path)
+
+    with patch("app.database_migrations.engine", mock_engine):
+        backup = _create_sqlite_backup()
+
+    assert backup is None
+    assert not (tmp_path / "backups").exists()
+
+
+def test_create_sqlite_backup_creates_timestamped_backup_file(tmp_path):
+    source_path = tmp_path / "file_fridge.db"
+    with sqlite3.connect(source_path) as connection:
+        connection.execute("CREATE TABLE sample (id INTEGER PRIMARY KEY, name TEXT)")
+        connection.execute("INSERT INTO sample (name) VALUES ('hello')")
+        connection.commit()
+
+    mock_engine = MagicMock()
+    mock_engine.url.get_backend_name.return_value = "sqlite"
+    mock_engine.url.database = str(source_path)
+
+    with patch("app.database_migrations.engine", mock_engine):
+        backup = _create_sqlite_backup()
+
+    assert backup is not None
+    assert backup.exists()
+    assert backup.parent == tmp_path / "backups"
+    assert backup.name.startswith("file_fridge.db.pre_migration.")
+    assert backup.name.endswith(".bak")

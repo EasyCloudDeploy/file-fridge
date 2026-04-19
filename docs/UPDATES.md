@@ -62,13 +62,27 @@ uv run alembic upgrade head
 
 ### 4. Roll Back Recent Migrations (If Needed)
 
-If a migration causes issues, roll back the three most recent revisions:
+If a migration causes issues, first inspect revision history to identify the
+revision that was current before your update:
 
 ```bash
-uv run alembic downgrade -3
+uv run alembic history
 ```
 
-Then restore from your latest database backup if required, fix the root cause, and run:
+Then downgrade to that specific prior revision (recommended):
+
+```bash
+uv run alembic downgrade <previous-revision-id>
+```
+
+If you prefer step-counts, you can also downgrade by count:
+
+```bash
+uv run alembic downgrade -<N>
+```
+
+After rollback, restore from your latest database backup if required, fix the
+root cause, and run:
 
 ```bash
 uv run alembic upgrade head

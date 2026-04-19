@@ -22,6 +22,7 @@ BACKEND_MODULES_REVISION = "9f3d6e2aa1b1"
 LOCAL_DRIVE_IDENTITY_REVISION = "b17d9f43c2aa"
 ALLOW_OFFLINE_REVISION = "c3e1d8f7aa42"
 NORMALIZE_COLD_STORAGE_ENUM_VALUES_REVISION = "d4f9b8a1c2e3"
+BACKUP_RETENTION_COUNT = 10
 
 
 def _table_columns(inspector, table_name: str) -> set[str]:
@@ -121,12 +122,32 @@ def _create_sqlite_backup() -> Path | None:
     backup_path = backup_dir / f"{source.name}.pre_migration.{timestamp}.bak"
 
     source_uri = f"file:{source.absolute()}?mode=ro"
-    with sqlite3.connect(source_uri, uri=True) as src_conn:
-        with sqlite3.connect(backup_path) as backup_conn:
+    try:
+        with sqlite3.connect(source_uri, uri=True) as src_conn, sqlite3.connect(
+            backup_path
+        ) as backup_conn:
             src_conn.backup(backup_conn)
+    except (sqlite3.Error, OSError) as exc:
+        raise RuntimeError(
+            f"Pre-migration backup failed: could not snapshot SQLite database "
+            f"(path={backup_path})"
+        ) from exc
+
+    _prune_backups(backup_dir=backup_dir, database_filename=source.name)
 
     logger.info("Created pre-migration backup at %s", backup_path)
     return backup_path
+
+
+def _prune_backups(backup_dir: Path, database_filename: str) -> None:
+    """Keep only the most recent startup migration backups."""
+    pattern = f"{database_filename}.pre_migration.*.bak"
+    backups = sorted(backup_dir.glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)
+    for backup in backups[BACKUP_RETENTION_COUNT:]:
+        try:
+            backup.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Failed to prune old backup: %s", backup)
 
 
 def run_startup_migrations() -> None:
@@ -152,13 +173,15 @@ def run_startup_migrations() -> None:
             # Check for existing version
             has_alembic_table = "alembic_version" in tables
             has_version = False
+            current_revision: str | None = None
             if has_alembic_table:
                 result = db.execute(text("SELECT version_num FROM alembic_version")).fetchone()
                 has_version = result is not None
+                if has_version:
+                    current_revision = result[0]
 
             has_app_tables = len(tables) > (1 if has_alembic_table else 0)
-            if has_app_tables:
-                backup_path = _create_sqlite_backup()
+            revision_to_stamp: str | None = None
 
             # If we have tables but no alembic version, determine the closest
             # revision from the live schema before upgrading further.
@@ -170,16 +193,31 @@ def run_startup_migrations() -> None:
 
                 revision_to_stamp = _determine_schema_revision(inspector, db)
                 logger.info("Detected schema equivalent to revision %s", revision_to_stamp)
-                command.stamp(alembic_cfg, revision_to_stamp)
 
+            should_run_upgrade = True
+            if has_app_tables:
+                if has_version and current_revision == HEAD_REVISION:
+                    should_run_upgrade = False
+                if not has_version and revision_to_stamp == HEAD_REVISION:
+                    should_run_upgrade = False
+
+            if has_app_tables and should_run_upgrade:
+                backup_path = _create_sqlite_backup()
+
+            if not has_version and has_app_tables and revision_to_stamp is not None:
+                command.stamp(alembic_cfg, revision_to_stamp)
                 logger.info("✓ Database stamped with appropriate version")
         finally:
             db.close()
 
-        # Run Alembic upgrade to head (this will be a no-op if already at head)
-        command.upgrade(alembic_cfg, "head")
-        logger.info("✓ Database migrations completed successfully")
+        if should_run_upgrade:
+            command.upgrade(alembic_cfg, "head")
+            logger.info("✓ Database migrations completed successfully")
+        else:
+            logger.info("✓ Database already at head; no migration upgrade needed")
     except Exception as e:
+        if isinstance(e, RuntimeError) and str(e).startswith("Pre-migration backup failed:"):
+            raise
         logger.exception("Failed to run startup migrations", exc_info=e)
         recovery_message = (
             "Startup migrations failed; aborting startup. "

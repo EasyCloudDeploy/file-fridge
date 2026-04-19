@@ -31,6 +31,12 @@ def _table_exists(table: str) -> bool:
     return table in inspector.get_table_names()
 
 
+def _index_exists(table: str, index_name: str) -> bool:
+    bind = op.get_bind()
+    inspector = inspect(bind)
+    return any(index["name"] == index_name for index in inspector.get_indexes(table))
+
+
 def upgrade() -> None:
     # Add health tracking columns to remote_connections (idempotent)
     if _table_exists("remote_connections"):
@@ -83,6 +89,7 @@ def upgrade() -> None:
                 "timestamp",
                 sa.DateTime(timezone=True),
                 server_default=sa.text("(CURRENT_TIMESTAMP)"),
+                nullable=False,
             ),
             sa.Column("event_type", sa.String(50), nullable=False),
             sa.Column(
@@ -99,6 +106,37 @@ def upgrade() -> None:
             sa.Column("status", sa.String(20), nullable=True),
             sa.Column("error_message", sa.Text(), nullable=True),
         )
+    if _table_exists("remote_audit_logs"):
+        if not _index_exists("remote_audit_logs", "ix_remote_audit_logs_timestamp"):
+            op.create_index(
+                "ix_remote_audit_logs_timestamp",
+                "remote_audit_logs",
+                ["timestamp"],
+                unique=False,
+            )
+        if not _index_exists(
+            "remote_audit_logs", "ix_remote_audit_logs_connection_id_timestamp"
+        ):
+            op.create_index(
+                "ix_remote_audit_logs_connection_id_timestamp",
+                "remote_audit_logs",
+                ["connection_id", "timestamp"],
+                unique=False,
+            )
+        if not _index_exists("remote_audit_logs", "ix_remote_audit_logs_event_type"):
+            op.create_index(
+                "ix_remote_audit_logs_event_type",
+                "remote_audit_logs",
+                ["event_type"],
+                unique=False,
+            )
+        if not _index_exists("remote_audit_logs", "ix_remote_audit_logs_status"):
+            op.create_index(
+                "ix_remote_audit_logs_status",
+                "remote_audit_logs",
+                ["status"],
+                unique=False,
+            )
 
     # Create remote_connection_path_permissions table (idempotent)
     if not _table_exists("remote_connection_path_permissions"):
@@ -139,6 +177,19 @@ def downgrade() -> None:
     if _table_exists("remote_connection_path_permissions"):
         op.drop_table("remote_connection_path_permissions")
     if _table_exists("remote_audit_logs"):
+        if _index_exists("remote_audit_logs", "ix_remote_audit_logs_status"):
+            op.drop_index("ix_remote_audit_logs_status", table_name="remote_audit_logs")
+        if _index_exists("remote_audit_logs", "ix_remote_audit_logs_event_type"):
+            op.drop_index("ix_remote_audit_logs_event_type", table_name="remote_audit_logs")
+        if _index_exists(
+            "remote_audit_logs", "ix_remote_audit_logs_connection_id_timestamp"
+        ):
+            op.drop_index(
+                "ix_remote_audit_logs_connection_id_timestamp",
+                table_name="remote_audit_logs",
+            )
+        if _index_exists("remote_audit_logs", "ix_remote_audit_logs_timestamp"):
+            op.drop_index("ix_remote_audit_logs_timestamp", table_name="remote_audit_logs")
         op.drop_table("remote_audit_logs")
 
     if _table_exists("remote_transfer_jobs"):
