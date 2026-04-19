@@ -153,6 +153,58 @@ class TestRemoteConnectionService:
         assert conn.trust_status == TrustStatus.TRUSTED
         assert db_session.query(RemoteConnection).filter_by(remote_fingerprint=dummy_fp).first() is not None
 
+    @pytest.mark.asyncio
+    @respx.mock
+    async def test_initiate_connection_failure_does_not_mutate_existing_connection(
+        self, db_session, monkeypatch
+    ):
+        """Failed handshake should not persist updates to an existing connection."""
+        from app.services.instance_config_service import instance_config_service
+
+        monkeypatch.setattr(instance_config_service, "get_instance_url", lambda db: "http://local")
+
+        existing = RemoteConnection(
+            name="Existing",
+            url="http://existing",
+            remote_fingerprint="e" * 64,
+            remote_ed25519_public_key=base64.b64encode(b"4" * 32).decode("ascii"),
+            remote_x25519_public_key=base64.b64encode(b"4" * 32).decode("ascii"),
+            trust_status=TrustStatus.PENDING,
+            transfer_mode=TransferMode.PUSH_ONLY,
+        )
+        db_session.add(existing)
+        db_session.commit()
+
+        remote_id = {
+            "instance_name": "Remote Updated",
+            "fingerprint": "e" * 64,
+            "ed25519_public_key": base64.b64encode(b"5" * 32).decode("ascii"),
+            "x25519_public_key": base64.b64encode(b"5" * 32).decode("ascii"),
+            "url": "http://remote-updated",
+        }
+        from app.schemas import RemoteConnectionIdentity
+
+        parsed_remote_id = RemoteConnectionIdentity.model_validate(remote_id)
+
+        # Remote rejects handshake; local changes must roll back.
+        respx.post("http://remote-updated/api/v1/remote/connection-request").mock(
+            return_value=Response(403, json={"detail": "Rejected"})
+        )
+
+        with pytest.raises(ValueError, match="Connection rejected"):
+            await remote_connection_service.initiate_connection(
+                db_session, "Updated Name", parsed_remote_id, connection_code="bad-code"
+            )
+
+        persisted = (
+            db_session.query(RemoteConnection).filter_by(remote_fingerprint="e" * 64).first()
+        )
+        assert persisted is not None
+        assert persisted.name == "Existing"
+        assert persisted.url == "http://existing"
+        assert persisted.trust_status == TrustStatus.PENDING
+        assert persisted.transfer_mode == TransferMode.PUSH_ONLY
+
     def test_handle_connection_request_success(self, db_session, monkeypatch):
         """Test handling an incoming connection request."""
         # Setup mocks

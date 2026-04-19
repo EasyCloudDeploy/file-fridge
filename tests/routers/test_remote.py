@@ -17,7 +17,9 @@ from app.models import (
     StorageType,
     TransferMode,
     TrustStatus,
+    User,
 )
+from app.security import hash_password
 from app.utils.remote_signature import verify_remote_signature
 
 # Assume authenticated_client, monitored_path_factory, storage_location fixtures are available from conftest.
@@ -52,6 +54,21 @@ def mock_get_signed_headers():
     with patch("app.routers.api.remote.get_signed_headers", new_callable=AsyncMock) as mock:
         mock.return_value = {"Authorization": "Bearer signed-token"}
         yield mock
+
+
+def _authenticate_with_roles(
+    client: TestClient, db_session: Session, username: str, roles: list[str]
+) -> TestClient:
+    user = User(username=username, password_hash=hash_password("password"), roles=roles)
+    db_session.add(user)
+    db_session.commit()
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"username": username, "password": "password"},
+    )
+    token = response.json()["access_token"]
+    client.headers["Authorization"] = f"Bearer {token}"
+    return client
 
 
 # ==================================
@@ -370,15 +387,23 @@ def test_receive_chunk(
 
 @patch("app.routers.api.remote.scheduler_service.trigger_scan")
 @patch("app.services.file_metadata.file_metadata_extractor.compute_sha256", return_value="hash")
+@patch("pathlib.Path.stat")
 @patch("pathlib.Path.rename")
 @patch("app.routers.api.remote._get_found_tmp", new_callable=AsyncMock)
 def test_verify_transfer_success(
-    mock_get_tmp, mock_rename, mock_hash, mock_trigger, authenticated_client: TestClient, tmp_path
+    mock_get_tmp,
+    mock_rename,
+    mock_stat,
+    mock_hash,
+    mock_trigger,
+    authenticated_client: TestClient,
+    tmp_path,
 ):
     """Test transfer verification."""
     tmp_file = tmp_path / "test.fftmp"
     tmp_file.touch()
     mock_get_tmp.return_value = tmp_file
+    mock_stat.return_value = MagicMock(st_size=100)
 
     data = {"relative_path": "test.txt", "remote_path_id": 1, "checksum": "hash"}
     response = authenticated_client.post("/api/v1/remote/verify-transfer", json=data)
@@ -440,6 +465,36 @@ def test_pull_file_success(mock_post, authenticated_client: TestClient, remote_c
     assert response.status_code == 200
 
 
+@patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+def test_pull_file_requires_write_permission(
+    mock_post,
+    client: TestClient,
+    db_session: Session,
+    remote_connection_factory,
+    monitored_path_factory,
+    tmp_path,
+):
+    """Viewer role has read-only remote permission and cannot initiate pull requests."""
+    conn = remote_connection_factory()
+    conn_id = conn.id
+    local_path = monitored_path_factory("Viewer Pull", str(tmp_path / "viewer_pull_dest"))
+    local_path_id = local_path.id
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"status": "accepted", "job_id": "r1"}
+    mock_response.raise_for_status = MagicMock(return_value=None)
+    mock_post.return_value = mock_response
+
+    viewer_client = _authenticate_with_roles(client, db_session, "viewer_remote", ["viewer"])
+    data = {
+        "remote_file_inventory_id": 1,
+        "remote_connection_id": conn_id,
+        "local_monitored_path_id": local_path_id,
+        "strategy": "COPY",
+    }
+    response = viewer_client.post("/api/v1/remote/pull", json=data)
+    assert response.status_code == 403
+
+
 def test_exposed_paths(authenticated_client: TestClient, monitored_path_factory, tmp_path):
     """Test exposed paths."""
     monitored_path_factory("Exposed", str(tmp_path / "exposed"))
@@ -468,6 +523,23 @@ def test_browse_remote_files(authenticated_client: TestClient, monitored_path_fa
     assert response.status_code == 200
 
 
+@patch("httpx.AsyncClient.send", new_callable=AsyncMock)
+def test_browse_remote_instance_files_requires_permission(
+    mock_send, client: TestClient, db_session: Session, remote_connection_factory
+):
+    """Users with no remote permission cannot browse files from a connected remote instance."""
+    conn = remote_connection_factory()
+    conn_id = conn.id
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock(return_value=None)
+    mock_response.json.return_value = {"path_name": "Remote", "total_count": 0, "files": []}
+    mock_send.return_value = mock_response
+
+    basic_client = _authenticate_with_roles(client, db_session, "basic_remote", [])
+    response = basic_client.get(f"/api/v1/remote/connections/{conn_id}/browse-files?path_id=1")
+    assert response.status_code == 403
+
+
 @patch("app.routers.api.remote.remote_transfer_service.create_transfer_job")
 @patch("app.routers.api.remote.remote_transfer_service.run_transfer", new_callable=AsyncMock)
 def test_serve_transfer_request(mock_run, mock_create, authenticated_client: TestClient, file_inventory_factory, tmp_path):
@@ -478,6 +550,15 @@ def test_serve_transfer_request(mock_run, mock_create, authenticated_client: Tes
     data = {"file_inventory_id": file_inv.id, "remote_monitored_path_id": 1, "strategy": "COPY"}
     response = authenticated_client.post("/api/v1/remote/serve-transfer", json=data)
     assert response.status_code == 200
+
+
+def test_serve_transfer_request_rejects_invalid_strategy(authenticated_client: TestClient):
+    """Invalid transfer strategy should return 400."""
+    response = authenticated_client.post(
+        "/api/v1/remote/serve-transfer",
+        json={"file_inventory_id": 1, "remote_monitored_path_id": 1, "strategy": "INVALID"},
+    )
+    assert response.status_code == 400
 
 
 def test_sync_transfer_mode(authenticated_client: TestClient):
@@ -522,3 +603,14 @@ def test_get_transfer_status_not_found(authenticated_client: TestClient):
     """Test getting transfer status for non-existent path."""
     response = authenticated_client.get("/api/v1/remote/transfer-status?relative_path=none.txt&remote_path_id=9999&storage_type=hot")
     assert response.status_code == 404
+
+
+def test_get_transfer_status_rejects_path_traversal(
+    authenticated_client: TestClient, monitored_path_factory, tmp_path
+):
+    """Path traversal attempts must be rejected."""
+    path = monitored_path_factory("Status Traversal", str(tmp_path / "status_traversal"))
+    response = authenticated_client.get(
+        f"/api/v1/remote/transfer-status?relative_path=../secret.txt&remote_path_id={path.id}&storage_type=hot"
+    )
+    assert response.status_code == 400
