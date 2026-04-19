@@ -275,6 +275,7 @@ class RelocationTaskManager:
                     relative_path=relative_path,
                     location=target_location,
                     operation_mode=OperationType.MOVE,
+                    progress_callback=progress_callback,
                 )
                 if not success:
                     msg = f"File move failed: {error}"

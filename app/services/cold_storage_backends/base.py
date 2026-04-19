@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Protocol, Tuple
+from typing import Callable, Optional, Protocol, Tuple
 
 from app.models import ColdStorageLocation, OperationType
 
@@ -38,6 +38,7 @@ class ColdStorageBackend(Protocol):
         relative_path: Path,
         location: ColdStorageLocation,
         operation_mode: OperationType,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
         """Freeze from hot storage into backend.
 

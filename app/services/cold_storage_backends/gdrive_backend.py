@@ -6,7 +6,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import quote, unquote, urlparse
 
 import httpx
@@ -223,6 +223,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
         metadata: Dict[str, Any],
         source_path: Path,
         headers: Dict[str, str],
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> str:
         """Upload a file using the resumable upload API. Returns the new file ID."""
         file_size = source_path.stat().st_size
@@ -274,9 +275,14 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
                 # 308 Resume Incomplete is expected for all chunks except the last.
                 if upload_resp.status_code == 308:
                     bytes_sent = end_byte + 1
+                    if progress_callback is not None:
+                        progress_callback(bytes_sent)
                     continue
                 # 200 or 201 signals the upload is complete.
                 if upload_resp.status_code in (200, 201):
+                    bytes_sent = end_byte + 1
+                    if progress_callback is not None:
+                        progress_callback(bytes_sent)
                     file_id = upload_resp.json().get("id")
                     break
                 self._raise_for_status_with_google_detail(
@@ -428,6 +434,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
         relative_path: Path,
         location: ColdStorageLocation,
         operation_mode: OperationType,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
         if operation_mode == OperationType.SYMLINK:
             return False, "Operation 'symlink' is not supported by backend 'gdrive'", None, None
@@ -471,10 +478,12 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
                 file_id = response.json().get("id")
                 if not file_id:
                     return False, "Google Drive upload response missing file id", None, None
+                if progress_callback is not None:
+                    progress_callback(file_size)
             else:
                 # Large file: use resumable upload to avoid the 5 MB multipart cap
                 # and to avoid loading the entire file into memory.
-                file_id = self._resumable_upload(metadata, source_path, headers)
+                file_id = self._resumable_upload(metadata, source_path, headers, progress_callback)
 
             if operation_mode == OperationType.MOVE:
                 source_path.unlink()

@@ -1,7 +1,7 @@
 """Local filesystem cold storage backend."""
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from app.models import ColdStorageLocation, OperationType
 from app.services.checksum_verifier import checksum_verifier
@@ -38,6 +38,7 @@ class LocalColdStorageBackend(ColdStorageBackend):
         relative_path: Path,
         location: ColdStorageLocation,
         operation_mode: OperationType,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> Tuple[bool, Optional[str], Optional[str], Optional[str]]:
         destination = Path(location.path) / relative_path
         destination.parent.mkdir(parents=True, exist_ok=True)
