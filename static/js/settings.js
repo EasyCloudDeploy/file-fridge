@@ -348,6 +348,29 @@ function initSettingsPage() {
         });
     }
 
+    // Update the pending connections badge in the nav
+    function _updatePendingBadge(count) {
+        const badge = document.getElementById('pending-connections-badge');
+        if (!badge) return;
+        if (count > 0) {
+            badge.textContent = count;
+            badge.classList.remove('d-none');
+        } else {
+            badge.classList.add('d-none');
+        }
+    }
+
+    // Poll for pending connections every 60 seconds so the badge stays fresh
+    setInterval(async () => {
+        try {
+            const response = await authenticatedFetch('/api/v1/remote/status');
+            if (response.ok) {
+                const data = await response.json();
+                _updatePendingBadge(data.pending_connections || 0);
+            }
+        } catch (_) { /* silent — background poll */ }
+    }, 60000);
+
     // Check if remote connections are configured
     async function checkRemoteConfiguration() {
         // Load configuration first
@@ -406,10 +429,50 @@ function initSettingsPage() {
                     fetchConnectionCode();
                     loadRemoteTransfers();
                 }
+
+                // Update pending connections badge regardless of configured state
+                _updatePendingBadge(data.pending_connections || 0);
             }
         } catch (error) {
             console.error('Error checking remote configuration:', error);
         }
+    }
+
+    // Connection code expiry countdown
+    let _codeExpiryTimer = null;
+    let _codeExpiresAt = null;
+
+    function _startExpiryCountdown(expiresInSeconds) {
+        if (_codeExpiryTimer) clearInterval(_codeExpiryTimer);
+        _codeExpiresAt = Date.now() + expiresInSeconds * 1000;
+
+        function tick() {
+            const remaining = Math.max(0, Math.round((_codeExpiresAt - Date.now()) / 1000));
+            const min = String(Math.floor(remaining / 60)).padStart(2, '0');
+            const sec = String(remaining % 60).padStart(2, '0');
+            const badge = document.getElementById('code-expiry-badge');
+            const text = document.getElementById('code-expiry-text');
+            if (!text) return;
+            text.textContent = `${min}:${sec}`;
+            if (badge) {
+                badge.classList.remove('text-success', 'text-warning', 'text-danger');
+                if (remaining > 600) {
+                    text.classList.replace('text-warning', 'text-muted');
+                    text.classList.replace('text-danger', 'text-muted');
+                } else if (remaining > 120) {
+                    text.className = 'text-warning';
+                } else {
+                    text.className = 'text-danger';
+                }
+            }
+            if (remaining === 0) {
+                clearInterval(_codeExpiryTimer);
+                // Auto-refresh when the code expires
+                fetchConnectionCode();
+            }
+        }
+        tick();
+        _codeExpiryTimer = setInterval(tick, 1000);
     }
 
     // Fetch and display connection code
@@ -419,6 +482,9 @@ function initSettingsPage() {
             if (response.ok) {
                 const data = await response.json();
                 document.getElementById('my-connection-code').value = data.code;
+                if (data.expires_in_seconds != null) {
+                    _startExpiryCountdown(data.expires_in_seconds);
+                }
             } else if (response.status === 500) {
                 // Configuration error - likely FF_INSTANCE_URL not set
                 const codeInput = document.getElementById('my-connection-code');
@@ -426,6 +492,8 @@ function initSettingsPage() {
                     codeInput.value = 'Configuration required';
                     codeInput.disabled = true;
                 }
+                const text = document.getElementById('code-expiry-text');
+                if (text) text.textContent = '--:--';
             }
         } catch (error) {
             console.error('Error fetching connection code:', error);
@@ -520,11 +588,17 @@ function initSettingsPage() {
                     }
 
                     // Browse button - disabled for non-trusted connections
+                    let browseDisabledTitle = 'Enable Bidirectional mode on both instances';
+                    if (trustStatus === 'PENDING') {
+                        browseDisabledTitle = 'Accept connection first';
+                    } else if (trustStatus === 'TRUSTED' && conn.transfer_mode === 'BIDIRECTIONAL' && !conn.effective_bidirectional) {
+                        browseDisabledTitle = 'Waiting for the remote instance to also enable Bidirectional mode (currently: Push Only). Ask the remote admin to change their transfer mode setting.';
+                    }
                     const browseBtn = (trustStatus === 'TRUSTED' && conn.effective_bidirectional)
                         ? `<button class="btn btn-sm btn-primary browse-remote-btn w-100" data-id="${conn.id}" title="Browse remote files">
                              <i class="bi bi-folder2-open me-1"></i> Browse Files
                            </button>`
-                        : `<button class="btn btn-sm btn-outline-secondary w-100" disabled title="${trustStatus === 'PENDING' ? 'Accept connection first' : 'Enable Bidirectional mode on both instances'}">
+                        : `<button class="btn btn-sm btn-outline-secondary w-100" disabled title="${browseDisabledTitle}">
                              <i class="bi bi-lock me-1"></i> Locked
                            </button>`;
 
@@ -552,6 +626,9 @@ function initSettingsPage() {
                         `;
                     } else if (trustStatus === 'TRUSTED') {
                         actionButtons = `
+                            <button class="btn btn-sm btn-outline-info ping-conn-btn me-1" data-id="${conn.id}" data-name="${safeName}" title="Test Connection">
+                                <i class="bi bi-broadcast"></i>
+                            </button>
                             <button class="btn btn-sm btn-outline-primary edit-conn-btn me-1" data-id="${conn.id}" data-name="${safeName}" data-url="${safeUrl}" data-mode="${safeMode}" title="Edit connection">
                                 <i class="bi bi-pencil"></i>
                             </button>
@@ -628,6 +705,15 @@ function initSettingsPage() {
                         const id = this.dataset.id;
                         const name = this.dataset.name;
                         showDeleteModal(id, name);
+                    });
+                });
+
+                // Add ping event listeners
+                document.querySelectorAll('.ping-conn-btn').forEach(btn => {
+                    btn.addEventListener('click', function () {
+                        const id = this.dataset.id;
+                        const name = this.dataset.name;
+                        pingConnection(id, name, this);
                     });
                 });
 
@@ -833,6 +919,43 @@ function initSettingsPage() {
         } catch (error) {
             console.error('Error rejecting connection:', error);
             showToast('Error', 'Failed to connect to server.', 'danger');
+        }
+    }
+
+    // Ping connection logic
+    async function pingConnection(id, name, btn) {
+        const originalContent = btn.innerHTML;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
+        btn.disabled = true;
+
+        try {
+            const response = await authenticatedFetch(`/api/v1/remote/connections/${id}/ping`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.reachable) {
+                    btn.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
+                    showToast('Connection Successful', `Successfully reached "${name}" (latency: ${data.latency_ms}ms).`, 'success');
+                } else {
+                    btn.innerHTML = '<i class="bi bi-exclamation-circle text-danger"></i>';
+                    showToast('Connection Failed', `Remote instance "${name}" reported error: ${data.error}`, 'danger');
+                }
+            } else {
+                const errorData = await response.json();
+                btn.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
+                showToast('Error', errorData.detail || 'Failed to ping connection', 'danger');
+            }
+        } catch (error) {
+            console.error('Error pinging connection:', error);
+            btn.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
+            showToast('Error', 'Failed to connect to server.', 'danger');
+        } finally {
+            setTimeout(() => {
+                btn.innerHTML = originalContent;
+                btn.disabled = false;
+            }, 5000);
         }
     }
 

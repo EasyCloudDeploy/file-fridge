@@ -13,8 +13,9 @@
                 <i class="bi bi-person-circle me-2"></i>Accounts
             </a>
             <a href="#remote-connections" class="list-group-item list-group-item-action"
-                data-section="remote-connections">
+                data-section="remote-connections" id="nav-remote-connections">
                 <i class="bi bi-hdd-network me-2"></i>Remote Connections
+                <span id="pending-connections-badge" class="badge bg-danger ms-1 d-none">0</span>
             </a>
             <a href="#encryption" class="list-group-item list-group-item-action" data-section="encryption">
                 <i class="bi bi-shield-lock me-2"></i>Encryption
@@ -194,6 +195,68 @@
                 </div>
             </div>
 
+            <!-- Setup Guide (collapsible) -->
+            <div class="card mb-4 border-info">
+                <div class="card-header bg-info bg-opacity-10">
+                    <a class="d-flex align-items-center text-decoration-none text-reset collapsed"
+                        data-bs-toggle="collapse" href="#setup-guide-body" role="button"
+                        aria-expanded="false" aria-controls="setup-guide-body">
+                        <i class="bi bi-lightbulb me-2 text-info"></i>
+                        <span class="fw-semibold">Setup Guide</span>
+                        <i class="bi bi-chevron-down ms-auto text-muted small"></i>
+                    </a>
+                </div>
+                <div id="setup-guide-body" class="collapse">
+                    <div class="card-body">
+                        <h6 class="fw-semibold mb-3">How to configure remote connections</h6>
+
+                        <div class="mb-3">
+                            <p class="mb-1 fw-semibold"><i class="bi bi-1-circle text-primary me-1"></i>Set your Instance URL</p>
+                            <p class="text-muted small mb-0">
+                                The Instance URL is the address <em>other</em> File Fridge instances will use to reach
+                                <em>this</em> machine — not the URL you use to open the app in your browser.
+                                It must be reachable from the remote machine's network.
+                            </p>
+                        </div>
+
+                        <div class="mb-3">
+                            <p class="mb-1 fw-semibold"><i class="bi bi-house text-success me-1"></i>Homelab / Local Network</p>
+                            <p class="text-muted small mb-0">
+                                Use your LAN IP address and port, e.g.
+                                <code>http://192.168.1.100:8000</code>.
+                                If you have local DNS, a hostname like <code>http://nas.local:8000</code> also works.
+                                Both instances must be on the same network (or VPN) to reach each other.
+                            </p>
+                        </div>
+
+                        <div class="mb-3">
+                            <p class="mb-1 fw-semibold"><i class="bi bi-globe text-warning me-1"></i>External / Internet Access</p>
+                            <p class="text-muted small mb-0">
+                                Use your public IP or domain name, e.g. <code>https://fridge.example.com</code>.
+                                Set up port forwarding on your router (default port 8000) or use a reverse proxy
+                                (nginx, Caddy, Traefik) to terminate HTTPS. A reverse proxy with HTTPS is strongly
+                                recommended for connections over the internet.
+                            </p>
+                        </div>
+
+                        <div class="mb-3">
+                            <p class="mb-1 fw-semibold"><i class="bi bi-arrow-left-right text-secondary me-1"></i>NAT / Firewall Considerations</p>
+                            <p class="text-muted small mb-0">
+                                Both instances need to reach <em>each other's</em> URL for bidirectional transfers.
+                                If one machine is behind NAT without port forwarding, it can initiate connections
+                                outward but cannot receive incoming connections — only Push mode will work for that instance.
+                            </p>
+                        </div>
+
+                        <div class="alert alert-info mb-0 py-2 small">
+                            <i class="bi bi-info-circle me-1"></i>
+                            All data transfers are encrypted end-to-end with AES-256-GCM regardless of whether you use HTTP or HTTPS.
+                            HTTPS adds transport-layer security on top of that.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Instance Configuration Card -->
             <div id="instance-config" class="card mb-4">
                 <div class="card-header">
@@ -268,11 +331,14 @@
                         <h6 class="text-muted">Instance Connection Code</h6>
                         <p class="text-muted small">
                             Copy this code to another File Fridge instance to allow it to connect to this server.
-                            This code rotates hourly.
+                            This code rotates hourly — share it promptly.
                         </p>
                         <div class="input-group mb-3">
                             <input type="password" class="form-control font-monospace" id="my-connection-code" readonly
                                 autocomplete="off" spellcheck="false">
+                            <span class="input-group-text px-2" id="code-expiry-badge" title="Time until this code expires">
+                                <small id="code-expiry-text" class="text-muted">--:--</small>
+                            </span>
                             <button class="btn btn-outline-secondary" type="button" id="toggle-code-visibility"
                                 title="Show/Hide code">
                                 <i class="bi bi-eye"></i>

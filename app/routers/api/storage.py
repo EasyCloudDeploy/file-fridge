@@ -1,4 +1,3 @@
-# ruff: noqa: B008
 """API routes for storage management."""
 
 import base64
@@ -394,9 +393,7 @@ def get_google_drive_stats(location_id: int, db: Annotated[Session, Depends(get_
 
 
 @router.get("/gdrive/oauth/metadata")
-def get_google_drive_oauth_metadata(
-    request: Request, db: Annotated[Session, Depends(get_db)]
-):
+def get_google_drive_oauth_metadata(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Return Google OAuth metadata used by the storage setup UI."""
     return {"callback_url": _get_google_oauth_redirect_uri(request, db)}
 
@@ -806,7 +803,9 @@ def google_drive_oauth_callback(
         return RedirectResponse(url=f"/storage-locations/{location_id}/edit?gdrive_oauth=success")
     except httpx.ConnectError:
         logger.exception("Google OAuth callback failed due to network connectivity")
-        return RedirectResponse(url="/storage-locations?gdrive_oauth=error&reason=network_unreachable")
+        return RedirectResponse(
+            url="/storage-locations?gdrive_oauth=error&reason=network_unreachable"
+        )
     except Exception:
         logger.exception("Google OAuth callback failed")
         return RedirectResponse(url="/storage-locations?gdrive_oauth=error&reason=callback_failed")

@@ -1,4 +1,3 @@
-# ruff: noqa: B008
 """API routes for file cleanup."""
 
 from typing import Annotated, Optional
@@ -29,9 +28,7 @@ def cleanup_duplicates(
 
 
 @router.post("/symlinks")
-def cleanup_symlinks(
-    db: Annotated[Session, Depends(get_db)], path_id: Optional[int] = Query(None)
-):
+def cleanup_symlinks(db: Annotated[Session, Depends(get_db)], path_id: Optional[int] = Query(None)):
     """
     Clean up symlink entries from FileInventory.
 

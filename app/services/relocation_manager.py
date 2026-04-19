@@ -80,7 +80,11 @@ class RelocationTaskManager:
         db = SessionLocal()
         try:
             # Find any tasks that were running, mark them as pending to be restarted
-            running_tasks = db.query(RelocationTask).filter(RelocationTask.status == RelocationTaskStatus.RUNNING).all()
+            running_tasks = (
+                db.query(RelocationTask)
+                .filter(RelocationTask.status == RelocationTaskStatus.RUNNING)
+                .all()
+            )
             for task in running_tasks:
                 logger.info(f"Recovering interrupted relocation task {task.task_id}")
                 task.status = RelocationTaskStatus.PENDING
@@ -101,9 +105,12 @@ class RelocationTaskManager:
                 db = SessionLocal()
                 try:
                     # Look for pending tasks
-                    task = db.query(RelocationTask).filter(
-                        RelocationTask.status == RelocationTaskStatus.PENDING
-                    ).order_by(RelocationTask.created_at.asc()).first()
+                    task = (
+                        db.query(RelocationTask)
+                        .filter(RelocationTask.status == RelocationTaskStatus.PENDING)
+                        .order_by(RelocationTask.created_at.asc())
+                        .first()
+                    )
 
                     if task:
                         task_id = task.task_id
@@ -155,11 +162,14 @@ class RelocationTaskManager:
         db = SessionLocal()
         try:
             from datetime import timedelta
+
             cutoff_date = datetime.now(tz=timezone.utc) - timedelta(days=1)
             # Find old tasks
             db.query(RelocationTask).filter(
-                RelocationTask.status.in_([RelocationTaskStatus.COMPLETED, RelocationTaskStatus.FAILED]),
-                RelocationTask.completed_at < cutoff_date
+                RelocationTask.status.in_(
+                    [RelocationTaskStatus.COMPLETED, RelocationTaskStatus.FAILED]
+                ),
+                RelocationTask.completed_at < cutoff_date,
             ).delete()
             db.commit()
             logger.debug("Cleaned up old relocation tasks")
@@ -259,7 +269,11 @@ class RelocationTaskManager:
                     try:
                         # Use a separate session for progress updates to not interfere with main transaction
                         prog_db = SessionLocal()
-                        prog_task = prog_db.query(RelocationTask).filter(RelocationTask.task_id == task_id).first()
+                        prog_task = (
+                            prog_db.query(RelocationTask)
+                            .filter(RelocationTask.task_id == task_id)
+                            .first()
+                        )
                         if prog_task:
                             prog_task.bytes_transferred = bytes_transferred
                             prog_db.commit()
@@ -364,10 +378,16 @@ class RelocationTaskManager:
         db = SessionLocal()
         try:
             # Check if there's already an active task for this file
-            existing_task = db.query(RelocationTask).filter(
-                RelocationTask.inventory_id == inventory_id,
-                RelocationTask.status.in_([RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING])
-            ).first()
+            existing_task = (
+                db.query(RelocationTask)
+                .filter(
+                    RelocationTask.inventory_id == inventory_id,
+                    RelocationTask.status.in_(
+                        [RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING]
+                    ),
+                )
+                .first()
+            )
 
             if existing_task:
                 msg = "A relocation task is already in progress for this file"
@@ -409,10 +429,16 @@ class RelocationTaskManager:
         """Get active task for an inventory entry."""
         db = SessionLocal()
         try:
-            task = db.query(RelocationTask).filter(
-                RelocationTask.inventory_id == inventory_id,
-                RelocationTask.status.in_([RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING])
-            ).first()
+            task = (
+                db.query(RelocationTask)
+                .filter(
+                    RelocationTask.inventory_id == inventory_id,
+                    RelocationTask.status.in_(
+                        [RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING]
+                    ),
+                )
+                .first()
+            )
             if not task:
                 return None
             return serialize_relocation_task(task)
@@ -423,9 +449,15 @@ class RelocationTaskManager:
         """Get all active (pending or running) tasks."""
         _db = db or SessionLocal()
         try:
-            tasks = _db.query(RelocationTask).filter(
-                RelocationTask.status.in_([RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING])
-            ).all()
+            tasks = (
+                _db.query(RelocationTask)
+                .filter(
+                    RelocationTask.status.in_(
+                        [RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING]
+                    )
+                )
+                .all()
+            )
             return [serialize_relocation_task(task) for task in tasks]
         finally:
             if not db:
@@ -435,7 +467,12 @@ class RelocationTaskManager:
         """Get recent tasks (active and recently completed)."""
         _db = db or SessionLocal()
         try:
-            tasks = _db.query(RelocationTask).order_by(RelocationTask.created_at.desc()).limit(limit).all()
+            tasks = (
+                _db.query(RelocationTask)
+                .order_by(RelocationTask.created_at.desc())
+                .limit(limit)
+                .all()
+            )
             return [serialize_relocation_task(task) for task in tasks]
         finally:
             if not db:

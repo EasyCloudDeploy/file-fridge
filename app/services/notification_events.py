@@ -21,7 +21,9 @@ class NotificationEventType(str, Enum):
     # Storage health events
     DISK_SPACE_CAUTION = "DISK_SPACE_CAUTION"  # Free space drops below caution threshold
     DISK_SPACE_CRITICAL = "DISK_SPACE_CRITICAL"  # Free space drops below critical threshold
-    STORAGE_PERMISSION_ERROR = "STORAGE_PERMISSION_ERROR"  # Read/write permission denied on storage path
+    STORAGE_PERMISSION_ERROR = (
+        "STORAGE_PERMISSION_ERROR"  # Read/write permission denied on storage path
+    )
 
 
 # Event data models (for type safety and validation)

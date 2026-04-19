@@ -378,8 +378,7 @@ class ScanProgressManager:
 
             # Find the operation before removing
             file_op = next(
-                (op for op in progress.current_operations if op.operation_id == operation_id),
-                None
+                (op for op in progress.current_operations if op.operation_id == operation_id), None
             )
 
             # Remove from current operations

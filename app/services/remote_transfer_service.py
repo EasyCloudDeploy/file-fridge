@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
@@ -31,6 +30,7 @@ from app.models import (
     TransferStatus,
 )
 from app.services.file_metadata import file_metadata_extractor
+from app.services.remote_audit_service import remote_audit_service
 from app.utils.remote_signature import get_signed_headers
 from app.utils.retry_strategy import retry_strategy
 
@@ -85,6 +85,25 @@ class RemoteTransferService:
             msg = f"Remote connection with ID {remote_connection_id} not found"
             logger.error(msg)
             raise ValueError(msg)
+
+        # Deduplication check (Item 3.2)
+        existing_job = (
+            db.query(RemoteTransferJob)
+            .filter(
+                RemoteTransferJob.file_inventory_id == file_id,
+                RemoteTransferJob.remote_connection_id == remote_connection_id,
+                RemoteTransferJob.remote_monitored_path_id == remote_monitored_path_id,
+                RemoteTransferJob.status.in_([TransferStatus.PENDING, TransferStatus.IN_PROGRESS]),
+            )
+            .first()
+        )
+        if existing_job:
+            logger.debug(
+                f"Duplicate transfer job prevented for file_id={file_id}, "
+                f"remote_connection_id={remote_connection_id}, "
+                f"path_id={remote_monitored_path_id}. Returning existing job {existing_job.id}."
+            )
+            return existing_job
 
         logger.debug(f"Using remote connection: {conn.name} ({conn.url})")
 
@@ -177,8 +196,7 @@ class RemoteTransferService:
             for job in pending_jobs[:10]:  # Process max 10 jobs concurrently
                 logger.info(f"Starting transfer job {job.id}")
                 # Update status to in_progress
-                job.status = TransferStatus.IN_PROGRESS
-                job.start_time = datetime.now(timezone.utc)
+                job.transition_status(TransferStatus.IN_PROGRESS)
                 db.commit()
 
                 # Launch the transfer as an async task
@@ -298,7 +316,8 @@ class RemoteTransferService:
         self, job: RemoteTransferJob, conn: RemoteConnection, db: Session, client: httpx.AsyncClient
     ):
         """Internal helper to send file chunks."""
-        use_encryption = not conn.url.startswith("https://")
+        # Item 1.3: Always encrypt chunks, regardless of transport
+        use_encryption = True
         ephemeral_pub_key_b64, session_key = None, None
         if use_encryption:
             ephemeral_pub_key_b64, session_key = self._perform_ecdh_key_exchange(conn)
@@ -430,21 +449,58 @@ class RemoteTransferService:
                 logger.error(
                     f"Remote connection {job.remote_connection_id} not found for job {job_id}"
                 )
-                job.status = TransferStatus.FAILED
+                job.transition_status(TransferStatus.FAILED)
                 job.error_message = f"Remote connection {job.remote_connection_id} not found"
-                job.end_time = datetime.now(timezone.utc)
+
+                # Item 3.4: Log TRANSFER_FAILED
+                remote_audit_service.log_event(
+                    db,
+                    "TRANSFER_FAILED",
+                    connection_id=job.remote_connection_id,
+                    direction=job.direction.value,
+                    file_path=job.source_path,
+                    file_size=job.total_size,
+                    status=TransferStatus.FAILED.value,
+                    error_message=job.error_message,
+                )
+
                 db.commit()
                 return
 
             logger.debug(f"Transfer job {job_id} using connection: {conn.name} ({conn.url})")
 
+            # Item 3.4: Log TRANSFER_STARTED
+            remote_audit_service.log_event(
+                db,
+                "TRANSFER_STARTED",
+                connection_id=conn.id,
+                connection_name=conn.name,
+                direction=job.direction.value,
+                file_path=job.source_path,
+                file_size=job.total_size,
+                status=TransferStatus.IN_PROGRESS.value,
+            )
+
             # Ensure source file still exists
             source_path = Path(job.source_path)
             if not source_path.exists():
                 logger.error(f"Source file {source_path} not found for job {job_id}")
-                job.status = TransferStatus.FAILED
+                job.transition_status(TransferStatus.FAILED)
                 job.error_message = f"Source file not found: {source_path}"
-                job.end_time = datetime.now(timezone.utc)
+
+                # Item 3.4: Log TRANSFER_FAILED
+                remote_audit_service.log_event(
+                    db,
+                    "TRANSFER_FAILED",
+                    connection_id=conn.id,
+                    connection_name=conn.name,
+                    direction=job.direction.value,
+                    file_path=job.source_path,
+                    file_size=job.total_size,
+                    status=TransferStatus.FAILED.value,
+                    error_message=job.error_message,
+                )
+
                 db.commit()
                 return
 
@@ -462,10 +518,10 @@ class RemoteTransferService:
                             "relative_path": job.relative_path,
                             "remote_path_id": job.remote_monitored_path_id,
                         }
-                        body_bytes = json.dumps(json_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-                        signed_headers = await get_signed_headers(
-                            db, "POST", url, body_bytes
-                        )
+                        body_bytes = json.dumps(
+                            json_payload, sort_keys=True, separators=(",", ":")
+                        ).encode("utf-8")
+                        signed_headers = await get_signed_headers(db, "POST", url, body_bytes)
 
                         verify_response = await client.post(
                             url,
@@ -476,10 +532,23 @@ class RemoteTransferService:
 
                         # Transfer successful!
                         logger.info(f"Transfer job {job.id} completed successfully")
-                        job.status = TransferStatus.COMPLETED
+                        job.transition_status(TransferStatus.COMPLETED)
                         job.progress = 100
-                        job.end_time = datetime.now(timezone.utc)
                         job.error_message = None
+
+                        # Item 3.4: Log TRANSFER_COMPLETED
+                        remote_audit_service.log_event(
+                            db,
+                            "TRANSFER_COMPLETED",
+                            connection_id=conn.id,
+                            connection_name=conn.name,
+                            direction=job.direction.value,
+                            file_path=job.source_path,
+                            file_size=job.total_size,
+                            checksum=job.checksum,
+                            status=TransferStatus.COMPLETED.value,
+                        )
+
                         db.commit()
 
                         # Optional cleanup
@@ -498,9 +567,22 @@ class RemoteTransferService:
 
                     if not should_retry:
                         logger.exception(f"Transfer job {job.id} failed permanently: {reason}")
-                        job.status = TransferStatus.FAILED
+                        job.transition_status(TransferStatus.FAILED)
                         job.error_message = f"{reason}: {e!s}"
-                        job.end_time = datetime.now(timezone.utc)
+
+                        # Item 3.4: Log TRANSFER_FAILED
+                        remote_audit_service.log_event(
+                            db,
+                            "TRANSFER_FAILED",
+                            connection_id=conn.id,
+                            connection_name=conn.name,
+                            direction=job.direction.value,
+                            file_path=job.source_path,
+                            file_size=job.total_size,
+                            status=TransferStatus.FAILED.value,
+                            error_message=job.error_message,
+                        )
+
                         db.commit()
                         return
 
@@ -510,9 +592,22 @@ class RemoteTransferService:
 
             # If we get here, all retries failed
             logger.error(f"Transfer job {job.id} failed after {MAX_RETRIES} attempts")
-            job.status = TransferStatus.FAILED
+            job.transition_status(TransferStatus.FAILED)
             job.error_message = f"Transfer failed after {MAX_RETRIES} retry attempts"
-            job.end_time = datetime.now(timezone.utc)
+
+            # Item 3.4: Log TRANSFER_FAILED
+            remote_audit_service.log_event(
+                db,
+                "TRANSFER_FAILED",
+                connection_id=conn.id,
+                connection_name=conn.name,
+                direction=job.direction.value,
+                file_path=job.source_path,
+                file_size=job.total_size,
+                status=TransferStatus.FAILED.value,
+                error_message=job.error_message,
+            )
+
             db.commit()
 
         except Exception:
@@ -520,9 +615,21 @@ class RemoteTransferService:
             try:
                 job = db.query(RemoteTransferJob).filter(RemoteTransferJob.id == job_id).first()
                 if job:
-                    job.status = TransferStatus.FAILED
+                    job.transition_status(TransferStatus.FAILED)
                     job.error_message = "Unexpected error during transfer"
-                    job.end_time = datetime.now(timezone.utc)
+
+                    # Item 3.4: Log TRANSFER_FAILED
+                    remote_audit_service.log_event(
+                        db,
+                        "TRANSFER_FAILED",
+                        connection_id=job.remote_connection_id,
+                        direction=job.direction.value,
+                        file_path=job.source_path,
+                        file_size=job.total_size,
+                        status=TransferStatus.FAILED.value,
+                        error_message=job.error_message,
+                    )
+
                     db.commit()
             except Exception:
                 logger.exception("Failed to update job status after error")
@@ -553,8 +660,7 @@ class RemoteTransferService:
             return False
 
         logger.info(f"Cancelling transfer job {job_id}")
-        job.status = TransferStatus.CANCELLED
-        job.end_time = datetime.now(timezone.utc)
+        job.transition_status(TransferStatus.CANCELLED)
         job.error_message = "Transfer cancelled by user"
         db.commit()
 

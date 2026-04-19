@@ -1,4 +1,3 @@
-# ruff: noqa: B008
 """API routes for statistics."""
 
 from datetime import datetime, timedelta, timezone
@@ -53,9 +52,7 @@ def get_statistics(db: Annotated[Session, Depends(get_db)]):
 
 
 @router.get("/detailed", response_model=DetailedStatistics)
-def get_detailed_statistics(
-    db: Annotated[Session, Depends(get_db)], days: Optional[int] = None
-):
+def get_detailed_statistics(db: Annotated[Session, Depends(get_db)], days: Optional[int] = None):
     """Get comprehensive statistics with detailed metrics and trends."""
     if days is None:
         days = settings.stats_retention_days

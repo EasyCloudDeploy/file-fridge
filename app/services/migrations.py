@@ -59,7 +59,7 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
         failed_inventory_files = (
             db.query(FileInventory)
             .filter(FileInventory.file_path.in_(failed_file_paths))
-            .filter(FileInventory.status != FileStatus.MIGRATING) # Avoid duplicates
+            .filter(FileInventory.status != FileStatus.MIGRATING)  # Avoid duplicates
             .all()
         )
 
@@ -94,13 +94,11 @@ def get_freezing_files(db: Session) -> List[FreezingFileSchema]:
     result = []
 
     operation_lookup = {
-        (op["path_id"], op.get("file_path"), op["operation"]): op
-        for op in current_operations
+        (op["path_id"], op.get("file_path"), op["operation"]): op for op in current_operations
     }
 
     failed_lookup = {
-        (op["path_id"], op.get("file_path"), op["operation"]): op
-        for op in failed_operations
+        (op["path_id"], op.get("file_path"), op["operation"]): op for op in failed_operations
     }
 
     for f in freeze_thaw_files:
@@ -179,12 +177,16 @@ def _serialize_freeze_thaw_transaction(
     """Convert audit trail freeze/thaw entries to migration-row payload shape."""
     if tx.transaction_type == TransactionType.FREEZE:
         source_name = "Hot Storage"
-        target_location = locations_by_id.get(tx.new_storage_location_id) if tx.new_storage_location_id else None
+        target_location = (
+            locations_by_id.get(tx.new_storage_location_id) if tx.new_storage_location_id else None
+        )
         target_name = target_location.name if target_location else "Cold Storage"
         source_id = 0
         target_id = tx.new_storage_location_id or 0
     else:
-        source_location = locations_by_id.get(tx.old_storage_location_id) if tx.old_storage_location_id else None
+        source_location = (
+            locations_by_id.get(tx.old_storage_location_id) if tx.old_storage_location_id else None
+        )
         source_name = source_location.name if source_location else "Cold Storage"
         target_name = "Hot Storage"
         source_id = tx.old_storage_location_id or 0
@@ -222,7 +224,9 @@ def get_recent_migrations(db: Session, limit: int = 20) -> List[Dict[str, Any]]:
     for item in relocation_recent:
         row = dict(item)
         row["destination_path"] = row.get("new_file_path")
-        row["_sort_time"] = row.get("completed_at") or row.get("started_at") or row.get("created_at")
+        row["_sort_time"] = (
+            row.get("completed_at") or row.get("started_at") or row.get("created_at")
+        )
         relocation_rows.append(row)
 
     freeze_thaw_txs = (
@@ -248,7 +252,9 @@ def get_recent_migrations(db: Session, limit: int = 20) -> List[Dict[str, Any]]:
     if location_ids:
         locations_by_id = {
             loc.id: loc
-            for loc in db.query(ColdStorageLocation).filter(ColdStorageLocation.id.in_(location_ids)).all()
+            for loc in db.query(ColdStorageLocation)
+            .filter(ColdStorageLocation.id.in_(location_ids))
+            .all()
         }
 
     tx_rows = [_serialize_freeze_thaw_transaction(tx, locations_by_id) for tx in freeze_thaw_txs]

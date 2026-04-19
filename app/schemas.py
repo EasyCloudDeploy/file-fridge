@@ -586,7 +586,10 @@ class NotifierBase(BaseModel):
                     msg = "Webhook URLs must use HTTPS for security"
                     raise ValueError(msg)
             except Exception as e:
-                if isinstance(e, ValueError) and str(e) == "Webhook URLs must use HTTPS for security":
+                if (
+                    isinstance(e, ValueError)
+                    and str(e) == "Webhook URLs must use HTTPS for security"
+                ):
                     raise
                 raise ValueError(f"Invalid webhook URL: {e}") from e
         return v
@@ -888,12 +891,18 @@ class RemoteConnectionResponse(BaseModel):
 
     identity: RemoteConnectionIdentity
     signature: str = Field(..., description="Hex-encoded Ed25519 signature of the identity payload")
+    trust_status: Optional[str] = Field(
+        None,
+        description="Trust status of the connection on the remote side (TRUSTED, PENDING, REJECTED)",
+    )
 
 
 class RemoteConnectionCreate(RemoteConnectionBase):
     """Schema for creating a remote connection."""
 
-    connection_code: str = Field(..., description="The rotating code from the remote instance")
+    connection_code: Optional[str] = Field(
+        None, description="The rotating code from the remote instance"
+    )
     transfer_mode: Optional[TransferMode] = TransferMode.PUSH_ONLY
 
 
@@ -921,8 +930,28 @@ class RemoteConnection(RemoteConnectionBase):
     transfer_mode: TransferMode = TransferMode.PUSH_ONLY
     remote_transfer_mode: TransferMode = TransferMode.PUSH_ONLY
     effective_bidirectional: bool = False
+    last_seen_at: Optional[datetime] = None
+    is_reachable: Optional[bool] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RemoteConnectionPathPermissionBase(BaseModel):
+    monitored_path_id: int
+    can_browse: bool = True
+    can_pull: bool = True
+
+
+class RemoteConnectionPathPermissionCreate(RemoteConnectionPathPermissionBase):
+    pass
+
+
+class RemoteConnectionPathPermissionResponse(RemoteConnectionPathPermissionBase):
+    id: int
+    remote_connection_id: int
 
     class Config:
         from_attributes = True

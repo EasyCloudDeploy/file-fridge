@@ -1,4 +1,3 @@
-# ruff: noqa: B008
 """API routes for tag management."""
 
 import logging
