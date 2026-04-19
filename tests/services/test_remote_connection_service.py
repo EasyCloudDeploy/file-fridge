@@ -66,7 +66,7 @@ class TestRemoteConnectionService:
         """Test error handling when fetching remote identity fails."""
         respx.get("http://remote-fail/api/v1/remote/identity").mock(return_value=Response(500))
 
-        with pytest.raises(ValueError, match="Could not fetch identity"):
+        with pytest.raises(ValueError, match="encountered an internal error"):
             await remote_connection_service.get_remote_identity("http://remote-fail")
 
     def test_trust_reject_connection(self, db_session):
@@ -127,6 +127,8 @@ class TestRemoteConnectionService:
             "identity": {
                 "instance_name": "Remote",
                 "fingerprint": dummy_fp,
+                "ed25519_public_key": dummy_key,
+                "x25519_public_key": dummy_key,
                 "url": "http://remote",
                 "transfer_mode": "PUSH_ONLY"
             },

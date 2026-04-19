@@ -26,6 +26,11 @@ def canonical_json_encode(data: dict) -> bytes:
 class RemoteConnectionService:
     """Service for managing remote File Fridge connections."""
 
+    @staticmethod
+    def _base_url(url_value: object) -> str:
+        """Normalize URL-like values (e.g., Pydantic HttpUrl) to a clean base URL string."""
+        return str(url_value).rstrip("/")
+
     def list_connections(self, db: Session) -> List[RemoteConnection]:
         """List all remote connections."""
         return db.query(RemoteConnection).all()
@@ -58,7 +63,7 @@ class RemoteConnectionService:
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.get(
-                    f"{remote_url.rstrip('/')}/api/v1/remote/identity", timeout=10.0
+                    f"{self._base_url(remote_url)}/api/v1/remote/identity", timeout=10.0
                 )
                 response.raise_for_status()
                 identity_data = response.json()
@@ -163,8 +168,9 @@ class RemoteConnectionService:
 
         async with httpx.AsyncClient() as client:
             try:
+                remote_base_url = self._base_url(remote_identity.url)
                 response = await client.post(
-                    f"{remote_identity.url.rstrip('/')}/api/v1/remote/connection-request",
+                    f"{remote_base_url}/api/v1/remote/connection-request",
                     json=request_payload,
                     timeout=10.0,
                 )
@@ -405,7 +411,7 @@ class RemoteConnectionService:
             from app.utils.remote_signature import get_signed_headers
 
             try:
-                url = f"{conn.url.rstrip('/')}/api/v1/remote/terminate-connection"
+                url = f"{self._base_url(conn.url)}/api/v1/remote/terminate-connection"
                 headers = await get_signed_headers(db, "POST", url, b"")
 
                 async with httpx.AsyncClient(timeout=10.0) as client:
@@ -427,7 +433,7 @@ class RemoteConnectionService:
         """Notify the remote instance that our transfer mode has changed."""
         from app.utils.remote_signature import get_signed_headers
 
-        url = f"{conn.url.rstrip('/')}/api/v1/remote/sync-transfer-mode"
+        url = f"{self._base_url(conn.url)}/api/v1/remote/sync-transfer-mode"
         payload = {"transfer_mode": conn.transfer_mode.value}
         body_bytes = canonical_json_encode(payload)
         headers = await get_signed_headers(db, "POST", url, body_bytes)
