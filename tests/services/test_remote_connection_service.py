@@ -2,6 +2,8 @@ import base64
 
 import pytest
 import respx
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ed25519
 from httpx import Response
 
 from app.models import RemoteConnection, TransferMode, TrustStatus
@@ -207,3 +209,38 @@ class TestRemoteConnectionService:
 
         with pytest.raises(ValueError, match="Signature verification failed"):
             remote_connection_service.handle_connection_request(db_session, request_data)
+
+    def test_handle_connection_request_accepts_raw_identity_signature_without_trailing_slash(
+        self, db_session, monkeypatch
+    ):
+        """Accept signatures made over the raw identity payload even when URL is normalized."""
+        from app.services.instance_config_service import instance_config_service
+
+        monkeypatch.setattr(instance_config_service, "get_instance_url", lambda db: "http://local")
+
+        remote_private_key = ed25519.Ed25519PrivateKey.generate()
+        remote_public_key = remote_private_key.public_key().public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        remote_public_key_b64 = base64.b64encode(remote_public_key).decode("ascii")
+
+        identity_payload = {
+            "instance_name": "Remote Sender",
+            "fingerprint": "d" * 64,
+            "ed25519_public_key": remote_public_key_b64,
+            "x25519_public_key": base64.b64encode(b"3" * 32).decode("ascii"),
+            # Intentionally no trailing slash to reproduce mixed canonicalization.
+            "url": "http://10.0.0.9:8111",
+            "transfer_mode": "PUSH_ONLY",
+        }
+        signature = remote_private_key.sign(canonical_json_encode(identity_payload)).hex()
+
+        response = remote_connection_service.handle_connection_request(
+            db_session,
+            {"identity": identity_payload, "signature": signature},
+        )
+
+        assert "identity" in response
+        conn = db_session.query(RemoteConnection).filter_by(remote_fingerprint="d" * 64).first()
+        assert conn is not None

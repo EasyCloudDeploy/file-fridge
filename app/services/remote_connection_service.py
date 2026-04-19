@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 
 import httpx
 from sqlalchemy.orm import Session
@@ -30,6 +30,40 @@ class RemoteConnectionService:
     def _base_url(url_value: object) -> str:
         """Normalize URL-like values (e.g., Pydantic HttpUrl) to a clean base URL string."""
         return str(url_value).rstrip("/")
+
+    @staticmethod
+    def _verify_identity_signature(
+        *,
+        public_key_b64: str,
+        signature_hex: str,
+        parsed_identity: RemoteConnectionIdentity,
+        raw_identity_payload: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """
+        Verify identity signature with compatibility for URL canonicalization differences.
+
+        Some peers sign the raw JSON identity payload, while others may sign a normalized
+        model serialization. Accept either to avoid handshake failures between versions.
+        """
+        signature = bytes.fromhex(signature_hex)
+        messages_to_try: list[bytes] = []
+
+        if raw_identity_payload is not None:
+            messages_to_try.append(canonical_json_encode(raw_identity_payload))
+
+        messages_to_try.append(
+            canonical_json_encode(parsed_identity.model_dump(mode="json", exclude_unset=True))
+        )
+
+        seen: set[bytes] = set()
+        for message in messages_to_try:
+            if message in seen:
+                continue
+            seen.add(message)
+            if identity_service.verify_signature(public_key_b64, signature, message):
+                return True
+
+        return False
 
     def list_connections(self, db: Session) -> List[RemoteConnection]:
         """List all remote connections."""
@@ -179,7 +213,12 @@ class RemoteConnectionService:
                 # which we can verify to prevent man-in-the-middle attacks.
                 remote_response_data = response.json()
                 remote_response = RemoteConnectionResponse.model_validate(remote_response_data)
-                self._verify_remote_response(remote_identity, remote_response)
+                raw_remote_identity = remote_response_data.get("identity")
+                self._verify_remote_response(
+                    remote_identity,
+                    remote_response,
+                    raw_remote_identity if isinstance(raw_remote_identity, dict) else None,
+                )
 
                 # 4. Update remote's transfer mode and trust status from their response
                 remote_mode = remote_response.identity.transfer_mode
@@ -243,6 +282,7 @@ class RemoteConnectionService:
         self,
         original_identity: RemoteConnectionIdentity,
         response: RemoteConnectionResponse,
+        raw_identity_payload: Optional[dict[str, Any]] = None,
     ):
         """Verify the signature in the response from a remote instance."""
         # Check if the fingerprint matches the one we originally trusted
@@ -251,16 +291,11 @@ class RemoteConnectionService:
                 "Fingerprint verification failed. The remote instance may have changed its identity since you last connected."
             )
 
-        # Verify the signature
-        # We use model_dump(mode="json", exclude_unset=True) to get the dict for signing
-        # to ensure we only include fields that were actually present in the response.
-        message_to_verify = canonical_json_encode(
-            response.identity.model_dump(mode="json", exclude_unset=True)
-        )
-        signature = bytes.fromhex(response.signature)
-
-        if not identity_service.verify_signature(
-            original_identity.ed25519_public_key, signature, message_to_verify
+        if not self._verify_identity_signature(
+            public_key_b64=original_identity.ed25519_public_key,
+            signature_hex=response.signature,
+            parsed_identity=response.identity,
+            raw_identity_payload=raw_identity_payload,
         ):
             raise ValueError(
                 "Fingerprint verification failed. The remote instance may have changed its identity since you last connected."
@@ -295,13 +330,14 @@ class RemoteConnectionService:
                 raise ValueError("Invalid or expired connection code.")
             connection_code_valid = True
 
-        # 2. Verify the Ed25519 signature to prevent spoofing
-        message_to_verify = canonical_json_encode(
-            identity.model_dump(mode="json", exclude_unset=True)
-        )
-        signature = bytes.fromhex(signature_hex)
-        if not identity_service.verify_signature(
-            identity.ed25519_public_key, signature, message_to_verify
+        # 2. Verify the Ed25519 signature to prevent spoofing.
+        # Accept raw JSON and normalized model payload signing styles.
+        raw_identity_payload = request_data.get("identity")
+        if not self._verify_identity_signature(
+            public_key_b64=identity.ed25519_public_key,
+            signature_hex=signature_hex,
+            parsed_identity=identity,
+            raw_identity_payload=raw_identity_payload if isinstance(raw_identity_payload, dict) else None,
         ):
             raise ValueError("Signature verification failed for connection request.")
 
