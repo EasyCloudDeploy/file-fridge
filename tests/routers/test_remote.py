@@ -1,7 +1,7 @@
 import base64
 import time
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -265,7 +265,7 @@ def test_handle_connection_request(mock_handle, client: TestClient):
     payload = {
         "identity": {
             "instance_name": "Remote",
-            "url": "http://remote.com/",
+            "url": "http://remote.com",
             "fingerprint": "a" * 64,
             "ed25519_public_key": "3YGphBPL4ioYr/v66Frj0IxKQZrBuSBbO2VXLWp1L5Q=",
             "x25519_public_key": "rhjY0TbxIvRP94vmjq8LLBCEbjefwurwSe35qQIo1EA=",
@@ -275,6 +275,7 @@ def test_handle_connection_request(mock_handle, client: TestClient):
     }
     response = client.post("/api/v1/remote/connection-request", json=payload)
     assert response.status_code == 200
+    mock_handle.assert_called_once_with(ANY, payload)
 
 
 def test_update_connection_success(authenticated_client: TestClient, remote_connection_factory):
