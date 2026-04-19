@@ -154,31 +154,9 @@ class RemoteConnectionService:
                 "or configure it via the UI to enable remote connections."
             )
 
-        # 1. Check if connection already exists
-        conn = self.get_connection_by_fingerprint(db, remote_identity.fingerprint)
-        is_new_connection = conn is None
-
-        if is_new_connection:
-            # 2. Create and save the new connection locally as TRUSTED
-            conn = RemoteConnection(
-                name=name,
-                url=str(remote_identity.url),
-                remote_fingerprint=remote_identity.fingerprint,
-                remote_ed25519_public_key=remote_identity.ed25519_public_key,
-                remote_x25519_public_key=remote_identity.x25519_public_key,
-                trust_status=TrustStatus.TRUSTED,
-                transfer_mode=transfer_mode,
-            )
-            db.add(conn)
-        else:
-            # Update existing connection info
-            conn.name = name
-            conn.url = str(remote_identity.url)
-            conn.trust_status = TrustStatus.TRUSTED
-            conn.transfer_mode = transfer_mode
-
-        db.commit()
-        db.refresh(conn)
+        # 1. Check if connection already exists. We only persist changes
+        # after the remote handshake fully succeeds.
+        existing_conn = self.get_connection_by_fingerprint(db, remote_identity.fingerprint)
 
         # 3. Send our identity to the remote to establish a PENDING connection there
         instance_name = instance_config_service.get_instance_name(db) or "File Fridge"
@@ -188,7 +166,7 @@ class RemoteConnectionService:
             "ed25519_public_key": identity_service.get_signing_public_key_str(db),
             "x25519_public_key": identity_service.get_kx_public_key_str(db),
             "url": instance_url,
-            "transfer_mode": conn.transfer_mode.value,
+            "transfer_mode": transfer_mode.value,
         }
 
         # Sign the payload
@@ -220,7 +198,25 @@ class RemoteConnectionService:
                     raw_remote_identity if isinstance(raw_remote_identity, dict) else None,
                 )
 
-                # 4. Update remote's transfer mode and trust status from their response
+                # 4. Persist local connection only after successful handshake verification.
+                if existing_conn is None:
+                    conn = RemoteConnection(
+                        name=name,
+                        url=str(remote_identity.url),
+                        remote_fingerprint=remote_identity.fingerprint,
+                        remote_ed25519_public_key=remote_identity.ed25519_public_key,
+                        remote_x25519_public_key=remote_identity.x25519_public_key,
+                        trust_status=TrustStatus.TRUSTED,
+                        transfer_mode=transfer_mode,
+                    )
+                    db.add(conn)
+                else:
+                    conn = existing_conn
+                    conn.name = name
+                    conn.url = str(remote_identity.url)
+                    conn.trust_status = TrustStatus.TRUSTED
+                    conn.transfer_mode = transfer_mode
+
                 remote_mode = remote_response.identity.transfer_mode
                 if remote_mode:
                     conn.remote_transfer_mode = remote_mode
@@ -233,18 +229,10 @@ class RemoteConnectionService:
                 db.refresh(conn)
 
             except httpx.ConnectTimeout as e:
-                # Rollback the local connection since the remote rejected or errored
-                if is_new_connection:
-                    db.delete(conn)
-                    db.commit()
                 raise ValueError(
                     "Connection timed out after 10s. Check network connectivity and firewall rules."
                 ) from e
             except httpx.HTTPStatusError as e:
-                # Rollback the local connection since the remote rejected or errored
-                if is_new_connection:
-                    db.delete(conn)
-                    db.commit()
                 if e.response.status_code in (401, 403):
                     raise ValueError(
                         "Connection rejected — the connection code is invalid or has expired. Get a fresh code from the remote instance."
@@ -260,10 +248,6 @@ class RemoteConnectionService:
                     error_detail = str(e)
                 raise ValueError(f"Remote instance returned an error: {error_detail}") from e
             except Exception as e:
-                # Network errors or unexpected failures — rollback local connection
-                if is_new_connection:
-                    db.delete(conn)
-                    db.commit()
                 # Capture the original error message to check for specific failure types
                 error_msg = str(e)
                 if "Fingerprint verification failed" in error_msg:

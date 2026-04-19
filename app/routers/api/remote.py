@@ -1207,19 +1207,30 @@ async def get_transfer_status(
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
     """Check the status of a file transfer on the remote instance."""
-    _ = remote_conn
+    # Enforce per-path ACL if an explicit permission row exists.
+    perm = (
+        db.query(RemoteConnectionPathPermission)
+        .filter(
+            RemoteConnectionPathPermission.remote_connection_id == remote_conn.id,
+            RemoteConnectionPathPermission.monitored_path_id == remote_path_id,
+        )
+        .first()
+    )
+    if perm is not None and not (perm.can_browse or perm.can_pull):
+        raise HTTPException(status_code=403, detail="Access to this path is not permitted.")
+
     path = db.query(MonitoredPath).filter(MonitoredPath.id == remote_path_id).first()
     if not path:
         raise HTTPException(status_code=404, detail="MonitoredPath not found")
 
     base_dir = _get_base_directory(path, storage_type)
-    final_path = (Path(base_dir) / relative_path).absolute()
-    # Security check is implicitly handled by _validate_and_build_path logic if we reuse it
+    tmp_path = await _validate_and_build_path(base_dir, relative_path)
+    final_path = tmp_path.with_suffix("")
+
     if await anyio.to_thread.run_sync(final_path.exists):
         stat = await anyio.to_thread.run_sync(final_path.stat)
         return {"size": stat.st_size, "status": "completed"}
 
-    tmp_path = final_path.with_suffix(final_path.suffix + ".fftmp")
     if await anyio.to_thread.run_sync(tmp_path.exists):
         stat = await anyio.to_thread.run_sync(tmp_path.stat)
         return {"size": stat.st_size, "status": "partial"}
@@ -1356,7 +1367,10 @@ async def serve_transfer_request(
     file_inventory_id = data.get("file_inventory_id")
     remote_path_id = data.get("remote_monitored_path_id")
     strategy_val = data.get("strategy", FileTransferStrategy.COPY.value)
-    strategy = FileTransferStrategy(strategy_val)
+    try:
+        strategy = FileTransferStrategy(strategy_val)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid transfer strategy") from e
 
     if not file_inventory_id or not remote_path_id:
         raise HTTPException(
@@ -1445,7 +1459,7 @@ async def browse_remote_instance_files(
     limit: int = 100,
     search: Optional[str] = Query(None),
     storage_type: Optional[str] = Query(None),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """Browse files on a remote instance for pull transfer."""
     _ = current_user
@@ -1494,7 +1508,7 @@ async def browse_remote_instance_files(
 async def pull_file(
     pull_data: PullTransferRequest,
     db: Annotated[Session, Depends(get_db)],
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS)),
 ):
     """
     Request a file from a remote instance (pull transfer).
