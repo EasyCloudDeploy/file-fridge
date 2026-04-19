@@ -440,16 +440,11 @@ async def create_connection(
         500: {"description": "Internal server error"},
     },
 )
-async def handle_connection_request(
-    request_data: RemoteConnectionRequest, db: Annotated[Session, Depends(get_db)]
-):
+async def handle_connection_request(request: Request, db: Annotated[Session, Depends(get_db)]):
     """Handles an incoming connection request from a remote instance (unauthenticated)."""
     try:
-        # Pass the dictionary from model_dump to the service
-        # Alternatively, we could update the service to accept the model directly.
-        return remote_connection_service.handle_connection_request(
-            db, request_data.model_dump(exclude_unset=True)
-        )
+        request_data = await request.json()
+        return remote_connection_service.handle_connection_request(db, request_data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
