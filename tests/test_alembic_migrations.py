@@ -1,4 +1,5 @@
 import sqlite3
+import importlib.util
 from pathlib import Path
 from unittest.mock import PropertyMock, patch
 
@@ -11,6 +12,19 @@ from alembic import command
 from app.database_migrations import HEAD_REVISION, run_startup_migrations
 
 SNAPSHOT_DIR = Path("tests/fixtures/db_snapshots")
+
+
+def _load_a1_migration_module():
+    migration_path = (
+        Path("alembic/versions/a1b2c3d4e5f6_add_remote_connection_health_and_audit.py")
+        .absolute()
+    )
+    spec = importlib.util.spec_from_file_location("a1_migration_module", migration_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load migration module from {migration_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -264,6 +278,76 @@ def test_cold_storage_backend_values_normalize_on_upgrade(alembic_config):
 
         assert rows[0] == (1, "LOCAL", "MOVE")
         assert rows[1] == (2, "S3", "COPY")
+
+
+def test_remote_audit_and_permissions_revision_downgrades_cleanly(alembic_config):
+    """Upgrade to a1b2..., then downgrade back to d4f9... and verify schema rollback."""
+    cfg, db_url = alembic_config
+    rev_a1 = _load_a1_migration_module()
+
+    with patch("app.config.Settings.database_url", new_callable=PropertyMock, return_value=db_url):
+        engine = sa.create_engine(db_url)
+
+        with engine.begin() as connection:
+            connection.execute(
+                sa.text(
+                    """
+                    CREATE TABLE monitored_paths (
+                        id INTEGER PRIMARY KEY,
+                        name VARCHAR NOT NULL
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                sa.text(
+                    """
+                    CREATE TABLE remote_connections (
+                        id INTEGER PRIMARY KEY,
+                        name VARCHAR NOT NULL,
+                        url VARCHAR NOT NULL
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                sa.text(
+                    """
+                    CREATE TABLE remote_transfer_jobs (
+                        id INTEGER PRIMARY KEY,
+                        remote_connection_id INTEGER NOT NULL
+                    )
+                    """
+                )
+            )
+
+        command.stamp(cfg, "d4f9b8a1c2e3")
+        command.upgrade(cfg, "a1b2c3d4e5f6")
+
+        with engine.connect() as connection:
+            with patch.object(rev_a1.op, "get_bind", return_value=connection):
+                assert rev_a1._table_exists("remote_connection_path_permissions")
+                assert rev_a1._table_exists("remote_audit_logs")
+                assert rev_a1._column_exists("remote_transfer_jobs", "created_at")
+                assert rev_a1._column_exists("remote_transfer_jobs", "updated_at")
+                assert rev_a1._column_exists("remote_connections", "is_reachable")
+                assert rev_a1._column_exists("remote_connections", "last_seen_at")
+
+        command.downgrade(cfg, "d4f9b8a1c2e3")
+
+        with engine.connect() as connection:
+            with patch.object(rev_a1.op, "get_bind", return_value=connection):
+                assert not rev_a1._table_exists("remote_connection_path_permissions")
+                assert not rev_a1._table_exists("remote_audit_logs")
+                assert not rev_a1._column_exists("remote_transfer_jobs", "created_at")
+                assert not rev_a1._column_exists("remote_transfer_jobs", "updated_at")
+                assert not rev_a1._column_exists("remote_connections", "is_reachable")
+                assert not rev_a1._column_exists("remote_connections", "last_seen_at")
+
+            version = connection.execute(
+                sa.text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+            assert version == "d4f9b8a1c2e3"
 
 
 def _restore_snapshot(snapshot_name: str, tmp_path: Path) -> tuple[sa.Engine, str]:

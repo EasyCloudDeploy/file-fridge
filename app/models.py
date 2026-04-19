@@ -10,6 +10,7 @@ import sqlalchemy as sa
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -19,6 +20,7 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.orm import relationship
@@ -816,9 +818,16 @@ class RemoteConnection(Base):
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    is_reachable = Column(Boolean, default=True, nullable=False, server_default=sa.text("'1'"))
 
     transfers = relationship(
         "RemoteTransferJob", back_populates="remote_connection", cascade="all, delete-orphan"
+    )
+    path_permissions = relationship(
+        "RemoteConnectionPathPermission",
+        back_populates="remote_connection",
+        cascade="all, delete-orphan",
     )
 
     @property
@@ -828,6 +837,50 @@ class RemoteConnection(Base):
             self.transfer_mode == TransferMode.BIDIRECTIONAL
             and self.remote_transfer_mode == TransferMode.BIDIRECTIONAL
         )
+
+
+class RemoteAuditLog(Base):
+    """Audit log for remote transfer events."""
+
+    __tablename__ = "remote_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    event_type = Column(String(50), nullable=False)  # e.g. "TRANSFER_STARTED", "TRANSFER_COMPLETED"
+    connection_id = Column(Integer, ForeignKey("remote_connections.id"), nullable=True)
+    connection_name = Column(String(255), nullable=True)
+    direction = Column(String(10), nullable=True)  # "PUSH" or "PULL"
+    file_path = Column(String(1024), nullable=True)
+    file_size = Column(BigInteger, nullable=True)
+    checksum = Column(String(64), nullable=True)
+    status = Column(String(20), nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("ix_remote_audit_logs_timestamp", "timestamp"),
+        Index("ix_remote_audit_logs_connection_id_timestamp", "connection_id", "timestamp"),
+        Index("ix_remote_audit_logs_event_type", "event_type"),
+        Index("ix_remote_audit_logs_status", "status"),
+    )
+
+
+class RemoteConnectionPathPermission(Base):
+    """Per-path access control for remote connections."""
+
+    __tablename__ = "remote_connection_path_permissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    remote_connection_id = Column(Integer, ForeignKey("remote_connections.id"), nullable=False)
+    monitored_path_id = Column(Integer, ForeignKey("monitored_paths.id"), nullable=False)
+    can_browse = Column(Boolean, default=True, nullable=False, server_default=sa.text("'1'"))
+    can_pull = Column(Boolean, default=True, nullable=False, server_default=sa.text("'1'"))
+
+    remote_connection = relationship("RemoteConnection", back_populates="path_permissions")
+    monitored_path = relationship("MonitoredPath")
+
+    __table_args__ = (
+        UniqueConstraint("remote_connection_id", "monitored_path_id", name="uq_conn_path_perm"),
+    )
 
 
 class TransferStatus(str, enum.Enum):
@@ -857,6 +910,8 @@ class RemoteTransferJob(Base):
     end_time = Column(DateTime(timezone=True), nullable=True)
     error_message = Column(Text, nullable=True)
     retry_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=True)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
 
     # Metadata for the transfer
     source_path = Column(String, nullable=False)
@@ -886,6 +941,37 @@ class RemoteTransferJob(Base):
 
     file = relationship("FileInventory")
     remote_connection = relationship("RemoteConnection", back_populates="transfers")
+
+    VALID_TRANSITIONS = {
+        TransferStatus.PENDING: {TransferStatus.IN_PROGRESS, TransferStatus.CANCELLED},
+        TransferStatus.IN_PROGRESS: {
+            TransferStatus.COMPLETED,
+            TransferStatus.FAILED,
+            TransferStatus.CANCELLED,
+        },
+        TransferStatus.FAILED: {TransferStatus.PENDING},  # retry
+        TransferStatus.CANCELLED: {TransferStatus.PENDING},  # retry
+        TransferStatus.COMPLETED: set(),  # terminal
+    }
+
+    def transition_status(self, new_status: TransferStatus):
+        """Validate and perform status transition."""
+        if new_status == self.status:
+            return
+
+        allowed = self.VALID_TRANSITIONS.get(self.status, set())
+        if new_status not in allowed:
+            raise ValueError(f"Invalid transition: {self.status} -> {new_status}")
+
+        self.status = new_status
+        if new_status in {
+            TransferStatus.COMPLETED,
+            TransferStatus.FAILED,
+            TransferStatus.CANCELLED,
+        }:
+            self.end_time = func.now()
+        elif new_status == TransferStatus.IN_PROGRESS:
+            self.start_time = func.now()
 
 
 class RequestNonce(Base):
