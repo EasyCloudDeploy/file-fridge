@@ -4,7 +4,14 @@ import pytest
 from sqlalchemy import inspect
 
 from app.database import Base, engine, has_schema_objects, init_db
-from app.database_migrations import run_startup_migrations
+from app.database_migrations import (
+    ALLOW_OFFLINE_REVISION,
+    HEAD_REVISION,
+    MAX_CONCURRENT_MIGRATIONS_REVISION,
+    NORMALIZE_COLD_STORAGE_ENUM_VALUES_REVISION,
+    _determine_schema_revision,
+    run_startup_migrations,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -74,9 +81,10 @@ def test_run_startup_migrations_empty_db(mock_stamp, mock_upgrade, db_session, m
 
 @patch("alembic.command.upgrade")
 @patch("alembic.command.stamp")
+@patch("app.database_migrations._create_sqlite_backup")
 @patch("app.database.engine")  # Patch the engine used by app.database to control inspect behavior
 def test_run_startup_migrations_with_existing_tables_no_alembic_version(
-    mock_engine, mock_stamp, mock_upgrade, db_session, monkeypatch
+    mock_engine, mock_create_backup, mock_stamp, mock_upgrade, db_session, monkeypatch
 ):
     """
     Test migrations when tables exist (from init_db) but alembic_version table is empty/missing.
@@ -106,15 +114,17 @@ def test_run_startup_migrations_with_existing_tables_no_alembic_version(
 
     # The max_concurrent_migrations column tells us this schema matches the
     # pre-head revision immediately before RelocationTask.
-    mock_stamp.assert_called_once_with(ANY, "6b398cde9d3e")
+    mock_stamp.assert_called_once_with(ANY, MAX_CONCURRENT_MIGRATIONS_REVISION)
     mock_upgrade.assert_called_once_with(ANY, "head")
+    mock_create_backup.assert_called_once()
 
 
 @patch("alembic.command.upgrade")
 @patch("alembic.command.stamp")
+@patch("app.database_migrations._create_sqlite_backup")
 @patch("app.database.engine")
 def test_run_startup_migrations_stamps_max_concurrent_schema_to_matching_revision(
-    mock_engine, mock_stamp, mock_upgrade, db_session, monkeypatch
+    mock_engine, mock_create_backup, mock_stamp, mock_upgrade, db_session, monkeypatch
 ):
     """Databases with the column already present should not be re-migrated from the base revision."""
     monkeypatch.setattr("app.config.settings.database_path", ":memory:")
@@ -133,5 +143,83 @@ def test_run_startup_migrations_stamps_max_concurrent_schema_to_matching_revisio
     with patch("app.database_migrations.inspect", return_value=mock_inspector):
         run_startup_migrations()
 
-    mock_stamp.assert_called_once_with(ANY, "6b398cde9d3e")
+    mock_stamp.assert_called_once_with(ANY, MAX_CONCURRENT_MIGRATIONS_REVISION)
     mock_upgrade.assert_called_once_with(ANY, "head")
+    mock_create_backup.assert_called_once()
+
+
+def test_determine_schema_revision_returns_head_for_full_head_schema():
+    inspector = MagicMock()
+    inspector.get_table_names.return_value = [
+        "monitored_paths",
+        "remote_connections",
+        "remote_transfer_jobs",
+        "remote_audit_logs",
+        "remote_connection_path_permissions",
+    ]
+
+    def get_columns(table_name):
+        columns = {
+            "remote_connections": [{"name": "last_seen_at"}, {"name": "is_reachable"}],
+            "remote_transfer_jobs": [{"name": "created_at"}, {"name": "updated_at"}],
+            "monitored_paths": [{"name": "permissions_error"}],
+        }
+        return columns.get(table_name, [{"name": "id"}])
+
+    inspector.get_columns.side_effect = get_columns
+    db = MagicMock()
+
+    revision = _determine_schema_revision(inspector, db)
+
+    assert revision == HEAD_REVISION
+    db.execute.assert_not_called()
+
+
+def test_determine_schema_revision_returns_allow_offline_when_normalization_needed():
+    inspector = MagicMock()
+    inspector.get_table_names.return_value = ["monitored_paths", "cold_storage_locations"]
+
+    def get_columns(table_name):
+        if table_name == "monitored_paths":
+            return [{"name": "permissions_error"}]
+        if table_name == "cold_storage_locations":
+            return [{"name": "allow_offline"}]
+        return [{"name": "id"}]
+
+    inspector.get_columns.side_effect = get_columns
+    db = MagicMock()
+    db.execute.return_value.fetchone.return_value = (1,)
+
+    revision = _determine_schema_revision(inspector, db)
+
+    assert revision == ALLOW_OFFLINE_REVISION
+
+
+def test_determine_schema_revision_returns_normalized_revision_when_values_already_uppercase():
+    inspector = MagicMock()
+    inspector.get_table_names.return_value = ["monitored_paths", "cold_storage_locations"]
+
+    def get_columns(table_name):
+        if table_name == "monitored_paths":
+            return [{"name": "permissions_error"}]
+        if table_name == "cold_storage_locations":
+            return [{"name": "allow_offline"}]
+        return [{"name": "id"}]
+
+    inspector.get_columns.side_effect = get_columns
+    db = MagicMock()
+    db.execute.return_value.fetchone.return_value = None
+
+    revision = _determine_schema_revision(inspector, db)
+
+    assert revision == NORMALIZE_COLD_STORAGE_ENUM_VALUES_REVISION
+
+
+@patch("alembic.command.upgrade", side_effect=RuntimeError("boom"))
+def test_run_startup_migrations_raises_on_failure(mock_upgrade, db_session, monkeypatch):
+    monkeypatch.setattr("app.config.settings.database_path", ":memory:")
+
+    with pytest.raises(RuntimeError, match="Startup migrations failed; aborting startup"):
+        run_startup_migrations()
+
+    mock_upgrade.assert_called_once()

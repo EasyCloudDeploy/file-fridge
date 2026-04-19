@@ -60,7 +60,21 @@ pip install -r requirements.txt
 uv run alembic upgrade head
 ```
 
-### 4. Restart the Service
+### 4. Roll Back Recent Migrations (If Needed)
+
+If a migration causes issues, roll back the three most recent revisions:
+
+```bash
+uv run alembic downgrade -3
+```
+
+Then restore from your latest database backup if required, fix the root cause, and run:
+
+```bash
+uv run alembic upgrade head
+```
+
+### 5. Restart the Service
 
 Restart your `uvicorn` process or systemd service.
 
