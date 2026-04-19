@@ -75,10 +75,16 @@ class LocalColdStorageBackend(ColdStorageBackend):
         from app.services.file_thawer import FileThawer
 
         # For SYMLINK thaw, remove the symlink before moving the payload back.
-        if operation_mode == OperationType.SYMLINK and destination_path.exists() and destination_path.is_symlink():
+        if (
+            operation_mode == OperationType.SYMLINK
+            and destination_path.exists()
+            and destination_path.is_symlink()
+        ):
             destination_path.unlink()
 
-        prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(source, destination_path)
+        prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
+            source, destination_path
+        )
         if prepared_path != destination_path:
             FileThawer._finalize_staged_move(source, prepared_path, destination_path, prepared_stat)
 
@@ -97,7 +103,9 @@ class LocalColdStorageBackend(ColdStorageBackend):
     def exists(self, storage_reference: str, location: ColdStorageLocation) -> bool:
         return Path(storage_reference).exists()
 
-    def delete(self, storage_reference: str, location: ColdStorageLocation) -> Tuple[bool, Optional[str]]:
+    def delete(
+        self, storage_reference: str, location: ColdStorageLocation
+    ) -> Tuple[bool, Optional[str]]:
         ref = Path(storage_reference)
         try:
             if ref.exists():

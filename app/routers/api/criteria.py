@@ -1,4 +1,3 @@
-# ruff: noqa: B008
 """API routes for criteria management."""
 
 import logging
@@ -30,7 +29,9 @@ def list_criteria(path_id: int, db: Annotated[Session, Depends(get_db)]):
 
 
 @router.post("/path/{path_id}", response_model=CriteriaSchema, status_code=status.HTTP_201_CREATED)
-def create_criteria(path_id: int, criteria: CriteriaCreate, db: Annotated[Session, Depends(get_db)]):
+def create_criteria(
+    path_id: int, criteria: CriteriaCreate, db: Annotated[Session, Depends(get_db)]
+):
     """Create a new criterion for a path."""
     path = db.query(MonitoredPath).filter(MonitoredPath.id == path_id).first()
     if not path:

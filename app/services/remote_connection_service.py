@@ -64,6 +64,20 @@ class RemoteConnectionService:
                 identity_data = response.json()
                 # Validate with Pydantic model
                 return RemoteConnectionIdentity.model_validate(identity_data)
+            except (httpx.ConnectError, httpx.UnsupportedProtocol):
+                raise ValueError(
+                    f"Could not connect to '{remote_url}'. Check that the URL is correct and the remote instance is running."
+                )
+            except httpx.ConnectTimeout:
+                raise ValueError(
+                    "Connection timed out after 10s. Check network connectivity and firewall rules."
+                )
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 500:
+                    raise ValueError(
+                        "The remote instance encountered an internal error. Check its logs."
+                    )
+                raise ValueError(f"Remote instance returned an error: {e.response.status_code}")
             except httpx.HTTPError as e:
                 msg = f"Could not fetch identity from remote instance: {e}"
                 logger.exception("Failed to fetch identity from %s", remote_url)
@@ -161,31 +175,61 @@ class RemoteConnectionService:
                 remote_response = RemoteConnectionResponse.model_validate(remote_response_data)
                 self._verify_remote_response(remote_identity, remote_response)
 
-                # 4. Update remote's transfer mode from their response
+                # 4. Update remote's transfer mode and trust status from their response
                 remote_mode = remote_response.identity.transfer_mode
                 if remote_mode:
                     conn.remote_transfer_mode = remote_mode
-                    db.commit()
-                    db.refresh(conn)
+                remote_trust = remote_response.trust_status
+                logger.info(
+                    "Remote instance reports connection trust status: %s",
+                    remote_trust or "not reported (legacy)",
+                )
+                db.commit()
+                db.refresh(conn)
 
+            except httpx.ConnectTimeout as e:
+                # Rollback the local connection since the remote rejected or errored
+                if is_new_connection:
+                    db.delete(conn)
+                    db.commit()
+                raise ValueError(
+                    "Connection timed out after 10s. Check network connectivity and firewall rules."
+                ) from e
             except httpx.HTTPStatusError as e:
-                # If we get a 401/403, it's likely a connection code issue
+                # Rollback the local connection since the remote rejected or errored
+                if is_new_connection:
+                    db.delete(conn)
+                    db.commit()
                 if e.response.status_code in (401, 403):
-                    # Rollback the local connection since the remote rejected us
-                    if is_new_connection:
-                        db.delete(conn)
-                        db.commit()
                     raise ValueError(
-                        "Connection rejected by remote instance. "
-                        "The connection code may be invalid or expired."
+                        "Connection rejected — the connection code is invalid or has expired. Get a fresh code from the remote instance."
                     ) from e
-                # Re-raise other HTTP errors
-                raise
+                if e.response.status_code == 500:
+                    raise ValueError(
+                        "The remote instance encountered an internal error. Check its logs."
+                    ) from e
+                # Surface the remote's error message for other HTTP failures
+                try:
+                    error_detail = e.response.json().get("detail", str(e))
+                except Exception:
+                    error_detail = str(e)
+                raise ValueError(f"Remote instance returned an error: {error_detail}") from e
             except Exception as e:
-                # If the notification fails, we still keep the local connection.
-                # The user can retry later. We can add a status field for this.
+                # Network errors or unexpected failures — rollback local connection
+                if is_new_connection:
+                    db.delete(conn)
+                    db.commit()
+                # Capture the original error message to check for specific failure types
+                error_msg = str(e)
+                if "Fingerprint verification failed" in error_msg:
+                    raise ValueError(
+                        "Fingerprint verification failed. The remote instance may have changed its identity since you last connected."
+                    ) from e
+
                 logger.error("Failed to send connection request to remote instance %s: %s", name, e)
-                # Rollback or mark as "local_only"? For now, we'll keep it.
+                raise ValueError(
+                    f"Could not connect to '{remote_identity.url}'. Check that the URL is correct and the remote instance is running."
+                ) from e
 
         return conn
 
@@ -197,28 +241,34 @@ class RemoteConnectionService:
         """Verify the signature in the response from a remote instance."""
         # Check if the fingerprint matches the one we originally trusted
         if response.identity.fingerprint != original_identity.fingerprint:
-            raise ValueError("Man-in-the-middle attack suspected! Fingerprint mismatch.")
+            raise ValueError(
+                "Fingerprint verification failed. The remote instance may have changed its identity since you last connected."
+            )
 
         # Verify the signature
         # We use model_dump(mode="json", exclude_unset=True) to get the dict for signing
         # to ensure we only include fields that were actually present in the response.
-        message_to_verify = canonical_json_encode(response.identity.model_dump(mode="json", exclude_unset=True))
+        message_to_verify = canonical_json_encode(
+            response.identity.model_dump(mode="json", exclude_unset=True)
+        )
         signature = bytes.fromhex(response.signature)
 
         if not identity_service.verify_signature(
             original_identity.ed25519_public_key, signature, message_to_verify
         ):
-            raise ValueError("Signature verification of remote response failed.")
+            raise ValueError(
+                "Fingerprint verification failed. The remote instance may have changed its identity since you last connected."
+            )
 
         logger.info("Successfully verified remote instance identity.")
 
     def handle_connection_request(self, db: Session, request_data: dict) -> dict:
         """
         Handle an incoming connection request from a remote instance.
-        If the request is valid, create a PENDING connection.
 
-        If a connection_code is provided in the request, it will be verified
-        before proceeding. This allows authenticated connection establishment.
+        If a valid connection_code is provided, the connection is automatically
+        TRUSTED (the code proves the remote admin authorized it). Without a code,
+        the connection is created as PENDING for manual review.
         """
         # Validate request data with Pydantic model
         request = RemoteConnectionRequest.model_validate(request_data)
@@ -226,37 +276,36 @@ class RemoteConnectionService:
         signature_hex = request.signature
         connection_code = request.connection_code
 
-        # Verify instance URL is configured
         from app.services.instance_config_service import instance_config_service
 
-        instance_url = instance_config_service.get_instance_url(db)
-        if not instance_url:
-            raise ValueError(
-                "Instance URL not configured. Please set FF_INSTANCE_URL environment variable "
-                "or configure it via the UI to enable remote connections."
-            )
-
-        # 1. Verify the connection code if provided
+        # 1. Verify the connection code if provided.
+        # A valid code means the remote admin explicitly authorized this connection.
+        connection_code_valid = False
         if connection_code:
             from app.utils.remote_auth import remote_auth
 
             current_code = remote_auth.get_code()
             if connection_code != current_code:
                 raise ValueError("Invalid or expired connection code.")
+            connection_code_valid = True
 
-        # 2. Verify the signature
-        message_to_verify = canonical_json_encode(identity.model_dump(mode="json", exclude_unset=True))
+        # 2. Verify the Ed25519 signature to prevent spoofing
+        message_to_verify = canonical_json_encode(
+            identity.model_dump(mode="json", exclude_unset=True)
+        )
         signature = bytes.fromhex(signature_hex)
         if not identity_service.verify_signature(
             identity.ed25519_public_key, signature, message_to_verify
         ):
             raise ValueError("Signature verification failed for connection request.")
 
-        # 3. Create or update the connection as PENDING
+        # 3. Create or update the connection.
+        # Auto-trust when a valid code was provided (code = explicit invitation).
+        # Fall back to PENDING for unauthenticated requests (manual review required).
         fingerprint = identity.fingerprint
         conn = self.get_connection_by_fingerprint(db, fingerprint)
-        # Parse remote transfer mode from identity payload
         remote_mode = identity.transfer_mode or TransferMode.PUSH_ONLY
+        new_trust_status = TrustStatus.TRUSTED if connection_code_valid else TrustStatus.PENDING
 
         if not conn:
             conn = RemoteConnection(
@@ -265,21 +314,38 @@ class RemoteConnectionService:
                 remote_fingerprint=fingerprint,
                 remote_ed25519_public_key=identity.ed25519_public_key,
                 remote_x25519_public_key=identity.x25519_public_key,
-                trust_status=TrustStatus.PENDING,
+                trust_status=new_trust_status,
                 remote_transfer_mode=remote_mode,
             )
             db.add(conn)
         else:
-            # Update info but keep trust status as is, unless it was rejected.
+            # Update connection info. Upgrade trust if code is valid or if previously rejected.
             conn.name = identity.instance_name
             conn.url = str(identity.url)
             conn.remote_transfer_mode = remote_mode
-            if conn.trust_status == TrustStatus.REJECTED:
-                conn.trust_status = TrustStatus.PENDING
+            if connection_code_valid or conn.trust_status == TrustStatus.REJECTED:
+                conn.trust_status = new_trust_status
 
         db.commit()
 
-        # 4. Return our own signed identity to prove who we are
+        logger.info(
+            "Connection from %s (%s) created/updated with status %s",
+            identity.instance_name,
+            fingerprint[:16],
+            conn.trust_status.value,
+        )
+
+        # 4. Return our own signed identity so the initiator can verify us.
+        # Instance URL may not be configured — use a placeholder so the response
+        # is still valid (the initiator already knows our URL; they sent the request to us).
+        instance_url = instance_config_service.get_instance_url(db)
+        if not instance_url:
+            logger.warning(
+                "Instance URL not configured — returning placeholder in connection response. "
+                "Set FF_INSTANCE_URL or configure it in the UI."
+            )
+            instance_url = "http://localhost"
+
         instance_name = instance_config_service.get_instance_name(db) or "File Fridge"
         my_identity_payload = {
             "instance_name": instance_name,
@@ -292,7 +358,11 @@ class RemoteConnectionService:
         message_to_sign = canonical_json_encode(my_identity_payload)
         my_signature = identity_service.sign_message(db, message_to_sign)
 
-        return {"identity": my_identity_payload, "signature": my_signature.hex()}
+        return {
+            "identity": my_identity_payload,
+            "signature": my_signature.hex(),
+            "trust_status": conn.trust_status.value,
+        }
 
     def trust_connection(self, db: Session, connection_id: int) -> RemoteConnection:
         """Manually trust a PENDING connection."""

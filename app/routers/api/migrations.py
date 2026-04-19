@@ -14,7 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 @router.get("/active", response_model=List[RelocationTaskOut])
-def get_active_migrations(db: Annotated[Session, Depends(get_db)]) -> List[Dict[str, Any]]:  # NOSONAR
+def get_active_migrations(
+    db: Annotated[Session, Depends(get_db)],
+) -> List[Dict[str, Any]]:  # NOSONAR
     """Get all active file migrations."""
     return relocation_manager.get_all_active_tasks(db)
 
@@ -28,6 +30,8 @@ def get_recent_migrations(
 
 
 @router.get("/freezing", response_model=List[FreezingFileSchema])
-def get_freezing_files(db: Annotated[Session, Depends(get_db)]) -> List[FreezingFileSchema]:  # NOSONAR
+def get_freezing_files(
+    db: Annotated[Session, Depends(get_db)],
+) -> List[FreezingFileSchema]:  # NOSONAR
     """Get files currently being frozen or thawed (MIGRATING status without an active RelocationTask)."""
     return migrations_service.get_freezing_files(db)

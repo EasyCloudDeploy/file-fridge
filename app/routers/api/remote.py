@@ -2,6 +2,7 @@
 import base64
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Annotated, List, Optional
 
@@ -27,6 +28,7 @@ from app.models import (
     FileStatus,
     MonitoredPath,
     RemoteConnection,
+    RemoteConnectionPathPermission,
     RemoteTransferJob,
     TransferDirection,
     TransferMode,
@@ -45,6 +47,7 @@ from app.schemas import (
     PullTransferRequest,
     RemoteConnectionCreate,
     RemoteConnectionIdentity,
+    RemoteConnectionPathPermissionCreate,
     RemoteConnectionRequest,
     RemoteConnectionResponse,
     RemoteConnectionUpdate,
@@ -56,6 +59,7 @@ from app.schemas import StorageType as StorageTypeSchema
 from app.security import PermissionChecker, get_current_user
 from app.services.identity_service import identity_service
 from app.services.instance_config_service import instance_config_service
+from app.services.remote_audit_service import remote_audit_service
 from app.services.remote_connection_service import remote_connection_service
 from app.services.remote_transfer_service import (
     get_transfer_timeouts,
@@ -64,6 +68,7 @@ from app.services.remote_transfer_service import (
 from app.services.scheduler import scheduler_service
 from app.utils.db_utils import escape_like_string
 from app.utils.disk_validator import disk_space_validator
+from app.utils.rate_limiter import rate_limit_dependency
 from app.utils.remote_auth import remote_auth
 from app.utils.remote_signature import (
     get_signed_headers,
@@ -162,8 +167,11 @@ async def _decrypt_chunk(
         Decrypted chunk bytes
     """
     if not nonce_hex or not ephemeral_public_key_b64:
-        # Not encrypted, return as-is
-        return chunk
+        logger.error("Chunk decryption failed: missing encryption headers")
+        raise HTTPException(
+            status_code=400,
+            detail="Encryption is required for all transfers. Please ensure both instances are up to date.",
+        )
 
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.asymmetric import x25519
@@ -202,13 +210,21 @@ async def _decrypt_chunk(
         ) from None
 
 
+MAX_DECOMPRESSED_CHUNK_SIZE = 15 * 1024 * 1024  # 15 MB
+
+
 async def _decompress_chunk(chunk: bytes) -> bytes:
-    """Decompress chunk using zstandard."""
+    """Decompress chunk using zstandard with compression bomb protection."""
     try:
         dctx = zstd.ZstdDecompressor()
-        return dctx.decompress(chunk)
+        return dctx.decompress(chunk, max_length=MAX_DECOMPRESSED_CHUNK_SIZE)
+    except zstd.ZstdError:
+        logger.error("Decompression failed or output exceeded size limit")
+        raise HTTPException(
+            status_code=400, detail="Decompression failed or output exceeded size limit"
+        ) from None
     except Exception:
-        logger.exception("Decompression failed")
+        logger.exception("Unexpected error during decompression")
         raise HTTPException(status_code=400, detail="Decompression failed") from None
 
 
@@ -224,9 +240,15 @@ def get_remote_status(
     _ = current_user
     instance_url = instance_config_service.get_instance_url(db)
     is_configured = bool(instance_url)
+    pending_count = (
+        db.query(RemoteConnection)
+        .filter(RemoteConnection.trust_status == TrustStatus.PENDING)
+        .count()
+    )
     return {
         "configured": is_configured,
         "instance_url": instance_url if is_configured else None,
+        "pending_connections": pending_count,
         "message": (
             "Remote connections are ready to use."
             if is_configured
@@ -271,7 +293,10 @@ def update_instance_config(
 
 
 @router.get(
-    "/identity", response_model=RemoteConnectionIdentity, tags=[RESOURCE_REMOTE_CONNECTIONS]
+    "/identity",
+    response_model=RemoteConnectionIdentity,
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
+    dependencies=[Depends(rate_limit_dependency(requests_per_minute=20))],
 )
 def get_public_identity(db: Annotated[Session, Depends(get_db)]):
     """Return the public identity of this File Fridge instance."""
@@ -407,6 +432,7 @@ async def create_connection(
     "/connection-request",
     response_model=RemoteConnectionResponse,
     tags=[RESOURCE_REMOTE_CONNECTIONS],
+    dependencies=[Depends(rate_limit_dependency(requests_per_minute=5))],
     responses={
         400: {
             "description": "Invalid request, signature verification failed, or duplicate fingerprint"
@@ -453,6 +479,76 @@ async def delete_connection(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return {"status": "success"}
+
+
+@router.post(
+    "/connections/{connection_id}/ping",
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
+)
+async def ping_connection(
+    connection_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+):
+    """Test the connection to a remote instance."""
+    _ = current_user
+    conn = db.query(RemoteConnection).filter(RemoteConnection.id == connection_id).first()
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    start_time_ts = time.time()
+    try:
+        url = f"{conn.url.rstrip('/')}/api/v1/remote/identity"
+        # Signed GET request (empty body)
+        signed_headers = await get_signed_headers(db, "GET", url, b"")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url, headers=signed_headers)
+            response.raise_for_status()
+
+            latency_ms = int((time.time() - start_time_ts) * 1000)
+            identity_data = response.json()
+
+            # Verify fingerprint
+            remote_identity = RemoteConnectionIdentity.model_validate(identity_data)
+            if remote_identity.fingerprint != conn.remote_fingerprint:
+                conn.is_reachable = False
+                db.commit()
+                return {
+                    "reachable": False,
+                    "error": "Fingerprint mismatch. The remote identity has changed.",
+                    "latency_ms": latency_ms,
+                }
+
+            # Item 3.1: Update health tracking on success
+            from datetime import datetime, timezone
+
+            conn.last_seen_at = datetime.now(timezone.utc)
+            conn.is_reachable = True
+            db.commit()
+
+            return {"reachable": True, "latency_ms": latency_ms}
+
+    except httpx.HTTPStatusError as e:
+        latency_ms = int((time.time() - start_time_ts) * 1000)
+        # Item 3.1: Update health tracking on failure
+        conn.is_reachable = False
+        db.commit()
+        return {
+            "reachable": False,
+            "error": f"Remote returned error {e.response.status_code}",
+            "latency_ms": latency_ms,
+        }
+    except Exception as e:
+        latency_ms = int((time.time() - start_time_ts) * 1000)
+        # Item 3.1: Update health tracking on failure
+        conn.is_reachable = False
+        db.commit()
+        return {
+            "reachable": False,
+            "error": f"Connection failed: {e!s}",
+            "latency_ms": latency_ms,
+        }
 
 
 @router.post(
@@ -531,6 +627,97 @@ async def update_connection(
             )
 
     return conn
+
+
+# --- Path Permission Endpoints (Item 3.5) ---
+
+
+@router.get(
+    "/connections/{connection_id}/path-permissions",
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
+)
+def list_path_permissions(
+    connection_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+):
+    """List per-path ACL permissions for a connection."""
+    _ = current_user
+    conn = remote_connection_service.get_connection(db, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    perms = (
+        db.query(RemoteConnectionPathPermission)
+        .filter(RemoteConnectionPathPermission.remote_connection_id == connection_id)
+        .all()
+    )
+    return perms
+
+
+@router.post(
+    "/connections/{connection_id}/path-permissions",
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
+)
+def upsert_path_permission(
+    connection_id: int,
+    data: RemoteConnectionPathPermissionCreate,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+):
+    """Create or update a per-path ACL for a connection."""
+    _ = current_user
+    conn = remote_connection_service.get_connection(db, connection_id)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    perm = (
+        db.query(RemoteConnectionPathPermission)
+        .filter(
+            RemoteConnectionPathPermission.remote_connection_id == connection_id,
+            RemoteConnectionPathPermission.monitored_path_id == data.monitored_path_id,
+        )
+        .first()
+    )
+    if perm:
+        perm.can_browse = data.can_browse
+        perm.can_pull = data.can_pull
+    else:
+        perm = RemoteConnectionPathPermission(
+            remote_connection_id=connection_id,
+            monitored_path_id=data.monitored_path_id,
+            can_browse=data.can_browse,
+            can_pull=data.can_pull,
+        )
+        db.add(perm)
+    db.commit()
+    db.refresh(perm)
+    return perm
+
+
+@router.delete(
+    "/connections/{connection_id}/path-permissions/{permission_id}",
+    tags=[RESOURCE_REMOTE_CONNECTIONS],
+)
+def delete_path_permission(
+    connection_id: int,
+    permission_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+):
+    """Remove a per-path ACL for a connection."""
+    _ = current_user
+    perm = (
+        db.query(RemoteConnectionPathPermission)
+        .filter(
+            RemoteConnectionPathPermission.id == permission_id,
+            RemoteConnectionPathPermission.remote_connection_id == connection_id,
+        )
+        .first()
+    )
+    if not perm:
+        raise HTTPException(status_code=404, detail="Permission not found")
+    db.delete(perm)
+    db.commit()
+    return {"status": "deleted"}
 
 
 # --- Endpoints Requiring Signature Verification ---
@@ -695,7 +882,7 @@ def bulk_retry_transfers(
             continue
 
         # Reset job to pending state
-        job.status = TransferStatus.PENDING
+        job.transition_status(TransferStatus.PENDING)
         job.progress = 0
         job.current_size = 0
         job.retry_count = 0
@@ -949,28 +1136,68 @@ async def verify_transfer(
     if checksum:
         # For safety, we verify the checksum BEFORE returning success
         # especially important for MOVE operations.
+        # FIX: We hash the .fftmp file BEFORE renaming to final path
         logger.info(f"Verifying checksum for {found_tmp}...")
 
-        # We rename it first so we hash the final file
-        await anyio.to_thread.run_sync(found_tmp.rename, final_path)
-
-        # Calculate local hash
+        # Calculate local hash on the tmp file
         from app.services.file_metadata import file_metadata_extractor
 
         local_hash = await anyio.to_thread.run_sync(
-            file_metadata_extractor.compute_sha256, final_path
+            file_metadata_extractor.compute_sha256, found_tmp
         )
 
         if local_hash != checksum:
             logger.error(
-                f"Checksum mismatch! Expected {checksum}, got {local_hash}. Deleting {final_path}"
+                f"Checksum mismatch! Expected {checksum}, got {local_hash}. Deleting {found_tmp}"
             )
-            await anyio.to_thread.run_sync(final_path.unlink, True)
+            # Item 3.4: Log TRANSFER_FAILED
+            remote_audit_service.log_event(
+                db,
+                "TRANSFER_FAILED",
+                connection_id=remote_conn.id,
+                connection_name=remote_conn.name,
+                direction="PULL",
+                file_path=str(found_tmp),
+                status="failed",
+                error_message=f"Checksum mismatch: expected {checksum}, got {local_hash}",
+            )
+            await anyio.to_thread.run_sync(found_tmp.unlink, True)
             raise HTTPException(status_code=422, detail="Checksum verification failed")
 
-        logger.info(f"Checksum verified for {final_path}")
-    else:
+        logger.info(f"Checksum verified for {found_tmp}")
+
+        # Rename only AFTER successful verification
         await anyio.to_thread.run_sync(found_tmp.rename, final_path)
+
+        # Item 3.4: Log TRANSFER_COMPLETED
+        stat = await anyio.to_thread.run_sync(final_path.stat)
+        remote_audit_service.log_event(
+            db,
+            "TRANSFER_COMPLETED",
+            connection_id=remote_conn.id,
+            connection_name=remote_conn.name,
+            direction="PULL",
+            file_path=str(final_path),
+            file_size=stat.st_size,
+            checksum=checksum,
+            status="completed",
+        )
+    else:
+        # If no checksum provided, just rename
+        await anyio.to_thread.run_sync(found_tmp.rename, final_path)
+
+        # Item 3.4: Log TRANSFER_COMPLETED
+        stat = await anyio.to_thread.run_sync(final_path.stat)
+        remote_audit_service.log_event(
+            db,
+            "TRANSFER_COMPLETED",
+            connection_id=remote_conn.id,
+            connection_name=remote_conn.name,
+            direction="PULL",
+            file_path=str(final_path),
+            file_size=stat.st_size,
+            status="completed",
+        )
 
     background_tasks.add_task(scheduler_service.trigger_scan, remote_path_id)
     return {"status": "success"}
@@ -1066,6 +1293,18 @@ def browse_remote_files(
     if not path:
         raise HTTPException(status_code=404, detail="MonitoredPath not found")
 
+    # Item 3.5: Enforce per-path ACL if an explicit permission row exists
+    perm = (
+        db.query(RemoteConnectionPathPermission)
+        .filter(
+            RemoteConnectionPathPermission.remote_connection_id == remote_conn.id,
+            RemoteConnectionPathPermission.monitored_path_id == path_id,
+        )
+        .first()
+    )
+    if perm is not None and not perm.can_browse:
+        raise HTTPException(status_code=403, detail="Access to this path is not permitted.")
+
     query = db.query(FileInventory).filter(
         FileInventory.path_id == path_id,
         FileInventory.status == FileStatus.ACTIVE,
@@ -1134,6 +1373,18 @@ async def serve_transfer_request(
     file_obj = db.query(FileInventory).filter(FileInventory.id == file_inventory_id).first()
     if not file_obj:
         raise HTTPException(status_code=404, detail="File not found in inventory")
+
+    # Item 3.5: Enforce per-path ACL for can_pull if an explicit permission row exists
+    perm = (
+        db.query(RemoteConnectionPathPermission)
+        .filter(
+            RemoteConnectionPathPermission.remote_connection_id == remote_conn.id,
+            RemoteConnectionPathPermission.monitored_path_id == file_obj.path_id,
+        )
+        .first()
+    )
+    if perm is not None and not perm.can_pull:
+        raise HTTPException(status_code=403, detail="Access to this path is not permitted.")
 
     try:
         job = remote_transfer_service.create_transfer_job(

@@ -126,3 +126,23 @@ def rate_limit(requests_per_minute: int = 60):
         return wrapper
 
     return decorator
+
+
+def rate_limit_dependency(requests_per_minute: int = 60):
+    """
+    Factory to create a FastAPI dependency for rate limiting.
+    A reasonable default: 20 requests per minute per IP for /identity,
+    5 requests per minute per IP for /connection-request.
+    """
+    limiter = RateLimiter(requests_per_minute=requests_per_minute)
+
+    def _check_rate_limit(request: Request) -> None:
+        key = get_rate_limit_key(request)
+        if not limiter.is_allowed(key):
+            raise HTTPException(
+                status_code=429,
+                detail="Rate limit exceeded. Please try again later.",
+                headers={"Retry-After": "60"},
+            )
+
+    return _check_rate_limit

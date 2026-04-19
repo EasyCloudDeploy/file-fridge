@@ -76,6 +76,9 @@ class SchedulerService:
                 self._add_nonce_cleanup_job()
                 self._add_remote_code_rotation_job()
                 self._add_remote_transfer_job()
+                self._add_fftmp_cleanup_job()
+                self._add_transfer_job_cleanup_job()
+                self._add_remote_health_check_job()
             except Exception:
                 logger.exception("Error starting scheduler")
                 # Try to clean up
@@ -264,7 +267,7 @@ class SchedulerService:
             logger.exception("Error adding remote code rotation job")
 
     def _add_nonce_cleanup_job(self):
-        """Add scheduled job for cleaning up old request nonces (runs every hour)."""
+        """Add scheduled job for cleaning up old request nonces (runs every 10 minutes)."""
         if not self.scheduler.running:
             logger.warning("Scheduler not running, skipping nonce cleanup job addition")
             return
@@ -275,17 +278,17 @@ class SchedulerService:
             if self.scheduler.get_job(job_id):
                 self.scheduler.remove_job(job_id)
 
-            # Schedule to run every hour
+            # Schedule to run every 10 minutes as per PLAN.md
             self.scheduler.add_job(
                 cleanup_old_nonces_job_func,
                 "interval",
-                hours=1,
+                minutes=10,
                 id=job_id,
                 replace_existing=True,
             )
-            logger.info("Added scheduled job for nonce cleanup (runs every hour)")
-        except Exception as e:
-            logger.exception(f"Error adding nonce cleanup job: {e}")
+            logger.info("Added scheduled job for nonce cleanup (runs every 10 minutes)")
+        except Exception:
+            logger.exception("Error adding nonce cleanup job")
 
     def _add_disk_space_monitoring_job(self):
         """Add scheduled job for disk space monitoring (runs every 10 minutes)."""
@@ -311,7 +314,6 @@ class SchedulerService:
         except Exception as e:
             logger.exception(f"Error adding disk space monitoring job: {e}")
 
-
     def _add_storage_permissions_job(self) -> None:
         """Add scheduled job for storage permissions checking (runs every hour)."""
         if not self.scheduler.running:
@@ -333,6 +335,74 @@ class SchedulerService:
             logger.info("Added scheduled job for storage permissions check (runs every hour)")
         except Exception as e:
             logger.exception(f"Error adding storage permissions job: {e}")
+
+    def _add_fftmp_cleanup_job(self):
+        """Add scheduled job for cleaning up orphaned .fftmp files (runs daily at 3 AM)."""
+        if not self.scheduler.running:
+            return
+
+        job_id = "fftmp_cleanup"
+        try:
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            self.scheduler.add_job(
+                cleanup_orphaned_fftmp_job_func,
+                "cron",
+                hour=3,
+                minute=0,
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info("Added scheduled job for daily .fftmp cleanup (runs at 3 AM)")
+        except Exception:
+            logger.exception("Error adding fftmp cleanup job")
+
+    def _add_transfer_job_cleanup_job(self):
+        """Add scheduled job for cleaning up old transfer job records (runs weekly on Sunday at 4 AM)."""
+        if not self.scheduler.running:
+            return
+
+        job_id = "transfer_job_cleanup"
+        try:
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            self.scheduler.add_job(
+                cleanup_old_transfer_jobs_job_func,
+                "cron",
+                day_of_week="sun",
+                hour=4,
+                minute=0,
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info(
+                "Added scheduled job for weekly transfer job cleanup (runs Sundays at 4 AM)"
+            )
+        except Exception:
+            logger.exception("Error adding transfer job cleanup job")
+
+    def _add_remote_health_check_job(self):
+        """Add scheduled job for remote connection health checks (runs every 15 minutes)."""
+        if not self.scheduler.running:
+            return
+
+        job_id = "remote_health_check"
+        try:
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            self.scheduler.add_job(
+                remote_health_check_job_func,
+                "interval",
+                minutes=15,
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info("Added scheduled job for remote health check (every 15 minutes)")
+        except Exception:
+            logger.exception("Error adding remote health check job")
 
 
 def _check_and_notify_disk_space(location, db: Session):
@@ -481,9 +551,7 @@ def check_storage_permissions_job_func() -> None:
                 if backend.capabilities().supports_local_path_stats:
                     missing = _check_path_permissions(location.path)
                     if missing:
-                        error = (
-                            f"Missing {' and '.join(missing)} permission on cold storage path: {location.path}"
-                        )
+                        error = f"Missing {' and '.join(missing)} permission on cold storage path: {location.path}"
                         if location.permissions_error != error:
                             location.permissions_error = error
                             logger.warning(
@@ -565,7 +633,9 @@ def check_storage_permissions_job_func() -> None:
                                 ),
                             )
                         except Exception as e:
-                            logger.error(f"Failed to dispatch STORAGE_PERMISSION_ERROR notification: {e}")
+                            logger.error(
+                                f"Failed to dispatch STORAGE_PERMISSION_ERROR notification: {e}"
+                            )
                 else:
                     if path.permissions_error is not None:
                         logger.info(f"Permissions restored on hot storage '{path.name}'")
@@ -882,28 +952,190 @@ def decrypt_location_job_func(location_id: int):
 
 
 def cleanup_old_nonces_job_func():
-    """Job function to clean up old request nonces (runs every hour)."""
+    """Job function to clean up old request nonces (runs every 10 minutes)."""
     import time
 
-    from app.config import settings
     from app.models import RequestNonce
 
     db = SchedulerSessionLocal()
     try:
-        # Clean up nonces older than signature_timestamp_tolerance + buffer (6 minutes total)
-        cutoff_time = int(time.time()) - (settings.signature_timestamp_tolerance + 60)
+        # Clean up nonces older than 600 seconds (2x signature tolerance) as per PLAN.md
+        cutoff_time = int(time.time()) - 600
         deleted = db.query(RequestNonce).filter(RequestNonce.timestamp < cutoff_time).delete()
         db.commit()
         if deleted > 0:
             logger.info(f"Cleaned up {deleted} old request nonces")
-    except Exception as e:
-        logger.exception("Error cleaning up old nonces", exc_info=e)
+    except Exception:
+        logger.exception("Error cleaning up old nonces")
         db.rollback()
     finally:
         try:
             db.close()
         except Exception as e:
             logger.warning("Error closing scheduler database session in nonce cleanup", exc_info=e)
+
+
+def cleanup_orphaned_fftmp_job_func():
+    """Daily job to clean up orphaned .fftmp files older than 7 days."""
+    from datetime import datetime, timedelta
+    from pathlib import Path
+
+    from app.models import ColdStorageLocation, MonitoredPath
+
+    db = SchedulerSessionLocal()
+    try:
+        # Get all monitored paths and storage locations
+        monitored_paths = db.query(MonitoredPath).all()
+        storage_locations = db.query(ColdStorageLocation).all()
+
+        all_paths = set()
+        for mp in monitored_paths:
+            all_paths.add(mp.source_path)
+        for sl in storage_locations:
+            all_paths.add(sl.path)
+
+        now = datetime.now()
+        cleanup_threshold = now - timedelta(days=7)
+        warning_threshold = now - timedelta(days=1)
+
+        deleted_count = 0
+        warning_count = 0
+
+        for path_str in all_paths:
+            base_path = Path(path_str)
+            if not base_path.exists() or not base_path.is_dir():
+                continue
+
+            # Scan for .fftmp files
+            for fftmp_file in base_path.glob("**/*.fftmp"):
+                try:
+                    mtime = datetime.fromtimestamp(fftmp_file.stat().st_mtime)
+                    if mtime < cleanup_threshold:
+                        fftmp_file.unlink()
+                        deleted_count += 1
+                        logger.info(f"Deleted orphaned .fftmp file: {fftmp_file}")
+                    elif mtime < warning_threshold:
+                        warning_count += 1
+                        logger.warning(f"Found old .fftmp file (stuck transfer?): {fftmp_file}")
+                except Exception as e:
+                    logger.error(f"Error processing .fftmp file {fftmp_file}: {e}")
+
+        if deleted_count > 0:
+            logger.info(f"Cleaned up {deleted_count} orphaned .fftmp files")
+
+    except Exception:
+        logger.exception("Error in orphaned .fftmp cleanup job")
+    finally:
+        db.close()
+
+
+def cleanup_old_transfer_jobs_job_func():
+    """Weekly job to clean up terminal transfer jobs older than 90 days."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import RemoteTransferJob, TransferStatus
+
+    db = SchedulerSessionLocal()
+    try:
+        # Retention period 90 days
+        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+
+        terminal_statuses = [
+            TransferStatus.COMPLETED,
+            TransferStatus.FAILED,
+            TransferStatus.CANCELLED,
+        ]
+
+        deleted = (
+            db.query(RemoteTransferJob)
+            .filter(
+                RemoteTransferJob.status.in_(terminal_statuses),
+                RemoteTransferJob.updated_at < cutoff,
+            )
+            .delete(synchronize_session=False)
+        )
+
+        db.commit()
+        if deleted > 0:
+            logger.info(f"Cleaned up {deleted} old transfer job records")
+    except Exception:
+        logger.exception("Error cleaning up old transfer jobs")
+        db.rollback()
+    finally:
+        db.close()
+
+
+# In-memory failure tracking for remote connections (connection_id -> consecutive_failures)
+remote_failure_counts = {}
+
+
+def remote_health_check_job_func():
+    """Job to ping all trusted remote connections and track health."""
+    from datetime import datetime, timezone
+
+    import anyio
+    import httpx
+
+    from app.models import RemoteConnection, TrustStatus
+    from app.schemas import RemoteConnectionIdentity
+    from app.utils.remote_signature import get_signed_headers
+
+    db = SchedulerSessionLocal()
+    try:
+        # Get all trusted connections
+        trusted_connections = (
+            db.query(RemoteConnection)
+            .filter(RemoteConnection.trust_status == TrustStatus.TRUSTED)
+            .all()
+        )
+
+        for conn in trusted_connections:
+            url = f"{conn.url.rstrip('/')}/api/v1/remote/identity"
+            success = False
+            error_msg = None
+
+            try:
+
+                async def do_ping():
+                    signed_headers = await get_signed_headers(db, "GET", url, b"")
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.get(url, headers=signed_headers)
+                        response.raise_for_status()
+
+                        identity_data = response.json()
+                        remote_identity = RemoteConnectionIdentity.model_validate(identity_data)
+                        if remote_identity.fingerprint != conn.remote_fingerprint:
+                            raise ValueError("Fingerprint mismatch")
+                        return True
+
+                anyio.run(do_ping)
+                success = True
+            except Exception as e:
+                success = False
+                error_msg = str(e)
+
+            if success:
+                conn.is_reachable = True
+                conn.last_seen_at = datetime.now(timezone.utc)
+                remote_failure_counts[conn.id] = 0
+            else:
+                logger.warning(
+                    f"Health check failed for connection {conn.id} ({conn.name}): {error_msg}"
+                )
+                count = remote_failure_counts.get(conn.id, 0) + 1
+                remote_failure_counts[conn.id] = count
+                if count >= 3:
+                    conn.is_reachable = False
+                    # Cap at 3
+                    remote_failure_counts[conn.id] = 3
+
+            db.commit()
+
+    except Exception:
+        logger.exception("Error in remote health check job")
+        db.rollback()
+    finally:
+        db.close()
 
 
 # Global scheduler instance

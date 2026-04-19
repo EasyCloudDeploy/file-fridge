@@ -61,7 +61,10 @@ class FileReconciliation:
                 return False
             if loc.operation_mode == OperationType.SYMLINK:
                 return True
-            return loc.operation_mode == OperationType.MOVE and path.operation_type == OperationType.SYMLINK
+            return (
+                loc.operation_mode == OperationType.MOVE
+                and path.operation_type == OperationType.SYMLINK
+            )
 
         symlink_location = next(
             (loc for loc in path.storage_locations if _is_symlink_location(loc, path)),

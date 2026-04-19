@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Dict, Union
 
 from fastapi import Depends, Header, HTTPException, Request, status
@@ -10,8 +11,9 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import RemoteConnection, TrustStatus
+from app.models import RemoteConnection, RequestNonce, TrustStatus
 from app.services.identity_service import identity_service
+from app.services.remote_audit_service import remote_audit_service
 from app.services.remote_connection_service import remote_connection_service
 
 logger = logging.getLogger(__name__)
@@ -86,6 +88,7 @@ async def get_signed_headers(db: Session, method: str, url: str, content: bytes)
         "X-Timestamp": timestamp,
         "X-Nonce": nonce,
         "X-Signature": signature.hex(),
+        "X-FF-Protocol-Version": "1",
     }
 
 
@@ -115,9 +118,6 @@ async def verify_signature_from_components(
         ) from err
 
     # 2. Check nonce hasn't been used (replay protection)
-    from app.models import RequestNonce
-    from app.services.security_audit_service import security_audit_service
-
     existing_nonce = (
         db.query(RequestNonce)
         .filter(RequestNonce.nonce == nonce, RequestNonce.fingerprint == fingerprint)
@@ -125,7 +125,11 @@ async def verify_signature_from_components(
     )
 
     if existing_nonce:
-        security_audit_service.log_replay_attack_detected(db, fingerprint, nonce)
+        from app.services.security_audit_service import (
+            security_audit_service as old_audit_service,
+        )
+
+        old_audit_service.log_replay_attack_detected(db, fingerprint, nonce)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Request nonce already used (replay attack detected)",
@@ -134,10 +138,24 @@ async def verify_signature_from_components(
     # 3. Look up the remote connection by its fingerprint
     conn = remote_connection_service.get_connection_by_fingerprint(db, fingerprint)
     if not conn:
+        # Item 3.4: Audit log unauthorized attempt
+        remote_audit_service.log_event(
+            db,
+            "UNAUTHORIZED_ATTEMPT",
+            error_message=f"Unknown fingerprint: {fingerprint} from {request.client.host if request.client else 'unknown'}",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Unknown remote instance fingerprint."
         )
     if conn.trust_status != TrustStatus.TRUSTED:
+        # Item 3.4: Audit log unauthorized attempt
+        remote_audit_service.log_event(
+            db,
+            "UNAUTHORIZED_ATTEMPT",
+            connection_id=conn.id,
+            connection_name=conn.name,
+            error_message=f"Untrusted connection (status: {conn.trust_status.value}) from {request.client.host if request.client else 'unknown'}",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Remote instance is not trusted. Current status: {conn.trust_status.value}",
@@ -158,15 +176,35 @@ async def verify_signature_from_components(
     if not identity_service.verify_signature(
         conn.remote_ed25519_public_key, signature_bytes, message
     ):
-        security_audit_service.log_signature_verification_failed(
-            db, fingerprint, "Invalid signature"
+        from app.services.security_audit_service import (
+            security_audit_service as old_audit_service,
+        )
+
+        old_audit_service.log_signature_verification_failed(db, fingerprint, "Invalid signature")
+        # Item 3.4: Audit log unauthorized attempt
+        remote_audit_service.log_event(
+            db,
+            "UNAUTHORIZED_ATTEMPT",
+            connection_id=conn.id,
+            connection_name=conn.name,
+            error_message=f"Invalid signature from {request.client.host if request.client else 'unknown'}",
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid signature.")
 
     # 5. Store nonce to prevent replay
     request_nonce = RequestNonce(fingerprint=fingerprint, nonce=nonce, timestamp=timestamp)
     db.add(request_nonce)
+
+    # Item 3.1: Update health tracking fields
+    conn.last_seen_at = datetime.now(timezone.utc)
+    conn.is_reachable = True
+
     db.commit()
+
+    # Item 3.3: Protocol version header check
+    version = request.headers.get("X-FF-Protocol-Version")
+    if version and version != "1":
+        logger.warning(f"Remote instance uses protocol version {version}, expected 1")
 
     return conn
 

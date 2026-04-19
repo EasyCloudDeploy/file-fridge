@@ -1,4 +1,3 @@
-# ruff: noqa: B008
 """API routes for tag rule management."""
 
 from typing import Annotated, List
@@ -60,7 +59,9 @@ def get_tag_rule(rule_id: int, db: Annotated[Session, Depends(get_db)]):
 
 
 @router.patch("/{rule_id}", response_model=TagRuleSchema)
-def update_tag_rule(rule_id: int, rule_update: TagRuleUpdate, db: Annotated[Session, Depends(get_db)]):
+def update_tag_rule(
+    rule_id: int, rule_update: TagRuleUpdate, db: Annotated[Session, Depends(get_db)]
+):
     """Update a tag rule."""
     rule = db.query(TagRuleModel).filter(TagRuleModel.id == rule_id).first()
     if not rule:

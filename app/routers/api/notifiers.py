@@ -1,4 +1,3 @@
-# ruff: noqa: B008
 """API endpoints for notifier management."""
 
 import logging
@@ -71,9 +70,7 @@ def _validate_notifier_config(
 
 
 @router.get("", response_model=List[Notifier])
-def list_notifiers(
-    db: Annotated[Session, Depends(get_db)], skip: int = 0, limit: int = 100
-):
+def list_notifiers(db: Annotated[Session, Depends(get_db)], skip: int = 0, limit: int = 100):
     """
     List all configured notifiers.
 

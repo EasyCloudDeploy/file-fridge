@@ -46,7 +46,9 @@ class PathReverser:
                     success, error = PathReverser._reverse_file_operation(file_record, db)
                     if success:
                         results["files_reversed"] += 1
-                        existing = db.query(FileRecord).filter(FileRecord.id == file_record.id).first()
+                        existing = (
+                            db.query(FileRecord).filter(FileRecord.id == file_record.id).first()
+                        )
                         if existing is not None:
                             db.delete(existing)
                         logger.info(f"Reversed operation for file: {file_record.original_path}")
