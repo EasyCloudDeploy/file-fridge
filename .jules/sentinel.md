@@ -34,3 +34,8 @@
 **Vulnerability:** The tag creation endpoint (`/api/v1/tags`) returned an HTTP error detail containing unsanitized user input (`tag.name`) when attempting to create a duplicate tag, which could result in reflected/stored XSS and information disclosure.
 **Learning:** Any user input reflected in an API response, even within an error message or exception detail, can pose an injection or XSS risk. Input should not be echoed back to the user blindly.
 **Prevention:** Avoid reflecting user input in error messages. Log the event server-side with proper sanitization (e.g., using `sanitize_for_log`) while returning generic error messages to the client.
+## 2026-04-21 - [CRITICAL] Fix Command-Line Argument Injection (CWE-88) in xattr subprocess call
+
+**Vulnerability:** The application used `subprocess.run` to call `xattr` with a user-controlled file path without a `--` delimiter. If a file path started with a `-`, it could be interpreted as a command-line option flag, leading to potential command execution or unintended behavior (CWE-88).
+**Learning:** Command-line argument injection can occur when untrusted input is passed as arguments to subprocess calls, even if `shell=False` is used. This is particularly dangerous for commands that interpret options based on a leading `-`.
+**Prevention:** Always use the POSIX `--` delimiter when passing file paths or other user-controlled arguments to command-line utilities, especially if the arguments could start with a `-`.
