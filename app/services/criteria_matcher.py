@@ -346,7 +346,7 @@ class CriteriaMatcher:
         try:
             # Method 1: Try mdls (Spotlight metadata) - most reliable
             result = subprocess.run(
-                ["mdls", "-name", "kMDItemLastUsedDate", "--", str(file_path)],
+                ["mdls", "-name", "kMDItemLastUsedDate", "--", str(file_path.absolute())],
                 check=False,
                 capture_output=True,
                 timeout=2,
@@ -361,7 +361,7 @@ class CriteriaMatcher:
 
             # Method 2: Try xattr (fallback)
             xattr_result = subprocess.run(
-                ["xattr", "-p", "com.apple.lastuseddate#PS", str(file_path)],
+                ["xattr", "-p", "com.apple.lastuseddate#PS", "--", str(file_path.absolute())],
                 check=False,
                 capture_output=True,
                 timeout=2,
