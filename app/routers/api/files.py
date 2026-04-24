@@ -34,6 +34,7 @@ from app.schemas import (
     BulkActionResult,
     BulkFileActionRequest,
     BulkFreezeRequest,
+    BulkRelocateRequest,
     FileMoveRequest,
     FileRelocateRequest,
     FilterCriteria,
@@ -412,7 +413,9 @@ def _generate_next_cursor(
         sort_value_raw = last_file.storage_location.name if last_file.storage_location else None
     else:
         sort_value_raw = (
-            getattr(last_file, sort_by, None) if sort_by in valid_sort_fields else last_file.last_seen
+            getattr(last_file, sort_by, None)
+            if sort_by in valid_sort_fields
+            else last_file.last_seen
         )
 
     if hasattr(sort_value_raw, "isoformat"):
@@ -1507,6 +1510,175 @@ def bulk_freeze_files(request: BulkFreezeRequest, db: Annotated[Session, Depends
 
         except Exception as e:
             logger.exception(f"Error freezing file {file_id}")
+            results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
+            failed += 1
+
+    return BulkActionResponse(
+        total=len(request.file_ids), successful=successful, failed=failed, results=results
+    )
+
+
+@router.post("/bulk/relocate", response_model=BulkActionResponse)
+def bulk_relocate_files(request: BulkRelocateRequest, db: Annotated[Session, Depends(get_db)]):
+    """
+    Bulk relocate cold storage files to another cold storage location.
+
+    Files whose monitored path is not associated with the selected target location
+    will be skipped and reported as failures.
+    """
+    from app.services.relocation_manager import relocation_manager
+
+    target_location = (
+        db.query(ColdStorageLocation)
+        .filter(ColdStorageLocation.id == request.target_storage_location_id)
+        .first()
+    )
+
+    if not target_location:
+        return BulkActionResponse(
+            total=len(request.file_ids),
+            successful=0,
+            failed=len(request.file_ids),
+            results=[
+                BulkActionResult(
+                    file_id=file_id,
+                    success=False,
+                    message=f"Target storage location with id {request.target_storage_location_id} not found",
+                )
+                for file_id in request.file_ids
+            ],
+        )
+
+    results = []
+    successful = 0
+    failed = 0
+
+    for file_id in request.file_ids:
+        inventory_entry = None
+        try:
+            inventory_entry = (
+                db.query(FileInventory)
+                .filter(FileInventory.id == file_id, FileInventory.storage_type == StorageType.COLD)
+                .first()
+            )
+
+            if not inventory_entry:
+                results.append(
+                    BulkActionResult(
+                        file_id=file_id,
+                        success=False,
+                        message="File not found in cold storage",
+                    )
+                )
+                failed += 1
+                continue
+
+            monitored_path = (
+                db.query(MonitoredPath).filter(MonitoredPath.id == inventory_entry.path_id).first()
+            )
+            if not monitored_path:
+                results.append(
+                    BulkActionResult(
+                        file_id=file_id,
+                        success=False,
+                        message="Monitored path not found",
+                    )
+                )
+                failed += 1
+                continue
+
+            path_location_ids = [loc.id for loc in monitored_path.storage_locations]
+            if request.target_storage_location_id not in path_location_ids:
+                results.append(
+                    BulkActionResult(
+                        file_id=file_id,
+                        success=False,
+                        message="Target storage location is not associated with this path",
+                    )
+                )
+                failed += 1
+                continue
+
+            current_file_path = Path(inventory_entry.file_path)
+            if not current_file_path.exists():
+                results.append(
+                    BulkActionResult(
+                        file_id=file_id,
+                        success=False,
+                        message=f"Source file does not exist: {inventory_entry.file_path}",
+                    )
+                )
+                failed += 1
+                continue
+
+            current_location = None
+            if inventory_entry.cold_storage_location_id:
+                current_location = next(
+                    (
+                        loc
+                        for loc in monitored_path.storage_locations
+                        if loc.id == inventory_entry.cold_storage_location_id
+                    ),
+                    None,
+                )
+            if not current_location:
+                for loc in monitored_path.storage_locations:
+                    if inventory_entry.file_path.startswith(loc.path):
+                        current_location = loc
+                        break
+
+            if not current_location:
+                results.append(
+                    BulkActionResult(
+                        file_id=file_id,
+                        success=False,
+                        message="Could not determine current storage location for file",
+                    )
+                )
+                failed += 1
+                continue
+
+            if current_location.id == request.target_storage_location_id:
+                results.append(
+                    BulkActionResult(
+                        file_id=file_id,
+                        success=False,
+                        message="File is already in the target storage location",
+                    )
+                )
+                failed += 1
+                continue
+
+            file_size = current_file_path.stat().st_size
+            inventory_entry.status = FileStatus.MIGRATING
+            db.commit()
+
+            task_id = relocation_manager.create_task(
+                inventory_id=file_id,
+                file_path=inventory_entry.file_path,
+                file_size=file_size,
+                source_location_id=current_location.id,
+                source_location_name=current_location.name,
+                target_location_id=target_location.id,
+                target_location_name=target_location.name,
+            )
+
+            results.append(
+                BulkActionResult(
+                    file_id=file_id,
+                    success=True,
+                    message=f"Relocation task created: {task_id}",
+                )
+            )
+            successful += 1
+        except ValueError as e:
+            if inventory_entry:
+                inventory_entry.status = FileStatus.ACTIVE
+                db.commit()
+            results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
+            failed += 1
+        except Exception as e:
+            logger.exception("Error in bulk relocate operation for file %s", file_id)
             results.append(BulkActionResult(file_id=file_id, success=False, message=str(e)))
             failed += 1
 

@@ -334,6 +334,10 @@
         <button type="button" class="btn btn-info btn-sm" id="bulk-freeze-btn" title="Freeze selected files">
             <i class="bi bi-snow"></i> Freeze
         </button>
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="bulk-relocate-btn"
+            title="Relocate selected files">
+            <i class="bi bi-arrow-right-circle"></i> Relocate
+        </button>
         <button type="button" class="btn btn-outline-info btn-sm" id="bulk-migrate-btn"
             title="Migrate selected files to remote instance">
             <i class="bi bi-hdd-network"></i> Migrate
@@ -355,6 +359,40 @@
     <button type="button" class="btn btn-link btn-sm text-muted" id="clear-selection-btn">
         <i class="bi bi-x-lg"></i> Clear
     </button>
+</div>
+
+<!-- Bulk Relocate Modal -->
+<div class="modal fade" id="bulkRelocateModal" tabindex="-1" aria-labelledby="bulkRelocateModalLabel"
+    aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="bulkRelocateModalLabel"><i class="bi bi-arrow-right-circle"></i> Bulk
+                    Relocate Files</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p>Move <strong id="bulkRelocateCount">0</strong> files to a different cold storage location?</p>
+                <div class="mb-3">
+                    <label for="bulkRelocateLocationSelect" class="form-label">Target Storage Location</label>
+                    <select class="form-select" id="bulkRelocateLocationSelect">
+                        <option value="">Loading...</option>
+                    </select>
+                    <div class="form-text">Select the cold storage location to move these files to</div>
+                </div>
+                <div class="alert alert-info mt-3">
+                    <i class="bi bi-info-circle"></i>
+                    <small>Files already in the target location or from paths not associated with it will be skipped.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmBulkRelocateBtn" disabled>
+                    <i class="bi bi-arrow-right-circle"></i> Relocate Files
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Bulk Thaw Modal -->

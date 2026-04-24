@@ -662,6 +662,69 @@ def test_relocate_file_success(
     mock_create_task.assert_called_once()
 
 
+@patch("app.services.relocation_manager.relocation_manager.create_task")
+def test_bulk_relocate_files_success(
+    mock_create_task,
+    authenticated_client: TestClient,
+    db_session,
+    storage_location,
+    monitored_path_factory,
+    tmp_path,
+):
+    """Test successful bulk relocation of cold storage files."""
+    monitored_path = monitored_path_factory("BulkRelocatePath", str(tmp_path / "bulk_relocate_hot"))
+    cold_loc1 = storage_location
+    cold_loc2 = ColdStorageLocation(name="Bulk Cold Loc 2", path=str(tmp_path / "bulk_cold2"))
+    monitored_path.storage_locations.append(cold_loc2)
+    db_session.add(cold_loc2)
+    db_session.commit()
+    db_session.refresh(cold_loc2)
+    Path(cold_loc2.path).mkdir(exist_ok=True, parents=True)
+
+    cold_files = []
+    for index in range(2):
+        cold_file_path = str(Path(cold_loc1.path) / f"bulk_relocate_file_{index}.txt")
+        Path(cold_file_path).touch()
+        cold_file = FileInventory(
+            path_id=monitored_path.id,
+            file_path=cold_file_path,
+            file_size=1024,
+            file_mtime=datetime.now(timezone.utc),
+            storage_type=StorageType.COLD,
+            cold_storage_location_id=cold_loc1.id,
+        )
+        db_session.add(cold_file)
+        cold_files.append(cold_file)
+    db_session.commit()
+    for cold_file in cold_files:
+        db_session.refresh(cold_file)
+    cold_file_ids = [cold_file.id for cold_file in cold_files]
+
+    mock_create_task.side_effect = ["bulk_task_1", "bulk_task_2"]
+
+    response = authenticated_client.post(
+        "/api/v1/files/bulk/relocate",
+        json={
+            "file_ids": cold_file_ids,
+            "target_storage_location_id": cold_loc2.id,
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total"] == 2
+    assert data["successful"] == 2
+    assert data["failed"] == 0
+    assert mock_create_task.call_count == 2
+
+    db_session.expire_all()
+    statuses = [
+        db_session.query(FileInventory).filter(FileInventory.id == cold_file_id).first().status
+        for cold_file_id in cold_file_ids
+    ]
+    assert statuses == [FileStatus.MIGRATING, FileStatus.MIGRATING]
+
+
 @patch("app.services.metadata_backfill.MetadataBackfillService.backfill_all")
 @patch("app.services.metadata_backfill.MetadataBackfillService.__init__", return_value=None)
 def test_metadata_backfill(mock_init, mock_backfill_all, authenticated_client: TestClient):

@@ -757,6 +757,13 @@ class BulkFreezeRequest(BaseModel):
     pin: bool = Field(False, description="Pin files after freezing")
 
 
+class BulkRelocateRequest(BaseModel):
+    """Request for bulk relocate operation."""
+
+    file_ids: List[int] = Field(..., min_length=1, description="List of file inventory IDs")
+    target_storage_location_id: int = Field(..., description="Target cold storage location ID")
+
+
 class BulkTagRequest(BaseModel):
     """Request for bulk tag operations."""
 

@@ -1,6 +1,6 @@
 {
   "frontend/entries/app.js": {
-    "file": "assets/app-xJpQ1dgB.js",
+    "file": "assets/app-BwScWvi0.js",
     "name": "app",
     "src": "frontend/entries/app.js",
     "isEntry": true,
@@ -8,7 +8,7 @@
       "static/js/app.js"
     ],
     "css": [
-      "assets/app-B875uNZX.css"
+      "assets/app-BnVJpm56.css"
     ],
     "assets": [
       "assets/bootstrap-icons-mSm7cUeB.woff2",

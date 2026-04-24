@@ -233,60 +233,6 @@ function tagsCellRenderer(params) {
     return tagsHtml;
 }
 
-function actionsCellRenderer(params) {
-    const file = params.data;
-    if (!file) return '';
-    const isMigrating = file.status === 'migrating';
-    const storageUnavailable = file.storage_type === 'cold' &&
-        file.storage_location && file.storage_location.available === false;
-
-    if (isMigrating) {
-        return `<span class="text-warning">
-            <span class="spinner-border spinner-border-sm" role="status"></span>
-            <span class="d-none d-sm-inline">Migrating...</span>
-        </span>`;
-    }
-
-    if (storageUnavailable) {
-        return `
-            <div class="btn-group btn-group-sm" role="group">
-                <button type="button" class="btn btn-outline-secondary" data-action="details" data-file-id="${file.id}" title="View file details">
-                    <i class="bi bi-info-circle"></i><span class="d-none d-lg-inline"> Details</span>
-                </button>
-                <button type="button" class="btn btn-outline-danger" disabled title="Storage unavailable - reconnect drive to thaw or relocate">
-                    <i class="bi bi-hdd-network"></i><span class="d-none d-lg-inline"> Offline</span>
-                </button>
-            </div>
-        `;
-    }
-
-    const isCold = file.storage_type === 'cold';
-    const primaryAction = isCold ? 'thaw' : 'freeze';
-    const primaryIcon = isCold ? 'bi-fire' : 'bi-snow';
-    const primaryText = isCold ? 'Thaw' : 'Fridge';
-    const primaryClass = isCold ? 'btn-warning' : 'btn-info';
-
-    return `
-        <div class="btn-group btn-group-sm" role="group">
-            <button type="button" class="btn ${primaryClass}" data-action="${primaryAction}" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}" title="${isCold ? 'Move file back to hot storage' : 'Send to cold storage'}">
-                <i class="bi ${primaryIcon}"></i><span class="d-none d-lg-inline"> ${primaryText}</span>
-            </button>
-            <div class="btn-group btn-group-sm" role="group">
-                <button type="button" class="btn btn-outline-secondary dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" data-bs-boundary="window" data-bs-auto-close="true" aria-expanded="false">
-                    <span class="visually-hidden">Toggle Dropdown</span>
-                </button>
-                <ul class="dropdown-menu dropdown-menu-end shadow-sm">
-                    <li><button class="dropdown-item" type="button" data-action="details" data-file-id="${file.id}"><i class="bi bi-info-circle me-2"></i>Details</button></li>
-                    ${isCold ? `<li><button class="dropdown-item" type="button" data-action="relocate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}"><i class="bi bi-arrow-right-circle me-2"></i>Relocate</button></li>` : ''}
-                    <li><button class="dropdown-item" type="button" data-action="migrate" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}"><i class="bi bi-hdd-network me-2"></i>Migrate</button></li>
-                    <li><hr class="dropdown-divider"></li>
-                    <li><button class="dropdown-item" type="button" data-action="manageTags" data-file-id="${file.id}" data-file-path="${escapeHtml(file.file_path)}"><i class="bi bi-tags me-2"></i>Manage Tags</button></li>
-                </ul>
-            </div>
-        </div>
-    `;
-}
-
 // AG Grid Column Definitions
 const columnDefs = [
     {
@@ -392,14 +338,6 @@ const columnDefs = [
         sortable: false,
         resizable: true,
         autoHeight: true
-    },
-    {
-        headerName: 'Actions',
-        cellRenderer: actionsCellRenderer,
-        width: 150,
-        sortable: false,
-        resizable: false,
-        pinned: 'right'
     }
 ];
 
@@ -2002,6 +1940,7 @@ async function startRemoteMigration() {
 
 let selectedFiles = [];
 let bulkFreezeModal = null;
+let bulkRelocateModal = null;
 let bulkAddTagModal = null;
 let bulkRemoveTagModal = null;
 let bulkRemoteMigrationModal = null;
@@ -2031,6 +1970,7 @@ function updateBulkActionsToolbar() {
 
         const thawBtn = document.getElementById('bulk-thaw-btn');
         const freezeBtn = document.getElementById('bulk-freeze-btn');
+        const relocateBtn = document.getElementById('bulk-relocate-btn');
 
         if (thawBtn) {
             thawBtn.disabled = coldFiles.length === 0;
@@ -2039,6 +1979,13 @@ function updateBulkActionsToolbar() {
         if (freezeBtn) {
             freezeBtn.disabled = hotFiles.length === 0;
             freezeBtn.title = hotFiles.length === 0 ? 'Select hot storage files to freeze' : `Freeze ${hotFiles.length} file(s)`;
+        }
+        if (relocateBtn) {
+            const relocatableFiles = getSelectedRelocatableFiles();
+            relocateBtn.disabled = relocatableFiles.length === 0;
+            relocateBtn.title = relocatableFiles.length === 0
+                ? 'Select available cold storage files to relocate'
+                : `Relocate ${relocatableFiles.length} file(s)`;
         }
 
         const migrateBtn = document.getElementById('bulk-migrate-btn');
@@ -2063,6 +2010,14 @@ function clearSelection() {
 // Get selected file IDs
 function getSelectedFileIds() {
     return selectedFiles.map(f => f.id);
+}
+
+function getSelectedRelocatableFiles() {
+    return selectedFiles.filter(file =>
+        file.storage_type === 'cold' &&
+        file.status !== 'migrating' &&
+        (!file.storage_location || file.storage_location.available !== false)
+    );
 }
 
 // Show bulk thaw confirmation
@@ -2226,6 +2181,106 @@ async function executeBulkFreeze() {
         if (confirmBtn) {
             confirmBtn.disabled = false;
             confirmBtn.innerHTML = '<i class="bi bi-snow"></i> Freeze Files';
+        }
+    }
+}
+
+// Show bulk relocate modal
+async function showBulkRelocateModal() {
+    const relocatableFiles = getSelectedRelocatableFiles();
+    if (relocatableFiles.length === 0) {
+        showNotification('No available cold storage files selected', 'warning');
+        return;
+    }
+
+    const modal = document.getElementById('bulkRelocateModal');
+    if (!modal) return;
+
+    document.getElementById('bulkRelocateCount').textContent = relocatableFiles.length;
+    document.getElementById('bulkRelocateLocationSelect').innerHTML = '<option value="">Loading...</option>';
+    document.getElementById('bulkRelocateLocationSelect').disabled = true;
+    document.getElementById('confirmBulkRelocateBtn').disabled = true;
+
+    if (!bulkRelocateModal) {
+        bulkRelocateModal = new bootstrap.Modal(modal);
+    }
+    bulkRelocateModal.show();
+
+    try {
+        const response = await authenticatedFetch(`${API_BASE_URL}/storage/locations`);
+        if (!response.ok) throw new Error('Failed to load storage locations');
+
+        const locations = await response.json();
+        const selectEl = document.getElementById('bulkRelocateLocationSelect');
+
+        if (locations.length === 0) {
+            selectEl.innerHTML = '<option value="">No storage locations available</option>';
+        } else {
+            selectEl.innerHTML = '<option value="">Select target location...</option>' +
+                locations.map(loc => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`).join('');
+            selectEl.disabled = false;
+        }
+    } catch (error) {
+        console.error('Error loading storage locations:', error);
+        document.getElementById('bulkRelocateLocationSelect').innerHTML =
+            '<option value="">Error loading locations</option>';
+    }
+}
+
+// Handle bulk relocate location change
+function onBulkRelocateLocationChange() {
+    const selectEl = document.getElementById('bulkRelocateLocationSelect');
+    const confirmBtn = document.getElementById('confirmBulkRelocateBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = !selectEl || !selectEl.value;
+    }
+}
+
+// Execute bulk relocate
+async function executeBulkRelocate() {
+    const relocatableFiles = getSelectedRelocatableFiles();
+    const fileIds = relocatableFiles.map(f => f.id);
+    const selectEl = document.getElementById('bulkRelocateLocationSelect');
+    const targetLocationId = selectEl ? parseInt(selectEl.value) : null;
+
+    if (!targetLocationId || fileIds.length === 0) return;
+
+    const confirmBtn = document.getElementById('confirmBulkRelocateBtn');
+    if (confirmBtn) {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Relocating...';
+    }
+
+    try {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/bulk/relocate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                file_ids: fileIds,
+                target_storage_location_id: targetLocationId
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Bulk relocate request failed');
+        }
+
+        const result = await response.json();
+        showNotification(`Started relocation for ${result.successful} of ${result.total} files` +
+            (result.failed > 0 ? ` (${result.failed} skipped)` : ''));
+
+        bulkRelocateModal?.hide();
+        clearSelection();
+        loadFilesList();
+
+    } catch (error) {
+        console.error('Bulk relocate error:', error);
+        showNotification(`Bulk relocate failed: ${error.message}`, 'error');
+    } finally {
+        if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="bi bi-arrow-right-circle"></i> Relocate Files';
         }
     }
 }
@@ -2828,6 +2883,11 @@ async function initFilesPage() {
         bulkFreezeBtn.addEventListener('click', showBulkFreezeModal);
     }
 
+    const bulkRelocateBtn = document.getElementById('bulk-relocate-btn');
+    if (bulkRelocateBtn) {
+        bulkRelocateBtn.addEventListener('click', showBulkRelocateModal);
+    }
+
     const bulkMigrateBtn = document.getElementById('bulk-migrate-btn');
     if (bulkMigrateBtn) {
         bulkMigrateBtn.addEventListener('click', showBulkRemoteMigrationModal);
@@ -2872,6 +2932,16 @@ async function initFilesPage() {
     const bulkFreezeLocationSelect = document.getElementById('bulkFreezeLocationSelect');
     if (bulkFreezeLocationSelect) {
         bulkFreezeLocationSelect.addEventListener('change', onBulkFreezeLocationChange);
+    }
+
+    const confirmBulkRelocateBtn = document.getElementById('confirmBulkRelocateBtn');
+    if (confirmBulkRelocateBtn) {
+        confirmBulkRelocateBtn.addEventListener('click', executeBulkRelocate);
+    }
+
+    const bulkRelocateLocationSelect = document.getElementById('bulkRelocateLocationSelect');
+    if (bulkRelocateLocationSelect) {
+        bulkRelocateLocationSelect.addEventListener('change', onBulkRelocateLocationChange);
     }
 
     const confirmBulkAddTagBtn = document.getElementById('confirmBulkAddTagBtn');
