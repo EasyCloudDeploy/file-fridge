@@ -1,4 +1,5 @@
 # ruff: noqa: B008, PLR0913
+import asyncio
 import base64
 import json
 import logging
@@ -79,6 +80,7 @@ from app.utils.remote_signature import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/remote", tags=[RESOURCE_REMOTE_CONNECTIONS])
+_background_transfer_tasks: set[asyncio.Task] = set()
 INVALID_PATH_MSG = "Invalid relative path"
 
 
@@ -1408,9 +1410,9 @@ async def serve_transfer_request(
 
     # Detach the transfer from the request lifecycle so shutdown is not blocked
     # waiting for Starlette background tasks to finish a long file upload.
-    import asyncio
-
-    asyncio.create_task(remote_transfer_service.run_transfer(job.id))
+    task = asyncio.create_task(remote_transfer_service.run_transfer(job.id))
+    _background_transfer_tasks.add(task)
+    task.add_done_callback(_background_transfer_tasks.discard)
 
     return {"status": "accepted", "job_id": job.id}
 
