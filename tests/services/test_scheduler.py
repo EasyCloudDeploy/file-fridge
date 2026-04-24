@@ -164,6 +164,57 @@ class TestCheckStoragePermissionsJob:
         assert loc.permissions_error is not None
         assert "write" in loc.permissions_error
 
+    def test_critical_low_disk_space_is_not_reported_as_write_permission_error(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """A critically full cold drive should not be mislabeled as missing write permission."""
+        from app.services.scheduler import check_storage_permissions_job_func
+
+        cold_path = tmp_path / "cold"
+        cold_path.mkdir()
+        loc = self._make_cold_location(db_session, str(cold_path))
+
+        # Simulate a full drive where write checks fail because no free blocks remain.
+        monkeypatch.setattr("app.services.scheduler.os.access", lambda path, mode: mode != 2)
+        monkeypatch.setattr(
+            "app.services.scheduler.shutil.disk_usage",
+            lambda path: (100, 96, 4),
+        )
+
+        dispatched = []
+        monkeypatch.setattr(
+            "app.services.scheduler.notification_service.dispatch_event_sync",
+            lambda **kwargs: dispatched.append(kwargs),
+        )
+
+        check_storage_permissions_job_func()
+
+        db_session.refresh(loc)
+        assert loc.permissions_error is None
+        assert dispatched == []
+
+    def test_caution_low_disk_space_still_reports_real_write_permission_error(
+        self, db_session, tmp_path, monkeypatch
+    ):
+        """Only critical disk pressure suppresses write-permission classification."""
+        from app.services.scheduler import check_storage_permissions_job_func
+
+        cold_path = tmp_path / "cold"
+        cold_path.mkdir()
+        loc = self._make_cold_location(db_session, str(cold_path))
+
+        monkeypatch.setattr("app.services.scheduler.os.access", lambda path, mode: mode != 2)
+        monkeypatch.setattr(
+            "app.services.scheduler.shutil.disk_usage",
+            lambda path: (100, 85, 15),
+        )
+
+        check_storage_permissions_job_func()
+
+        db_session.refresh(loc)
+        assert loc.permissions_error is not None
+        assert "write" in loc.permissions_error
+
     def test_clears_permissions_error_when_permissions_restored(self, db_session, tmp_path, monkeypatch):
         """permissions_error is cleared once the path becomes accessible again."""
         from app.services.scheduler import check_storage_permissions_job_func

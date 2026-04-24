@@ -504,6 +504,24 @@ def _check_path_permissions(path: str) -> list[str]:
     return missing
 
 
+def _local_disk_space_level(location) -> tuple[str | None, float | None]:
+    """Return the local disk-space alert level for a cold storage location."""
+    backend = get_backend(location)
+    if not backend.capabilities().supports_local_path_stats:
+        return None, None
+
+    total, _used, free = shutil.disk_usage(location.path)
+    if total <= 0:
+        return None, None
+
+    free_percent = (free / total) * 100
+    if free_percent <= location.critical_threshold_percent:
+        return "critical", free_percent
+    if free_percent <= location.caution_threshold_percent:
+        return "caution", free_percent
+    return None, free_percent
+
+
 def check_storage_permissions_job_func() -> None:
     """Background job to verify read/write access on all hot and cold storage paths (runs every hour)."""
     from app.models import ColdStorageLocation, MonitoredPath
@@ -538,6 +556,24 @@ def check_storage_permissions_job_func() -> None:
                 if backend.capabilities().supports_local_path_stats:
                     missing = _check_path_permissions(location.path)
                     if missing:
+                        disk_space_level, free_percent = _local_disk_space_level(location)
+                        if disk_space_level == "critical" and missing == ["write"]:
+                            if location.permissions_error is not None:
+                                logger.info(
+                                    "Clearing stale permission error on cold storage '%s'; "
+                                    "path is writable enough to inspect but disk space is critical",
+                                    location.name,
+                                )
+                            location.permissions_error = None
+                            logger.warning(
+                                "Cold storage '%s' has critical low disk space (%.1f%% free; "
+                                "threshold: %s%%); not reporting this as a write permission error",
+                                location.name,
+                                free_percent,
+                                location.critical_threshold_percent,
+                            )
+                            continue
+
                         error = f"Missing {' and '.join(missing)} permission on cold storage path: {location.path}"
                         if location.permissions_error != error:
                             location.permissions_error = error
