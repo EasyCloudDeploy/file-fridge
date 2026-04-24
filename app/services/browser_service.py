@@ -41,6 +41,17 @@ def check_path_permission(db: Session, current_user: User, resolved_path: Path) 
     if "admin" in current_user.roles:
         return
 
+    try:
+        # Resolve the path to eliminate any '..' traversal or symlink escapes
+        actual_path = resolved_path.resolve()
+    except OSError as e:
+        # Fail securely if the path cannot be resolved
+        logger.warning(f"Could not resolve path {resolved_path} for permission check.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: Invalid path",
+        ) from e
+
     allowed_paths = []
 
     # Get monitored paths
@@ -62,7 +73,7 @@ def check_path_permission(db: Session, current_user: User, resolved_path: Path) 
     is_allowed = False
     for allowed_path in allowed_paths:
         try:
-            resolved_path.relative_to(allowed_path)
+            actual_path.relative_to(allowed_path)
             is_allowed = True
             break
         except ValueError:
