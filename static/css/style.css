@@ -1012,12 +1012,6 @@ code {
     min-width: 80px;
 }
 
-/* Actions column - fixed width */
-.virtual-table-row td:last-child {
-    flex: 0 0 180px;
-    justify-content: flex-end;
-}
-
 /* Tags column needs more space */
 .virtual-table-row td:nth-child(10) {
     flex: 1.5;
@@ -1030,9 +1024,6 @@ code {
         height: calc(100vh - 350px);
     }
 
-    .virtual-table-row td:last-child {
-        flex: 0 0 140px;
-    }
 }
 
 @media (max-width: 992px) {
