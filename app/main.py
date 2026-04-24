@@ -57,6 +57,7 @@ from app.routers.api import users as api_users
 from app.routers.web.views import router as web_router
 from app.security import PermissionChecker
 from app.services.file_cleanup import FileCleanup
+from app.services.remote_transfer_service import remote_transfer_service
 from app.services.scheduler import scheduler_service
 
 # Apply filter to uvicorn access logger
@@ -135,6 +136,22 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
             db.close()
     except SQLAlchemyError as e:
         logger.warning(f"Error during MIGRATING file recovery: {e}")
+
+    logger.info("Recovering interrupted remote transfers...")
+    try:
+        db = SessionLocal()
+        try:
+            recovered_transfers = remote_transfer_service.recover_interrupted_transfers(db)
+            if recovered_transfers:
+                logger.warning(
+                    "Recovered %s interrupted remote transfer job(s)", recovered_transfers
+                )
+            else:
+                logger.info("No interrupted remote transfers found")
+        finally:
+            db.close()
+    except SQLAlchemyError as e:
+        logger.warning(f"Error during remote transfer recovery: {e}")
 
     logger.info("Starting scheduler...")
     scheduler_service.start()

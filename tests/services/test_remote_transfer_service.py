@@ -55,6 +55,52 @@ class TestRemoteTransferService:
         await remote_transfer_service.process_pending_transfers()
         # Success if no exception
 
+    def test_recover_interrupted_transfers_requeues_in_progress(
+        self, db_session, remote_transfer_job_factory
+    ):
+        """IN_PROGRESS transfers from a killed process are requeued on startup."""
+        job = remote_transfer_job_factory(status="IN_PROGRESS")
+        job.current_speed = 123
+        job.eta = 60
+        db_session.commit()
+
+        recovered = remote_transfer_service.recover_interrupted_transfers(db_session)
+
+        db_session.refresh(job)
+        assert recovered == 1
+        assert job.status == TransferStatus.PENDING
+        assert job.error_message == "Recovered after interrupted application shutdown"
+        assert job.current_speed == 0
+        assert job.eta is None
+
+    @pytest.mark.asyncio
+    async def test_process_pending_transfers_limits_concurrency(
+        self, db_session, remote_transfer_job_factory, monkeypatch
+    ):
+        """The scheduler only starts the configured number of transfers at once."""
+        monkeypatch.setattr(db_session, "close", lambda: None)
+        monkeypatch.setattr(
+            "app.services.remote_transfer_service.SessionLocal", lambda: db_session
+        )
+        jobs = [remote_transfer_job_factory(status="PENDING") for _ in range(3)]
+        started = []
+
+        async def fake_run_transfer(job_id):
+            started.append(job_id)
+
+        monkeypatch.setattr("app.config.settings.remote_transfer_max_concurrent", 2)
+        monkeypatch.setattr(remote_transfer_service, "run_transfer", fake_run_transfer)
+
+        await remote_transfer_service.process_pending_transfers()
+
+        assert started == [jobs[0].id, jobs[1].id]
+        db_session.refresh(jobs[0])
+        db_session.refresh(jobs[1])
+        db_session.refresh(jobs[2])
+        assert jobs[0].status == TransferStatus.IN_PROGRESS
+        assert jobs[1].status == TransferStatus.IN_PROGRESS
+        assert jobs[2].status == TransferStatus.PENDING
+
     def test_get_transfer_timeouts(self):
         """Test timeout configuration helper."""
         from app.services.remote_transfer_service import get_transfer_timeouts

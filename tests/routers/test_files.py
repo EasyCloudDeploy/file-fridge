@@ -100,6 +100,188 @@ def test_list_files_filter_by_storage_type(
     assert files[0]["storage_type"] == StorageTypeSchema.COLD.value
 
 
+def test_list_files_filter_by_storage_location_id(
+    authenticated_client: TestClient,
+    db_session: Session,
+    monitored_path_factory,
+    storage_location,
+    tmp_path,
+):
+    """Test filtering cold files by a specific cold storage location."""
+    hot_path = tmp_path / "hot"
+    google_drive_path = tmp_path / "google_drive"
+    s3_path = tmp_path / "s3_archive"
+    google_drive_path.mkdir()
+    s3_path.mkdir()
+
+    storage_location.name = "Google Drive"
+    storage_location.path = str(google_drive_path)
+    s3_location = ColdStorageLocation(name="S3 Archive", path=str(s3_path))
+    db_session.add(s3_location)
+    db_session.commit()
+    db_session.refresh(storage_location)
+    db_session.refresh(s3_location)
+
+    monitored_path = monitored_path_factory("Advanced Storage", str(hot_path))
+    monitored_path.storage_locations.append(s3_location)
+    db_session.commit()
+    db_session.refresh(monitored_path)
+
+    now = datetime.now(timezone.utc)
+    google_drive_file = FileInventory(
+        path_id=monitored_path.id,
+        file_path=str(google_drive_path / "drive_file.txt"),
+        file_size=128,
+        file_mtime=now,
+        last_seen=now,
+        status=FileStatus.ACTIVE,
+        storage_type=StorageType.COLD,
+        cold_storage_location_id=storage_location.id,
+    )
+    s3_file = FileInventory(
+        path_id=monitored_path.id,
+        file_path=str(s3_path / "s3_file.txt"),
+        file_size=256,
+        file_mtime=now,
+        last_seen=now,
+        status=FileStatus.ACTIVE,
+        storage_type=StorageType.COLD,
+        cold_storage_location_id=s3_location.id,
+    )
+    db_session.add_all([google_drive_file, s3_file])
+    db_session.commit()
+
+    response = authenticated_client.get(f"/api/v1/files?storage_location_id={s3_location.id}")
+    assert response.status_code == 200
+
+    lines = response.content.decode().strip().split("\n")
+    metadata = json.loads(lines[0])
+    files = [json.loads(line)["data"] for line in lines[1:-1]]
+
+    assert metadata["total"] == 1
+    assert metadata["filters"]["storage_location_id"] == s3_location.id
+    assert len(files) == 1
+    assert files[0]["id"] == s3_file.id
+    assert files[0]["storage_location"]["id"] == s3_location.id
+    assert files[0]["storage_location_name"] == "S3 Archive"
+
+
+def test_list_files_sort_by_storage_location(
+    authenticated_client: TestClient,
+    db_session: Session,
+    monitored_path_factory,
+    storage_location,
+    tmp_path,
+):
+    """Test sorting cold files by cold storage location name."""
+    hot_path = tmp_path / "hot"
+    google_drive_path = tmp_path / "google_drive"
+    s3_path = tmp_path / "s3_archive"
+    google_drive_path.mkdir()
+    s3_path.mkdir()
+
+    storage_location.name = "Google Drive"
+    storage_location.path = str(google_drive_path)
+    s3_location = ColdStorageLocation(name="S3 Archive", path=str(s3_path))
+    db_session.add(s3_location)
+    db_session.commit()
+    db_session.refresh(storage_location)
+    db_session.refresh(s3_location)
+
+    monitored_path = monitored_path_factory("Sortable Storage", str(hot_path))
+    monitored_path.storage_locations.append(s3_location)
+    db_session.commit()
+    db_session.refresh(monitored_path)
+
+    now = datetime.now(timezone.utc)
+    s3_file = FileInventory(
+        path_id=monitored_path.id,
+        file_path=str(s3_path / "s3_file.txt"),
+        file_size=256,
+        file_mtime=now,
+        last_seen=now,
+        status=FileStatus.ACTIVE,
+        storage_type=StorageType.COLD,
+        cold_storage_location_id=s3_location.id,
+    )
+    google_drive_file = FileInventory(
+        path_id=monitored_path.id,
+        file_path=str(google_drive_path / "drive_file.txt"),
+        file_size=128,
+        file_mtime=now,
+        last_seen=now,
+        status=FileStatus.ACTIVE,
+        storage_type=StorageType.COLD,
+        cold_storage_location_id=storage_location.id,
+    )
+    db_session.add_all([s3_file, google_drive_file])
+    db_session.commit()
+
+    response = authenticated_client.get(
+        "/api/v1/files?storage_type=cold&sort_by=storage_location&sort_order=asc"
+    )
+    assert response.status_code == 200
+
+    lines = response.content.decode().strip().split("\n")
+    files = [json.loads(line)["data"] for line in lines[1:-1]]
+
+    assert [file["storage_location_name"] for file in files] == ["Google Drive", "S3 Archive"]
+
+
+def test_list_files_uses_original_path_as_display_path_for_remote_storage_reference(
+    authenticated_client: TestClient,
+    db_session: Session,
+    monitored_path_factory,
+    storage_location,
+    tmp_path,
+):
+    """Remote cold storage references should still show the user's original file path."""
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir()
+    monitored_path = monitored_path_factory("Remote Display", str(hot_path))
+    storage_location.path = "file_fridge"
+    db_session.commit()
+    db_session.refresh(storage_location)
+
+    original_path = str(hot_path / "Quarterly Report.pdf")
+    storage_reference = "gdrive://file_fridge/1UQlTBZ5WrNECHgs4PtrSZLl8MD6kC3a2"
+    now = datetime.now(timezone.utc)
+    inventory = FileInventory(
+        path_id=monitored_path.id,
+        file_path=storage_reference,
+        file_size=1024,
+        file_mtime=now,
+        last_seen=now,
+        status=FileStatus.ACTIVE,
+        storage_type=StorageType.COLD,
+        cold_storage_location_id=storage_location.id,
+        is_encrypted=True,
+    )
+    record = FileRecord(
+        path_id=monitored_path.id,
+        original_path=original_path,
+        cold_storage_path=storage_reference,
+        cold_storage_location_id=storage_location.id,
+        file_size=1024,
+        operation_type=OperationType.MOVE,
+        criteria_matched="manual_freeze",
+    )
+    db_session.add_all([inventory, record])
+    db_session.commit()
+
+    response = authenticated_client.get("/api/v1/files?storage_type=cold")
+    assert response.status_code == 200
+
+    lines = response.content.decode().strip().split("\n")
+    files = [json.loads(line)["data"] for line in lines[1:-1]]
+    file_data = next(file for file in files if file["id"] == inventory.id)
+
+    assert file_data["file_path"] == storage_reference
+    assert file_data["display_file_path"] == original_path
+    assert file_data["original_file_path"] == original_path
+    assert file_data["storage_reference"] == storage_reference
+
+
 def test_list_files_filter_by_file_status(
     authenticated_client: TestClient, file_inventory_factory, tmp_path
 ):

@@ -117,9 +117,11 @@ def _serialize_file(
     paths_map: dict,
     pinned_paths_set: Optional[set] = None,
     operation_lookup: Optional[dict] = None,
+    file_record_lookup: Optional[dict] = None,
 ) -> dict:
     """Serialize a FileInventory object to a dictionary for JSON output."""
     operation_lookup = operation_lookup or {}
+    file_record_lookup = file_record_lookup or {}
     operation_key = None
     if file.status == FileStatus.MIGRATING:
         if file.storage_type == StorageType.HOT:
@@ -128,11 +130,23 @@ def _serialize_file(
             operation_key = (file.path_id, file.file_path, "move_to_hot")
 
     operation = operation_lookup.get(operation_key, {}) if operation_key else {}
+    file_record = file_record_lookup.get((file.path_id, file.file_path))
+    original_file_path = file_record.original_path if file_record else None
+    display_file_path = (
+        original_file_path
+        if file.storage_type == StorageType.COLD
+        and original_file_path
+        and str(file.file_path).startswith(("gdrive://", "s3://"))
+        else file.file_path
+    )
 
     file_dict = {
         "id": file.id,
         "path_id": file.path_id,
         "file_path": file.file_path,
+        "display_file_path": display_file_path,
+        "original_file_path": original_file_path,
+        "storage_reference": file.file_path if display_file_path != file.file_path else None,
         "destination_path": operation.get("destination_path"),
         "storage_type": (
             file.storage_type.value if hasattr(file.storage_type, "value") else file.storage_type
@@ -164,6 +178,8 @@ def _serialize_file(
             for ft in file.tags
         ],
         "storage_location": None,
+        "storage_location_name": None,
+        "storage_location_backend_type": None,
         "path_name": paths_map.get(file.path_id).name if paths_map.get(file.path_id) else None,
         "is_pinned": file.file_path in pinned_paths_set if pinned_paths_set else False,
     }
@@ -174,6 +190,9 @@ def _serialize_file(
             file.file_path, monitored_path, storage_location_id=file.cold_storage_location_id
         )
         file_dict["storage_location"] = storage_loc
+        if storage_loc:
+            file_dict["storage_location_name"] = storage_loc.get("name")
+            file_dict["storage_location_backend_type"] = storage_loc.get("backend_type")
 
     return file_dict
 
@@ -341,6 +360,17 @@ def _apply_cursor_pagination(query: "Query", sort_field, cursor_data, is_descend
     last_id = cursor_data.get("id")
     last_sort_value = cursor_data.get("sort_value")
 
+    # Parse ISO datetime strings back to Python datetime objects so SQLAlchemy
+    # performs a proper datetime comparison instead of a string comparison.
+    # Without this, SQLite would compare e.g. "2024-01-01 12:00:00" (stored) against
+    # "2024-01-01T12:00:00" (cursor, with 'T' separator). Since space < 'T' in ASCII,
+    # every stored datetime satisfies the '<' condition, breaking keyset pagination.
+    if isinstance(last_sort_value, str):
+        try:
+            last_sort_value = datetime.fromisoformat(last_sort_value)
+        except ValueError:
+            pass
+
     if last_id is None:
         return query
 
@@ -378,9 +408,12 @@ def _generate_next_cursor(
         return None
 
     last_file = files_list[-1]
-    sort_value_raw = (
-        getattr(last_file, sort_by, None) if sort_by in valid_sort_fields else last_file.last_seen
-    )
+    if sort_by == "storage_location":
+        sort_value_raw = last_file.storage_location.name if last_file.storage_location else None
+    else:
+        sort_value_raw = (
+            getattr(last_file, sort_by, None) if sort_by in valid_sort_fields else last_file.last_seen
+        )
 
     if hasattr(sort_value_raw, "isoformat"):
         sort_value = sort_value_raw.isoformat()
@@ -436,7 +469,10 @@ def list_files(
     sort_by: Annotated[
         str,
         FastAPIQuery(
-            description="Sort field (file_path, file_size, last_seen, storage_type, file_extension)"
+            description=(
+                "Sort field (file_path, file_size, last_seen, storage_type, "
+                "file_extension, file_mtime, file_atime, file_ctime, status, storage_location)"
+            )
         ),
     ] = "last_seen",
     sort_order: Annotated[str, FastAPIQuery(description="Sort order (asc/desc)")] = "desc",
@@ -521,9 +557,16 @@ def list_files(
                 "storage_type": FileInventory.storage_type,
                 "file_mtime": FileInventory.file_mtime,
                 "file_atime": FileInventory.file_atime,
+                "file_ctime": FileInventory.file_ctime,
                 "file_extension": FileInventory.file_extension,
                 "status": FileInventory.status,
+                "storage_location": ColdStorageLocation.name,
             }
+            if sort_by == "storage_location":
+                query = query.outerjoin(
+                    ColdStorageLocation,
+                    FileInventory.cold_storage_location_id == ColdStorageLocation.id,
+                )
             sort_field = valid_sort_fields.get(sort_by, FileInventory.last_seen)
             is_descending = sort_order.lower() != "asc"
 
@@ -563,6 +606,20 @@ def list_files(
                 (op["path_id"], op.get("file_path"), op["operation"]): op
                 for op in scan_progress_manager.get_all_current_operations()
             }
+            cold_file_keys = {
+                (file.path_id, file.file_path)
+                for file in files_list
+                if file.storage_type == StorageType.COLD
+            }
+            file_record_lookup = {}
+            if cold_file_keys:
+                file_record_lookup = {
+                    (record.path_id, record.cold_storage_path): record
+                    for record in db.query(FileRecord)
+                    .filter(FileRecord.cold_storage_path.in_([key[1] for key in cold_file_keys]))
+                    .all()
+                    if (record.path_id, record.cold_storage_path) in cold_file_keys
+                }
 
             yield (
                 json.dumps(
@@ -579,6 +636,7 @@ def list_files(
                             "search": search,
                             "tag_ids": tag_id_list,
                             "is_pinned": is_pinned,
+                            "storage_location_id": storage_location_id,
                         },
                         "sort": {"by": sort_by, "order": sort_order},
                     }
@@ -589,7 +647,13 @@ def list_files(
             # Stream results
             for file in files_list:
                 try:
-                    file_dict = _serialize_file(file, paths_map, pinned_paths_set, operation_lookup)
+                    file_dict = _serialize_file(
+                        file,
+                        paths_map,
+                        pinned_paths_set,
+                        operation_lookup,
+                        file_record_lookup,
+                    )
                     yield json.dumps({"type": "file", "data": file_dict}) + "\n"
                     count += 1
                 except Exception as e:

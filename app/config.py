@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     # Override via REMOTE_TRANSFER_POOL_TIMEOUT environment variable
     remote_transfer_pool_timeout: float = 60.0
 
+    # Maximum number of remote transfer jobs to run at once.
+    # Override via REMOTE_TRANSFER_MAX_CONCURRENT environment variable
+    remote_transfer_max_concurrent: int = 2
+
     # Remote Instance URL (for inter-instance communication)
     # Override via FF_INSTANCE_URL environment variable
     ff_instance_url: Optional[str] = None

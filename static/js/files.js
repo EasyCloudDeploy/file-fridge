@@ -28,16 +28,59 @@ let pageSize = 200;
 
 // Streaming state
 let currentAbortController = null;
+// Monotonically increasing counter — each loadFilesList() call gets a new version.
+// processNDJSONStream checks this to discard messages from superseded requests.
+let currentStreamVersion = 0;
+
+// Maximum rows to keep in memory. When exceeded the oldest rows are evicted
+// from both allRowData and the grid to maintain a sliding window.
+const MAX_ROW_CACHE = 10000;
+
+// Stream timeout — abort if no new data arrives within this many ms.
+const STREAM_TIMEOUT_MS = 30000;
 
 // AG Grid instance
 let gridApi = null;
 let allRowData = [];
+let activeGridDropdown = null;
+
+// Debounce helper — returns a version of fn that waits delayMs after the last call.
+function debounce(fn, delayMs) {
+    let timer = null;
+    return function (...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delayMs);
+    };
+}
 
 // Utility functions
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+function parseStorageFilterValue(value) {
+    if (!value) {
+        return { storageType: null, storageLocationId: null };
+    }
+
+    if (value.startsWith('location:')) {
+        const storageLocationId = parseInt(value.slice('location:'.length), 10);
+        return {
+            storageType: 'cold',
+            storageLocationId: Number.isNaN(storageLocationId) ? null : storageLocationId
+        };
+    }
+
+    return { storageType: value, storageLocationId: null };
+}
+
+function storageFilterValueFromState() {
+    if (currentStorageLocationId !== null && currentStorageLocationId !== undefined) {
+        return `location:${currentStorageLocationId}`;
+    }
+    return currentStorageType || '';
 }
 
 function formatBytes(bytes) {
@@ -62,7 +105,20 @@ function showNotification(message, type = 'success') {
 // Cell Renderers for AG Grid
 function filePathCellRenderer(params) {
     if (!params.value) return '';
-    return `<code class="file-path-cell">${escapeHtml(params.value)}</code>`;
+    const file = params.data || {};
+    const displayPath = escapeHtml(params.value);
+    const storageReference = file.storage_reference ? escapeHtml(file.storage_reference) : null;
+
+    if (storageReference) {
+        return `
+            <div class="file-path-cell">
+                <code>${displayPath}</code>
+                <div><small class="text-muted" title="${storageReference}">Stored as ${storageReference}</small></div>
+            </div>
+        `;
+    }
+
+    return `<code class="file-path-cell">${displayPath}</code>`;
 }
 
 function destinationPathCellRenderer(params) {
@@ -141,6 +197,7 @@ function dateCellRenderer(params) {
 
 function statusCellRenderer(params) {
     const file = params.data;
+    if (!file) return '';
     let statusBadgeClass = 'bg-secondary';
     if (file.status === 'active') {
         statusBadgeClass = 'bg-success';
@@ -159,10 +216,13 @@ function statusCellRenderer(params) {
 
 function tagsCellRenderer(params) {
     const file = params.data;
+    if (!file) return '';
     let tagsHtml = '';
     if (file.tags && file.tags.length > 0) {
         tagsHtml = file.tags.map(ft => {
-            const color = ft.tag && ft.tag.color ? ft.tag.color : '#6c757d';
+            const rawColor = ft.tag && ft.tag.color ? ft.tag.color : '#6c757d';
+            // Validate hex color to prevent style injection
+            const color = /^#[0-9a-fA-F]{3,6}$/.test(rawColor) ? rawColor : '#6c757d';
             const name = ft.tag && ft.tag.name ? ft.tag.name : 'Unknown';
             return `<span class="badge me-1" style="background-color: ${color};">${escapeHtml(name)}</span>`;
         }).join('');
@@ -175,6 +235,7 @@ function tagsCellRenderer(params) {
 
 function actionsCellRenderer(params) {
     const file = params.data;
+    if (!file) return '';
     const isMigrating = file.status === 'migrating';
     const storageUnavailable = file.storage_type === 'cold' &&
         file.storage_location && file.storage_location.available === false;
@@ -241,14 +302,14 @@ const columnDefs = [
         pinned: 'left'
     },
     {
-        field: 'file_path',
+        field: 'display_file_path',
         headerName: 'File Path',
         cellRenderer: filePathCellRenderer,
         flex: 2,
         minWidth: 200,
         sortable: true,
         resizable: true,
-        tooltipField: 'file_path'
+        tooltipField: 'display_file_path'
     },
     {
         field: 'storage_type',
@@ -259,10 +320,11 @@ const columnDefs = [
         resizable: true
     },
     {
+        field: 'storage_location_name',
         headerName: 'Location',
         cellRenderer: storageLocationCellRenderer,
         width: 250,
-        sortable: false,
+        sortable: true,
         resizable: true
     },
     {
@@ -350,7 +412,10 @@ const gridOptions = {
         resizable: true,
         sortable: true
     },
-    animateRows: true,
+    // Animations add CPU cost with large datasets; disable for enterprise scale.
+    animateRows: false,
+    // Pre-render 25 rows beyond the visible viewport for smooth scrolling.
+    rowBuffer: 25,
     rowHeight: 48,
     headerHeight: 40,
     suppressCellFocus: true,
@@ -375,20 +440,22 @@ function onGridSortChanged(event) {
     if (sortModel.length > 0) {
         const sortedColumn = sortModel[0];
         const fieldToSortBy = {
-            'file_path': 'file_path',
+            'display_file_path': 'file_path',
             'storage_type': 'storage_type',
             'file_size': 'file_size',
             'file_mtime': 'file_mtime',
             'file_atime': 'file_atime',
             'file_ctime': 'file_ctime',
             'status': 'status',
-            'last_seen': 'last_seen'
+            'last_seen': 'last_seen',
+            'storage_location_name': 'storage_location'
         };
 
         const apiSortField = fieldToSortBy[sortedColumn.colId];
         if (apiSortField) {
             currentSortBy = apiSortField;
             currentSortOrder = sortedColumn.sort;
+            syncStateToUrl();
             loadFilesList();
         }
     }
@@ -399,14 +466,32 @@ function onGridReady(params) {
     gridApi = params.api;
 
     // Add click handler for action buttons
-    document.getElementById('filesGrid').addEventListener('click', handleActionClick);
+    const filesGridEl = document.getElementById('filesGrid');
+    filesGridEl.addEventListener('click', handleActionClick);
+    document.addEventListener('click', handlePortaledDropdownAction);
+    filesGridEl.addEventListener('show.bs.dropdown', function (event) {
+        bootstrap.Dropdown.getOrCreateInstance(event.target, gridDropdownConfig());
+        moveDropdownMenuToBody(event.target);
+    });
+    filesGridEl.addEventListener('hidden.bs.dropdown', restoreDropdownMenu);
+
+    // Fix #7: Ctrl/Cmd+A selects all loaded rows when the grid is focused.
+    filesGridEl.addEventListener('keydown', function (e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+            e.preventDefault();
+            if (gridApi) gridApi.selectAll();
+        }
+    });
 
     // Initialize dropdowns with proper Popper.js config for overflow issues
     initializeDropdowns();
 
     // Re-initialize dropdowns when grid updates
     gridApi.addEventListener('rowDataUpdated', initializeDropdowns);
-    gridApi.addEventListener('modelUpdated', initializeDropdowns);
+    gridApi.addEventListener('modelUpdated', function () {
+        hideOpenGridDropdown();
+        initializeDropdowns();
+    });
 }
 
 // Initialize Bootstrap dropdowns with custom Popper.js config
@@ -415,37 +500,83 @@ function initializeDropdowns() {
     setTimeout(() => {
         const dropdownToggles = document.querySelectorAll('#filesGrid [data-bs-toggle="dropdown"]');
         dropdownToggles.forEach(toggle => {
-            // Dispose existing dropdown instance if any
-            const existingInstance = bootstrap.Dropdown.getInstance(toggle);
-            if (existingInstance) {
-                existingInstance.dispose();
-            }
-
-            // Create or get existing dropdown with custom config
-            bootstrap.Dropdown.getOrCreateInstance(toggle, {
-                boundary: 'window',
-                popperConfig: function (defaultConfig) {
-                    return {
-                        ...defaultConfig,
-                        strategy: 'fixed',
-                        modifiers: [
-                            ...defaultConfig.modifiers,
-                            {
-                                name: 'preventOverflow',
-                                options: {
-                                    boundary: 'window'
-                                }
-                            }
-                        ]
-                    };
-                }
-            });
+            bootstrap.Dropdown.getOrCreateInstance(toggle, gridDropdownConfig());
         });
     }, 100);
 }
 
+function gridDropdownConfig() {
+    return {
+        boundary: 'window',
+        popperConfig: function (defaultConfig) {
+            return {
+                ...defaultConfig,
+                strategy: 'fixed',
+                modifiers: [
+                    ...defaultConfig.modifiers,
+                    {
+                        name: 'preventOverflow',
+                        options: {
+                            boundary: 'viewport'
+                        }
+                    }
+                ]
+            };
+        }
+    };
+}
+
+function getDropdownMenuForToggle(toggle) {
+    return toggle.closest('.btn-group')?.querySelector('.dropdown-menu') || null;
+}
+
+function moveDropdownMenuToBody(toggle) {
+    const menu = getDropdownMenuForToggle(toggle);
+    if (!menu || menu.parentElement === document.body) {
+        return;
+    }
+
+    activeGridDropdown = {
+        toggle,
+        menu,
+        parent: menu.parentNode,
+        nextSibling: menu.nextSibling
+    };
+    menu.classList.add('files-grid-dropdown-menu');
+    document.body.appendChild(menu);
+}
+
+function restoreDropdownMenu() {
+    if (!activeGridDropdown) {
+        return;
+    }
+
+    const { menu, parent, nextSibling } = activeGridDropdown;
+    menu.classList.remove('files-grid-dropdown-menu');
+    if (parent && parent.isConnected) {
+        parent.insertBefore(menu, nextSibling && nextSibling.isConnected ? nextSibling : null);
+    } else if (menu.isConnected) {
+        menu.remove();
+    }
+    activeGridDropdown = null;
+}
+
+function hideOpenGridDropdown() {
+    const openToggle = document.querySelector('#filesGrid [data-bs-toggle="dropdown"].show');
+    if (openToggle) {
+        const instance = bootstrap.Dropdown.getInstance(openToggle);
+        if (instance) {
+            instance.hide();
+        }
+    } else {
+        restoreDropdownMenu();
+    }
+}
+
 // Handle body scroll for infinite scrolling
 function onBodyScroll(event) {
+    hideOpenGridDropdown();
+
     if (!gridApi || isLoadingMore || !hasMoreData) return;
 
     const verticalScrollPosition = event.top;
@@ -491,6 +622,13 @@ function handleActionClick(event) {
     }
 }
 
+function handlePortaledDropdownAction(event) {
+    if (!event.target.closest('.files-grid-dropdown-menu')) {
+        return;
+    }
+    handleActionClick(event);
+}
+
 // Initialize AG Grid
 function initGrid() {
     const gridDiv = document.getElementById('filesGrid');
@@ -517,29 +655,34 @@ async function waitForAgGrid(maxWaitMs = 5000) {
     }
 }
 
-// Handle metadata message from stream
-function handleStreamMetadata(metadata) {
+// Handle metadata message from stream.
+// append=true means this is a load-more page — don't touch the loading overlay.
+function handleStreamMetadata(metadata, append = false) {
     totalItems = metadata.total;
     hasMoreData = metadata.has_more;
     nextCursor = metadata.next_cursor;
     pageSize = metadata.page_size || 200;
 
-    const loadingTextEl = document.getElementById('loading-text');
-    const progressContainer = document.getElementById('stream-progress-container');
-
-    if (loadingTextEl) {
-        loadingTextEl.textContent = `Loading ${totalItems.toLocaleString()} files...`;
-    }
-    if (progressContainer) {
-        progressContainer.style.display = 'block';
+    if (!append) {
+        const loadingTextEl = document.getElementById('loading-text');
+        const progressContainer = document.getElementById('stream-progress-container');
+        if (loadingTextEl) {
+            loadingTextEl.textContent = `Loading ${totalItems.toLocaleString()} files...`;
+        }
+        if (progressContainer) {
+            progressContainer.style.display = 'block';
+        }
     }
 }
 
-// Update progress bar during streaming
-function updateStreamProgress(received, total) {
+// Update progress bar during streaming.
+// Progress reflects how much of the CURRENT page has arrived (received/pageSize),
+// not the fraction of total matching files — that would show <1% for large datasets
+// and jump to 100% when the first small page completes.
+function updateStreamProgress(received) {
     const progressBar = document.getElementById('stream-progress');
-    if (progressBar && total > 0) {
-        const percent = Math.round((received / total) * 100);
+    if (progressBar && pageSize > 0) {
+        const percent = Math.min(100, Math.round((received / pageSize) * 100));
         progressBar.style.width = `${percent}%`;
         progressBar.setAttribute('aria-valuenow', percent);
     }
@@ -564,14 +707,42 @@ function updateStatusBar() {
     const statusBar = document.getElementById('status-bar');
     if (!statusBar) return;
 
-    const loadedCount = allRowData.length;
+    const loadedCount = gridApi ? gridApi.getDisplayedRowCount() : allRowData.length;
     const moreText = hasMoreData ? ' (scroll for more)' : '';
 
     statusBar.textContent = `Showing ${loadedCount.toLocaleString()} of ${totalItems.toLocaleString()} files${moreText}`;
 }
 
-// Process NDJSON stream
-async function processNDJSONStream(body, append = false) {
+// Flush a batch of file rows into the grid using applyTransaction (fix #11).
+// Uses a sliding window (fix #6): when allRowData would exceed MAX_ROW_CACHE,
+// evict the oldest rows from both allRowData and the grid before adding new ones.
+function flushBatchToGrid(batch) {
+    if (!batch.length) return;
+
+    if (allRowData.length + batch.length > MAX_ROW_CACHE) {
+        const overflow = allRowData.length + batch.length - MAX_ROW_CACHE;
+        const toEvict = allRowData.slice(0, overflow);
+        allRowData = allRowData.slice(overflow).concat(batch);
+        if (gridApi) gridApi.applyTransaction({ remove: toEvict, add: batch });
+    } else {
+        allRowData = allRowData.concat(batch);
+        if (gridApi) gridApi.applyTransaction({ add: batch });
+    }
+
+    // Reveal the grid as soon as the first rows arrive
+    const gridEl = document.getElementById('filesGrid');
+    if (gridEl && gridEl.style.display === 'none' && allRowData.length > 0) {
+        gridEl.style.display = 'block';
+        const emptyEl = document.getElementById('no-files-message');
+        if (emptyEl) emptyEl.style.display = 'none';
+    }
+}
+
+// Process an NDJSON response stream.
+//   append       — true when loading more pages (infinite scroll); false for fresh loads.
+//   streamVersion — the currentStreamVersion value at the time the request was made;
+//                   messages from superseded (stale) streams are silently discarded (fix #1).
+async function processNDJSONStream(body, append = false, streamVersion = null) {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -579,51 +750,46 @@ async function processNDJSONStream(body, append = false) {
     const batchSize = 50;
     let batch = [];
 
+    // Returns false if this stream has been superseded by a newer loadFilesList() call.
+    function isCurrentStream() {
+        return streamVersion === null || streamVersion === currentStreamVersion;
+    }
+
     try {
         while (true) {
             const { done, value } = await reader.read();
-
             if (done) break;
 
-            buffer += decoder.decode(value, { stream: true });
+            // Fix #1: discard stale stream as soon as possible
+            if (!isCurrentStream()) {
+                reader.cancel();
+                return;
+            }
 
+            buffer += decoder.decode(value, { stream: true });
             const lines = buffer.split('\n');
             buffer = lines.pop();
 
             for (const line of lines) {
                 if (!line.trim()) continue;
+                if (!isCurrentStream()) { reader.cancel(); return; }
 
                 try {
                     const message = JSON.parse(line);
-
                     switch (message.type) {
                         case 'metadata':
-                            handleStreamMetadata(message);
+                            // Pass append so load-more doesn't overwrite the loading overlay (fix #2)
+                            handleStreamMetadata(message, append);
                             break;
                         case 'file':
                             batch.push(message.data);
                             receivedCount++;
-
-                            // Process batch when it reaches size
                             if (batch.length >= batchSize) {
-                                allRowData = allRowData.concat(batch);
-
-                                if (gridApi) {
-                                    gridApi.setGridOption('rowData', allRowData);
-                                }
-                                
-                                // Show grid if we now have data
-                                const gridEl = document.getElementById('filesGrid');
-                                if (gridEl && gridEl.style.display === 'none' && allRowData.length > 0) {
-                                    gridEl.style.display = 'block';
-                                    const emptyEl = document.getElementById('no-files-message');
-                                    if (emptyEl) emptyEl.style.display = 'none';
-                                }
-                                
+                                flushBatchToGrid(batch);
                                 batch = [];
                             }
-
-                            updateStreamProgress(receivedCount, totalItems);
+                            // Fix #12: progress relative to current page, not total file count
+                            if (!append) updateStreamProgress(receivedCount);
                             break;
                         case 'complete':
                             handleStreamComplete(message);
@@ -638,31 +804,17 @@ async function processNDJSONStream(body, append = false) {
             }
         }
 
-        // Process remaining batch
+        // Flush any remaining partial batch
         if (batch.length > 0) {
-            allRowData = allRowData.concat(batch);
-            if (gridApi) {
-                gridApi.setGridOption('rowData', allRowData);
-            }
-            
-            // Show grid if we now have data
-            const gridEl = document.getElementById('filesGrid');
-            if (gridEl && gridEl.style.display === 'none' && allRowData.length > 0) {
-                gridEl.style.display = 'block';
-                const emptyEl = document.getElementById('no-files-message');
-                if (emptyEl) emptyEl.style.display = 'none';
-            }
+            flushBatchToGrid(batch);
         }
 
-        // Process any remaining buffer content
+        // Handle any leftover buffer content (e.g. final line without trailing newline)
         if (buffer.trim()) {
             try {
                 const message = JSON.parse(buffer);
-                if (message.type === 'complete') {
-                    handleStreamComplete(message);
-                } else if (message.type === 'error') {
-                    handleStreamError(message);
-                }
+                if (message.type === 'complete') handleStreamComplete(message);
+                else if (message.type === 'error') handleStreamError(message);
             } catch (e) {
                 console.error('Failed to parse final buffer:', buffer);
             }
@@ -693,7 +845,8 @@ async function loadMoreFiles() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        await processNDJSONStream(response.body, true);
+        // Pass current stream version so a concurrent loadFilesList() cancels this stream (fix #1)
+        await processNDJSONStream(response.body, true, currentStreamVersion);
         updateStatusBar();
 
     } catch (error) {
@@ -767,6 +920,13 @@ async function loadFilesList() {
     const emptyEl = document.getElementById('no-files-message');
     const statusBar = document.getElementById('status-bar');
 
+    // Fix #4: Snapshot selected IDs before clearing the grid, so we can restore them
+    // after the new data arrives (preserves selection across filter/sort changes).
+    const selectionSnapshot = new Set(selectedFiles.map(f => f.id));
+
+    // Fix #1: Increment version so any in-flight streams (including load-more) know to stop.
+    const myVersion = ++currentStreamVersion;
+
     // Abort any in-progress stream
     if (currentAbortController) {
         currentAbortController.abort();
@@ -801,6 +961,11 @@ async function loadFilesList() {
     // Reset state
     totalItems = 0;
 
+    // Fix #2: Abort the stream if no data arrives within STREAM_TIMEOUT_MS.
+    const timeoutId = setTimeout(() => {
+        if (currentAbortController) currentAbortController.abort();
+    }, STREAM_TIMEOUT_MS);
+
     try {
         const params = buildQueryParams();
         const url = `${API_BASE_URL}/files?${params.toString()}`;
@@ -813,8 +978,8 @@ async function loadFilesList() {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        // Process NDJSON stream
-        await processNDJSONStream(response.body);
+        // Process NDJSON stream — pass version so stale messages self-discard (fix #1)
+        await processNDJSONStream(response.body, false, myVersion);
 
         // Show content or empty message based on actual received data
         if (allRowData.length === 0) {
@@ -825,15 +990,41 @@ async function loadFilesList() {
             if (emptyEl) emptyEl.style.display = 'none';
         }
 
+        // Fix #4: Restore as many previously-selected rows as the new dataset contains.
+        if (selectionSnapshot.size > 0 && gridApi) {
+            let restored = 0;
+            gridApi.forEachNode(node => {
+                if (selectionSnapshot.has(node.data.id)) {
+                    node.setSelected(true);
+                    restored++;
+                }
+            });
+            const lost = selectionSnapshot.size - restored;
+            if (lost > 0) {
+                showNotification(
+                    `${lost} previously selected file${lost > 1 ? 's are' : ' is'} not visible with the current filters.`,
+                    'warning'
+                );
+            }
+        }
+
     } catch (error) {
         if (error.name === 'AbortError') {
-            console.log('Stream aborted');
+            // Fix #2: Distinguish user-triggered aborts (filter change) from timeouts.
+            if (myVersion !== currentStreamVersion) {
+                // A newer request superseded this one — expected, not an error.
+                return;
+            }
+            console.error('Stream timed out or was aborted');
+            showNotification('Loading timed out. Check your connection and try again.', 'error');
+            if (emptyEl) emptyEl.style.display = 'block';
             return;
         }
         console.error('Error loading files:', error);
         showNotification(`Failed to load files: ${error.message}`, 'error');
         if (emptyEl) emptyEl.style.display = 'block';
     } finally {
+        clearTimeout(timeoutId);
         if (loadingEl) loadingEl.style.display = 'none';
         currentAbortController = null;
     }
@@ -854,6 +1045,7 @@ function resetFilters() {
     const storageSelect = document.getElementById('storage_filter');
     if (storageSelect) storageSelect.value = '';
     currentStorageType = null;
+    currentStorageLocationId = null;
 
     const statusSelect = document.getElementById('status_filter');
     if (statusSelect) statusSelect.value = '';
@@ -892,10 +1084,6 @@ function resetFilters() {
     if (maxMtimeInput) maxMtimeInput.value = '';
     currentMaxMtime = null;
 
-    const storageLocationSelect = document.getElementById('location_id_filter');
-    if (storageLocationSelect) storageLocationSelect.value = '';
-    currentStorageLocationId = null;
-
     // Reset tags
     clearTagFilter();
 }
@@ -923,11 +1111,7 @@ async function loadPathsForFilter() {
         // Setup storage filter
         const storageSelect = document.getElementById('storage_filter');
         if (storageSelect) {
-            const urlParams = new URLSearchParams(window.location.search);
-            const currentStorage = urlParams.get('storage_type');
-            if (currentStorage) {
-                storageSelect.value = currentStorage;
-            }
+            storageSelect.value = storageFilterValueFromState();
 
             storageSelect.addEventListener('change', function () {
                 updateFilters();
@@ -947,6 +1131,32 @@ async function loadPathsForFilter() {
     }
 }
 
+// Fix #10: Persist current filter + sort state to the URL so the view survives a
+// page refresh or can be shared as a link.
+function syncStateToUrl() {
+    const params = new URLSearchParams();
+    if (currentPathId) params.set('path_id', currentPathId);
+    if (currentStorageLocationId) {
+        params.set('storage_location_id', currentStorageLocationId);
+    } else if (currentStorageType) {
+        params.set('storage_type', currentStorageType);
+    }
+    if (currentFileStatus) params.set('status', currentFileStatus);
+    if (currentSearch) params.set('search', currentSearch);
+    if (currentSortBy && currentSortBy !== 'last_seen') params.set('sort_by', currentSortBy);
+    if (currentSortOrder && currentSortOrder !== 'desc') params.set('sort_order', currentSortOrder);
+    if (currentExtension) params.set('extension', currentExtension);
+    if (currentMimeType) params.set('mime_type', currentMimeType);
+    if (currentHasChecksum !== null) params.set('has_checksum', currentHasChecksum);
+    if (currentIsPinned !== null) params.set('is_pinned', currentIsPinned);
+    if (currentMinSize !== null) params.set('min_size', currentMinSize);
+    if (currentMaxSize !== null) params.set('max_size', currentMaxSize);
+    if (currentTagIds.length > 0) params.set('tag_ids', currentTagIds.join(','));
+
+    const qs = params.toString();
+    window.history.replaceState({}, '', qs ? `?${qs}` : window.location.pathname);
+}
+
 // Update filters and reload files
 function updateFilters() {
     const searchInput = document.getElementById('search_input');
@@ -958,7 +1168,6 @@ function updateFilters() {
     const mimeInput = document.getElementById('mime_filter');
     const checksumSelect = document.getElementById('checksum_filter');
     const pinnedSelect = document.getElementById('pinned_filter');
-    const locationIdSelect = document.getElementById('location_id_filter');
     const minSizeInput = document.getElementById('min_size_filter');
     const maxSizeInput = document.getElementById('max_size_filter');
     const minMtimeInput = document.getElementById('min_mtime_filter');
@@ -966,7 +1175,9 @@ function updateFilters() {
 
     currentSearch = searchInput ? searchInput.value.trim() : '';
     currentPathId = pathSelect && pathSelect.value ? parseInt(pathSelect.value) : null;
-    currentStorageType = storageSelect && storageSelect.value ? storageSelect.value : null;
+    const storageFilter = parseStorageFilterValue(storageSelect ? storageSelect.value : '');
+    currentStorageType = storageFilter.storageType;
+    currentStorageLocationId = storageFilter.storageLocationId;
     currentFileStatus = statusSelect && statusSelect.value ? statusSelect.value : null;
 
     currentExtension = extensionInput ? extensionInput.value.trim() : '';
@@ -975,7 +1186,6 @@ function updateFilters() {
     currentHasChecksum = checksumSelect && checksumSelect.value ? checksumSelect.value === 'true' : null;
     currentIsPinned = pinnedSelect && pinnedSelect.value ? pinnedSelect.value === 'true' : null;
 
-    currentStorageLocationId = locationIdSelect && locationIdSelect.value ? parseInt(locationIdSelect.value) : null;
     currentMinSize = minSizeInput && minSizeInput.value ? parseInt(minSizeInput.value) : null;
     currentMaxSize = maxSizeInput && maxSizeInput.value ? parseInt(maxSizeInput.value) : null;
 
@@ -1003,6 +1213,7 @@ function updateFilters() {
             .map(val => parseInt(val));
     }
 
+    syncStateToUrl();
     loadFilesList();
 }
 
@@ -1040,10 +1251,26 @@ async function loadStorageLocationsForFilter() {
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const locations = await response.json();
 
-        const select = document.getElementById('location_id_filter');
+        const select = document.getElementById('storage_filter');
         if (select) {
-            select.innerHTML = '<option value="">All Locations</option>' +
-                locations.map(loc => `<option value="${loc.id}">${escapeHtml(loc.name)}</option>`).join('');
+            const selectedValue = storageFilterValueFromState();
+            const locationOptions = locations.map(loc => {
+                const backendType = (loc.backend_type || 'local').toUpperCase();
+                const label = `${loc.name} (${backendType})`;
+                return `<option value="location:${loc.id}">${escapeHtml(label)}</option>`;
+            }).join('');
+
+            select.innerHTML = `
+                <option value="">All</option>
+                <option value="hot">Hot</option>
+                <option value="cold">Cold</option>
+                ${locations.length ? `<optgroup label="Cold Locations">${locationOptions}</optgroup>` : ''}
+            `;
+
+            select.value = selectedValue;
+            if (selectedValue && select.value !== selectedValue) {
+                select.value = currentStorageType || '';
+            }
         }
     } catch (error) {
         console.error('Error loading storage locations for filter:', error);
@@ -2391,14 +2618,42 @@ async function initFilesPage() {
     await waitForAgGrid();
     filesPageInitialized = true;
 
+    // Fix #10: Restore full filter + sort state from URL params so a shared link or
+    // page refresh lands back in the same view.
     const urlParams = new URLSearchParams(window.location.search);
     currentPathId = urlParams.get('path_id') ? parseInt(urlParams.get('path_id')) : null;
     currentStorageType = urlParams.get('storage_type') || null;
+    currentStorageLocationId = urlParams.get('storage_location_id')
+        ? parseInt(urlParams.get('storage_location_id'), 10)
+        : null;
+    if (currentStorageLocationId !== null && !Number.isNaN(currentStorageLocationId)) {
+        currentStorageType = 'cold';
+    } else {
+        currentStorageLocationId = null;
+    }
     currentFileStatus = urlParams.get('status') || null;
+    currentSortBy = urlParams.get('sort_by') || 'last_seen';
+    currentSortOrder = urlParams.get('sort_order') || 'desc';
+    currentSearch = urlParams.get('search') || '';
+    currentExtension = urlParams.get('extension') || '';
+    currentMimeType = urlParams.get('mime_type') || '';
+    const hasChecksumParam = urlParams.get('has_checksum');
+    currentHasChecksum = hasChecksumParam !== null ? hasChecksumParam === 'true' : null;
+    const isPinnedParam = urlParams.get('is_pinned');
+    currentIsPinned = isPinnedParam !== null ? isPinnedParam === 'true' : null;
+    currentMinSize = urlParams.get('min_size') ? parseInt(urlParams.get('min_size')) : null;
+    currentMaxSize = urlParams.get('max_size') ? parseInt(urlParams.get('max_size')) : null;
+    const tagIdsParam = urlParams.get('tag_ids');
+    currentTagIds = tagIdsParam ? tagIdsParam.split(',').map(Number).filter(Boolean) : [];
 
+    // Sync URL-restored values to visible form controls
     const statusSelect = document.getElementById('status_filter');
     if (statusSelect && currentFileStatus) {
         statusSelect.value = currentFileStatus;
+    }
+    const searchInput = document.getElementById('search_input');
+    if (searchInput && currentSearch) {
+        searchInput.value = currentSearch;
     }
 
     // Initialize AG Grid
@@ -2415,9 +2670,13 @@ async function initFilesPage() {
         confirmBtn.addEventListener('click', thawFile);
     }
 
-    const searchInput = document.getElementById('search_input');
-    if (searchInput) {
-        searchInput.addEventListener('keypress', function (e) {
+    const searchInputEl = document.getElementById('search_input');
+    if (searchInputEl) {
+        // Fix #5: Debounced input handler for type-as-you-search (400 ms delay).
+        // The Enter key / Search button still trigger immediately.
+        const debouncedSearch = debounce(updateFilters, 400);
+        searchInputEl.addEventListener('input', debouncedSearch);
+        searchInputEl.addEventListener('keypress', function (e) {
             if (e.key === 'Enter') {
                 updateFilters();
             }

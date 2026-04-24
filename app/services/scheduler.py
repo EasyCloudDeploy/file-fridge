@@ -93,17 +93,11 @@ class SchedulerService:
         """Stop the scheduler gracefully."""
         if self.scheduler.running:
             try:
-                # Shutdown gracefully, waiting for running jobs to complete
-                self.scheduler.shutdown(wait=True)
-                logger.info("Scheduler stopped gracefully")
+                # Do not wait for long-running transfer or storage jobs during container shutdown.
+                self.scheduler.shutdown(wait=False)
+                logger.info("Scheduler stopped")
             except Exception:
                 logger.warning("Error during scheduler shutdown")
-                try:
-                    # Force shutdown if graceful shutdown fails
-                    self.scheduler.shutdown(wait=False)
-                    logger.info("Scheduler force-stopped")
-                except Exception as e2:
-                    logger.exception(f"Error during forced scheduler shutdown: {e2}")
 
     def _load_existing_jobs(self):
         """Load existing monitored paths as scheduled jobs."""
@@ -486,14 +480,7 @@ def process_remote_transfers_job_func():
     import asyncio
 
     try:
-        # Create a new event loop for this thread if needed
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        loop.run_until_complete(remote_transfer_service.process_pending_transfers())
+        asyncio.run(remote_transfer_service.process_pending_transfers())
     except Exception:
         logger.exception("Error in remote transfer job")
 
@@ -515,6 +502,24 @@ def _check_path_permissions(path: str) -> list[str]:
     if not os.access(path, os.W_OK):
         missing.append("write")
     return missing
+
+
+def _local_disk_space_level(location) -> tuple[str | None, float | None]:
+    """Return the local disk-space alert level for a cold storage location."""
+    backend = get_backend(location)
+    if not backend.capabilities().supports_local_path_stats:
+        return None, None
+
+    total, _used, free = shutil.disk_usage(location.path)
+    if total <= 0:
+        return None, None
+
+    free_percent = (free / total) * 100
+    if free_percent <= location.critical_threshold_percent:
+        return "critical", free_percent
+    if free_percent <= location.caution_threshold_percent:
+        return "caution", free_percent
+    return None, free_percent
 
 
 def check_storage_permissions_job_func() -> None:
@@ -551,6 +556,24 @@ def check_storage_permissions_job_func() -> None:
                 if backend.capabilities().supports_local_path_stats:
                     missing = _check_path_permissions(location.path)
                     if missing:
+                        disk_space_level, free_percent = _local_disk_space_level(location)
+                        if disk_space_level == "critical" and missing == ["write"]:
+                            if location.permissions_error is not None:
+                                logger.info(
+                                    "Clearing stale permission error on cold storage '%s'; "
+                                    "path is writable enough to inspect but disk space is critical",
+                                    location.name,
+                                )
+                            location.permissions_error = None
+                            logger.warning(
+                                "Cold storage '%s' has critical low disk space (%.1f%% free; "
+                                "threshold: %s%%); not reporting this as a write permission error",
+                                location.name,
+                                free_percent,
+                                location.critical_threshold_percent,
+                            )
+                            continue
+
                         error = f"Missing {' and '.join(missing)} permission on cold storage path: {location.path}"
                         if location.permissions_error != error:
                             location.permissions_error = error
