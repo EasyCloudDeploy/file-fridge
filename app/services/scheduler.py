@@ -93,17 +93,11 @@ class SchedulerService:
         """Stop the scheduler gracefully."""
         if self.scheduler.running:
             try:
-                # Shutdown gracefully, waiting for running jobs to complete
-                self.scheduler.shutdown(wait=True)
-                logger.info("Scheduler stopped gracefully")
+                # Do not wait for long-running transfer or storage jobs during container shutdown.
+                self.scheduler.shutdown(wait=False)
+                logger.info("Scheduler stopped")
             except Exception:
                 logger.warning("Error during scheduler shutdown")
-                try:
-                    # Force shutdown if graceful shutdown fails
-                    self.scheduler.shutdown(wait=False)
-                    logger.info("Scheduler force-stopped")
-                except Exception as e2:
-                    logger.exception(f"Error during forced scheduler shutdown: {e2}")
 
     def _load_existing_jobs(self):
         """Load existing monitored paths as scheduled jobs."""
@@ -486,14 +480,7 @@ def process_remote_transfers_job_func():
     import asyncio
 
     try:
-        # Create a new event loop for this thread if needed
-        try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        loop.run_until_complete(remote_transfer_service.process_pending_transfers())
+        asyncio.run(remote_transfer_service.process_pending_transfers())
     except Exception:
         logger.exception("Error in remote transfer job")
 

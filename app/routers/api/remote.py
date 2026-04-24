@@ -1348,7 +1348,6 @@ def browse_remote_files(
 @router.post("/serve-transfer", tags=[RESOURCE_REMOTE_CONNECTIONS])
 async def serve_transfer_request(
     request: Request,
-    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     remote_conn: RemoteConnection = Depends(verify_remote_signature),
 ):
@@ -1407,8 +1406,11 @@ async def serve_transfer_request(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
-    # Queue the transfer to run in background
-    background_tasks.add_task(remote_transfer_service.run_transfer, job.id)
+    # Detach the transfer from the request lifecycle so shutdown is not blocked
+    # waiting for Starlette background tasks to finish a long file upload.
+    import asyncio
+
+    asyncio.create_task(remote_transfer_service.run_transfer(job.id))
 
     return {"status": "accepted", "job_id": job.id}
 

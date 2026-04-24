@@ -191,25 +191,44 @@ class RemoteTransferService:
 
             logger.info(f"Found {len(pending_jobs)} pending transfer job(s)")
 
-            # Process each job in parallel (up to a reasonable limit)
-            tasks = []
-            for job in pending_jobs[:10]:  # Process max 10 jobs concurrently
-                logger.info(f"Starting transfer job {job.id}")
+            # Process jobs in parallel, but keep concurrency below the DB pool size.
+            job_ids = []
+            for job in pending_jobs[: settings.remote_transfer_max_concurrent]:
+                job_id = job.id
+                logger.info(f"Starting transfer job {job_id}")
                 # Update status to in_progress
                 job.transition_status(TransferStatus.IN_PROGRESS)
                 db.commit()
-
-                # Launch the transfer as an async task
-                tasks.append(self.run_transfer(job.id))
-
-            # Wait for all tasks to complete
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-
+                job_ids.append(job_id)
         except Exception:
             logger.exception("Error processing pending transfers")
+            return
         finally:
             db.close()
+
+        # Launch transfers only after releasing the scheduler's DB session.
+        tasks = [self.run_transfer(job_id) for job_id in job_ids]
+
+        # Wait for all tasks to complete
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def recover_interrupted_transfers(self, db: Session) -> int:
+        """Return interrupted in-progress remote transfers to the pending queue."""
+        interrupted_jobs = (
+            db.query(RemoteTransferJob)
+            .filter(RemoteTransferJob.status == TransferStatus.IN_PROGRESS)
+            .all()
+        )
+        for job in interrupted_jobs:
+            logger.warning("Recovering interrupted remote transfer job %s", job.id)
+            job.status = TransferStatus.PENDING
+            job.error_message = "Recovered after interrupted application shutdown"
+            job.current_speed = 0
+            job.eta = None
+        if interrupted_jobs:
+            db.commit()
+        return len(interrupted_jobs)
 
     async def _is_final_chunk(self, file_handle) -> bool:
         """Check if we've reached the end of the file."""
@@ -221,7 +240,7 @@ class RemoteTransferService:
 
     def _update_job_progress(
         self, job: RemoteTransferJob, bytes_transferred: int, start_time: float, db: Session
-    ):
+    ) -> dict:
         """Update job progress, speed, and ETA."""
         job.current_size += bytes_transferred
         job.progress = int((job.current_size / job.total_size) * 100) if job.total_size > 0 else 0
@@ -241,7 +260,15 @@ class RemoteTransferService:
             job.current_speed = 0
             job.eta = None
 
+        progress = {
+            "current_size": job.current_size,
+            "total_size": job.total_size,
+            "progress": job.progress,
+            "current_speed": job.current_speed,
+            "eta": job.eta,
+        }
         db.commit()
+        return progress
 
     def _perform_ecdh_key_exchange(self, conn: RemoteConnection):
         """
@@ -298,9 +325,11 @@ class RemoteTransferService:
             "remote_path_id": str(job.remote_monitored_path_id),
             "storage_type": job.storage_type.value,
         }
+        job_id = job.id
         # Build a request to sign it
         req = httpx.Request("GET", url, params=params)
         signed_headers = await get_signed_headers(db, req.method, str(req.url), req.content)
+        db.commit()
 
         try:
             response = await client.get(
@@ -309,7 +338,7 @@ class RemoteTransferService:
             response.raise_for_status()
             return response.json()
         except Exception:
-            logger.debug(f"Failed to get remote status for job {job.id}, starting fresh")
+            logger.debug(f"Failed to get remote status for job {job_id}, starting fresh")
             return {"size": 0, "status": "not_found"}
 
     async def _send_chunks(
@@ -324,6 +353,8 @@ class RemoteTransferService:
 
         start_time_ts = time.time()
         source_path = Path(job.source_path)
+        conn_url = conn.url.rstrip("/")
+        job_id = job.id
 
         remote_status = await self._get_remote_status(db, client, conn, job)
         remote_size = remote_status.get("size", 0)
@@ -356,18 +387,26 @@ class RemoteTransferService:
                 )
 
                 # --- Signing and Header construction ---
-                url = f"{conn.url.rstrip('/')}/api/v1/remote/receive"
+                url = f"{conn_url}/api/v1/remote/receive"
+                job_values = {
+                    "id": str(job_id),
+                    "relative_path": job.relative_path,
+                    "remote_monitored_path_id": str(job.remote_monitored_path_id),
+                    "storage_type": job.storage_type.value,
+                    "total_size": str(job.total_size),
+                }
                 signed_headers = await get_signed_headers(db, "POST", url, final_chunk)
+                db.commit()
 
                 headers = {
-                    "X-Job-ID": str(job.id),
+                    "X-Job-ID": job_values["id"],
                     "X-Chunk-Index": str(chunk_idx),
                     "X-Is-Final": "true" if is_final else "false",
-                    "X-Relative-Path": job.relative_path,
-                    "X-Remote-Path-ID": str(job.remote_monitored_path_id),
-                    "X-Storage-Type": job.storage_type.value,
+                    "X-Relative-Path": job_values["relative_path"],
+                    "X-Remote-Path-ID": job_values["remote_monitored_path_id"],
+                    "X-Storage-Type": job_values["storage_type"],
                     "X-Encryption-Nonce": nonce.hex() if use_encryption else "",
-                    "X-File-Size": str(job.total_size),
+                    "X-File-Size": job_values["total_size"],
                     **signed_headers,
                 }
                 if use_encryption:
@@ -375,7 +414,7 @@ class RemoteTransferService:
                 # --- End Header Construction ---
 
                 logger.debug(
-                    f"Sending chunk {chunk_idx} for job {job.id} to {url} "
+                    f"Sending chunk {chunk_idx} for job {job_id} to {url} "
                     f"(size: {len(final_chunk)} bytes, is_final: {is_final})"
                 )
                 logger.debug(
@@ -402,23 +441,25 @@ class RemoteTransferService:
                     # Log the full error response for debugging
                     error_detail = response.text if response.text else "No error details provided"
                     logger.error(
-                        f"Chunk {chunk_idx} upload failed for job {job.id}: "
+                        f"Chunk {chunk_idx} upload failed for job {job_id}: "
                         f"Status {response.status_code}, Response: {error_detail}"
                     )
                     raise
 
                 chunk_idx += 1
-                self._update_job_progress(job, len(chunk), start_time_ts, db)
+                progress = self._update_job_progress(job, len(chunk), start_time_ts, db)
 
                 # Log progress at reasonable intervals (approx every 10%)
-                if job.total_size > 0:
-                    chunks_per_10_percent = max(1, (job.total_size // CHUNK_SIZE) // 10)
+                if progress["total_size"] > 0:
+                    chunks_per_10_percent = max(1, (progress["total_size"] // CHUNK_SIZE) // 10)
                     if chunk_idx % chunks_per_10_percent == 0 or is_final:
-                        eta_str = f", ETA: {job.eta}s" if job.eta is not None else ""
-                        speed_mb = job.current_speed / (1024 * 1024) if job.current_speed else 0
+                        eta = progress["eta"]
+                        eta_str = f", ETA: {eta}s" if eta is not None else ""
+                        current_speed = progress["current_speed"]
+                        speed_mb = current_speed / (1024 * 1024) if current_speed else 0
                         logger.info(
-                            f"Transfer Job {job.id} progress: {job.progress}% "
-                            f"({job.current_size}/{job.total_size} bytes, "
+                            f"Transfer Job {job_id} progress: {progress['progress']}% "
+                            f"({progress['current_size']}/{progress['total_size']} bytes, "
                             f"Speed: {speed_mb:.2f} MB/s{eta_str})"
                         )
 
@@ -430,6 +471,10 @@ class RemoteTransferService:
             if not job:
                 logger.error(f"Transfer job {job_id} not found")
                 return
+
+            if job.status == TransferStatus.PENDING:
+                job.transition_status(TransferStatus.IN_PROGRESS)
+                db.commit()
 
             logger.info(
                 f"Starting transfer job {job_id} ({job.direction.value}): "
@@ -522,6 +567,7 @@ class RemoteTransferService:
                             json_payload, sort_keys=True, separators=(",", ":")
                         ).encode("utf-8")
                         signed_headers = await get_signed_headers(db, "POST", url, body_bytes)
+                        db.commit()
 
                         verify_response = await client.post(
                             url,
