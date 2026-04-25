@@ -45,3 +45,20 @@ class TestBrowserService:
         with pytest.raises(HTTPException) as exc:
             check_path_permission(db_session, viewer, Path("/tmp"))
         assert exc.value.status_code == 403
+
+    def test_check_path_permission_traversal_denied(self, db_session, tmp_path):
+        """Test that paths with traversal elements (..) are correctly denied."""
+        hot_dir = tmp_path / "allowed_hot"
+        hot_dir.mkdir()
+        db_session.add(MonitoredPath(name="Allowed", source_path=str(hot_dir)))
+        db_session.commit()
+
+        viewer = User(username="viewer", roles=["viewer"])
+
+        # Malicious path constructed using textual /../ to escape the allowed directory
+        malicious_path = Path(f"{hot_dir}/../malicious_file.txt")
+
+        # Even if it looks like it's inside allowed_hot initially, resolve() should catch it
+        with pytest.raises(HTTPException) as exc:
+            check_path_permission(db_session, viewer, malicious_path)
+        assert exc.value.status_code == 403
