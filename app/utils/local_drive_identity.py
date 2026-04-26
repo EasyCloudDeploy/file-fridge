@@ -7,18 +7,17 @@ import plistlib
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
 
 from app.models import ColdStorageBackendType, ColdStorageLocation
 
 
-def _diskutil_info(path: Path) -> Dict:
+def _diskutil_info(path: Path) -> dict:
     """Return diskutil plist info for a path on macOS, or empty dict if unavailable."""
     if platform.system() != "Darwin":
         return {}
     try:
         proc = subprocess.run(
-            ["diskutil", "info", "-plist", str(path)],
+            ["diskutil", "info", "-plist", str(path.absolute())],
             check=True,
             capture_output=True,
             text=False,
@@ -28,7 +27,7 @@ def _diskutil_info(path: Path) -> Dict:
         return {}
 
 
-def detect_local_drive_identity(path: Path) -> Dict[str, Optional[str]]:
+def detect_local_drive_identity(path: Path) -> dict[str, str | None]:
     """
     Detect local drive identity from path metadata.
 
@@ -39,7 +38,7 @@ def detect_local_drive_identity(path: Path) -> Dict[str, Optional[str]]:
     - is_removable: whether the volume appears removable
     - is_connected: whether path currently resolves
     """
-    info: Dict[str, Optional[str]] = {
+    info: dict[str, str | None] = {
         "identifier": None,
         "label": None,
         "mount_path": None,
@@ -81,7 +80,7 @@ def detect_local_drive_identity(path: Path) -> Dict[str, Optional[str]]:
 
 
 def update_local_drive_identity_fields(
-    location: ColdStorageLocation, now: Optional[datetime] = None
+    location: ColdStorageLocation, now: datetime | None = None
 ) -> None:
     """Refresh local-drive identity/status fields in-place for a location."""
     if location.backend_type != ColdStorageBackendType.LOCAL:
