@@ -13,6 +13,13 @@
         }
     }
 
+    function extractErrorMessage(errorData, fallback) {
+        const detail = errorData && errorData.detail;
+        if (!detail) return fallback;
+        if (Array.isArray(detail)) return detail.map(e => e.msg || JSON.stringify(e)).join('; ');
+        return String(detail);
+    }
+
     function toLocalDate(value) {
         if (!value) return 'Never';
         const date = new Date(value);
@@ -95,7 +102,7 @@
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ detail: 'Request failed' }));
-                throw new Error(errorData.detail || 'Could not save P2P network');
+                throw new Error(extractErrorMessage(errorData, 'Could not save P2P network'));
             }
 
             toastSuccess('P2P network configuration saved');
@@ -129,7 +136,7 @@
 
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ detail: 'Request failed' }));
-                throw new Error(errorData.detail || 'Failed to join peer');
+                throw new Error(extractErrorMessage(errorData, 'Failed to join peer'));
             }
 
             toastSuccess('Peer joined');
@@ -142,17 +149,21 @@
     }
 
     async function syncPeers() {
+        const syncBtn = document.querySelector('#sync-p2p-peers-btn');
+        if (syncBtn) syncBtn.disabled = true;
         try {
             const response = await authenticatedFetch('/api/v1/p2p/sync', { method: 'POST' });
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ detail: 'Sync failed' }));
-                throw new Error(errorData.detail || 'Sync failed');
+                throw new Error(extractErrorMessage(errorData, 'Sync failed'));
             }
             await loadPeers();
             toastSuccess('Peer manifests synced');
         } catch (error) {
             console.error('Failed to sync peers:', error);
             toastError(error.message);
+        } finally {
+            if (syncBtn) syncBtn.disabled = false;
         }
     }
 
@@ -217,7 +228,9 @@
         await loadPeers();
     }
 
-    window.runWhenFileFridgeReady(() => {
+    if (typeof window.runWhenFileFridgeReady === 'function') {
+        window.runWhenFileFridgeReady(() => { void initP2PSettings(); });
+    } else {
         void initP2PSettings();
-    });
+    }
 })();

@@ -770,6 +770,7 @@ class P2PNetworkConfig(Base):
     id = Column(Integer, primary_key=True, index=True)
     network_name = Column(String, nullable=False, default="File Fridge P2P")
     psk_hash = Column(String, nullable=False, unique=True, index=True)
+    # Accepts connections from arbitrary peers on the LAN/Internet; restrict via firewall or config.
     listen_host = Column(String, nullable=False, default="0.0.0.0")
     listen_port = Column(Integer, nullable=False, default=9119)
     enabled = Column(Boolean, nullable=False, default=True, server_default=sa.text("'1'"))

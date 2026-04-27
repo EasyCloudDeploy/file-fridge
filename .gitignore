@@ -165,6 +165,10 @@ logs/
 test_run/
 playwright-report/
 test-results/
+*-results.json
+*-retry.json
+final-debug.json
+latest-failure.json
 
 # Accidental local directory from gdrive:// path handling
 gdrive:/

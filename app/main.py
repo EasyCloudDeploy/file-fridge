@@ -47,8 +47,8 @@ from app.routers.api import files as api_files
 from app.routers.api import identity as api_identity
 from app.routers.api import migrations as api_migrations
 from app.routers.api import notifiers as api_notifiers
-from app.routers.api import paths as api_paths
 from app.routers.api import p2p as api_p2p
+from app.routers.api import paths as api_paths
 from app.routers.api import remote as api_remote
 from app.routers.api import stats as api_stats
 from app.routers.api import storage as api_storage

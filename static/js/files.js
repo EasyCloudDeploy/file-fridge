@@ -70,7 +70,8 @@ function parseStorageFilterValue(value) {
         const storageLocationId = parseInt(value.slice('location:'.length), 10);
         return {
             storageType: 'cold',
-            storageLocationId: Number.isNaN(storageLocationId) ? null : storageLocationId
+            storageLocationId: Number.isNaN(storageLocationId) ? null : storageLocationId,
+            remotePeerId: null
         };
     }
 

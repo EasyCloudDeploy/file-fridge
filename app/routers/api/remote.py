@@ -16,8 +16,10 @@ LEGACY_DETAIL = (
 )
 
 
-@router.api_route("", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])
-@router.api_route("/{path:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE"])
+@router.api_route("", methods=["GET", "POST", "PATCH", "PUT", "DELETE", "HEAD", "OPTIONS"])
+@router.api_route(
+    "/{path:path}", methods=["GET", "POST", "PATCH", "PUT", "DELETE", "HEAD", "OPTIONS"]
+)
 def legacy_remote_protocol_removed(path: str = ""):
     _ = path
     raise HTTPException(status_code=426, detail=LEGACY_DETAIL)

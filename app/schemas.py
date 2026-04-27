@@ -892,7 +892,6 @@ class P2PNetworkConfigUpdate(BaseModel):
 
 class P2PNetworkConfigResponse(P2PNetworkConfigBase):
     id: int
-    psk_hash: str
     created_at: datetime
     updated_at: Optional[datetime] = None
 

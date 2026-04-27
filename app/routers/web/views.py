@@ -119,4 +119,3 @@ async def cleanup_duplicates_redirect():
 async def thaw_redirect(file_id: int):
     """Legacy thaw redirect."""
     return RedirectResponse(url="/files", status_code=303)
-

@@ -144,7 +144,9 @@ def list_remote_cached_files(
     current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     _ = current_user
-    return db.query(RemoteSharedFileCache).order_by(RemoteSharedFileCache.id.desc()).limit(5000).all()
+    return (
+        db.query(RemoteSharedFileCache).order_by(RemoteSharedFileCache.id.desc()).limit(5000).all()
+    )
 
 
 @router.get("/manifest")

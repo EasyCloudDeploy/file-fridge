@@ -406,16 +406,19 @@ function initSettingsPage() {
                 list.innerHTML = peers.map(peer => `
                     <tr>
                         <td><strong>${escapeHtml(peer.peer_name)}</strong></td>
-                        <td><code>${peer.host}:${peer.port}</code></td>
-                        <td><span class="badge bg-${peer.status === 'CONNECTED' ? 'success' : 'secondary'}">${peer.status}</span></td>
+                        <td><code>${escapeHtml(peer.host)}:${Number(peer.port)}</code></td>
+                        <td><span class="badge bg-${peer.status === 'CONNECTED' ? 'success' : 'secondary'}">${escapeHtml(peer.status)}</span></td>
                         <td>${peer.last_seen_at ? new Date(peer.last_seen_at).toLocaleString() : 'Never'}</td>
                         <td class="text-end">
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteP2PPeer(${peer.id})" title="Delete Peer">
+                            <button class="btn btn-sm btn-outline-danger" data-peer-id="${Number(peer.id)}" title="Delete Peer">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </td>
                     </tr>
                 `).join('');
+                list.querySelectorAll('[data-peer-id]').forEach(btn => {
+                    btn.addEventListener('click', () => deleteP2PPeer(Number(btn.dataset.peerId)));
+                });
             }
         } catch (error) {
             console.error('Error loading P2P peers:', error);

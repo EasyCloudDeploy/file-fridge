@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Annotated, Generator, List, Optional
 if TYPE_CHECKING:
     from sqlalchemy.orm import Query
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi import Query as FastAPIQuery
 from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, or_
@@ -34,10 +34,10 @@ from app.models import (
 from app.schemas import (
     BulkActionResponse,
     BulkActionResult,
-    BulkShareToggleRequest,
     BulkFileActionRequest,
     BulkFreezeRequest,
     BulkRelocateRequest,
+    BulkShareToggleRequest,
     FileMoveRequest,
     FileRelocateRequest,
     FilterCriteria,
@@ -219,9 +219,11 @@ def _serialize_remote_cached_file(remote_file: RemoteSharedFileCache, peer: P2PP
         "original_file_path": remote_file.display_file_path,
         "storage_reference": remote_file.file_path,
         "destination_path": None,
-        "storage_type": remote_file.storage_type.value
-        if hasattr(remote_file.storage_type, "value")
-        else str(remote_file.storage_type),
+        "storage_type": (
+            remote_file.storage_type.value
+            if hasattr(remote_file.storage_type, "value")
+            else str(remote_file.storage_type)
+        ),
         "file_size": remote_file.file_size,
         "file_mtime": file_mtime,
         "file_atime": None,
@@ -716,7 +718,9 @@ def list_files(
                     if filter_criteria.extension.startswith(".")
                     else f".{filter_criteria.extension}"
                 )
-                remote_query = remote_query.filter(RemoteSharedFileCache.file_extension == ext.lower())
+                remote_query = remote_query.filter(
+                    RemoteSharedFileCache.file_extension == ext.lower()
+                )
             if filter_criteria.mime_type:
                 escaped_mime = escape_like_string(filter_criteria.mime_type)
                 remote_query = remote_query.filter(
@@ -2068,6 +2072,7 @@ def unpin_file(inventory_id: int, db: Annotated[Session, Depends(get_db)]):
 def set_file_shareability(
     inventory_id: int,
     payload: ShareToggleRequest,
+    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
 ):
     """Set whether a local file should be announced to P2P peers."""
@@ -2081,7 +2086,7 @@ def set_file_shareability(
     file.is_shareable = payload.is_shareable
     db.commit()
     db.refresh(file)
-    p2p_service.sync_all_peer_manifests(db)
+    background_tasks.add_task(p2p_service.sync_all_peer_manifests, db)
     return {
         "message": "Shareability updated",
         "inventory_id": file.id,
@@ -2092,6 +2097,7 @@ def set_file_shareability(
 @router.post("/bulk/share", response_model=BulkActionResponse)
 def bulk_set_file_shareability(
     request: BulkShareToggleRequest,
+    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
 ):
     """Bulk update file shareability for local files."""
@@ -2113,7 +2119,7 @@ def bulk_set_file_shareability(
         results.append(BulkActionResult(file_id=file_id, success=True))
 
     db.commit()
-    p2p_service.sync_all_peer_manifests(db)
+    background_tasks.add_task(p2p_service.sync_all_peer_manifests, db)
     return BulkActionResponse(
         total=len(request.file_ids),
         successful=successful,

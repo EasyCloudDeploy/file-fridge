@@ -64,7 +64,7 @@ def upgrade() -> None:
             ),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         )
-        op.create_index("ix_p2p_network_config_psk_hash", "p2p_network_config", ["psk_hash"])
+        # unique=True on psk_hash already creates the index; no separate create_index needed.
 
     if not _table_exists("p2p_peers"):
         op.create_table(
@@ -151,14 +151,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if _table_exists("remote_shared_file_cache"):
-        op.drop_table("remote_shared_file_cache")
-    if _table_exists("p2p_peers"):
-        op.drop_table("p2p_peers")
-    if _table_exists("p2p_network_config"):
-        op.drop_table("p2p_network_config")
-
-    if _table_exists("file_inventory") and _column_exists("file_inventory", "is_shareable"):
-        with op.batch_alter_table("file_inventory") as batch_op:
-            batch_op.drop_index("ix_file_inventory_is_shareable")
-            batch_op.drop_column("is_shareable")
+    raise NotImplementedError(
+        "This migration is a hard cutover to P2P v2 and is intentionally irreversible. "
+        "Legacy tables (remote_transfer_jobs, remote_connections, etc.) cannot be recreated "
+        "from this migration. Restore from a pre-migration backup instead."
+    )

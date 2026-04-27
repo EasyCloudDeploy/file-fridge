@@ -148,6 +148,8 @@ def _prune_backups(backup_dir: Path, database_filename: str) -> None:
 
 def _ensure_post_migration_schema() -> None:
     """Apply idempotent safety fixes for legacy SQLite schemas."""
+    if engine.dialect.name != "sqlite":
+        return
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
     if "file_inventory" not in tables:
@@ -159,10 +161,7 @@ def _ensure_post_migration_schema() -> None:
 
     with engine.begin() as connection:
         connection.execute(
-            text(
-                "ALTER TABLE file_inventory "
-                "ADD COLUMN is_shareable BOOLEAN NOT NULL DEFAULT 1"
-            )
+            text("ALTER TABLE file_inventory ADD COLUMN is_shareable BOOLEAN NOT NULL DEFAULT 1")
         )
         connection.execute(
             text(
@@ -188,6 +187,8 @@ def run_startup_migrations() -> None:
 
         # Check if we need to stamp the database
         # This happens when init_db() created tables but alembic_version is empty or missing
+        should_run_upgrade = True
+        revision_to_stamp: str | None = None
         db = SessionLocal()
         try:
             inspector = inspect(engine)
@@ -204,7 +205,6 @@ def run_startup_migrations() -> None:
                     current_revision = result[0]
 
             has_app_tables = len(tables) > (1 if has_alembic_table else 0)
-            revision_to_stamp: str | None = None
 
             # If we have tables but no alembic version, determine the closest
             # revision from the live schema before upgrading further.
@@ -217,7 +217,6 @@ def run_startup_migrations() -> None:
                 revision_to_stamp = _determine_schema_revision(inspector, db)
                 logger.info("Detected schema equivalent to revision %s", revision_to_stamp)
 
-            should_run_upgrade = True
             if has_app_tables:
                 if has_version and current_revision == HEAD_REVISION:
                     should_run_upgrade = False
@@ -250,7 +249,5 @@ def run_startup_migrations() -> None:
             "`uv run alembic downgrade -3`."
         )
         if backup_path is not None:
-            recovery_message = (
-                f"{recovery_message} Latest automatic backup: {backup_path}."
-            )
+            recovery_message = f"{recovery_message} Latest automatic backup: {backup_path}."
         raise RuntimeError(recovery_message) from e
