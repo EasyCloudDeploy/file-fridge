@@ -17,7 +17,7 @@ INITIAL_REVISION = "726412e8862d"
 MAX_CONCURRENT_MIGRATIONS_REVISION = "6b398cde9d3e"
 RELOCATION_TASK_REVISION = "4cb41a7faab6"
 PERMISSIONS_ERROR_REVISION = "764abe6a5a03"
-HEAD_REVISION = "a1b2c3d4e5f6"
+HEAD_REVISION = "e6f7a8b9c0d1"
 BACKEND_MODULES_REVISION = "9f3d6e2aa1b1"
 LOCAL_DRIVE_IDENTITY_REVISION = "b17d9f43c2aa"
 ALLOW_OFFLINE_REVISION = "c3e1d8f7aa42"
@@ -33,20 +33,16 @@ def _schema_has_head_markers(inspector) -> bool:
     """Return True when schema already matches the current head structure."""
     tables = set(inspector.get_table_names())
 
-    required_tables = {"remote_audit_logs", "remote_connection_path_permissions"}
+    required_tables = {"p2p_network_config", "p2p_peers", "remote_shared_file_cache"}
     if not required_tables.issubset(tables):
         return False
 
-    if "remote_connections" not in tables or "remote_transfer_jobs" not in tables:
+    if "file_inventory" not in tables:
         return False
 
-    remote_connection_columns = _table_columns(inspector, "remote_connections")
-    transfer_job_columns = _table_columns(inspector, "remote_transfer_jobs")
+    file_inventory_columns = _table_columns(inspector, "file_inventory")
 
-    return {"last_seen_at", "is_reachable"}.issubset(remote_connection_columns) and {
-        "created_at",
-        "updated_at",
-    }.issubset(transfer_job_columns)
+    return "is_shareable" in file_inventory_columns
 
 
 def _cold_storage_values_need_normalization(db) -> bool:
@@ -150,6 +146,33 @@ def _prune_backups(backup_dir: Path, database_filename: str) -> None:
             logger.warning("Failed to prune old backup: %s", backup)
 
 
+def _ensure_post_migration_schema() -> None:
+    """Apply idempotent safety fixes for legacy SQLite schemas."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "file_inventory" not in tables:
+        return
+
+    columns = _table_columns(inspector, "file_inventory")
+    if "is_shareable" in columns:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE file_inventory "
+                "ADD COLUMN is_shareable BOOLEAN NOT NULL DEFAULT 1"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_file_inventory_is_shareable "
+                "ON file_inventory (is_shareable)"
+            )
+        )
+    logger.warning("Applied fallback schema fix: added file_inventory.is_shareable")
+
+
 def run_startup_migrations() -> None:
     """
     Run database migrations using Alembic on application startup.
@@ -215,6 +238,8 @@ def run_startup_migrations() -> None:
             logger.info("✓ Database migrations completed successfully")
         else:
             logger.info("✓ Database already at head; no migration upgrade needed")
+
+        _ensure_post_migration_schema()
     except Exception as e:
         if isinstance(e, RuntimeError) and str(e).startswith("Pre-migration backup failed:"):
             raise

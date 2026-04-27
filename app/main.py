@@ -48,6 +48,7 @@ from app.routers.api import identity as api_identity
 from app.routers.api import migrations as api_migrations
 from app.routers.api import notifiers as api_notifiers
 from app.routers.api import paths as api_paths
+from app.routers.api import p2p as api_p2p
 from app.routers.api import remote as api_remote
 from app.routers.api import stats as api_stats
 from app.routers.api import storage as api_storage
@@ -57,7 +58,7 @@ from app.routers.api import users as api_users
 from app.routers.web.views import router as web_router
 from app.security import PermissionChecker
 from app.services.file_cleanup import FileCleanup
-from app.services.remote_transfer_service import remote_transfer_service
+from app.services.p2p_service import p2p_service
 from app.services.scheduler import scheduler_service
 
 # Apply filter to uvicorn access logger
@@ -137,21 +138,11 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     except SQLAlchemyError as e:
         logger.warning(f"Error during MIGRATING file recovery: {e}")
 
-    logger.info("Recovering interrupted remote transfers...")
+    logger.info("Starting P2P node runtime...")
     try:
-        db = SessionLocal()
-        try:
-            recovered_transfers = remote_transfer_service.recover_interrupted_transfers(db)
-            if recovered_transfers:
-                logger.warning(
-                    "Recovered %s interrupted remote transfer job(s)", recovered_transfers
-                )
-            else:
-                logger.info("No interrupted remote transfers found")
-        finally:
-            db.close()
-    except SQLAlchemyError as e:
-        logger.warning(f"Error during remote transfer recovery: {e}")
+        p2p_service.start_node()
+    except Exception as e:
+        logger.warning(f"Error starting P2P runtime: {e!s}")
 
     logger.info("Starting scheduler...")
     scheduler_service.start()
@@ -161,6 +152,7 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     # Shutdown
     logger.info("Stopping scheduler...")
     scheduler_service.stop()
+    p2p_service.stop_node()
     logger.info("Application shutdown complete")
 
 
@@ -208,7 +200,8 @@ app.include_router(api_encryption.router, dependencies=[Depends(PermissionChecke
 app.include_router(api_migrations.router, dependencies=[Depends(PermissionChecker("migrations"))])
 app.include_router(api_users.router)  # Roles handled inside this router
 app.include_router(api_identity.router)  # Permissions handled inside router
-app.include_router(api_remote.router)  # Remote connections has its own internal auth/security logic
+app.include_router(api_p2p.router)
+app.include_router(api_remote.router)
 
 # Include consolidated web router (public - frontend handles auth)
 app.include_router(web_router)

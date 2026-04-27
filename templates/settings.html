@@ -178,6 +178,96 @@
         <!-- Remote Connections Section -->
         <div id="remote-connections-section" class="settings-section d-none">
 
+            <div class="card mb-4 border-primary">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>P2P Network</h5>
+                    <span class="badge bg-primary">V2</span>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted mb-3">Configure this instance for private P2P sharing using a shared PSK.</p>
+                    <form id="p2p-network-form" class="row g-3">
+                        <div class="col-md-4">
+                            <label for="p2p-network-name" class="form-label">Network Name</label>
+                            <input class="form-control" id="p2p-network-name" placeholder="File Fridge P2P">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="p2p-listen-host" class="form-label">Listen Host</label>
+                            <input class="form-control" id="p2p-listen-host" placeholder="0.0.0.0">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="p2p-listen-port" class="form-label">Listen Port</label>
+                            <input class="form-control" id="p2p-listen-port" type="number" min="1" max="65535" placeholder="9119">
+                        </div>
+                        <div class="col-12">
+                            <label for="p2p-psk" class="form-label">Pre-Shared Key (PSK)</label>
+                            <input class="form-control font-monospace" id="p2p-psk" placeholder="Create or rotate PSK">
+                        </div>
+                        <div class="col-12 d-flex gap-2 justify-content-end">
+                            <button type="submit" class="btn btn-primary" id="save-p2p-network-btn">
+                                <i class="bi bi-save me-1"></i>Save P2P Network
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="sync-p2p-peers-btn">
+                                <i class="bi bi-arrow-repeat me-1"></i>Sync Peers
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-hdd-network me-2"></i>Join Peer</h5>
+                </div>
+                <div class="card-body">
+                    <form id="p2p-join-form" class="row g-3">
+                        <div class="col-md-3">
+                            <label for="p2p-peer-host" class="form-label">Peer IP/Host</label>
+                            <input class="form-control" id="p2p-peer-host" placeholder="192.168.1.25" required>
+                        </div>
+                        <div class="col-md-2">
+                            <label for="p2p-peer-port" class="form-label">Port</label>
+                            <input class="form-control" id="p2p-peer-port" type="number" min="1" max="65535" placeholder="9119" required>
+                        </div>
+                        <div class="col-md-3">
+                            <label for="p2p-peer-name" class="form-label">Name (optional)</label>
+                            <input class="form-control" id="p2p-peer-name" placeholder="Site B">
+                        </div>
+                        <div class="col-md-4">
+                            <label for="p2p-peer-psk" class="form-label">PSK</label>
+                            <input class="form-control font-monospace" id="p2p-peer-psk" required>
+                        </div>
+                        <div class="col-12 d-flex justify-content-end">
+                            <button type="submit" class="btn btn-success">
+                                <i class="bi bi-plug me-1"></i>Join Peer
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-people me-2"></i>P2P Peers</h5>
+                </div>
+                <div class="card-body">
+                    <div class="table-responsive">
+                        <table class="table table-sm">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Endpoint</th>
+                                    <th>Status</th>
+                                    <th>Last Seen</th>
+                                </tr>
+                            </thead>
+                            <tbody id="p2p-peers-list">
+                                <tr><td colspan="4" class="text-muted text-center py-3">Loading peers...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- Configuration Warning Alert (shown when FF_INSTANCE_URL not set) -->
             <div id="remote-config-warning" class="alert alert-warning d-none mb-4" role="alert">
                 <div class="d-flex align-items-start">
@@ -774,4 +864,5 @@
 
 {% block extra_scripts %}
 <script src="/static/js/settings.js"></script>
+<script src="/static/js/p2p_settings.js"></script>
 {% endblock %}

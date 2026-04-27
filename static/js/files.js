@@ -18,6 +18,7 @@ let currentMaxSize = null;
 let currentMinMtime = null;
 let currentMaxMtime = null;
 let currentStorageLocationId = null;
+let currentRemotePeerId = null;
 let totalItems = 0;
 
 // Pagination state
@@ -62,7 +63,7 @@ function escapeHtml(text) {
 
 function parseStorageFilterValue(value) {
     if (!value) {
-        return { storageType: null, storageLocationId: null };
+        return { storageType: null, storageLocationId: null, remotePeerId: null };
     }
 
     if (value.startsWith('location:')) {
@@ -73,10 +74,22 @@ function parseStorageFilterValue(value) {
         };
     }
 
-    return { storageType: value, storageLocationId: null };
+    if (value.startsWith('peer:')) {
+        const remotePeerId = parseInt(value.slice('peer:'.length), 10);
+        return {
+            storageType: null,
+            storageLocationId: null,
+            remotePeerId: Number.isNaN(remotePeerId) ? null : remotePeerId
+        };
+    }
+
+    return { storageType: value, storageLocationId: null, remotePeerId: null };
 }
 
 function storageFilterValueFromState() {
+    if (currentRemotePeerId !== null && currentRemotePeerId !== undefined) {
+        return `peer:${currentRemotePeerId}`;
+    }
     if (currentStorageLocationId !== null && currentStorageLocationId !== undefined) {
         return `location:${currentStorageLocationId}`;
     }
@@ -210,13 +223,19 @@ function statusCellRenderer(params) {
     const pinIndicator = file.is_pinned
         ? '<i class="bi bi-pin-fill text-secondary me-1" title="File is pinned"></i>'
         : '';
+    const shareIndicator = !file.is_remote && file.is_shareable === false
+        ? '<i class="bi bi-eye-slash text-danger me-1" title="Not shared to peers"></i>'
+        : '';
 
-    return `${pinIndicator}<span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span>`;
+    return `${pinIndicator}${shareIndicator}<span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span>`;
 }
 
 function tagsCellRenderer(params) {
     const file = params.data;
     if (!file) return '';
+    if (file.is_remote) {
+        return '<span class="text-muted small">Remote file</span>';
+    }
     let tagsHtml = '';
     if (file.tags && file.tags.length > 0) {
         tagsHtml = file.tags.map(ft => {
@@ -847,6 +866,9 @@ function buildQueryParams() {
     if (currentStorageLocationId !== null) {
         params.append('storage_location_id', currentStorageLocationId);
     }
+    if (currentRemotePeerId !== null) {
+        params.append('remote_peer_id', currentRemotePeerId);
+    }
 
     return params;
 }
@@ -1076,6 +1098,8 @@ function syncStateToUrl() {
     if (currentPathId) params.set('path_id', currentPathId);
     if (currentStorageLocationId) {
         params.set('storage_location_id', currentStorageLocationId);
+    } else if (currentRemotePeerId) {
+        params.set('remote_peer_id', currentRemotePeerId);
     } else if (currentStorageType) {
         params.set('storage_type', currentStorageType);
     }
@@ -1116,6 +1140,7 @@ function updateFilters() {
     const storageFilter = parseStorageFilterValue(storageSelect ? storageSelect.value : '');
     currentStorageType = storageFilter.storageType;
     currentStorageLocationId = storageFilter.storageLocationId;
+    currentRemotePeerId = storageFilter.remotePeerId;
     currentFileStatus = statusSelect && statusSelect.value ? statusSelect.value : null;
 
     currentExtension = extensionInput ? extensionInput.value.trim() : '';
@@ -1185,9 +1210,13 @@ async function loadTagsForFilter() {
  */
 async function loadStorageLocationsForFilter() {
     try {
-        const response = await authenticatedFetch(`${API_BASE_URL}/storage/locations`);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const locations = await response.json();
+        const [locationsResponse, peersResponse] = await Promise.all([
+            authenticatedFetch(`${API_BASE_URL}/storage/locations`),
+            authenticatedFetch(`${API_BASE_URL}/p2p/peers`)
+        ]);
+        if (!locationsResponse.ok) throw new Error(`HTTP error! status: ${locationsResponse.status}`);
+        const locations = await locationsResponse.json();
+        const peers = peersResponse.ok ? await peersResponse.json() : [];
 
         const select = document.getElementById('storage_filter');
         if (select) {
@@ -1197,12 +1226,17 @@ async function loadStorageLocationsForFilter() {
                 const label = `${loc.name} (${backendType})`;
                 return `<option value="location:${loc.id}">${escapeHtml(label)}</option>`;
             }).join('');
+            const peerOptions = peers.map(peer => {
+                const state = (peer.status || 'DISCONNECTED').toUpperCase();
+                return `<option value="peer:${peer.id}">${escapeHtml(`Remote: ${peer.peer_name} (${state})`)}</option>`;
+            }).join('');
 
             select.innerHTML = `
                 <option value="">All</option>
                 <option value="hot">Hot</option>
                 <option value="cold">Cold</option>
                 ${locations.length ? `<optgroup label="Cold Locations">${locationOptions}</optgroup>` : ''}
+                ${peers.length ? `<optgroup label="Remote Peers">${peerOptions}</optgroup>` : ''}
             `;
 
             select.value = selectedValue;
@@ -1841,18 +1875,18 @@ async function showRemoteMigrationModal(fileId, filePath) {
     remoteMigrationModal.show();
 
     try {
-        const response = await authenticatedFetch('/api/v1/remote/connections');
+        const response = await authenticatedFetch('/api/v1/p2p/peers');
         if (response.ok) {
             const connections = await response.json();
             if (connections.length === 0) {
-                connSelect.innerHTML = '<option value="">No remote connections configured</option>';
+                connSelect.innerHTML = '<option value="">No remote peers configured</option>';
             } else {
-                connSelect.innerHTML = '<option value="">Select a connection...</option>' +
-                    connections.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${c.url})</option>`).join('');
+                connSelect.innerHTML = '<option value="">Select a peer...</option>' +
+                    connections.map(c => `<option value="${c.id}">${escapeHtml(c.peer_name)} (${c.status})</option>`).join('');
             }
         }
     } catch (error) {
-        console.error('Error loading connections:', error);
+        console.error('Error loading peers:', error);
     }
 }
 
@@ -1872,21 +1906,10 @@ async function onRemoteConnectionChange() {
     pathSelect.innerHTML = '<option value="">Loading paths...</option>';
     confirmBtn.disabled = true;
 
-    try {
-        const response = await authenticatedFetch(`/api/v1/remote/connections/${connId}/paths`);
-        if (response.ok) {
-            const paths = await response.json();
-            if (paths.length === 0) {
-                pathSelect.innerHTML = '<option value="">No monitored paths found on remote</option>';
-            } else {
-                pathSelect.innerHTML = '<option value="">Select a path...</option>' +
-                    paths.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
-            }
-        }
-    } catch (error) {
-        console.error('Error loading remote paths:', error);
-        pathSelect.innerHTML = '<option value="">Error loading paths</option>';
-    }
+    // Note: P2P v2 does not expose remote paths directly in this way yet.
+    // We will default to the remote "Default" path or similar.
+    pathSelect.innerHTML = '<option value="0">Remote Default Path</option>';
+    confirmBtn.disabled = false;
 }
 
 async function startRemoteMigration() {
@@ -1965,8 +1988,9 @@ function updateBulkActionsToolbar() {
         }
 
         // Update button states based on selection
-        const hotFiles = selectedFiles.filter(f => f.storage_type === 'hot');
-        const coldFiles = selectedFiles.filter(f => f.storage_type === 'cold');
+        const localFiles = selectedFiles.filter(f => !f.is_remote);
+        const hotFiles = localFiles.filter(f => f.storage_type === 'hot');
+        const coldFiles = localFiles.filter(f => f.storage_type === 'cold');
 
         const thawBtn = document.getElementById('bulk-thaw-btn');
         const freezeBtn = document.getElementById('bulk-freeze-btn');
@@ -1988,10 +2012,19 @@ function updateBulkActionsToolbar() {
                 : `Relocate ${relocatableFiles.length} file(s)`;
         }
 
-        const migrateBtn = document.getElementById('bulk-migrate-btn');
-        if (migrateBtn) {
-            migrateBtn.disabled = false;
-            migrateBtn.title = `Migrate ${selectedFiles.length} file(s) to remote instance`;
+        const shareBtn = document.getElementById('bulk-share-btn');
+        const unshareBtn = document.getElementById('bulk-unshare-btn');
+        if (shareBtn) {
+            shareBtn.disabled = localFiles.length === 0;
+            shareBtn.title = localFiles.length
+                ? `Mark ${localFiles.length} local file(s) as shareable`
+                : 'Select local files to share';
+        }
+        if (unshareBtn) {
+            unshareBtn.disabled = localFiles.length === 0;
+            unshareBtn.title = localFiles.length
+                ? `Mark ${localFiles.length} local file(s) as not shareable`
+                : 'Select local files to unshare';
         }
     } else {
         toolbar.style.display = 'none';
@@ -2009,11 +2042,14 @@ function clearSelection() {
 
 // Get selected file IDs
 function getSelectedFileIds() {
-    return selectedFiles.map(f => f.id);
+    return selectedFiles
+        .filter(f => !f.is_remote && Number.isInteger(Number(f.id)))
+        .map(f => Number(f.id));
 }
 
 function getSelectedRelocatableFiles() {
     return selectedFiles.filter(file =>
+        !file.is_remote &&
         file.storage_type === 'cold' &&
         file.status !== 'migrating' &&
         (!file.storage_location || file.storage_location.available !== false)
@@ -2022,7 +2058,7 @@ function getSelectedRelocatableFiles() {
 
 // Show bulk thaw confirmation
 function showBulkThawModal() {
-    const coldFiles = selectedFiles.filter(f => f.storage_type === 'cold');
+    const coldFiles = selectedFiles.filter(f => !f.is_remote && f.storage_type === 'cold');
     if (coldFiles.length === 0) {
         showNotification('No cold storage files selected', 'warning');
         return;
@@ -2040,7 +2076,7 @@ function showBulkThawModal() {
 
 // Execute bulk thaw
 async function executeBulkThaw() {
-    const coldFiles = selectedFiles.filter(f => f.storage_type === 'cold');
+    const coldFiles = selectedFiles.filter(f => !f.is_remote && f.storage_type === 'cold');
     const fileIds = coldFiles.map(f => f.id);
     const pinCheckbox = document.getElementById('bulkThawPinCheckbox');
     const pin = pinCheckbox ? pinCheckbox.checked : false;
@@ -2083,7 +2119,7 @@ async function executeBulkThaw() {
 
 // Show bulk freeze modal
 async function showBulkFreezeModal() {
-    const hotFiles = selectedFiles.filter(f => f.storage_type === 'hot');
+    const hotFiles = selectedFiles.filter(f => !f.is_remote && f.storage_type === 'hot');
     if (hotFiles.length === 0) {
         showNotification('No hot storage files selected', 'warning');
         return;
@@ -2136,7 +2172,7 @@ function onBulkFreezeLocationChange() {
 
 // Execute bulk freeze
 async function executeBulkFreeze() {
-    const hotFiles = selectedFiles.filter(f => f.storage_type === 'hot');
+    const hotFiles = selectedFiles.filter(f => !f.is_remote && f.storage_type === 'hot');
     const fileIds = hotFiles.map(f => f.id);
     const selectEl = document.getElementById('bulkFreezeLocationSelect');
     const storageLocationId = selectEl ? parseInt(selectEl.value) : null;
@@ -2479,19 +2515,19 @@ async function showBulkRemoteMigrationModal() {
     bulkRemoteMigrationModal.show();
 
     try {
-        const response = await authenticatedFetch('/api/v1/remote/connections');
+        const response = await authenticatedFetch('/api/v1/p2p/peers');
         if (response.ok) {
             const connections = await response.json();
             if (connections.length === 0) {
-                connSelect.innerHTML = '<option value="">No remote connections configured</option>';
+                connSelect.innerHTML = '<option value="">No remote peers configured</option>';
             } else {
-                connSelect.innerHTML = '<option value="">Select a connection...</option>' +
-                    connections.map(c => `<option value="${c.id}">${escapeHtml(c.name)} (${c.url})</option>`).join('');
+                connSelect.innerHTML = '<option value="">Select a peer...</option>' +
+                    connections.map(c => `<option value="${c.id}">${escapeHtml(c.peer_name)} (${c.status})</option>`).join('');
             }
         }
     } catch (error) {
-        console.error('Error loading connections:', error);
-        connSelect.innerHTML = '<option value="">Error loading connections</option>';
+        console.error('Error loading peers:', error);
+        connSelect.innerHTML = '<option value="">Error loading peers</option>';
     }
 }
 
@@ -2515,25 +2551,9 @@ async function onBulkRemoteConnectionChange() {
     pathSelect.innerHTML = '<option value="">Loading paths...</option>';
     confirmBtn.disabled = true;
 
-    try {
-        const response = await authenticatedFetch(`/api/v1/remote/connections/${connId}/paths`);
-        if (response.ok) {
-            const paths = await response.json();
-            if (paths.length === 0) {
-                pathSelect.innerHTML = '<option value="">No paths available</option>';
-            } else {
-                pathSelect.innerHTML = '<option value="">Select a path...</option>' +
-                    paths.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
-            }
-        } else {
-            throw new Error('Failed to load remote paths');
-        }
-    } catch (error) {
-        console.error('Error loading remote paths:', error);
-        pathSelect.innerHTML = '<option value="">Error loading paths</option>';
-        errorDiv.textContent = 'Failed to load remote paths: ' + error.message;
-        errorDiv.classList.remove('d-none');
-    }
+    // Note: P2P v2 does not expose remote paths directly in this way yet.
+    pathSelect.innerHTML = '<option value="0">Remote Default Path</option>';
+    confirmBtn.disabled = false;
 }
 
 // Handle bulk remote path change
@@ -2659,6 +2679,38 @@ async function executeBulkUnpin() {
     }
 }
 
+async function executeBulkShareToggle(isShareable) {
+    const fileIds = getSelectedFileIds();
+    if (fileIds.length === 0) {
+        showNotification('Select local files to update sharing', 'warning');
+        return;
+    }
+
+    try {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/bulk/share`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_ids: fileIds, is_shareable: isShareable })
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({ detail: 'Request failed' }));
+            throw new Error(err.detail || 'Bulk share update failed');
+        }
+
+        const result = await response.json();
+        showNotification(
+            `${isShareable ? 'Shared' : 'Unshared'} ${result.successful} of ${result.total} files` +
+            (result.failed > 0 ? ` (${result.failed} failed)` : '')
+        );
+        clearSelection();
+        loadFilesList();
+    } catch (error) {
+        console.error('Bulk share toggle error:', error);
+        showNotification(`Bulk share update failed: ${error.message}`, 'error');
+    }
+}
+
 // ============================================
 // Initialization
 // ============================================
@@ -2681,10 +2733,18 @@ async function initFilesPage() {
     currentStorageLocationId = urlParams.get('storage_location_id')
         ? parseInt(urlParams.get('storage_location_id'), 10)
         : null;
+    currentRemotePeerId = urlParams.get('remote_peer_id')
+        ? parseInt(urlParams.get('remote_peer_id'), 10)
+        : null;
     if (currentStorageLocationId !== null && !Number.isNaN(currentStorageLocationId)) {
         currentStorageType = 'cold';
+        currentRemotePeerId = null;
+    } else if (currentRemotePeerId !== null && !Number.isNaN(currentRemotePeerId)) {
+        currentStorageType = null;
+        currentStorageLocationId = null;
     } else {
         currentStorageLocationId = null;
+        currentRemotePeerId = null;
     }
     currentFileStatus = urlParams.get('status') || null;
     currentSortBy = urlParams.get('sort_by') || 'last_seen';
@@ -2888,9 +2948,14 @@ async function initFilesPage() {
         bulkRelocateBtn.addEventListener('click', showBulkRelocateModal);
     }
 
-    const bulkMigrateBtn = document.getElementById('bulk-migrate-btn');
-    if (bulkMigrateBtn) {
-        bulkMigrateBtn.addEventListener('click', showBulkRemoteMigrationModal);
+    const bulkShareBtn = document.getElementById('bulk-share-btn');
+    if (bulkShareBtn) {
+        bulkShareBtn.addEventListener('click', () => executeBulkShareToggle(true));
+    }
+
+    const bulkUnshareBtn = document.getElementById('bulk-unshare-btn');
+    if (bulkUnshareBtn) {
+        bulkUnshareBtn.addEventListener('click', () => executeBulkShareToggle(false));
     }
 
     const bulkAddTagBtn = document.getElementById('bulk-add-tag-btn');

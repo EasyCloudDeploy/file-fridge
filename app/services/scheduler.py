@@ -22,10 +22,9 @@ from app.services.notification_events import (
     StoragePermissionErrorData,
 )
 from app.services.notification_service import notification_service
-from app.services.remote_transfer_service import remote_transfer_service
+from app.services.p2p_service import p2p_service
 from app.services.stats_cleanup import cleanup_old_stats_job_func
 from app.utils.local_drive_identity import update_local_drive_identity_fields
-from app.utils.remote_auth import remote_auth
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +73,9 @@ class SchedulerService:
                 self._add_disk_space_monitoring_job()
                 self._add_storage_permissions_job()
                 self._add_nonce_cleanup_job()
-                self._add_remote_code_rotation_job()
-                self._add_remote_transfer_job()
                 self._add_fftmp_cleanup_job()
                 self._add_transfer_job_cleanup_job()
-                self._add_remote_health_check_job()
+                self._add_p2p_manifest_sync_job()
             except Exception:
                 logger.exception("Error starting scheduler")
                 # Try to clean up
@@ -377,6 +374,27 @@ class SchedulerService:
         except Exception:
             logger.exception("Error adding transfer job cleanup job")
 
+    def _add_p2p_manifest_sync_job(self):
+        """Add scheduled job for syncing remote manifests from configured peers."""
+        if not self.scheduler.running:
+            return
+
+        job_id = "p2p_manifest_sync"
+        try:
+            if self.scheduler.get_job(job_id):
+                self.scheduler.remove_job(job_id)
+
+            self.scheduler.add_job(
+                sync_p2p_manifests_job_func,
+                "interval",
+                minutes=1,
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info("Added scheduled job for P2P manifest sync (runs every minute)")
+        except Exception:
+            logger.exception("Error adding P2P manifest sync job")
+
     def _add_remote_health_check_job(self):
         """Add scheduled job for remote connection health checks (runs every 15 minutes)."""
         if not self.scheduler.running:
@@ -475,20 +493,16 @@ def check_disk_space_and_notify(path: MonitoredPath, db: Session):
             logger.exception(f"Error checking disk space for {location.name}")
 
 
-def process_remote_transfers_job_func():
-    """Job function to process pending remote transfers."""
-    import asyncio
-
+def sync_p2p_manifests_job_func():
+    """Fetch manifests from all configured peers and refresh the local remote-file cache."""
+    db = SchedulerSessionLocal()
     try:
-        asyncio.run(remote_transfer_service.process_pending_transfers())
+        synced = p2p_service.sync_all_peer_manifests(db)
+        logger.debug("P2P manifest sync processed %s peer(s)", synced)
     except Exception:
-        logger.exception("Error in remote transfer job")
-
-
-def rotate_remote_code_job_func():
-    """Job function to rotate the remote connection code."""
-    remote_auth.rotate_code()
-    logger.info("Rotated remote connection code")
+        logger.exception("Error in P2P manifest sync job")
+    finally:
+        db.close()
 
 
 def _check_path_permissions(path: str) -> list[str]:

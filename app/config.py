@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     # Override via REMOTE_TRANSFER_MAX_CONCURRENT environment variable
     remote_transfer_max_concurrent: int = 2
 
+    # P2P private-network defaults
+    p2p_listen_host: str = "0.0.0.0"
+    p2p_listen_port: int = 9119
+
     # Remote Instance URL (for inter-instance communication)
     # Override via FF_INSTANCE_URL environment variable
     ff_instance_url: Optional[str] = None

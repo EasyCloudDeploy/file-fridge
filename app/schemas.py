@@ -19,6 +19,7 @@ from app.models import (
     NotifierType,
     OperationType,
     Operator,
+    P2PPeerStatus,
     ScanStatus,
     StorageType,
     TagRuleCriterionType,
@@ -136,6 +137,7 @@ class FilterCriteria(BaseModel):
     min_mtime: Optional[datetime] = None
     max_mtime: Optional[datetime] = None
     storage_location_id: Optional[int] = None
+    remote_peer_id: Optional[int] = None
 
 
 class ColdStorageLocation(ColdStorageLocationBase):
@@ -288,6 +290,7 @@ class FileInventoryBase(BaseModel):
     mime_type: Optional[str] = None
     status: FileStatus = FileStatus.ACTIVE
     is_encrypted: bool = False
+    is_shareable: bool = True
 
 
 class FileInventoryCreate(FileInventoryBase):
@@ -317,6 +320,9 @@ class FileInventory(FileInventoryBase):
     last_seen: datetime
     created_at: datetime
     tags: List["FileTagResponse"] = []
+    is_remote: bool = False
+    remote_peer_id: Optional[int] = None
+    remote_peer_name: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -764,6 +770,19 @@ class BulkRelocateRequest(BaseModel):
     target_storage_location_id: int = Field(..., description="Target cold storage location ID")
 
 
+class ShareToggleRequest(BaseModel):
+    """Request for toggling file shareability."""
+
+    is_shareable: bool = Field(..., description="Whether the file should be shareable to peers")
+
+
+class BulkShareToggleRequest(BaseModel):
+    """Request for bulk shareability updates."""
+
+    file_ids: List[int] = Field(..., min_length=1, description="List of file inventory IDs")
+    is_shareable: bool = Field(..., description="Whether files should be shareable to peers")
+
+
 class BulkTagRequest(BaseModel):
     """Request for bulk tag operations."""
 
@@ -848,8 +867,80 @@ class PasswordChange(BaseModel):
 
 
 # ========================================
-# Remote Connection Schemas
+# P2P Schemas
 # ========================================
+
+
+class P2PNetworkConfigBase(BaseModel):
+    network_name: str = Field("File Fridge P2P", min_length=1, max_length=255)
+    listen_host: str = Field("0.0.0.0", min_length=1, max_length=255)
+    listen_port: int = Field(9119, ge=1, le=65535)
+    enabled: bool = True
+
+
+class P2PNetworkConfigCreate(P2PNetworkConfigBase):
+    psk: str = Field(..., min_length=8, max_length=512)
+
+
+class P2PNetworkConfigUpdate(BaseModel):
+    network_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    listen_host: Optional[str] = Field(None, min_length=1, max_length=255)
+    listen_port: Optional[int] = Field(None, ge=1, le=65535)
+    enabled: Optional[bool] = None
+    psk: Optional[str] = Field(None, min_length=8, max_length=512)
+
+
+class P2PNetworkConfigResponse(P2PNetworkConfigBase):
+    id: int
+    psk_hash: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class P2PPeerJoinRequest(BaseModel):
+    host: str = Field(..., min_length=1, max_length=255)
+    port: int = Field(..., ge=1, le=65535)
+    psk: str = Field(..., min_length=8, max_length=512)
+    peer_name: Optional[str] = Field(None, min_length=1, max_length=255)
+
+
+class P2PPeerResponse(BaseModel):
+    id: int
+    peer_name: str
+    peer_id: str
+    host: str
+    port: int
+    status: P2PPeerStatus
+    last_seen_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class P2PRemoteFileCacheResponse(BaseModel):
+    id: int
+    peer_id: int
+    remote_file_id: str
+    path_id: Optional[int] = None
+    file_path: str
+    display_file_path: str
+    relative_path: Optional[str] = None
+    storage_type: StorageType
+    file_size: int
+    file_mtime: Optional[datetime] = None
+    checksum: Optional[str] = None
+    mime_type: Optional[str] = None
+    file_extension: Optional[str] = None
+    path_name: Optional[str] = None
+    last_announced_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 class RemoteConnectionBase(BaseModel):

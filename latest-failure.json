@@ -1,0 +1,303 @@
+{
+  "config": {
+    "configFile": "/Users/martino/repos/file-fridge/playwright.config.ts",
+    "rootDir": "/Users/martino/repos/file-fridge/e2e",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/martino/repos/file-fridge/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "/Users/martino/repos/file-fridge/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 60000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.59.1",
+    "workers": 1,
+    "webServer": {
+      "command": "uv run uvicorn app.main:app --host 127.0.0.1 --port 8000",
+      "url": "http://127.0.0.1:8000/health",
+      "reuseExistingServer": true,
+      "stdout": "pipe",
+      "stderr": "pipe",
+      "timeout": 120000,
+      "env": {
+        "SECRET_KEY": "dummy_key_for_e2e_testing",
+        "DATABASE_PATH": "data/test_file_fridge.db",
+        "DISABLE_RATE_LIMIT": "true",
+        "TESTING": "true"
+      }
+    }
+  },
+  "suites": [
+    {
+      "title": "files-view.spec.ts",
+      "file": "files-view.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Files View and AG Grid",
+          "file": "files-view.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "User can browse, filter, and pin files",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 22250,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator:  locator('#filesGrid')\nExpected: visible\nReceived: hidden\nTimeout:  20000ms\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 20000ms\u001b[22m\n\u001b[2m  - waiting for locator('#filesGrid')\u001b[22m\n\u001b[2m    23 × locator resolved to <div id=\"filesGrid\" class=\"ag-theme-quartz\">…</div>\u001b[22m\n\u001b[2m       - unexpected value \"hidden\"\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator:  locator('#filesGrid')\nExpected: visible\nReceived: hidden\nTimeout:  20000ms\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 20000ms\u001b[22m\n\u001b[2m  - waiting for locator('#filesGrid')\u001b[22m\n\u001b[2m    23 × locator resolved to <div id=\"filesGrid\" class=\"ag-theme-quartz\">…</div>\u001b[22m\n\u001b[2m       - unexpected value \"hidden\"\u001b[22m\n\n    at /Users/martino/repos/file-fridge/e2e/files-view.spec.ts:16:28",
+                        "location": {
+                          "file": "/Users/martino/repos/file-fridge/e2e/files-view.spec.ts",
+                          "column": 28,
+                          "line": 16
+                        },
+                        "snippet": "  14 |         // 1. Check if grid is loaded\n  15 |         const grid = page.locator('#filesGrid');\n> 16 |         await expect(grid).toBeVisible({ timeout: 20000 });\n     |                            ^\n  17 |         \n  18 |         // Wait for data to load\n  19 |         await expect(page.locator('.ag-overlay-loading-wrapper')).not.toBeVisible({ timeout: 15000 });"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/martino/repos/file-fridge/e2e/files-view.spec.ts",
+                            "column": 28,
+                            "line": 16
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator:  locator('#filesGrid')\nExpected: visible\nReceived: hidden\nTimeout:  20000ms\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 20000ms\u001b[22m\n\u001b[2m  - waiting for locator('#filesGrid')\u001b[22m\n\u001b[2m    23 × locator resolved to <div id=\"filesGrid\" class=\"ag-theme-quartz\">…</div>\u001b[22m\n\u001b[2m       - unexpected value \"hidden\"\u001b[22m\n\n\n  14 |         // 1. Check if grid is loaded\n  15 |         const grid = page.locator('#filesGrid');\n> 16 |         await expect(grid).toBeVisible({ timeout: 20000 });\n     |                            ^\n  17 |         \n  18 |         // Wait for data to load\n  19 |         await expect(page.locator('.ag-overlay-loading-wrapper')).not.toBeVisible({ timeout: 15000 });\n    at /Users/martino/repos/file-fridge/e2e/files-view.spec.ts:16:28"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-04-26T14:01:42.487Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/Users/martino/repos/file-fridge/test-results/files-view-Files-View-and--13203-browse-filter-and-pin-files/test-failed-1.png"
+                        },
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "/Users/martino/repos/file-fridge/test-results/files-view-Files-View-and--13203-browse-filter-and-pin-files/video.webm"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/martino/repos/file-fridge/test-results/files-view-Files-View-and--13203-browse-filter-and-pin-files/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/martino/repos/file-fridge/test-results/files-view-Files-View-and--13203-browse-filter-and-pin-files/trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/martino/repos/file-fridge/e2e/files-view.spec.ts",
+                        "column": 28,
+                        "line": 16
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "de7d1111b4b6ac433a57-d430b70a25f9ce908bfa",
+              "file": "files-view.spec.ts",
+              "line": 9,
+              "column": 5
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "title": "settings.spec.ts",
+      "file": "settings.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "Settings and Security",
+          "file": "settings.spec.ts",
+          "line": 4,
+          "column": 6,
+          "specs": [
+            {
+              "title": "User can generate and copy an API token",
+              "ok": false,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 1,
+                      "parallelIndex": 0,
+                      "status": "failed",
+                      "duration": 13302,
+                      "error": {
+                        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('alert')\nTimeout: 10000ms\nExpected pattern: \u001b[32m/copied/i\u001b[39m\nReceived string:  \u001b[31m\"···································································································\u001b[39m\n\u001b[31m                                        Token Generated Successfully·····································\u001b[39m\n\u001b[31m                                    Copy this token now. For security reasons, it won't be shown\u001b[39m\n\u001b[31m                                        again.·······················································································································\u001b[39m\n\u001b[31m                                             Copy·············································································································································································\u001b[39m\n\u001b[31m                        \"\u001b[39m\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('alert')\u001b[22m\n\u001b[2m    14 × locator resolved to <div role=\"alert\" id=\"token-result\" class=\"alert alert-success\">…</div>\u001b[22m\n\u001b[2m       - unexpected value \"\u001b[22m\n\u001b[2m                            \u001b[22m\n\u001b[2m                                \u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                        Token Generated Successfully\u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                    Copy this token now. For security reasons, it won't be shown\u001b[22m\n\u001b[2m                                        again.\u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                        \u001b[22m\n\u001b[2m                                        \u001b[22m\n\u001b[2m                                             Copy\u001b[22m\n\u001b[2m                                        \u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                \u001b[22m\n\u001b[2m                                \u001b[22m\n\u001b[2m                            \u001b[22m\n\u001b[2m                        \"\u001b[22m\n",
+                        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('alert')\nTimeout: 10000ms\nExpected pattern: \u001b[32m/copied/i\u001b[39m\nReceived string:  \u001b[31m\"···································································································\u001b[39m\n\u001b[31m                                        Token Generated Successfully·····································\u001b[39m\n\u001b[31m                                    Copy this token now. For security reasons, it won't be shown\u001b[39m\n\u001b[31m                                        again.·······················································································································\u001b[39m\n\u001b[31m                                             Copy·············································································································································································\u001b[39m\n\u001b[31m                        \"\u001b[39m\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('alert')\u001b[22m\n\u001b[2m    14 × locator resolved to <div role=\"alert\" id=\"token-result\" class=\"alert alert-success\">…</div>\u001b[22m\n\u001b[2m       - unexpected value \"\u001b[22m\n\u001b[2m                            \u001b[22m\n\u001b[2m                                \u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                        Token Generated Successfully\u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                    Copy this token now. For security reasons, it won't be shown\u001b[22m\n\u001b[2m                                        again.\u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                        \u001b[22m\n\u001b[2m                                        \u001b[22m\n\u001b[2m                                             Copy\u001b[22m\n\u001b[2m                                        \u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                \u001b[22m\n\u001b[2m                                \u001b[22m\n\u001b[2m                            \u001b[22m\n\u001b[2m                        \"\u001b[22m\n\n    at /Users/martino/repos/file-fridge/e2e/settings.spec.ts:25:47",
+                        "location": {
+                          "file": "/Users/martino/repos/file-fridge/e2e/settings.spec.ts",
+                          "column": 47,
+                          "line": 25
+                        },
+                        "snippet": "  23 |         await page.locator('#copy-token-btn').click();\n  24 |         // Toast notification\n> 25 |         await expect(page.getByRole('alert')).toContainText(/copied/i);\n     |                                               ^\n  26 |\n  27 |         const filteredFailures = browserFailures.failures.filter(\n  28 |             (entry) => !entry.includes('/api/v1/remote/connections')"
+                      },
+                      "errors": [
+                        {
+                          "location": {
+                            "file": "/Users/martino/repos/file-fridge/e2e/settings.spec.ts",
+                            "column": 47,
+                            "line": 25
+                          },
+                          "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoContainText\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('alert')\nTimeout: 10000ms\nExpected pattern: \u001b[32m/copied/i\u001b[39m\nReceived string:  \u001b[31m\"···································································································\u001b[39m\n\u001b[31m                                        Token Generated Successfully·····································\u001b[39m\n\u001b[31m                                    Copy this token now. For security reasons, it won't be shown\u001b[39m\n\u001b[31m                                        again.·······················································································································\u001b[39m\n\u001b[31m                                             Copy·············································································································································································\u001b[39m\n\u001b[31m                        \"\u001b[39m\n\nCall log:\n\u001b[2m  - Expect \"toContainText\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('alert')\u001b[22m\n\u001b[2m    14 × locator resolved to <div role=\"alert\" id=\"token-result\" class=\"alert alert-success\">…</div>\u001b[22m\n\u001b[2m       - unexpected value \"\u001b[22m\n\u001b[2m                            \u001b[22m\n\u001b[2m                                \u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                        Token Generated Successfully\u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                    Copy this token now. For security reasons, it won't be shown\u001b[22m\n\u001b[2m                                        again.\u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                        \u001b[22m\n\u001b[2m                                        \u001b[22m\n\u001b[2m                                             Copy\u001b[22m\n\u001b[2m                                        \u001b[22m\n\u001b[2m                                    \u001b[22m\n\u001b[2m                                \u001b[22m\n\u001b[2m                                \u001b[22m\n\u001b[2m                            \u001b[22m\n\u001b[2m                        \"\u001b[22m\n\n\n  23 |         await page.locator('#copy-token-btn').click();\n  24 |         // Toast notification\n> 25 |         await expect(page.getByRole('alert')).toContainText(/copied/i);\n     |                                               ^\n  26 |\n  27 |         const filteredFailures = browserFailures.failures.filter(\n  28 |             (entry) => !entry.includes('/api/v1/remote/connections')\n    at /Users/martino/repos/file-fridge/e2e/settings.spec.ts:25:47"
+                        }
+                      ],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-04-26T14:02:06.343Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "screenshot",
+                          "contentType": "image/png",
+                          "path": "/Users/martino/repos/file-fridge/test-results/settings-Settings-and-Secu-1661f-erate-and-copy-an-API-token/test-failed-1.png"
+                        },
+                        {
+                          "name": "video",
+                          "contentType": "video/webm",
+                          "path": "/Users/martino/repos/file-fridge/test-results/settings-Settings-and-Secu-1661f-erate-and-copy-an-API-token/video.webm"
+                        },
+                        {
+                          "name": "error-context",
+                          "contentType": "text/markdown",
+                          "path": "/Users/martino/repos/file-fridge/test-results/settings-Settings-and-Secu-1661f-erate-and-copy-an-API-token/error-context.md"
+                        },
+                        {
+                          "name": "trace",
+                          "contentType": "application/zip",
+                          "path": "/Users/martino/repos/file-fridge/test-results/settings-Settings-and-Secu-1661f-erate-and-copy-an-API-token/trace.zip"
+                        }
+                      ],
+                      "errorLocation": {
+                        "file": "/Users/martino/repos/file-fridge/e2e/settings.spec.ts",
+                        "column": 47,
+                        "line": 25
+                      }
+                    }
+                  ],
+                  "status": "unexpected"
+                }
+              ],
+              "id": "d877ffdf71ec720167ae-2324740135d134bf624b",
+              "file": "settings.spec.ts",
+              "line": 9,
+              "column": 5
+            },
+            {
+              "title": "P2P Network settings section is accessible",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "",
+                  "projectName": "",
+                  "results": [
+                    {
+                      "workerIndex": 2,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 1028,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-04-26T14:02:21.128Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "d877ffdf71ec720167ae-a0e6717d210ce2da58dc",
+              "file": "settings.spec.ts",
+              "line": 33,
+              "column": 5
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-04-26T14:01:39.065Z",
+    "duration": 43367.852999999996,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 2,
+    "flaky": 0
+  }
+}

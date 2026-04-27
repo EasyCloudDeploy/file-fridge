@@ -166,6 +166,7 @@ function initSettingsPage() {
                 setTimeout(() => {
                     this.innerHTML = originalIcon;
                 }, 2000);
+                showToast('Token copied to clipboard', 'success');
             } catch (err) {
                 console.error('Failed to copy:', err);
                 tokenInput.select();
@@ -237,984 +238,203 @@ function initSettingsPage() {
         });
     }
 
-    // --- Remote Connections ---
+    // --- P2P Network (V2) ---
 
-    // Load instance configuration
-    async function loadInstanceConfig() {
+    // Load P2P network configuration
+    async function loadP2PNetwork() {
+        const form = document.getElementById('p2p-network-form');
+        if (!form) return;
+
         try {
-            const response = await authenticatedFetch('/api/v1/remote/config');
+            const response = await authenticatedFetch('/api/v1/p2p/network');
             if (response.ok) {
                 const config = await response.json();
+                const networkNameInput = document.getElementById('p2p-network-name');
+                const listenHostInput = document.getElementById('p2p-listen-host');
+                const listenPortInput = document.getElementById('p2p-listen-port');
 
-                // Instance URL
-                const urlInput = document.getElementById('instance-url-input');
-                const urlSource = document.getElementById('instance-url-source');
-                if (urlInput && config.instance_url) {
-                    urlInput.value = config.instance_url.value || '';
-                    urlInput.disabled = !config.instance_url.can_edit;
-
-                    if (config.instance_url.source === 'environment') {
-                        urlSource.innerHTML = '<i class="bi bi-lock-fill me-1"></i>Set via FF_INSTANCE_URL environment variable (read-only)';
-                        urlSource.classList.add('text-info');
-                    } else if (config.instance_url.source === 'database') {
-                        urlSource.innerHTML = '<i class="bi bi-database me-1"></i>Configured in database (can be changed)';
-                        urlSource.classList.add('text-success');
-                    } else {
-                        urlSource.innerHTML = '<i class="bi bi-exclamation-circle me-1"></i>Not configured';
-                        urlSource.classList.add('text-warning');
-                    }
-                }
-
-                // Instance Name
-                const nameInput = document.getElementById('instance-name-input');
-                const nameSource = document.getElementById('instance-name-source');
-                if (nameInput && config.instance_name) {
-                    nameInput.value = config.instance_name.value || '';
-                    nameInput.disabled = !config.instance_name.can_edit;
-
-                    if (config.instance_name.source === 'environment') {
-                        nameSource.innerHTML = '<i class="bi bi-lock-fill me-1"></i>Set via INSTANCE_NAME environment variable (read-only)';
-                        nameSource.classList.add('text-info');
-                    } else if (config.instance_name.source === 'database') {
-                        nameSource.innerHTML = '<i class="bi bi-database me-1"></i>Configured in database (can be changed)';
-                        nameSource.classList.add('text-success');
-                    }
-                }
-
-                // Disable save button if all fields are read-only
-                const saveBtn = document.getElementById('save-config-btn');
-                if (saveBtn && !config.instance_url.can_edit && !config.instance_name.can_edit) {
-                    saveBtn.disabled = true;
-                    saveBtn.title = 'Configuration is set via environment variables and cannot be changed';
+                if (networkNameInput) networkNameInput.value = config.network_name || '';
+                if (listenHostInput) listenHostInput.value = config.listen_host || '';
+                if (listenPortInput) listenPortInput.value = config.listen_port || '';
+                
+                if (config.enabled) {
+                    form.classList.add('enabled');
                 }
             }
         } catch (error) {
-            console.error('Error loading instance config:', error);
+            console.error('Error loading P2P network:', error);
         }
     }
 
-    // Save instance configuration
-    const instanceConfigForm = document.getElementById('instance-config-form');
-    if (instanceConfigForm) {
-        instanceConfigForm.addEventListener('submit', async function (e) {
+    // Save P2P network configuration
+    const p2pNetworkForm = document.getElementById('p2p-network-form');
+    if (p2pNetworkForm) {
+        p2pNetworkForm.addEventListener('submit', async function (e) {
             e.preventDefault();
+            const btn = document.getElementById('save-p2p-network-btn');
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
 
-            const formData = new FormData(this);
-            const data = Object.fromEntries(formData.entries());
+            const payload = {
+                network_name: document.getElementById('p2p-network-name').value,
+                listen_host: document.getElementById('p2p-listen-host').value,
+                listen_port: parseInt(document.getElementById('p2p-listen-port').value),
+                enabled: true
+            };
 
-            // Hide messages
-            document.getElementById('config-error')?.classList.add('d-none');
-            document.getElementById('config-success')?.classList.add('d-none');
-            setFormButtonLoading('save-config', true);
+            const psk = document.getElementById('p2p-psk').value;
+            if (psk) payload.psk = psk;
 
             try {
-                const response = await authenticatedFetch('/api/v1/remote/config', {
+                const response = await authenticatedFetch('/api/v1/p2p/network', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
+                    body: JSON.stringify(payload)
                 });
 
                 if (response.ok) {
-                    const configSuccess = document.getElementById('config-success');
-                    const configSuccessText = document.getElementById('config-success-text');
-                    if (configSuccess && configSuccessText) {
-                        configSuccessText.textContent = 'Configuration saved successfully!';
-                        configSuccess.classList.remove('d-none');
-                    }
-                    // Reload config to show updated source info
-                    await loadInstanceConfig();
-                    // Recheck remote configuration status
-                    await checkRemoteConfiguration();
+                    showToast('P2P network configuration saved', 'success');
+                    await loadP2PNetwork();
                 } else {
-                    const errorData = await response.json();
-                    const configError = document.getElementById('config-error');
-                    const configErrorText = document.getElementById('config-error-text');
-                    if (configError && configErrorText) {
-                        configErrorText.textContent = errorData.detail || 'Failed to save configuration';
-                        configError.classList.remove('d-none');
-                    }
+                    const err = await response.json();
+                    showToast(err.detail || 'Failed to save P2P network', 'error');
                 }
             } catch (error) {
-                console.error('Error saving config:', error);
-                const configError = document.getElementById('config-error');
-                const configErrorText = document.getElementById('config-error-text');
-                if (configError && configErrorText) {
-                    configErrorText.textContent = 'Failed to connect to server.';
-                    configError.classList.remove('d-none');
-                }
+                showToast('Connection error', 'error');
             } finally {
-                setFormButtonLoading('save-config', false);
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
             }
         });
     }
 
-    // Update the pending connections badge in the nav
-    function _updatePendingBadge(count) {
-        const badge = document.getElementById('pending-connections-badge');
-        if (!badge) return;
-        if (count > 0) {
-            badge.textContent = count;
-            badge.classList.remove('d-none');
-        } else {
-            badge.classList.add('d-none');
-        }
-    }
-
-    // Poll for pending connections every 60 seconds so the badge stays fresh
-    setInterval(async () => {
-        try {
-            const response = await authenticatedFetch('/api/v1/remote/status');
-            if (response.ok) {
-                const data = await response.json();
-                _updatePendingBadge(data.pending_connections || 0);
-            }
-        } catch (_) { /* silent — background poll */ }
-    }, 60000);
-
-    // Check if remote connections are configured
-    async function checkRemoteConfiguration() {
-        // Load configuration first
-        await loadInstanceConfig();
+    // Sync P2P peers
+    document.getElementById('sync-p2p-peers-btn')?.addEventListener('click', async function() {
+        const btn = this;
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing...';
 
         try {
-            const response = await authenticatedFetch('/api/v1/remote/status');
+            const response = await authenticatedFetch('/api/v1/p2p/sync', { method: 'POST' });
             if (response.ok) {
                 const data = await response.json();
-                const warningDiv = document.getElementById('remote-config-warning');
-                const remoteConnectionsCard = document.getElementById('remote-connections');
-                const remoteTransfersCard = document.getElementById('remote-transfers');
-                const addRemoteBtn = document.getElementById('add-remote-btn');
-                const connectionCodeInput = document.getElementById('my-connection-code');
-                const copyCodeBtn = document.getElementById('copy-code-btn');
-                const refreshCodeBtn = document.getElementById('refresh-code-btn');
-
-                if (!data.configured) {
-                    // Show warning and disable UI
-                    warningDiv.classList.remove('d-none');
-
-                    // Disable buttons
-                    if (addRemoteBtn) addRemoteBtn.disabled = true;
-                    if (copyCodeBtn) copyCodeBtn.disabled = true;
-                    if (refreshCodeBtn) refreshCodeBtn.disabled = true;
-
-                    // Show disabled message in connection code input
-                    if (connectionCodeInput) {
-                        connectionCodeInput.value = 'Configuration required - see warning above';
-                        connectionCodeInput.disabled = true;
-                    }
-
-                    // Show configuration message in connections list
-                    const list = document.getElementById('remote-connections-list');
-                    if (list) {
-                        list.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Remote connections are disabled until instance URL is configured above.</td></tr>';
-                    }
-
-                    // Show configuration message in transfers list
-                    const transfersList = document.getElementById('remote-transfers-list');
-                    if (transfersList) {
-                        transfersList.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Remote connections are disabled until instance URL is configured above.</td></tr>';
-                    }
-                } else {
-                    // Hide warning and enable UI
-                    warningDiv.classList.add('d-none');
-
-                    // Enable buttons
-                    if (addRemoteBtn) addRemoteBtn.disabled = false;
-                    if (copyCodeBtn) copyCodeBtn.disabled = false;
-                    if (refreshCodeBtn) refreshCodeBtn.disabled = false;
-                    if (connectionCodeInput) connectionCodeInput.disabled = false;
-
-                    // Load data
-                    loadRemoteConnections();
-                    fetchConnectionCode();
-                    loadRemoteTransfers();
-                }
-
-                // Update pending connections badge regardless of configured state
-                _updatePendingBadge(data.pending_connections || 0);
+                showToast(`Synced ${data.synced} peers`, 'success');
+                await loadP2PPeers();
             }
         } catch (error) {
-            console.error('Error checking remote configuration:', error);
+            showToast('Sync failed', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    });
+
+    // Replace the legacy checkRemoteConfiguration
+    async function checkRemoteConfiguration() {
+        if (document.getElementById('p2p-network-form')) {
+            await loadP2PNetwork();
+            await loadP2PPeers();
+            
+            const legacyCards = ['remote-config-warning', 'instance-config', 'remote-connections', 'remote-transfers'];
+            legacyCards.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('d-none');
+            });
+            return;
         }
     }
 
     // Connection code expiry countdown
     let _codeExpiryTimer = null;
-    let _codeExpiresAt = null;
+    // Join P2P peer
+    const p2pJoinForm = document.getElementById('p2p-join-form');
+    if (p2pJoinForm) {
+        p2pJoinForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const btn = this.querySelector('button[type="submit"]');
+            const originalHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Joining...';
 
-    function _startExpiryCountdown(expiresInSeconds) {
-        if (_codeExpiryTimer) clearInterval(_codeExpiryTimer);
-        _codeExpiresAt = Date.now() + expiresInSeconds * 1000;
+            const payload = {
+                host: document.getElementById('p2p-peer-host').value,
+                port: parseInt(document.getElementById('p2p-peer-port').value),
+                peer_name: document.getElementById('p2p-peer-name').value || null,
+                psk: document.getElementById('p2p-peer-psk').value
+            };
 
-        function tick() {
-            const remaining = Math.max(0, Math.round((_codeExpiresAt - Date.now()) / 1000));
-            const min = String(Math.floor(remaining / 60)).padStart(2, '0');
-            const sec = String(remaining % 60).padStart(2, '0');
-            const badge = document.getElementById('code-expiry-badge');
-            const text = document.getElementById('code-expiry-text');
-            if (!text) return;
-            text.textContent = `${min}:${sec}`;
-            if (badge) {
-                badge.classList.remove('text-success', 'text-warning', 'text-danger');
-                if (remaining > 600) {
-                    text.classList.replace('text-warning', 'text-muted');
-                    text.classList.replace('text-danger', 'text-muted');
-                } else if (remaining > 120) {
-                    text.className = 'text-warning';
-                } else {
-                    text.className = 'text-danger';
-                }
-            }
-            if (remaining === 0) {
-                clearInterval(_codeExpiryTimer);
-                // Auto-refresh when the code expires
-                fetchConnectionCode();
-            }
-        }
-        tick();
-        _codeExpiryTimer = setInterval(tick, 1000);
-    }
-
-    // Fetch and display connection code
-    async function fetchConnectionCode() {
-        try {
-            const response = await authenticatedFetch('/api/v1/remote/connection-code');
-            if (response.ok) {
-                const data = await response.json();
-                document.getElementById('my-connection-code').value = data.code;
-                if (data.expires_in_seconds != null) {
-                    _startExpiryCountdown(data.expires_in_seconds);
-                }
-            } else if (response.status === 500) {
-                // Configuration error - likely FF_INSTANCE_URL not set
-                const codeInput = document.getElementById('my-connection-code');
-                if (codeInput) {
-                    codeInput.value = 'Configuration required';
-                    codeInput.disabled = true;
-                }
-                const text = document.getElementById('code-expiry-text');
-                if (text) text.textContent = '--:--';
-            }
-        } catch (error) {
-            console.error('Error fetching connection code:', error);
-        }
-    }
-
-    const toggleCodeVisibilityBtn = document.getElementById('toggle-code-visibility');
-    if (toggleCodeVisibilityBtn) {
-        toggleCodeVisibilityBtn.addEventListener('click', function () {
-            const codeInput = document.getElementById('my-connection-code');
-            const icon = this.querySelector('i');
-            if (codeInput.type === 'password') {
-                codeInput.type = 'text';
-                icon.classList.replace('bi-eye', 'bi-eye-slash');
-            } else {
-                codeInput.type = 'password';
-                icon.classList.replace('bi-eye-slash', 'bi-eye');
-            }
-        });
-    }
-
-    const refreshCodeBtn = document.getElementById('refresh-code-btn');
-    if (refreshCodeBtn) {
-        refreshCodeBtn.addEventListener('click', fetchConnectionCode);
-    }
-
-    const copyCodeBtn = document.getElementById('copy-code-btn');
-    if (copyCodeBtn) {
-        copyCodeBtn.addEventListener('click', async function () {
-            const codeInput = document.getElementById('my-connection-code');
             try {
-                await navigator.clipboard.writeText(codeInput.value);
+                const response = await authenticatedFetch('/api/v1/p2p/peers/join', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
 
-                const originalIcon = this.innerHTML;
-                this.innerHTML = '<i class="bi bi-check"></i>';
-                setTimeout(() => {
-                    this.innerHTML = originalIcon;
-                }, 2000);
-            } catch (err) {
-                console.error('Failed to copy:', err);
-                // Fallback: select text for manual copy
-                codeInput.select();
+                if (response.ok) {
+                    showToast('Joined peer successfully', 'success');
+                    p2pJoinForm.reset();
+                    await loadP2PPeers();
+                } else {
+                    const err = await response.json();
+                    showToast(err.detail || 'Failed to join peer', 'error');
+                }
+            } catch (error) {
+                showToast('Connection error', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHtml;
             }
         });
     }
 
-    // Load remote connections
-    async function loadRemoteConnections() {
-        const list = document.getElementById('remote-connections-list');
+    // Load P2P peers
+    async function loadP2PPeers() {
+        const list = document.getElementById('p2p-peers-list');
         if (!list) return;
 
         try {
-            const response = await authenticatedFetch('/api/v1/remote/connections');
+            const response = await authenticatedFetch('/api/v1/p2p/peers');
             if (response.ok) {
-                const connections = await response.json();
-                list.innerHTML = '';
-
-                if (connections.length === 0) {
-                    list.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">No remote connections found.</td></tr>';
+                const peers = await response.json();
+                if (peers.length === 0) {
+                    list.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-3">No peers joined yet</td></tr>';
                     return;
                 }
 
-                connections.forEach(conn => {
-                    const date = new Date(conn.created_at).toLocaleString();
-                    const tr = document.createElement('tr');
-                    // Escape HTML for display
-                    const escapedName = escapeHtml(conn.name);
-                    const escapedUrl = escapeHtml(conn.url);
-                    // Escape quotes for data attributes (use original values, not HTML-escaped)
-                    const safeName = conn.name.replace(/"/g, '&quot;');
-                    const safeUrl = conn.url.replace(/"/g, '&quot;');
-                    const safeMode = (conn.transfer_mode || 'PUSH_ONLY').replace(/"/g, '&quot;');
-
-                    // Build trust status badge
-                    const trustStatus = conn.trust_status || 'PENDING';
-                    let statusBadge = '';
-                    if (trustStatus === 'TRUSTED') {
-                        statusBadge = '<span class="badge bg-success">Trusted</span>';
-                    } else if (trustStatus === 'PENDING') {
-                        statusBadge = '<span class="badge bg-warning">Pending</span>';
-                    } else if (trustStatus === 'REJECTED') {
-                        statusBadge = '<span class="badge bg-danger">Rejected</span>';
-                    }
-
-                    // Build mode display
-                    const modeLabel = conn.transfer_mode === 'BIDIRECTIONAL' ? 'Bidirectional' : 'Push Only';
-                    let modeBadge = '';
-                    if (conn.effective_bidirectional) {
-                        modeBadge = '<span class="badge bg-success ms-1">Active</span>';
-                    } else if (conn.transfer_mode === 'BIDIRECTIONAL') {
-                        modeBadge = '<span class="badge bg-warning ms-1">Pending Remote</span>';
-                    }
-
-                    // Browse button - disabled for non-trusted connections
-                    let browseDisabledTitle = 'Enable Bidirectional mode on both instances';
-                    if (trustStatus === 'PENDING') {
-                        browseDisabledTitle = 'Accept connection first';
-                    } else if (trustStatus === 'TRUSTED' && conn.transfer_mode === 'BIDIRECTIONAL' && !conn.effective_bidirectional) {
-                        browseDisabledTitle = 'Waiting for the remote instance to also enable Bidirectional mode (currently: Push Only). Ask the remote admin to change their transfer mode setting.';
-                    }
-                    const browseBtn = (trustStatus === 'TRUSTED' && conn.effective_bidirectional)
-                        ? `<button class="btn btn-sm btn-primary browse-remote-btn w-100" data-id="${conn.id}" title="Browse remote files">
-                             <i class="bi bi-folder2-open me-1"></i> Browse Files
-                           </button>`
-                        : `<button class="btn btn-sm btn-outline-secondary w-100" disabled title="${browseDisabledTitle}">
-                             <i class="bi bi-lock me-1"></i> Locked
-                           </button>`;
-
-                    // Action buttons - different for pending vs trusted connections
-                    let actionButtons = '';
-                    if (trustStatus === 'PENDING') {
-                        const safeFingerprint = (conn.remote_fingerprint || '').replace(/"/g, '&quot;');
-                        actionButtons = `
-                            <button class="btn btn-sm btn-outline-info view-details-btn me-1"
-                                data-id="${conn.id}"
-                                data-name="${safeName}"
-                                data-url="${safeUrl}"
-                                data-fingerprint="${safeFingerprint}"
-                                data-mode="${safeMode}"
-                                data-status="${trustStatus}"
-                                title="View connection details">
-                                <i class="bi bi-info-circle"></i>
-                            </button>
-                            <button class="btn btn-sm btn-success accept-conn-btn me-1" data-id="${conn.id}" data-name="${safeName}" title="Accept connection">
-                                <i class="bi bi-check-circle"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger reject-conn-btn" data-id="${conn.id}" data-name="${safeName}" title="Reject connection">
-                                <i class="bi bi-x-circle"></i>
-                            </button>
-                        `;
-                    } else if (trustStatus === 'TRUSTED') {
-                        actionButtons = `
-                            <button class="btn btn-sm btn-outline-info ping-conn-btn me-1" data-id="${conn.id}" data-name="${safeName}" title="Test Connection">
-                                <i class="bi bi-broadcast"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-primary edit-conn-btn me-1" data-id="${conn.id}" data-name="${safeName}" data-url="${safeUrl}" data-mode="${safeMode}" title="Edit connection">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger delete-conn-btn" data-id="${conn.id}" data-name="${safeName}" title="Delete connection">
+                list.innerHTML = peers.map(peer => `
+                    <tr>
+                        <td><strong>${escapeHtml(peer.peer_name)}</strong></td>
+                        <td><code>${peer.host}:${peer.port}</code></td>
+                        <td><span class="badge bg-${peer.status === 'CONNECTED' ? 'success' : 'secondary'}">${peer.status}</span></td>
+                        <td>${peer.last_seen_at ? new Date(peer.last_seen_at).toLocaleString() : 'Never'}</td>
+                        <td class="text-end">
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteP2PPeer(${peer.id})" title="Delete Peer">
                                 <i class="bi bi-trash"></i>
                             </button>
-                        `;
-                    } else {
-                        // REJECTED - only show delete
-                        actionButtons = `
-                            <button class="btn btn-sm btn-outline-danger delete-conn-btn" data-id="${conn.id}" data-name="${safeName}" title="Delete connection">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        `;
-                    }
-
-                    tr.innerHTML = `
-                        <td>${escapedName}</td>
-                        <td>${escapedUrl}</td>
-                        <td>${statusBadge}</td>
-                        <td>${modeLabel}${modeBadge}</td>
-                        <td>${date}</td>
-                        <td>${browseBtn}</td>
-                        <td>${actionButtons}</td>
-                    `;
-                    list.appendChild(tr);
-                });
-
-                // Add view details event listeners
-                document.querySelectorAll('.view-details-btn').forEach(btn => {
-                    btn.addEventListener('click', function () {
-                        const id = this.dataset.id;
-                        const name = this.dataset.name;
-                        const url = this.dataset.url;
-                        const fingerprint = this.dataset.fingerprint;
-                        const mode = this.dataset.mode;
-                        const status = this.dataset.status;
-                        showConnectionDetails(id, name, url, fingerprint, mode, status);
-                    });
-                });
-
-                // Add accept event listeners
-                document.querySelectorAll('.accept-conn-btn').forEach(btn => {
-                    btn.addEventListener('click', function () {
-                        const id = this.dataset.id;
-                        const name = this.dataset.name;
-                        acceptConnection(id, name);
-                    });
-                });
-
-                // Add reject event listeners
-                document.querySelectorAll('.reject-conn-btn').forEach(btn => {
-                    btn.addEventListener('click', function () {
-                        const id = this.dataset.id;
-                        const name = this.dataset.name;
-                        rejectConnection(id, name);
-                    });
-                });
-
-                // Add edit event listeners
-                document.querySelectorAll('.edit-conn-btn').forEach(btn => {
-                    btn.addEventListener('click', function () {
-                        const id = this.dataset.id;
-                        const name = this.dataset.name;
-                        const url = this.dataset.url;
-                        const mode = this.dataset.mode;
-                        showEditModal(id, name, url, mode);
-                    });
-                });
-
-                // Add delete event listeners
-                document.querySelectorAll('.delete-conn-btn').forEach(btn => {
-                    btn.addEventListener('click', function () {
-                        const id = this.dataset.id;
-                        const name = this.dataset.name;
-                        showDeleteModal(id, name);
-                    });
-                });
-
-                // Add ping event listeners
-                document.querySelectorAll('.ping-conn-btn').forEach(btn => {
-                    btn.addEventListener('click', function () {
-                        const id = this.dataset.id;
-                        const name = this.dataset.name;
-                        pingConnection(id, name, this);
-                    });
-                });
-
-                // Add browse event listeners
-                document.querySelectorAll('.browse-remote-btn').forEach(btn => {
-                    btn.addEventListener('click', function () {
-                        const id = this.dataset.id;
-                        window.location.href = `/remote-files/${id}`;
-                    });
-                });
-            }
-        } catch (error) {
-            console.error('Error loading connections:', error);
-            list.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Failed to load connections.</td></tr>';
-        }
-    }
-
-    // Track if we're editing or adding
-    let editingConnectionId = null;
-
-    // Show edit modal
-    function showEditModal(id, name, url, transferMode) {
-        editingConnectionId = id;
-        const modal = document.getElementById('addConnectionModal');
-        const modalTitle = document.getElementById('addConnectionModalLabel');
-        const nameInput = document.getElementById('remote-name');
-        const urlInput = document.getElementById('remote-url');
-        const codeInput = document.getElementById('connection-code');
-        const codeGroup = codeInput.closest('.mb-3');
-        const saveBtn = document.getElementById('save-connection-text');
-        const modeSelect = document.getElementById('transfer-mode');
-
-        // Update modal title
-        modalTitle.textContent = 'Edit Remote Connection';
-
-        // Populate form fields
-        nameInput.value = name;
-        urlInput.value = url;
-        if (modeSelect) modeSelect.value = transferMode || 'PUSH_ONLY';
-
-        // Hide connection code field for editing
-        codeGroup.classList.add('d-none');
-        codeInput.removeAttribute('required');
-
-        // Update button text
-        saveBtn.textContent = 'Update Connection';
-
-        // Show modal
-        const modalInstance = new bootstrap.Modal(modal);
-        modalInstance.show();
-    }
-
-    // Reset modal to add mode
-    function resetModalToAddMode() {
-        editingConnectionId = null;
-        const modalTitle = document.getElementById('addConnectionModalLabel');
-        const codeInput = document.getElementById('connection-code');
-        const codeGroup = codeInput.closest('.mb-3');
-        const saveBtn = document.getElementById('save-connection-text');
-
-        modalTitle.textContent = 'Add Remote Connection';
-        codeGroup.classList.remove('d-none');
-        codeInput.setAttribute('required', 'required');
-        saveBtn.textContent = 'Add Connection';
-    }
-
-    // Add connection form
-    const addConnectionForm = document.getElementById('add-connection-form');
-    if (addConnectionForm) {
-        // Reset modal when it's hidden
-        const addConnectionModal = document.getElementById('addConnectionModal');
-        if (addConnectionModal) {
-            addConnectionModal.addEventListener('hidden.bs.modal', function () {
-                addConnectionForm.reset();
-                resetModalToAddMode();
-            });
-        }
-
-        addConnectionForm.addEventListener('submit', async function (e) {
-            e.preventDefault();
-            setFormButtonLoading('save-connection', true);
-
-            const formData = new FormData(this);
-            const data = Object.fromEntries(formData.entries());
-
-            try {
-                let response;
-                if (editingConnectionId) {
-                    // Update existing connection
-                    const updateData = {
-                        name: data.name,
-                        url: data.url,
-                        transfer_mode: data.transfer_mode || 'PUSH_ONLY',
-                    };
-                    response = await authenticatedFetch(`/api/v1/remote/connections/${editingConnectionId}`, {
-                        method: 'PATCH',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(updateData)
-                    });
-                } else {
-                    // Create new connection
-                    response = await authenticatedFetch('/api/v1/remote/connect', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(data)
-                    });
-                }
-
-                if (response.ok) {
-                    bootstrap.Modal.getInstance(document.getElementById('addConnectionModal')).hide();
-                    addConnectionForm.reset();
-                    resetModalToAddMode();
-                    loadRemoteConnections();
-                } else {
-                    const errorData = await response.json();
-                    alert('Error: ' + (errorData.detail || 'Failed to save connection'));
-                }
-            } catch (error) {
-                console.error('Error saving connection:', error);
-                alert('Failed to connect to server.');
-            } finally {
-                setFormButtonLoading('save-connection', false);
-            }
-        });
-    }
-
-    // Connection details modal
-    let currentDetailConnectionId = null;
-    let currentDetailConnectionName = null;
-    const detailsModal = new bootstrap.Modal(document.getElementById('connectionDetailsModal'));
-
-    function showConnectionDetails(id, name, url, fingerprint, mode, status) {
-        currentDetailConnectionId = id;
-        currentDetailConnectionName = name;
-
-        document.getElementById('detail-name').textContent = name;
-        document.getElementById('detail-url').textContent = url;
-        document.getElementById('detail-fingerprint').textContent = fingerprint || 'N/A';
-        document.getElementById('detail-status').textContent = status;
-        document.getElementById('detail-mode').textContent = mode === 'BIDIRECTIONAL' ? 'Bidirectional' : 'Push Only';
-
-        // Show/hide accept button based on status
-        const acceptBtn = document.getElementById('accept-from-details-btn');
-        if (status === 'PENDING') {
-            acceptBtn.style.display = '';
-        } else {
-            acceptBtn.style.display = 'none';
-        }
-
-        detailsModal.show();
-    }
-
-    // Accept from details modal
-    document.getElementById('accept-from-details-btn').addEventListener('click', async function () {
-        if (currentDetailConnectionId) {
-            detailsModal.hide();
-            await acceptConnection(currentDetailConnectionId, currentDetailConnectionName);
-        }
-    });
-
-    // Accept connection logic
-    async function acceptConnection(id, name) {
-        if (!confirm(`Accept connection from "${name}"?`)) {
-            return;
-        }
-
-        try {
-            const response = await authenticatedFetch(`/api/v1/remote/connections/${id}/trust`, {
-                method: 'POST'
-            });
-
-            if (response.ok) {
-                showToast('Success', `Connection "${name}" has been accepted.`, 'success');
-                loadRemoteConnections();
-            } else {
-                const errorData = await response.json();
-                showToast('Error', errorData.detail || 'Failed to accept connection', 'danger');
-            }
-        } catch (error) {
-            console.error('Error accepting connection:', error);
-            showToast('Error', 'Failed to connect to server.', 'danger');
-        }
-    }
-
-    // Reject connection logic
-    async function rejectConnection(id, name) {
-        if (!confirm(`Reject connection from "${name}"? This can be reversed later.`)) {
-            return;
-        }
-
-        try {
-            const response = await authenticatedFetch(`/api/v1/remote/connections/${id}/reject`, {
-                method: 'POST'
-            });
-
-            if (response.ok) {
-                showToast('Success', `Connection "${name}" has been rejected.`, 'warning');
-                loadRemoteConnections();
-            } else {
-                const errorData = await response.json();
-                showToast('Error', errorData.detail || 'Failed to reject connection', 'danger');
-            }
-        } catch (error) {
-            console.error('Error rejecting connection:', error);
-            showToast('Error', 'Failed to connect to server.', 'danger');
-        }
-    }
-
-    // Ping connection logic
-    async function pingConnection(id, name, btn) {
-        const originalContent = btn.innerHTML;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>';
-        btn.disabled = true;
-
-        try {
-            const response = await authenticatedFetch(`/api/v1/remote/connections/${id}/ping`, {
-                method: 'POST'
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                if (data.reachable) {
-                    btn.innerHTML = '<i class="bi bi-check-circle text-success"></i>';
-                    showToast('Connection Successful', `Successfully reached "${name}" (latency: ${data.latency_ms}ms).`, 'success');
-                } else {
-                    btn.innerHTML = '<i class="bi bi-exclamation-circle text-danger"></i>';
-                    showToast('Connection Failed', `Remote instance "${name}" reported error: ${data.error}`, 'danger');
-                }
-            } else {
-                const errorData = await response.json();
-                btn.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
-                showToast('Error', errorData.detail || 'Failed to ping connection', 'danger');
-            }
-        } catch (error) {
-            console.error('Error pinging connection:', error);
-            btn.innerHTML = '<i class="bi bi-x-circle text-danger"></i>';
-            showToast('Error', 'Failed to connect to server.', 'danger');
-        } finally {
-            setTimeout(() => {
-                btn.innerHTML = originalContent;
-                btn.disabled = false;
-            }, 5000);
-        }
-    }
-
-    // Delete connection logic
-    let connectionToDelete = null;
-    const deleteModal = new bootstrap.Modal(document.getElementById('deleteConnectionModal'));
-
-    function showDeleteModal(id, name) {
-        connectionToDelete = id;
-        document.getElementById('delete-conn-name').textContent = name;
-        document.getElementById('force-delete-check').checked = false;
-        document.getElementById('force-delete-warning').classList.add('d-none');
-        deleteModal.show();
-    }
-
-    document.getElementById('force-delete-check').addEventListener('change', function () {
-        const warning = document.getElementById('force-delete-warning');
-        if (this.checked) {
-            warning.classList.remove('d-none');
-        } else {
-            warning.classList.add('d-none');
-        }
-    });
-
-    // Delete transfer logic
-    let transferToDelete = null;
-    let transferFileName = '';
-    const deleteTransferModal = new bootstrap.Modal(document.getElementById('deleteTransferModal'));
-
-    function showDeleteTransferModal(jobId, fileName) {
-        transferToDelete = jobId;
-        transferFileName = fileName;
-        document.getElementById('delete-transfer-name').textContent = fileName;
-        deleteTransferModal.show();
-    }
-
-    // Load remote transfers
-    let transfers = [];
-    async function loadRemoteTransfers() {
-        const list = document.getElementById('remote-transfers-list');
-        try {
-            const response = await authenticatedFetch('/api/v1/remote/transfers');
-            if (response.ok) {
-                transfers = await response.json();
-                if (transfers.length === 0) {
-                    list.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">No active transfers.</td></tr>';
-                    return;
-                }
-
-                list.innerHTML = '';
-                transfers.forEach(job => {
-                    const fileName = job.source_path.split('/').pop();
-                    let statusClass = 'secondary';
-                    if (job.status === 'completed') {
-                        statusClass = 'success';
-                    } else if (job.status === 'failed') {
-                        statusClass = 'danger';
-                    } else if (job.status === 'in_progress') {
-                        statusClass = 'primary';
-                    } else if (job.status === 'cancelled') {
-                        statusClass = 'warning';
-                    }
-
-                    const directionBadge = job.direction === 'PULL'
-                        ? '<span class="badge bg-info me-1" title="Pull transfer (serving to remote)"><i class="bi bi-arrow-up"></i></span>'
-                        : '<span class="badge bg-secondary me-1" title="Push transfer"><i class="bi bi-arrow-right"></i></span>';
-
-                    const canCancel = ['pending', 'in_progress'].includes(job.status);
-                    const canDelete = ['failed', 'completed', 'cancelled'].includes(job.status);
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td title="${job.source_path}">${directionBadge}${fileName}</td>
-                        <td><span class="badge bg-${statusClass}">${job.status}</span></td>
-                        <td>
-                            <div class="progress" style="height: 10px; width: 100px;">
-                                <div class="progress-bar" role="progressbar" style="width: ${job.progress}%"></div>
-                            </div>
-                            <small>${job.progress}%</small>
                         </td>
-                        <td>${formatETA(job.eta)}</td>
-                        <td>
-                            ${job.error_message ? `<i class="bi bi-exclamation-circle text-danger" title="${job.error_message}"></i>` : ''}
-                            ${canCancel ? `<button class="btn btn-sm btn-outline-danger ms-2" onclick="cancelTransfer(${job.id})" title="Cancel transfer"><i class="bi bi-x-circle"></i></button>` : ''}
-                            ${canDelete ? `<button class="btn btn-sm btn-outline-secondary ms-2" onclick="showDeleteTransferModal(${job.id}, '${fileName.replace(/'/g, "\\\'")}')" title="Remove from list"><i class="bi bi-trash"></i></button>` : ''}
-                        </td>
-                    `;
-                    list.appendChild(tr);
-                });
+                    </tr>
+                `).join('');
             }
         } catch (error) {
-            console.error('Error loading transfers:', error);
+            console.error('Error loading P2P peers:', error);
         }
     }
 
-    function formatETA(seconds) {
-        if (!seconds || seconds < 0) return '-';
-        if (seconds < 60) return Math.round(seconds) + 's';
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.round(seconds % 60);
-        return mins + 'm ' + secs + 's';
-    }
-
-    globalThis.cancelTransfer = async function (jobId) {
-        if (!confirm('Are you sure you want to cancel this transfer?')) return;
+    globalThis.deleteP2PPeer = async function(id) {
+        if (!confirm('Are you sure you want to delete this peer?')) return;
 
         try {
-            const response = await authenticatedFetch(`/api/v1/remote/transfers/${jobId}/cancel`, {
-                method: 'POST'
-            });
-
+            const response = await authenticatedFetch(`/api/v1/p2p/peers/${id}`, { method: 'DELETE' });
             if (response.ok) {
-                await loadRemoteTransfers();
-            } else {
-                const errorData = await response.json();
-                alert('Error: ' + (errorData.detail || 'Failed to cancel transfer'));
+                showToast('Peer deleted', 'success');
+                await loadP2PPeers();
             }
         } catch (error) {
-            console.error('Error cancelling transfer:', error);
-            alert('Failed to connect to server.');
+            showToast('Delete failed', 'error');
         }
     };
-
-    // Make showDeleteTransferModal globally accessible for inline onclick
-    globalThis.showDeleteTransferModal = showDeleteTransferModal;
-
-    // Confirm delete transfer button handler
-    document.getElementById('confirm-delete-transfer-btn').addEventListener('click', async function () {
-        if (!transferToDelete) return;
-
-        const button = this;
-        setButtonTextLoading(button, true, 'Removing...', 'Remove');
-
-        try {
-            const response = await authenticatedFetch(`/api/v1/remote/transfers/${transferToDelete}`, {
-                method: 'DELETE'
-            });
-
-            if (response.ok) {
-                deleteTransferModal.hide();
-                await loadRemoteTransfers();
-            } else {
-                const errorData = await response.json();
-                alert('Error: ' + (errorData.detail || 'Failed to delete transfer'));
-            }
-        } catch (error) {
-            console.error('Error deleting transfer:', error);
-            alert('Failed to connect to server.');
-        } finally {
-            setButtonTextLoading(button, false, 'Removing...', 'Remove');
-        }
-    });
-
-    globalThis.bulkCancelTransfers = async function () {
-        const pendingJobs = transfers.filter(t => ['pending', 'in_progress'].includes(t.status));
-        if (pendingJobs.length === 0) {
-            alert('No pending or in-progress transfers to cancel.');
-            return;
-        }
-
-        if (!confirm(`Cancel ${pendingJobs.length} transfers?`)) return;
-
-        try {
-            const jobIds = pendingJobs.map(t => t.id);
-            const response = await authenticatedFetch('/api/v1/remote/transfers/bulk/cancel', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(jobIds)
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                await loadRemoteTransfers();
-                alert(`Cancelled ${data.cancelled_count} transfers. ${data.error_count > 0 ? data.error_count + ' errors occurred.' : ''}`);
-            } else {
-                const errorData = await response.json();
-                alert('Error: ' + (errorData.detail || 'Failed to cancel transfers'));
-            }
-        } catch (error) {
-            console.error('Error cancelling transfers:', error);
-            alert('Failed to connect to server.');
-        }
-    };
-
-    globalThis.bulkRetryTransfers = async function () {
-        const failedJobs = transfers.filter(t => t.status === 'failed');
-        if (failedJobs.length === 0) {
-            alert('No failed transfers to retry.');
-            return;
-        }
-
-        if (!confirm(`Retry ${failedJobs.length} transfers?`)) return;
-
-        try {
-            const jobIds = failedJobs.map(t => t.id);
-            const response = await authenticatedFetch('/api/v1/remote/transfers/bulk/retry', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ job_ids: jobIds })
-            });
-
-            if (response.ok) {
-                const data = await response.json();
-                await loadRemoteTransfers();
-                alert(`Retrying ${data.retried_count} transfers. ${data.skipped_count > 0 ? data.skipped_count + ' transfers skipped (max retries exceeded).' : ''}`);
-            } else {
-                const errorData = await response.json();
-                alert('Error: ' + (errorData.detail || 'Failed to retry transfers'));
-            }
-        } catch (error) {
-            console.error('Error retrying transfers:', error);
-            alert('Failed to connect to server.');
-        }
-    };
-
-    const refreshTransfersBtn = document.getElementById('refresh-transfers-btn');
-    if (refreshTransfersBtn) {
-        refreshTransfersBtn.addEventListener('click', loadRemoteTransfers);
-    }
-
-    // Auto-refresh transfers if visible (only if configured)
-    let remoteConfigured = false;
-    setInterval(() => {
-        const section = document.getElementById('remote-connections-section');
-        const warningDiv = document.getElementById('remote-config-warning');
-        // Only refresh if section is visible and configuration warning is hidden
-        if (section && !section.classList.contains('d-none') && warningDiv && warningDiv.classList.contains('d-none')) {
-            loadRemoteTransfers();
-        }
-    }, 5000);
-
-    document.getElementById('confirm-delete-conn-btn').addEventListener('click', async function () {
-        if (!connectionToDelete) return;
-
-        const button = this;
-        setButtonTextLoading(button, true, 'Deleting...', 'Delete');
-
-        try {
-            const force = document.getElementById('force-delete-check').checked;
-            const response = await authenticatedFetch(`/api/v1/remote/connections/${connectionToDelete}?force=${force}`, {
-                method: 'DELETE'
-            });
-
-            if (response.ok) {
-                deleteModal.hide();
-                loadRemoteConnections();
-            } else {
-                const errorData = await response.json();
-                alert('Error: ' + (errorData.detail || 'Failed to delete connection'));
-            }
-        } catch (error) {
-            console.error('Error deleting connection:', error);
-            alert('Failed to connect to server.');
-        } finally {
-            setButtonTextLoading(button, false, 'Deleting...', 'Delete');
-        }
-    });
-
-    // --- Encryption Management ---
-
     async function loadEncryptionKeys() {
         const list = document.getElementById('encryption-keys-list');
         if (!list) return;

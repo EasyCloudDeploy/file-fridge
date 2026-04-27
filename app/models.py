@@ -446,6 +446,13 @@ class FileInventory(Base):
         Integer, ForeignKey(COLD_STORAGE_LOCATIONS_ID), nullable=True, index=True
     )
     is_encrypted = Column(Boolean, nullable=False, default=False)
+    is_shareable = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=sa.text("'1'"),
+        index=True,
+    )
 
     # Composite indexes for common query patterns
     __table_args__ = (
@@ -745,6 +752,85 @@ class InstanceMetadata(Base):
     )  # Instance URL for remote connections (fallback if env var not set)
     instance_name = Column(String, nullable=True)  # Custom instance name
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class P2PPeerStatus(str, enum.Enum):
+    """Connection status for a P2P peer."""
+
+    CONNECTED = "CONNECTED"
+    DEGRADED = "DEGRADED"
+    DISCONNECTED = "DISCONNECTED"
+
+
+class P2PNetworkConfig(Base):
+    """Single-node P2P network configuration."""
+
+    __tablename__ = "p2p_network_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    network_name = Column(String, nullable=False, default="File Fridge P2P")
+    psk_hash = Column(String, nullable=False, unique=True, index=True)
+    listen_host = Column(String, nullable=False, default="0.0.0.0")
+    listen_port = Column(Integer, nullable=False, default=9119)
+    enabled = Column(Boolean, nullable=False, default=True, server_default=sa.text("'1'"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+
+class P2PPeer(Base):
+    """Known peer in the private P2P network."""
+
+    __tablename__ = "p2p_peers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    peer_name = Column(String, nullable=False)
+    peer_id = Column(String, nullable=False, unique=True, index=True)
+    host = Column(String, nullable=False)
+    port = Column(Integer, nullable=False)
+    status = Column(
+        SQLEnum(P2PPeerStatus),
+        default=P2PPeerStatus.DISCONNECTED,
+        nullable=False,
+        server_default=sa.text("'DISCONNECTED'"),
+    )
+    psk_hash = Column(String, nullable=False, index=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    shared_files = relationship(
+        "RemoteSharedFileCache", back_populates="peer", cascade="all, delete-orphan"
+    )
+
+
+class RemoteSharedFileCache(Base):
+    """Cached metadata for files announced by other peers."""
+
+    __tablename__ = "remote_shared_file_cache"
+
+    id = Column(Integer, primary_key=True, index=True)
+    peer_id = Column(Integer, ForeignKey("p2p_peers.id"), nullable=False, index=True)
+    remote_file_id = Column(String, nullable=False, index=True)
+    path_id = Column(Integer, nullable=True)
+    file_path = Column(String, nullable=False, index=True)
+    display_file_path = Column(String, nullable=False)
+    relative_path = Column(String, nullable=True)
+    storage_type = Column(SQLEnum(StorageType), nullable=False)
+    file_size = Column(BigInteger, nullable=False)
+    file_mtime = Column(DateTime(timezone=True), nullable=True)
+    checksum = Column(String, nullable=True)
+    mime_type = Column(String, nullable=True)
+    file_extension = Column(String, nullable=True, index=True)
+    path_name = Column(String, nullable=True)
+    last_announced_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    peer = relationship("P2PPeer", back_populates="shared_files")
+
+    __table_args__ = (
+        UniqueConstraint("peer_id", "remote_file_id", name="uq_remote_shared_file_peer_remote_id"),
+    )
 
 
 class TrustStatus(str, enum.Enum):
