@@ -3,13 +3,13 @@
 
     function toastSuccess(message) {
         if (typeof showToast === 'function') {
-            showToast('Success', message, 'success');
+            showToast(message, 'success');
         }
     }
 
     function toastError(message) {
         if (typeof showToast === 'function') {
-            showToast('Error', message, 'danger');
+            showToast(message, 'error');
         }
     }
 
@@ -27,160 +27,78 @@
         return date.toLocaleString();
     }
 
-    async function loadNetworkConfig() {
-        const nameEl = document.getElementById('p2p-network-name');
-        const hostEl = document.getElementById('p2p-listen-host');
-        const portEl = document.getElementById('p2p-listen-port');
-        const pskEl = document.getElementById('p2p-psk');
-        if (!nameEl || !hostEl || !portEl || !pskEl) return;
+    function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value || '';
+        return div.innerHTML;
+    }
 
+    function showWizardMode() {
+        document.getElementById('p2p-setup-wizard')?.classList.remove('d-none');
+        document.getElementById('p2p-management')?.classList.add('d-none');
+    }
+
+    function showManagementMode() {
+        document.getElementById('p2p-setup-wizard')?.classList.add('d-none');
+        document.getElementById('p2p-management')?.classList.remove('d-none');
+    }
+
+    function getJoinEndpoint() {
+        const host = window.location.hostname || '127.0.0.1';
+        const port = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+        return { host, port };
+    }
+
+    function setWizardChoice(mode) {
+        const createBtn = document.getElementById('wizard-choice-create');
+        const joinBtn = document.getElementById('wizard-choice-join');
+        const createPane = document.getElementById('p2p-wizard-create-pane');
+        const joinPane = document.getElementById('p2p-wizard-join-pane');
+
+        const isCreate = mode === 'create';
+        createBtn?.classList.toggle('active', isCreate);
+        joinBtn?.classList.toggle('active', !isCreate);
+        createPane?.classList.toggle('d-none', !isCreate);
+        joinPane?.classList.toggle('d-none', isCreate);
+    }
+
+    async function apiJson(url, options) {
+        const response = await authenticatedFetch(url, options);
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: 'Request failed' }));
+            throw new Error(extractErrorMessage(errorData, `Request failed (${response.status})`));
+        }
+        return response.status === 204 ? null : response.json();
+    }
+
+    async function refreshNetworkConfig() {
         try {
             const response = await authenticatedFetch('/api/v1/p2p/network');
             if (response.status === 404) {
                 currentNetworkConfig = null;
-                nameEl.value = 'File Fridge P2P';
-                hostEl.value = '0.0.0.0';
-                portEl.value = '9119';
-                pskEl.value = '';
-                return;
+                return null;
             }
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
-
-            const config = await response.json();
-            currentNetworkConfig = config;
-            nameEl.value = config.network_name || 'File Fridge P2P';
-            hostEl.value = config.listen_host || '0.0.0.0';
-            portEl.value = config.listen_port || 9119;
-            pskEl.value = '';
+            currentNetworkConfig = await response.json();
+            return currentNetworkConfig;
         } catch (error) {
-            console.error('Failed to load P2P config:', error);
+            console.error('Failed to load network config:', error);
             toastError(`Failed to load P2P config: ${error.message}`);
-        }
-    }
-
-    async function saveNetworkConfig(event) {
-        event.preventDefault();
-
-        const name = document.getElementById('p2p-network-name')?.value?.trim() || 'File Fridge P2P';
-        const host = document.getElementById('p2p-listen-host')?.value?.trim() || '0.0.0.0';
-        const portRaw = document.getElementById('p2p-listen-port')?.value;
-        const psk = document.getElementById('p2p-psk')?.value?.trim() || '';
-        const port = parseInt(portRaw || '9119', 10);
-
-        try {
-            let response;
-            if (!currentNetworkConfig) {
-                if (!psk) {
-                    throw new Error('PSK is required to create a P2P network');
-                }
-                response = await authenticatedFetch('/api/v1/p2p/network', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        network_name: name,
-                        listen_host: host,
-                        listen_port: port,
-                        enabled: true,
-                        psk
-                    })
-                });
-            } else {
-                response = await authenticatedFetch('/api/v1/p2p/network', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        network_name: name,
-                        listen_host: host,
-                        listen_port: port,
-                        enabled: true,
-                        psk: psk || undefined
-                    })
-                });
-            }
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: 'Request failed' }));
-                throw new Error(extractErrorMessage(errorData, 'Could not save P2P network'));
-            }
-
-            toastSuccess('P2P network configuration saved');
-            await loadNetworkConfig();
-            await loadPeers();
-        } catch (error) {
-            console.error('Failed to save P2P config:', error);
-            toastError(error.message);
-        }
-    }
-
-    async function joinPeer(event) {
-        event.preventDefault();
-
-        const host = document.getElementById('p2p-peer-host')?.value?.trim();
-        const port = parseInt(document.getElementById('p2p-peer-port')?.value || '0', 10);
-        const peerName = document.getElementById('p2p-peer-name')?.value?.trim();
-        const psk = document.getElementById('p2p-peer-psk')?.value?.trim();
-
-        if (!host || !port || !psk) {
-            toastError('Host, port, and PSK are required');
-            return;
-        }
-
-        try {
-            const response = await authenticatedFetch('/api/v1/p2p/peers/join', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ host, port, psk, peer_name: peerName || undefined })
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: 'Request failed' }));
-                throw new Error(extractErrorMessage(errorData, 'Failed to join peer'));
-            }
-
-            toastSuccess('Peer joined');
-            document.getElementById('p2p-join-form')?.reset();
-            await loadPeers();
-        } catch (error) {
-            console.error('Failed to join peer:', error);
-            toastError(error.message);
-        }
-    }
-
-    async function syncPeers() {
-        const syncBtn = document.querySelector('#sync-p2p-peers-btn');
-        if (syncBtn) syncBtn.disabled = true;
-        try {
-            const response = await authenticatedFetch('/api/v1/p2p/sync', { method: 'POST' });
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({ detail: 'Sync failed' }));
-                throw new Error(extractErrorMessage(errorData, 'Sync failed'));
-            }
-            await loadPeers();
-            toastSuccess('Peer manifests synced');
-        } catch (error) {
-            console.error('Failed to sync peers:', error);
-            toastError(error.message);
-        } finally {
-            if (syncBtn) syncBtn.disabled = false;
+            return null;
         }
     }
 
     async function loadPeers() {
         const tbody = document.getElementById('p2p-peers-list');
-        if (!tbody) return;
+        if (!tbody) return [];
 
         try {
-            const response = await authenticatedFetch('/api/v1/p2p/peers');
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-
-            const peers = await response.json();
+            const peers = await apiJson('/api/v1/p2p/peers');
             if (!Array.isArray(peers) || peers.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-3">No peers joined yet.</td></tr>';
-                return;
+                tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-3">No peers joined yet.</td></tr>';
+                return [];
             }
 
             tbody.innerHTML = peers.map(peer => {
@@ -194,38 +112,334 @@
                         <td><code>${escapeHtml(`${peer.host}:${peer.port}`)}</code></td>
                         <td><span class="badge ${badgeClass}">${escapeHtml(status)}</span></td>
                         <td>${escapeHtml(toLocalDate(peer.last_seen_at))}</td>
+                        <td class="text-end">
+                            <button type="button" class="btn btn-sm btn-outline-danger p2p-unjoin-peer-btn" data-peer-id="${Number(peer.id)}">
+                                <i class="bi bi-x-circle me-1"></i>Unjoin
+                            </button>
+                        </td>
                     </tr>
                 `;
             }).join('');
+
+            tbody.querySelectorAll('.p2p-unjoin-peer-btn').forEach(btn => {
+                btn.addEventListener('click', async (event) => {
+                    const peerId = parseInt(event.currentTarget.dataset.peerId || '0', 10);
+                    if (!peerId) return;
+                    await unjoinPeer(peerId);
+                });
+            });
+
+            return peers;
         } catch (error) {
             console.error('Failed to load peers:', error);
-            tbody.innerHTML = '<tr><td colspan="4" class="text-danger text-center py-3">Failed to load peers.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="text-danger text-center py-3">Failed to load peers.</td></tr>';
+            return [];
         }
     }
 
-    function escapeHtml(value) {
-        const div = document.createElement('div');
-        div.textContent = value || '';
-        return div.innerHTML;
+    async function loadStats() {
+        try {
+            const stats = await apiJson('/api/v1/p2p/stats');
+            document.getElementById('p2p-stat-connected').textContent = String(stats.connected_peers || 0);
+            document.getElementById('p2p-stat-degraded').textContent = String(stats.degraded_peers || 0);
+            document.getElementById('p2p-stat-remote-files').textContent = String(stats.remote_cached_files || 0);
+            document.getElementById('p2p-stat-backend').textContent = String(stats.backend || 'unknown');
+
+            const health = String(stats.health || 'UNKNOWN').toUpperCase();
+            const healthBadge = document.getElementById('p2p-health-badge');
+            if (healthBadge) {
+                healthBadge.textContent = health;
+                healthBadge.className = 'badge';
+                if (health === 'HEALTHY') {
+                    healthBadge.classList.add('text-bg-success');
+                } else if (health === 'DEGRADED') {
+                    healthBadge.classList.add('text-bg-warning');
+                } else if (health === 'IDLE') {
+                    healthBadge.classList.add('text-bg-secondary');
+                } else {
+                    healthBadge.classList.add('text-bg-dark');
+                }
+            }
+        } catch (error) {
+            console.error('Failed to load p2p stats:', error);
+        }
     }
 
-    async function initP2PSettings() {
-        const networkForm = document.getElementById('p2p-network-form');
-        const joinForm = document.getElementById('p2p-join-form');
-        const syncBtn = document.getElementById('sync-p2p-peers-btn');
+    function updateJoinEndpointDisplay() {
+        const { host, port } = getJoinEndpoint();
+        const hostInput = document.getElementById('p2p-connect-host');
+        const portInput = document.getElementById('p2p-connect-port');
+        if (hostInput) hostInput.value = host;
+        if (portInput) portInput.value = port;
+    }
 
-        if (!networkForm || !joinForm) {
+    function showGeneratedPsk(psk) {
+        const panel = document.getElementById('p2p-generated-psk-panel');
+        const input = document.getElementById('p2p-generated-psk-value');
+        if (!panel || !input) return;
+
+        if (psk) {
+            input.value = psk;
+            panel.classList.remove('d-none');
+        } else {
+            input.value = '';
+            panel.classList.add('d-none');
+        }
+    }
+
+    async function refreshView() {
+        const config = await refreshNetworkConfig();
+        const peers = await loadPeers();
+        await loadStats();
+
+        if (config || peers.length > 0) {
+            showManagementMode();
+            updateJoinEndpointDisplay();
+        } else {
+            showWizardMode();
+        }
+    }
+
+    async function createNetwork(event) {
+        event.preventDefault();
+
+        const listenHost = document.getElementById('p2p-wizard-listen-host')?.value?.trim() || '0.0.0.0';
+        const listenPort = parseInt(document.getElementById('p2p-wizard-listen-port')?.value || '9119', 10);
+        const submitBtn = document.getElementById('p2p-wizard-create-btn');
+        const originalText = submitBtn ? submitBtn.innerHTML : '';
+
+        try {
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creating...';
+            }
+
+            const payload = await apiJson('/api/v1/p2p/network', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    network_name: 'File Fridge P2P',
+                    listen_host: listenHost,
+                    listen_port: listenPort,
+                    enabled: true
+                })
+            });
+
+            showGeneratedPsk(payload.setup_psk || '');
+            toastSuccess('P2P network created');
+            await refreshView();
+        } catch (error) {
+            console.error('Failed to create p2p network:', error);
+            toastError(error.message);
+        } finally {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalText;
+            }
+        }
+    }
+
+    async function joinNetwork(event) {
+        event.preventDefault();
+
+        const host = document.getElementById('p2p-wizard-peer-host')?.value?.trim();
+        const port = parseInt(document.getElementById('p2p-wizard-peer-port')?.value || '0', 10);
+        const psk = document.getElementById('p2p-wizard-psk')?.value?.trim();
+        const submitBtn = document.getElementById('p2p-wizard-join-btn');
+        const originalText = submitBtn ? submitBtn.innerHTML : '';
+
+        if (!host || !port || !psk) {
+            toastError('Peer host, peer port, and PSK are required');
             return;
         }
 
-        networkForm.addEventListener('submit', saveNetworkConfig);
-        joinForm.addEventListener('submit', joinPeer);
-        if (syncBtn) {
-            syncBtn.addEventListener('click', syncPeers);
+        try {
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Joining...';
+            }
+
+            await apiJson('/api/v1/p2p/peers/join', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ host, port, psk })
+            });
+
+            showGeneratedPsk('');
+            document.getElementById('p2p-wizard-join-form')?.reset();
+            toastSuccess('Joined P2P network');
+            await refreshView();
+        } catch (error) {
+            console.error('Failed to join p2p network:', error);
+            toastError(error.message);
+        } finally {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalText;
+            }
+        }
+    }
+
+    async function syncPeers() {
+        const syncBtn = document.getElementById('sync-p2p-peers-btn');
+        const originalText = syncBtn ? syncBtn.innerHTML : '';
+
+        try {
+            if (syncBtn) {
+                syncBtn.disabled = true;
+                syncBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing...';
+            }
+            await apiJson('/api/v1/p2p/sync', { method: 'POST' });
+            await refreshView();
+            toastSuccess('Peer manifests synced');
+        } catch (error) {
+            console.error('Failed to sync peers:', error);
+            toastError(error.message);
+        } finally {
+            if (syncBtn) {
+                syncBtn.disabled = false;
+                syncBtn.innerHTML = originalText;
+            }
+        }
+    }
+
+    async function regeneratePsk() {
+        if (!confirm('Generate a new PSK? Existing peers will be disconnected and must rejoin using the new PSK.')) {
+            return;
         }
 
-        await loadNetworkConfig();
-        await loadPeers();
+        const btn = document.getElementById('p2p-regenerate-psk-btn');
+        const originalText = btn ? btn.innerHTML : '';
+        try {
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class=\"spinner-border spinner-border-sm me-1\"></span>Generating...';
+            }
+
+            const payload = await apiJson('/api/v1/p2p/network/psk/regenerate', { method: 'POST' });
+            showGeneratedPsk(payload.psk || '');
+            toastSuccess('New PSK generated. Existing peers were disconnected.');
+            await refreshView();
+        } catch (error) {
+            console.error('Failed to regenerate psk:', error);
+            toastError(error.message);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+    }
+
+    async function unjoinNetwork() {
+        const confirmed = await showConfirmModal({
+            title: 'Unjoin Network',
+            message: 'Unjoin this P2P network? This removes this instance from the private network and clears local network configuration.',
+            confirmText: 'Unjoin',
+            dangerous: true
+        });
+
+        if (!confirmed) {
+            return;
+        }
+
+        const unjoinBtn = document.getElementById('unjoin-p2p-network-btn');
+        const originalText = unjoinBtn ? unjoinBtn.innerHTML : '';
+
+        try {
+            if (unjoinBtn) {
+                unjoinBtn.disabled = true;
+                unjoinBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Unjoining...';
+            }
+            await apiJson('/api/v1/p2p/peers', { method: 'DELETE' });
+            showGeneratedPsk('');
+            toastSuccess('Unjoined from P2P network');
+            await refreshView();
+        } catch (error) {
+            console.error('Failed to unjoin network:', error);
+            toastError(error.message);
+        } finally {
+            if (unjoinBtn) {
+                unjoinBtn.disabled = false;
+                unjoinBtn.innerHTML = originalText;
+            }
+        }
+    }
+
+    async function unjoinPeer(peerId) {
+        const confirmed = await showConfirmModal({
+            title: 'Unjoin Peer',
+            message: 'Unjoin this peer from the P2P network?',
+            confirmText: 'Unjoin',
+            dangerous: true
+        });
+
+        if (!confirmed) {
+            return;
+        }
+
+        const btn = document.querySelector(`.p2p-unjoin-peer-btn[data-peer-id="${peerId}"]`);
+        const originalText = btn ? btn.innerHTML : '';
+
+        try {
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>...';
+            }
+            await apiJson(`/api/v1/p2p/peers/${peerId}`, { method: 'DELETE' });
+            toastSuccess('Peer unjoined');
+            await refreshView();
+        } catch (error) {
+            console.error('Failed to unjoin peer:', error);
+            toastError(error.message);
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+    }
+
+    async function copyGeneratedPsk() {
+        const input = document.getElementById('p2p-generated-psk-value');
+        if (!input || !input.value) return;
+        try {
+            await navigator.clipboard.writeText(input.value);
+            toastSuccess('PSK copied to clipboard');
+        } catch (error) {
+            console.error('Failed to copy generated psk:', error);
+            toastError('Failed to copy PSK');
+        }
+    }
+
+    async function copyValue(inputId, label) {
+        const input = document.getElementById(inputId);
+        if (!input || !input.value) return;
+        try {
+            await navigator.clipboard.writeText(input.value);
+            toastSuccess(`${label} copied`);
+        } catch (error) {
+            console.error(`Failed to copy ${label}:`, error);
+            toastError(`Failed to copy ${label}`);
+        }
+    }
+
+    async function initP2PSettings() {
+        const section = document.getElementById('remote-connections-section');
+        if (!section) return;
+
+        document.getElementById('wizard-choice-create')?.addEventListener('click', () => setWizardChoice('create'));
+        document.getElementById('wizard-choice-join')?.addEventListener('click', () => setWizardChoice('join'));
+        document.getElementById('p2p-wizard-create-form')?.addEventListener('submit', createNetwork);
+        document.getElementById('p2p-wizard-join-form')?.addEventListener('submit', joinNetwork);
+        document.getElementById('p2p-copy-generated-psk-btn')?.addEventListener('click', () => { void copyGeneratedPsk(); });
+        document.getElementById('p2p-copy-connect-host-btn')?.addEventListener('click', () => { void copyValue('p2p-connect-host', 'Host'); });
+        document.getElementById('p2p-copy-connect-port-btn')?.addEventListener('click', () => { void copyValue('p2p-connect-port', 'Port'); });
+        document.getElementById('sync-p2p-peers-btn')?.addEventListener('click', () => { void syncPeers(); });
+        document.getElementById('p2p-regenerate-psk-btn')?.addEventListener('click', () => { void regeneratePsk(); });
+        document.getElementById('unjoin-p2p-network-btn')?.addEventListener('click', () => { void unjoinNetwork(); });
+
+        setWizardChoice('create');
+        await refreshView();
     }
 
     if (typeof window.runWhenFileFridgeReady === 'function') {

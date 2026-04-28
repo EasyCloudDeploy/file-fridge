@@ -17,6 +17,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models import (
     ColdStorageLocation,
@@ -192,6 +193,8 @@ def _serialize_file(
         "is_remote": False,
         "remote_peer_id": None,
         "remote_peer_name": None,
+        "also_available_on_peer_count": 0,
+        "also_available_on_peers": [],
     }
 
     if file.storage_type == StorageType.COLD:
@@ -207,10 +210,21 @@ def _serialize_file(
     return file_dict
 
 
-def _serialize_remote_cached_file(remote_file: RemoteSharedFileCache, peer: P2PPeer) -> dict:
+def _serialize_remote_cached_file(
+    remote_file: RemoteSharedFileCache,
+    peer: P2PPeer,
+    *,
+    peer_count: int = 1,
+    peer_names: Optional[list[str]] = None,
+) -> dict:
     """Serialize a cached remote file into the same shape used by /files UI."""
     file_mtime = remote_file.file_mtime.isoformat() if remote_file.file_mtime else None
     now_iso = datetime.utcnow().isoformat()
+    peer_names = sorted(peer_names or ([peer.peer_name] if peer and peer.peer_name else []))
+    peer_count = max(peer_count, 1)
+    storage_location_name = (
+        f"Remote: {peer.peer_name}" if peer_count == 1 else f"Remote: {peer_count} peers"
+    )
     return {
         "id": f"remote-{remote_file.id}",
         "path_id": remote_file.path_id,
@@ -238,26 +252,39 @@ def _serialize_remote_cached_file(remote_file: RemoteSharedFileCache, peer: P2PP
         "created_at": remote_file.created_at.isoformat() if remote_file.created_at else now_iso,
         "tags": [],
         "storage_location": {
-            "id": peer.id,
-            "name": f"Remote: {peer.peer_name}",
-            "path": f"p2p://{peer.peer_id}",
+            "id": peer.id if peer else None,
+            "name": storage_location_name,
+            "path": f"p2p://{peer.peer_id}" if peer else "p2p://remote",
             "backend_type": "p2p",
             "operation_mode": "copy",
-            "available": peer.status.value == "CONNECTED",
+            "available": peer.status.value == "CONNECTED" if peer else False,
             "local_drive_label": None,
             "local_drive_identifier": None,
-            "local_drive_is_connected": peer.status.value == "CONNECTED",
+            "local_drive_is_connected": peer.status.value == "CONNECTED" if peer else False,
             "local_drive_mount_path": None,
         },
-        "storage_location_name": f"Remote: {peer.peer_name}",
+        "storage_location_name": storage_location_name,
         "storage_location_backend_type": "p2p",
         "path_name": remote_file.path_name,
         "is_pinned": False,
         "is_shareable": False,
         "is_remote": True,
-        "remote_peer_id": peer.id,
-        "remote_peer_name": peer.peer_name,
+        "remote_peer_id": peer.id if peer else None,
+        "remote_peer_name": peer.peer_name if peer else None,
+        "also_available_on_peer_count": peer_count,
+        "also_available_on_peers": peer_names,
     }
+
+
+def _build_remote_dedupe_key(remote_file: RemoteSharedFileCache) -> tuple[str, str]:
+    """Build a stable key for remote-file dedupe.
+
+    We only dedupe across peers when checksum is available to avoid collapsing
+    unrelated files that happen to share a path/name.
+    """
+    if remote_file.checksum:
+        return ("checksum", remote_file.checksum.lower())
+    return ("peer_remote_id", f"{remote_file.peer_id}:{remote_file.remote_file_id}")
 
 
 @router.get("/details/{inventory_id}")
@@ -727,8 +754,154 @@ def list_files(
                     RemoteSharedFileCache.mime_type.ilike(f"%{escaped_mime}%", escape="\\")
                 )
 
-            remote_rows = remote_query.limit(page_size).all()
-            remote_total_count = remote_query.count()
+            remote_rows = remote_query.all()
+            aggregated_remote_rows: list[tuple[RemoteSharedFileCache, P2PPeer, list[str], int]] = []
+            grouped_remote_rows: dict[
+                tuple[str, str], dict[str, object]
+            ] = {}
+            for remote_file, peer in remote_rows:
+                dedupe_key = _build_remote_dedupe_key(remote_file)
+                existing_group = grouped_remote_rows.get(dedupe_key)
+                if existing_group is None:
+                    grouped_remote_rows[dedupe_key] = {
+                        "remote_file": remote_file,
+                        "peer": peer,
+                        "peer_names": {peer.peer_name} if peer and peer.peer_name else set(),
+                    }
+                    continue
+
+                # Keep the freshest row for display metadata.
+                current_latest = existing_group["remote_file"]
+                current_latest_announced = (
+                    current_latest.last_announced_at if current_latest else None
+                )
+                remote_last_announced = remote_file.last_announced_at
+                if (
+                    remote_last_announced
+                    and (
+                        current_latest_announced is None
+                        or remote_last_announced > current_latest_announced
+                    )
+                ):
+                    existing_group["remote_file"] = remote_file
+                    existing_group["peer"] = peer
+
+                if peer and peer.peer_name:
+                    existing_group["peer_names"].add(peer.peer_name)
+
+            for grouped_entry in grouped_remote_rows.values():
+                peer_names = sorted(grouped_entry["peer_names"])
+                aggregated_remote_rows.append(
+                    (
+                        grouped_entry["remote_file"],
+                        grouped_entry["peer"],
+                        peer_names,
+                        len(peer_names) if peer_names else 1,
+                    )
+                )
+
+            # Hide remote rows that represent files already present locally on this page.
+            # The local row will carry the peer count and peer list metadata.
+            local_checksum_keys = {
+                str(local_file.checksum).lower() for local_file in files_list if local_file.checksum
+            }
+            visible_remote_rows = []
+            for remote_file, peer, peer_names, peer_count in aggregated_remote_rows:
+                if remote_file.checksum and str(remote_file.checksum).lower() in local_checksum_keys:
+                    continue
+                visible_remote_rows.append((remote_file, peer, peer_names, peer_count))
+
+            remote_total_count = len(visible_remote_rows)
+            visible_remote_rows = visible_remote_rows[:page_size]
+
+            # Build checksum->peer-name map for the rows shown on this page.
+            # Count includes this local node when it has an active, shareable copy.
+            checksum_peer_map: dict[str, set[str]] = {}
+            checksum_keys: set[str] = set()
+            for local_file in files_list:
+                if local_file.checksum:
+                    checksum_keys.add(str(local_file.checksum).lower())
+            for remote_file, _peer, _peer_names, _peer_count in visible_remote_rows:
+                if remote_file.checksum:
+                    checksum_keys.add(str(remote_file.checksum).lower())
+
+            if checksum_keys:
+                remote_checksum_rows = (
+                    db.query(RemoteSharedFileCache.checksum, P2PPeer.peer_name)
+                    .join(P2PPeer, RemoteSharedFileCache.peer_id == P2PPeer.id)
+                    .filter(RemoteSharedFileCache.checksum.isnot(None))
+                    .all()
+                )
+                for checksum_value, peer_name in remote_checksum_rows:
+                    if not checksum_value or not peer_name:
+                        continue
+                    checksum_key = str(checksum_value).lower()
+                    if checksum_key in checksum_keys:
+                        checksum_peer_map.setdefault(checksum_key, set()).add(peer_name)
+
+                local_peer_name = settings.instance_name or "Local node"
+                local_shared_checksum_rows = (
+                    db.query(FileInventory.checksum)
+                    .filter(
+                        FileInventory.checksum.isnot(None),
+                        FileInventory.status == FileStatus.ACTIVE,
+                        FileInventory.is_shareable.is_(True),
+                    )
+                    .all()
+                )
+                for (checksum_value,) in local_shared_checksum_rows:
+                    if not checksum_value:
+                        continue
+                    checksum_key = str(checksum_value).lower()
+                    if checksum_key in checksum_keys:
+                        checksum_peer_map.setdefault(checksum_key, set()).add(local_peer_name)
+
+            # Build local-file availability hints for peers holding the same file.
+            local_peer_availability: dict[int, set[str]] = {}
+            if files_list:
+                checksum_to_local_ids: dict[str, set[int]] = {}
+                path_to_local_ids: dict[str, set[int]] = {}
+                for local_file in files_list:
+                    local_peer_availability[local_file.id] = set()
+                    if local_file.checksum:
+                        checksum_to_local_ids.setdefault(local_file.checksum, set()).add(local_file.id)
+                    if local_file.file_path:
+                        path_to_local_ids.setdefault(str(local_file.file_path), set()).add(local_file.id)
+
+                match_clauses = []
+                if checksum_to_local_ids:
+                    match_clauses.append(RemoteSharedFileCache.checksum.in_(checksum_to_local_ids.keys()))
+                if path_to_local_ids:
+                    match_clauses.extend(
+                        [
+                            RemoteSharedFileCache.file_path.in_(path_to_local_ids.keys()),
+                            RemoteSharedFileCache.display_file_path.in_(path_to_local_ids.keys()),
+                        ]
+                    )
+
+                if match_clauses:
+                    availability_rows = (
+                        db.query(RemoteSharedFileCache, P2PPeer)
+                        .join(P2PPeer, RemoteSharedFileCache.peer_id == P2PPeer.id)
+                        .filter(or_(*match_clauses))
+                        .all()
+                    )
+
+                    for remote_file, peer in availability_rows:
+                        matched_local_ids: set[int] = set()
+                        if remote_file.checksum:
+                            matched_local_ids.update(
+                                checksum_to_local_ids.get(remote_file.checksum, set())
+                            )
+                        if remote_file.file_path:
+                            matched_local_ids.update(path_to_local_ids.get(remote_file.file_path, set()))
+                        if remote_file.display_file_path:
+                            matched_local_ids.update(
+                                path_to_local_ids.get(remote_file.display_file_path, set())
+                            )
+
+                        for local_id in matched_local_ids:
+                            local_peer_availability[local_id].add(peer.peer_name)
 
             yield (
                 json.dumps(
@@ -764,14 +937,35 @@ def list_files(
                         operation_lookup,
                         file_record_lookup,
                     )
+                    if file.checksum:
+                        peer_names = sorted(
+                            checksum_peer_map.get(str(file.checksum).lower(), set())
+                        )
+                    else:
+                        peer_names = sorted(local_peer_availability.get(file.id, set()))
+                    file_dict["also_available_on_peer_count"] = len(peer_names)
+                    file_dict["also_available_on_peers"] = peer_names
                     yield json.dumps({"type": "file", "data": file_dict}) + "\n"
                     count += 1
                 except Exception as e:
                     logger.warning(f"Error serializing file {file.id}: {e}")
 
-            for remote_file, peer in remote_rows:
+            for remote_file, peer, peer_names, peer_count in visible_remote_rows:
                 try:
-                    file_dict = _serialize_remote_cached_file(remote_file, peer)
+                    if remote_file.checksum:
+                        network_peer_names = sorted(
+                            checksum_peer_map.get(str(remote_file.checksum).lower(), set())
+                        )
+                    else:
+                        network_peer_names = peer_names
+                    effective_peer_names = network_peer_names if network_peer_names else peer_names
+                    effective_peer_count = len(effective_peer_names) if effective_peer_names else peer_count
+                    file_dict = _serialize_remote_cached_file(
+                        remote_file,
+                        peer,
+                        peer_count=effective_peer_count,
+                        peer_names=effective_peer_names,
+                    )
                     yield json.dumps({"type": "file", "data": file_dict}) + "\n"
                     count += 1
                 except Exception as e:

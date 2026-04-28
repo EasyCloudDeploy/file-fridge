@@ -45,6 +45,12 @@ let gridApi = null;
 let allRowData = [];
 let activeGridDropdown = null;
 
+// Remote P2P mode state
+let isRemoteP2PMode = false;
+let remotePeersMap = {};
+let remoteFilesFull = [];
+let monitoredPaths = [];
+
 // Debounce helper — returns a version of fn that waits delayMs after the last call.
 function debounce(fn, delayMs) {
     let timer = null;
@@ -119,8 +125,8 @@ function showNotification(message, type = 'success') {
 // Cell Renderers for AG Grid
 function filePathCellRenderer(params) {
     if (!params.value) return '';
-    const file = params.data || {};
     const displayPath = escapeHtml(params.value);
+    const file = params.data || {};
     const storageReference = file.storage_reference ? escapeHtml(file.storage_reference) : null;
 
     if (storageReference) {
@@ -132,7 +138,20 @@ function filePathCellRenderer(params) {
         `;
     }
 
-    return `<code class="file-path-cell">${displayPath}</code>`;
+    return `
+        <div class="file-path-cell">
+            <code>${displayPath}</code>
+        </div>
+    `;
+}
+
+function peerCountCellRenderer(params) {
+    const file = params.data || {};
+    const peerCount = Number(file.also_available_on_peer_count || 0);
+    if (peerCount <= 0) {
+        return '<span class="text-muted">-</span>';
+    }
+    return `<span>${peerCount}</span>`;
 }
 
 function destinationPathCellRenderer(params) {
@@ -294,6 +313,14 @@ const columnDefs = [
         resizable: true
     },
     {
+        field: 'also_available_on_peer_count',
+        headerName: 'Peers',
+        cellRenderer: peerCountCellRenderer,
+        width: 90,
+        sortable: false,
+        resizable: true
+    },
+    {
         field: 'destination_path',
         headerName: 'Destination',
         cellRenderer: destinationPathCellRenderer,
@@ -361,6 +388,92 @@ const columnDefs = [
     }
 ];
 
+// Remote P2P cell renderers
+function remoteFilePathCellRenderer(params) {
+    if (!params.value) return '';
+    const parts = (params.value || '').split('/');
+    const filename = parts[parts.length - 1] || params.value;
+    const dir = parts.slice(0, -1).join('/');
+    const dirHtml = dir ? `<div><small class="text-muted">${escapeHtml(dir)}/</small></div>` : '';
+    return `<div class="file-path-cell"><code>${escapeHtml(filename)}</code>${dirHtml}</div>`;
+}
+
+function remotePeerCellRenderer(params) {
+    const file = params.data || {};
+    const peer = remotePeersMap[file.peer_id];
+    const name = peer ? (peer.peer_name || peer.peer_id) : `Peer ${file.peer_id}`;
+    const status = (peer?.status || 'unknown').toLowerCase();
+    const statusClass = status === 'connected' ? 'success' : 'secondary';
+    return `<span><span class="badge bg-${statusClass} me-1" title="${escapeHtml(status)}"></span>${escapeHtml(name)}</span>`;
+}
+
+// Remote P2P column definitions
+const remoteColumnDefs = [
+    {
+        headerName: '',
+        field: 'selected',
+        width: 50,
+        maxWidth: 50,
+        checkboxSelection: true,
+        headerCheckboxSelection: true,
+        headerCheckboxSelectionFilteredOnly: true,
+        sortable: false,
+        resizable: false,
+        pinned: 'left'
+    },
+    {
+        field: 'display_file_path',
+        headerName: 'File',
+        cellRenderer: remoteFilePathCellRenderer,
+        flex: 2,
+        minWidth: 200,
+        sortable: true,
+        resizable: true,
+        tooltipField: 'display_file_path'
+    },
+    {
+        field: 'peer_id',
+        headerName: 'Peer',
+        cellRenderer: remotePeerCellRenderer,
+        width: 200,
+        sortable: true,
+        resizable: true
+    },
+    {
+        field: 'file_size',
+        headerName: 'Size',
+        cellRenderer: sizeCellRenderer,
+        width: 100,
+        sortable: true,
+        resizable: true,
+        type: 'numericColumn'
+    },
+    {
+        field: 'storage_type',
+        headerName: 'Storage',
+        cellRenderer: storageCellRenderer,
+        width: 100,
+        sortable: true,
+        resizable: true
+    },
+    {
+        field: 'path_name',
+        headerName: 'Remote Path',
+        width: 160,
+        sortable: true,
+        resizable: true,
+        valueFormatter: p => p.value || '-'
+    },
+    {
+        field: 'last_announced_at',
+        headerName: 'Last Seen',
+        cellRenderer: dateCellRenderer,
+        width: 160,
+        sortable: true,
+        resizable: true
+    }
+];
+
 // AG Grid Options
 const gridOptions = {
     theme: 'legacy',
@@ -394,6 +507,7 @@ const gridOptions = {
 
 // Handle AG Grid sort changes
 function onGridSortChanged(event) {
+    if (isRemoteP2PMode) return; // remote files sorted client-side by AG Grid
     const sortModel = event.api.getColumnState().filter(col => col.sort);
     if (sortModel.length > 0) {
         const sortedColumn = sortModel[0];
@@ -786,7 +900,7 @@ async function processNDJSONStream(body, append = false, streamVersion = null) {
  * Load more files (infinite scroll)
  */
 async function loadMoreFiles() {
-    if (isLoadingMore || !hasMoreData || !nextCursor) {
+    if (isRemoteP2PMode || isLoadingMore || !hasMoreData || !nextCursor) {
         return;
     }
 
@@ -1979,8 +2093,40 @@ function onSelectionChanged(event) {
 function updateBulkActionsToolbar() {
     const toolbar = document.getElementById('bulk-actions-toolbar');
     const countEl = document.getElementById('selection-count');
+    const localBtnGroup = toolbar?.querySelector('.btn-group');
+    const pullGroup = document.getElementById('bulk-p2p-pull-group');
 
     if (!toolbar) return;
+
+    if (isRemoteP2PMode) {
+        // In remote mode: always show toolbar, toggle pull group
+        toolbar.style.display = 'flex';
+        localBtnGroup?.classList.add('d-none');
+        pullGroup?.classList.remove('d-none');
+
+        if (countEl) {
+            const n = selectedFiles.length;
+            countEl.textContent = n > 0
+                ? `${n} file${n !== 1 ? 's' : ''} selected`
+                : 'No files selected';
+        }
+
+        const pathSelect = document.getElementById('bulk-p2p-path-select');
+        const pullBtn = document.getElementById('bulk-p2p-pull-btn');
+        if (pullBtn) {
+            const n = selectedFiles.length;
+            const hasPath = !!(pathSelect?.value);
+            pullBtn.disabled = n === 0 || !hasPath;
+            pullBtn.innerHTML = n > 0
+                ? `<i class="bi bi-cloud-download"></i> Pull ${n} File${n !== 1 ? 's' : ''}`
+                : `<i class="bi bi-cloud-download"></i> Pull Files`;
+        }
+        return;
+    }
+
+    // Normal local mode
+    localBtnGroup?.classList.remove('d-none');
+    pullGroup?.classList.add('d-none');
 
     if (selectedFiles.length > 0) {
         toolbar.style.display = 'flex';
@@ -2013,19 +2159,34 @@ function updateBulkActionsToolbar() {
                 : `Relocate ${relocatableFiles.length} file(s)`;
         }
 
-        const shareBtn = document.getElementById('bulk-share-btn');
-        const unshareBtn = document.getElementById('bulk-unshare-btn');
-        if (shareBtn) {
-            shareBtn.disabled = localFiles.length === 0;
-            shareBtn.title = localFiles.length
-                ? `Mark ${localFiles.length} local file(s) as shareable`
-                : 'Select local files to share';
-        }
-        if (unshareBtn) {
-            unshareBtn.disabled = localFiles.length === 0;
-            unshareBtn.title = localFiles.length
-                ? `Mark ${localFiles.length} local file(s) as not shareable`
-                : 'Select local files to unshare';
+        const shareToggleBtn = document.getElementById('bulk-share-toggle-btn');
+        if (shareToggleBtn) {
+            const shareState = getShareToggleSelectionState(localFiles);
+            let iconClass = 'bi-arrow-repeat';
+            let label = 'Toggle Share';
+            let title = 'Toggle sharing for selected local files';
+            let buttonClass = 'btn btn-outline-secondary btn-sm';
+
+            if (shareState === 'all_shared') {
+                iconClass = 'bi-eye-slash';
+                label = 'Do Not Share';
+                title = `Mark ${localFiles.length} local file(s) as not shareable`;
+                buttonClass = 'btn btn-outline-danger btn-sm';
+            } else if (shareState === 'all_unshared') {
+                iconClass = 'bi-eye';
+                label = 'Share';
+                title = `Mark ${localFiles.length} local file(s) as shareable`;
+                buttonClass = 'btn btn-outline-success btn-sm';
+            } else if (shareState === 'mixed') {
+                title = `Toggle share state for ${localFiles.length} local file(s)`;
+            } else {
+                title = 'Select local files to update sharing';
+            }
+
+            shareToggleBtn.disabled = shareState === 'none';
+            shareToggleBtn.className = buttonClass;
+            shareToggleBtn.title = title;
+            shareToggleBtn.innerHTML = `<i class="bi ${iconClass}"></i> ${label}`;
         }
     } else {
         toolbar.style.display = 'none';
@@ -2055,6 +2216,25 @@ function getSelectedRelocatableFiles() {
         file.status !== 'migrating' &&
         (!file.storage_location || file.storage_location.available !== false)
     );
+}
+
+function getShareToggleSelectionState(localFiles) {
+    if (!Array.isArray(localFiles) || localFiles.length === 0) {
+        return 'none';
+    }
+
+    const shareableCount = localFiles.filter(file => file.is_shareable !== false).length;
+    const unshareableCount = localFiles.length - shareableCount;
+
+    if (shareableCount === localFiles.length) {
+        return 'all_shared';
+    }
+
+    if (unshareableCount === localFiles.length) {
+        return 'all_unshared';
+    }
+
+    return 'mixed';
 }
 
 // Show bulk thaw confirmation
@@ -2680,13 +2860,10 @@ async function executeBulkUnpin() {
     }
 }
 
-async function executeBulkShareToggle(isShareable) {
-    const fileIds = getSelectedFileIds();
-    if (fileIds.length === 0) {
-        showNotification('Select local files to update sharing', 'warning');
-        return;
+async function executeBulkShareSet(fileIds, isShareable) {
+    if (!Array.isArray(fileIds) || fileIds.length === 0) {
+        return { successful: 0, failed: 0, total: 0 };
     }
-
     try {
         const response = await authenticatedFetch(`${API_BASE_URL}/files/bulk/share`, {
             method: 'POST',
@@ -2699,16 +2876,251 @@ async function executeBulkShareToggle(isShareable) {
             throw new Error(err.detail || 'Bulk share update failed');
         }
 
-        const result = await response.json();
-        showNotification(
-            `${isShareable ? 'Shared' : 'Unshared'} ${result.successful} of ${result.total} files` +
-            (result.failed > 0 ? ` (${result.failed} failed)` : '')
-        );
+        return await response.json();
+    } catch (error) {
+        console.error('Bulk share set error:', error);
+        throw error;
+    }
+}
+
+async function executeBulkShareToggleFromSelection() {
+    const localFiles = selectedFiles.filter(file => !file.is_remote && Number.isInteger(Number(file.id)));
+    if (localFiles.length === 0) {
+        showNotification('Select local files to update sharing', 'warning');
+        return;
+    }
+
+    const currentlyShareableIds = localFiles
+        .filter(file => file.is_shareable !== false)
+        .map(file => Number(file.id));
+    const currentlyUnsharedIds = localFiles
+        .filter(file => file.is_shareable === false)
+        .map(file => Number(file.id));
+    const shareState = getShareToggleSelectionState(localFiles);
+
+    try {
+        let updated = { successful: 0, failed: 0, total: 0 };
+        if (shareState === 'all_shared') {
+            updated = await executeBulkShareSet(currentlyShareableIds, false);
+            showNotification(
+                `Unshared ${updated.successful} of ${updated.total} files` +
+                (updated.failed > 0 ? ` (${updated.failed} failed)` : '')
+            );
+        } else if (shareState === 'all_unshared') {
+            updated = await executeBulkShareSet(currentlyUnsharedIds, true);
+            showNotification(
+                `Shared ${updated.successful} of ${updated.total} files` +
+                (updated.failed > 0 ? ` (${updated.failed} failed)` : '')
+            );
+        } else {
+            const unshareResult = await executeBulkShareSet(currentlyShareableIds, false);
+            const shareResult = await executeBulkShareSet(currentlyUnsharedIds, true);
+            updated = {
+                successful: unshareResult.successful + shareResult.successful,
+                failed: unshareResult.failed + shareResult.failed,
+                total: unshareResult.total + shareResult.total
+            };
+            showNotification(
+                `Toggled sharing for ${updated.successful} of ${updated.total} files` +
+                (updated.failed > 0 ? ` (${updated.failed} failed)` : '')
+            );
+        }
         clearSelection();
         loadFilesList();
     } catch (error) {
-        console.error('Bulk share toggle error:', error);
         showNotification(`Bulk share update failed: ${error.message}`, 'error');
+    }
+}
+
+// ============================================
+// Remote P2P Mode
+// ============================================
+
+async function loadMonitoredPathsForPull() {
+    try {
+        const res = await authenticatedFetch(`${API_BASE_URL}/paths`);
+        if (!res.ok) return;
+        monitoredPaths = await res.json();
+        const select = document.getElementById('bulk-p2p-path-select');
+        if (select) {
+            select.innerHTML = '<option value="">Select destination path\u2026</option>' +
+                monitoredPaths.map(p =>
+                    `<option value="${p.id}">${escapeHtml(p.name)} \u2014 ${escapeHtml(p.source_path)}</option>`
+                ).join('');
+        }
+    } catch (err) {
+        console.error('Failed to load monitored paths for pull:', err);
+    }
+}
+
+function updateP2PPullButton() {
+    const btn = document.getElementById('p2pPullBtn');
+    if (!btn) return;
+    if (isRemoteP2PMode) {
+        btn.className = 'btn btn-primary btn-sm';
+        btn.innerHTML = '<i class="bi bi-x-lg"></i><span class="ms-1">Exit Remote View</span>';
+    } else {
+        btn.className = 'btn btn-outline-primary btn-sm';
+        btn.innerHTML = '<i class="bi bi-cloud-download"></i><span class="ms-1">Browse Remote Files</span>';
+    }
+}
+
+async function enterRemoteP2PMode() {
+    isRemoteP2PMode = true;
+    updateP2PPullButton();
+
+    document.getElementById('remote-p2p-bar')?.classList.remove('d-none');
+
+    if (gridApi) {
+        gridApi.setGridOption('columnDefs', remoteColumnDefs);
+    }
+
+    clearSelection();
+
+    if (monitoredPaths.length === 0) {
+        await loadMonitoredPathsForPull();
+    }
+
+    await loadRemoteP2PFiles();
+    updateBulkActionsToolbar();
+}
+
+function exitRemoteP2PMode() {
+    isRemoteP2PMode = false;
+    updateP2PPullButton();
+
+    document.getElementById('remote-p2p-bar')?.classList.add('d-none');
+
+    const peerFilter = document.getElementById('remote-peer-filter');
+    if (peerFilter) peerFilter.value = '';
+
+    if (gridApi) {
+        gridApi.setGridOption('columnDefs', columnDefs);
+        gridApi.setGridOption('rowData', []);
+    }
+
+    allRowData = [];
+    remoteFilesFull = [];
+    clearSelection();
+    loadFilesList();
+}
+
+async function loadRemoteP2PFiles() {
+    const loadingEl = document.getElementById('files-loading');
+    const gridEl = document.getElementById('filesGrid');
+    const emptyEl = document.getElementById('no-files-message');
+
+    if (loadingEl) loadingEl.style.display = 'block';
+    if (gridEl) gridEl.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    try {
+        const [peersRes, filesRes] = await Promise.all([
+            authenticatedFetch(`${API_BASE_URL}/p2p/peers`),
+            authenticatedFetch(`${API_BASE_URL}/p2p/remote-files`),
+        ]);
+
+        if (!peersRes.ok) throw new Error(`Failed to load peers (${peersRes.status})`);
+        if (!filesRes.ok) throw new Error(`Failed to load remote files (${filesRes.status})`);
+
+        const peers = await peersRes.json();
+        remoteFilesFull = await filesRes.json();
+
+        remotePeersMap = {};
+        peers.forEach(p => { remotePeersMap[p.id] = p; });
+
+        const peerFilter = document.getElementById('remote-peer-filter');
+        if (peerFilter) {
+            peerFilter.innerHTML = '<option value="">All Peers</option>' +
+                peers.map(p =>
+                    `<option value="${p.id}">${escapeHtml(p.peer_name || p.peer_id)}</option>`
+                ).join('');
+        }
+
+        applyRemotePeerFilter();
+    } catch (err) {
+        showNotification(`Failed to load remote files: ${err.message}`, 'error');
+        if (emptyEl) emptyEl.style.display = 'block';
+    } finally {
+        if (loadingEl) loadingEl.style.display = 'none';
+    }
+}
+
+function applyRemotePeerFilter() {
+    const peerFilter = document.getElementById('remote-peer-filter');
+    const peerId = peerFilter?.value ? parseInt(peerFilter.value) : null;
+
+    const filtered = peerId
+        ? remoteFilesFull.filter(f => f.peer_id === peerId)
+        : remoteFilesFull;
+
+    allRowData = filtered;
+
+    const gridEl = document.getElementById('filesGrid');
+    const emptyEl = document.getElementById('no-files-message');
+
+    if (gridApi) {
+        gridApi.setGridOption('rowData', filtered);
+    }
+
+    if (filtered.length === 0) {
+        if (emptyEl) emptyEl.style.display = 'block';
+        if (gridEl) gridEl.style.display = 'none';
+    } else {
+        if (gridEl) gridEl.style.display = 'block';
+        if (emptyEl) emptyEl.style.display = 'none';
+    }
+
+    clearSelection();
+}
+
+async function executeBulkP2PPull() {
+    const pathSelect = document.getElementById('bulk-p2p-path-select');
+    const pathId = parseInt(pathSelect?.value || '0');
+    const pullBtn = document.getElementById('bulk-p2p-pull-btn');
+
+    if (!pathId || selectedFiles.length === 0) return;
+
+    const ids = selectedFiles.map(f => f.id);
+
+    if (pullBtn) {
+        pullBtn.disabled = true;
+        pullBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1"></span>Pulling ${ids.length}\u2026`;
+    }
+
+    try {
+        const res = await authenticatedFetch(`${API_BASE_URL}/p2p/pull`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ remote_file_cache_ids: ids, local_path_id: pathId }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+            showNotification(data.detail || 'Pull failed', 'error');
+            return;
+        }
+
+        const { pulled, failed } = data;
+        if (pulled > 0) {
+            showNotification(`${pulled} file${pulled !== 1 ? 's' : ''} pulled. They will appear after the next scan.`);
+        }
+        if (failed > 0) {
+            const msgs = (data.errors || []).map(e => e.error).join('; ');
+            showNotification(`${failed} file${failed !== 1 ? 's' : ''} failed: ${msgs}`, 'error');
+        }
+
+        clearSelection();
+        await loadRemoteP2PFiles();
+    } catch (err) {
+        showNotification(`Pull failed: ${err.message}`, 'error');
+    } finally {
+        if (pullBtn) {
+            pullBtn.disabled = false;
+            pullBtn.innerHTML = '<i class="bi bi-cloud-download"></i> Pull Files';
+        }
+        updateBulkActionsToolbar();
     }
 }
 
@@ -2949,14 +3361,9 @@ async function initFilesPage() {
         bulkRelocateBtn.addEventListener('click', showBulkRelocateModal);
     }
 
-    const bulkShareBtn = document.getElementById('bulk-share-btn');
-    if (bulkShareBtn) {
-        bulkShareBtn.addEventListener('click', () => executeBulkShareToggle(true));
-    }
-
-    const bulkUnshareBtn = document.getElementById('bulk-unshare-btn');
-    if (bulkUnshareBtn) {
-        bulkUnshareBtn.addEventListener('click', () => executeBulkShareToggle(false));
+    const bulkShareToggleBtn = document.getElementById('bulk-share-toggle-btn');
+    if (bulkShareToggleBtn) {
+        bulkShareToggleBtn.addEventListener('click', executeBulkShareToggleFromSelection);
     }
 
     const bulkAddTagBtn = document.getElementById('bulk-add-tag-btn');
@@ -3044,6 +3451,15 @@ async function initFilesPage() {
     if (bulkRemotePathSelect) {
         bulkRemotePathSelect.addEventListener('change', onBulkRemotePathChange);
     }
+
+    // Remote P2P mode
+    document.getElementById('p2pPullBtn')?.addEventListener('click', () => {
+        if (isRemoteP2PMode) exitRemoteP2PMode(); else enterRemoteP2PMode();
+    });
+    document.getElementById('exit-remote-p2p-btn')?.addEventListener('click', exitRemoteP2PMode);
+    document.getElementById('remote-peer-filter')?.addEventListener('change', applyRemotePeerFilter);
+    document.getElementById('bulk-p2p-path-select')?.addEventListener('change', updateBulkActionsToolbar);
+    document.getElementById('bulk-p2p-pull-btn')?.addEventListener('click', executeBulkP2PPull);
 }
 
 window.runWhenFileFridgeReady(() => {

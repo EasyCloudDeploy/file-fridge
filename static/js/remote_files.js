@@ -261,7 +261,7 @@ async function loadRemoteFiles() {
         }
     } catch (error) {
         console.error('Error loading remote files:', error);
-        showToast('Error loading remote files: ' + error.message, 'danger');
+        showToast('Error loading remote files: ' + error.message, 'error');
     } finally {
         loadingEl.style.display = 'none';
     }

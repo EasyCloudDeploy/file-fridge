@@ -238,206 +238,8 @@ function initSettingsPage() {
         });
     }
 
-    // --- P2P Network (V2) ---
-
-    // Load P2P network configuration
-    async function loadP2PNetwork() {
-        const form = document.getElementById('p2p-network-form');
-        if (!form) return;
-
-        try {
-            const response = await authenticatedFetch('/api/v1/p2p/network');
-            if (response.ok) {
-                const config = await response.json();
-                const networkNameInput = document.getElementById('p2p-network-name');
-                const listenHostInput = document.getElementById('p2p-listen-host');
-                const listenPortInput = document.getElementById('p2p-listen-port');
-
-                if (networkNameInput) networkNameInput.value = config.network_name || '';
-                if (listenHostInput) listenHostInput.value = config.listen_host || '';
-                if (listenPortInput) listenPortInput.value = config.listen_port || '';
-                
-                if (config.enabled) {
-                    form.classList.add('enabled');
-                }
-            }
-        } catch (error) {
-            console.error('Error loading P2P network:', error);
-        }
-    }
-
-    // Save P2P network configuration
-    const p2pNetworkForm = document.getElementById('p2p-network-form');
-    if (p2pNetworkForm) {
-        p2pNetworkForm.addEventListener('submit', async function (e) {
-            e.preventDefault();
-            const btn = document.getElementById('save-p2p-network-btn');
-            const originalHtml = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving...';
-
-            const payload = {
-                network_name: document.getElementById('p2p-network-name').value,
-                listen_host: document.getElementById('p2p-listen-host').value,
-                listen_port: parseInt(document.getElementById('p2p-listen-port').value),
-                enabled: true
-            };
-
-            const psk = document.getElementById('p2p-psk').value;
-            if (psk) payload.psk = psk;
-
-            try {
-                const response = await authenticatedFetch('/api/v1/p2p/network', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (response.ok) {
-                    showToast('P2P network configuration saved', 'success');
-                    await loadP2PNetwork();
-                } else {
-                    const err = await response.json();
-                    showToast(err.detail || 'Failed to save P2P network', 'error');
-                }
-            } catch (error) {
-                showToast('Connection error', 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = originalHtml;
-            }
-        });
-    }
-
-    // Sync P2P peers
-    document.getElementById('sync-p2p-peers-btn')?.addEventListener('click', async function() {
-        const btn = this;
-        const originalHtml = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Syncing...';
-
-        try {
-            const response = await authenticatedFetch('/api/v1/p2p/sync', { method: 'POST' });
-            if (response.ok) {
-                const data = await response.json();
-                showToast(`Synced ${data.synced} peers`, 'success');
-                await loadP2PPeers();
-            }
-        } catch (error) {
-            showToast('Sync failed', 'error');
-        } finally {
-            btn.disabled = false;
-            btn.innerHTML = originalHtml;
-        }
-    });
-
-    // Replace the legacy checkRemoteConfiguration
-    async function checkRemoteConfiguration() {
-        if (document.getElementById('p2p-network-form')) {
-            await loadP2PNetwork();
-            await loadP2PPeers();
-            
-            const legacyCards = ['remote-config-warning', 'instance-config', 'remote-connections', 'remote-transfers'];
-            legacyCards.forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.classList.add('d-none');
-            });
-            return;
-        }
-    }
-
-    // Connection code expiry countdown
-    let _codeExpiryTimer = null;
-    // Join P2P peer
-    const p2pJoinForm = document.getElementById('p2p-join-form');
-    if (p2pJoinForm) {
-        p2pJoinForm.addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const btn = this.querySelector('button[type="submit"]');
-            const originalHtml = btn.innerHTML;
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Joining...';
-
-            const payload = {
-                host: document.getElementById('p2p-peer-host').value,
-                port: parseInt(document.getElementById('p2p-peer-port').value),
-                peer_name: document.getElementById('p2p-peer-name').value || null,
-                psk: document.getElementById('p2p-peer-psk').value
-            };
-
-            try {
-                const response = await authenticatedFetch('/api/v1/p2p/peers/join', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (response.ok) {
-                    showToast('Joined peer successfully', 'success');
-                    p2pJoinForm.reset();
-                    await loadP2PPeers();
-                } else {
-                    const err = await response.json();
-                    showToast(err.detail || 'Failed to join peer', 'error');
-                }
-            } catch (error) {
-                showToast('Connection error', 'error');
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = originalHtml;
-            }
-        });
-    }
-
-    // Load P2P peers
-    async function loadP2PPeers() {
-        const list = document.getElementById('p2p-peers-list');
-        if (!list) return;
-
-        try {
-            const response = await authenticatedFetch('/api/v1/p2p/peers');
-            if (response.ok) {
-                const peers = await response.json();
-                if (peers.length === 0) {
-                    list.innerHTML = '<tr><td colspan="4" class="text-muted text-center py-3">No peers joined yet</td></tr>';
-                    return;
-                }
-
-                list.innerHTML = peers.map(peer => `
-                    <tr>
-                        <td><strong>${escapeHtml(peer.peer_name)}</strong></td>
-                        <td><code>${escapeHtml(peer.host)}:${Number(peer.port)}</code></td>
-                        <td><span class="badge bg-${peer.status === 'CONNECTED' ? 'success' : 'secondary'}">${escapeHtml(peer.status)}</span></td>
-                        <td>${peer.last_seen_at ? new Date(peer.last_seen_at).toLocaleString() : 'Never'}</td>
-                        <td class="text-end">
-                            <button class="btn btn-sm btn-outline-danger" data-peer-id="${Number(peer.id)}" title="Delete Peer">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </td>
-                    </tr>
-                `).join('');
-                list.querySelectorAll('[data-peer-id]').forEach(btn => {
-                    btn.addEventListener('click', () => deleteP2PPeer(Number(btn.dataset.peerId)));
-                });
-            }
-        } catch (error) {
-            console.error('Error loading P2P peers:', error);
-        }
-    }
-
-    globalThis.deleteP2PPeer = async function(id) {
-        if (!confirm('Are you sure you want to delete this peer?')) return;
-
-        try {
-            const response = await authenticatedFetch(`/api/v1/p2p/peers/${id}`, { method: 'DELETE' });
-            if (response.ok) {
-                showToast('Peer deleted', 'success');
-                await loadP2PPeers();
-            }
-        } catch (error) {
-            showToast('Delete failed', 'error');
-        }
-    };
+    // P2P settings are handled exclusively in /static/js/p2p_settings.js.
+    function checkRemoteConfiguration() {}
     async function loadEncryptionKeys() {
         const list = document.getElementById('encryption-keys-list');
         if (!list) return;
@@ -472,7 +274,7 @@ function initSettingsPage() {
                 // Add delete event listeners
                 document.querySelectorAll('.btn-delete-key').forEach(btn => {
                     btn.addEventListener('click', function () {
-                        deleteEncryptionKey(this.dataset.id);
+                        deleteEncryptionKey(this.dataset.id, this);
                     });
                 });
             }
@@ -482,9 +284,22 @@ function initSettingsPage() {
         }
     }
 
-    async function deleteEncryptionKey(keyId) {
-        if (!confirm('Are you sure you want to delete this encryption key? This cannot be undone. Any data encrypted EXCLUSIVELY with this key will become unreadable and its password field will be cleared.')) {
+    async function deleteEncryptionKey(keyId, btn) {
+        const confirmed = await showConfirmModal({
+            title: 'Delete Encryption Key',
+            message: 'Are you sure you want to delete this encryption key? This cannot be undone. Any data encrypted EXCLUSIVELY with this key will become unreadable and its password field will be cleared.',
+            confirmText: 'Delete Key',
+            dangerous: true
+        });
+
+        if (!confirmed) {
             return;
+        }
+
+        const originalContent = btn ? btn.innerHTML : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
         }
 
         try {
@@ -493,41 +308,62 @@ function initSettingsPage() {
             });
 
             if (response.ok) {
+                showToast('Encryption key deleted', 'success');
                 loadEncryptionKeys();
             } else {
                 const errorData = await response.json();
-                alert('Error: ' + (errorData.detail || 'Failed to delete encryption key'));
+                showToast(errorData.detail || 'Failed to delete encryption key', 'error');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = originalContent;
+                }
             }
         } catch (error) {
             console.error('Error deleting encryption key:', error);
-            alert('Failed to connect to server.');
+            showToast('Failed to connect to server', 'error');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = originalContent;
+            }
         }
     }
 
     const btnGenerateKey = document.getElementById('btn-generate-key');
     if (btnGenerateKey) {
         btnGenerateKey.addEventListener('click', async function () {
-            if (!confirm('Are you sure you want to generate a new encryption key? This will rotate the current active key. New data will use this key, while existing data remains readable using old keys.')) {
+            const confirmed = await showConfirmModal({
+                title: 'Rotate Encryption Key',
+                message: 'Are you sure you want to generate a new encryption key? This will rotate the current active key. New data will use this key, while existing data remains readable using old keys.',
+                confirmText: 'Rotate Key',
+                dangerous: false
+            });
+
+            if (!confirmed) {
                 return;
             }
 
+            const originalContent = this.innerHTML;
             this.disabled = true;
+            this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Rotating...';
+
             try {
                 const response = await authenticatedFetch('/api/v1/encryption/keys', {
                     method: 'POST'
                 });
 
                 if (response.ok) {
+                    showToast('Encryption key rotated successfully', 'success');
                     loadEncryptionKeys();
                 } else {
                     const errorData = await response.json();
-                    alert('Error: ' + (errorData.detail || 'Failed to generate encryption key'));
+                    showToast(errorData.detail || 'Failed to generate encryption key', 'error');
                 }
             } catch (error) {
                 console.error('Error generating encryption key:', error);
-                alert('Failed to connect to server.');
+                showToast('Failed to connect to server', 'error');
             } finally {
                 this.disabled = false;
+                this.innerHTML = originalContent;
             }
         });
     }

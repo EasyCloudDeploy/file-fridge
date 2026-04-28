@@ -373,7 +373,7 @@ async function confirmDeleteTag() {
 
     } catch (error) {
         console.error('Error deleting tag:', error);
-        alert(`Failed to delete tag: ${error.message}`);
+        showToast(`Failed to delete tag: ${error.message}`, 'error');
     } finally {
         deleteBtn.disabled = false;
         deleteSpinner.classList.add('d-none');
@@ -683,7 +683,7 @@ async function confirmDeleteTagRule() {
 
     } catch (error) {
         console.error('Error deleting rule:', error);
-        alert(`Failed to delete rule: ${error.message}`);
+        showToast(`Failed to delete rule: ${error.message}`, 'error');
     } finally {
         deleteBtn.disabled = false;
         deleteSpinner.classList.add('d-none');
@@ -699,7 +699,14 @@ async function applyAllTagRules() {
     const applyBtn = document.getElementById('apply_rules_btn');
     const originalHtml = applyBtn.innerHTML;
 
-    if (!confirm('Apply all enabled tag rules to all files in the inventory? This may take a few moments.')) {
+    const confirmed = await showConfirmModal({
+        title: 'Apply Tag Rules',
+        message: 'Apply all enabled tag rules to all files in the inventory? This may take a few moments.',
+        confirmText: 'Apply Rules',
+        dangerous: false
+    });
+
+    if (!confirmed) {
         return;
     }
 
@@ -717,11 +724,17 @@ async function applyAllTagRules() {
         }
 
         const result = await response.json();
-        alert(`Rules applied successfully!\n\nFiles processed: ${result.files_processed}\nTags added: ${result.tags_added}`);
+        await showConfirmModal({
+            title: 'Rules Applied',
+            message: `Rules applied successfully!\n\nFiles processed: ${result.files_processed}\nTags added: ${result.tags_added}`,
+            confirmText: 'OK',
+            cancelText: '',
+            dangerous: false
+        });
 
     } catch (error) {
         console.error('Error applying rules:', error);
-        alert(`Failed to apply rules: ${error.message}`);
+        showToast(`Failed to apply rules: ${error.message}`, 'error');
     } finally {
         applyBtn.disabled = false;
         applyBtn.innerHTML = originalHtml;

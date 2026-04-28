@@ -455,6 +455,7 @@
             if (task.status === 'completed') statusBadge = '<span class="badge bg-success">Completed</span>';
             else if (task.status === 'failed') statusBadge = `<span class="badge bg-danger" title="${safeError}">Failed</span>`;
             else if (task.status === 'failed_freeze_thaw') statusBadge = `<span class="badge bg-danger" title="${safeError}">Failed</span>`;
+            else if (task.status === 'p2p_synced') statusBadge = '<span class="badge bg-info text-dark">P2P Synced</span>';
             else if (task.status === 'running_freeze_thaw') {
                 const label = task.operation_type === 'freeze' ? 'Freeze' : 'Thaw';
                 statusBadge = `<span class="badge bg-primary">${label} In Progress</span>`;
@@ -468,7 +469,7 @@
             const isLiveTransfer = task.status === 'running_freeze_thaw' || task.status === 'failed_freeze_thaw';
             const progress = isLiveTransfer
                 ? (task.percent_complete || 0)
-                : (task.status === 'completed' ? 100 : 0);
+                : ((task.status === 'completed' || task.status === 'p2p_synced') ? 100 : 0);
             const totalBytes = task.bytes_total || 0;
             const transferredBytes = isLiveTransfer
                 ? (task.bytes_transferred || 0)

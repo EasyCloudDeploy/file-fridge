@@ -55,8 +55,7 @@ async function loadStorageLocations() {
         }
     } catch (error) {
         console.error('Error loading storage locations:', error);
-        setRegionState({ ...LOCATIONS_REGION, state: 'error', errorMessage: `Failed to load storage locations: ${error.message}` });
-        showAlert('danger', `Failed to load storage locations: ${error.message}`);
+        showToast(`Failed to load storage locations: ${error.message}`, 'error');
     }
 }
 
@@ -134,7 +133,13 @@ function showDeleteModal(id, name) {
  * Delete a storage location
  */
 async function deleteLocation(id, name, isForced) {
-    deleteModal.hide();
+    const btn = document.getElementById('confirm-delete-button');
+    const originalContent = btn ? btn.innerHTML : '';
+    
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Deleting...';
+    }
 
     let url = `/api/v1/storage/locations/${id}`;
     if (isForced) {
@@ -151,13 +156,21 @@ async function deleteLocation(id, name, isForced) {
             throw new Error(error.detail || `Failed to delete storage location: ${response.statusText}`);
         }
 
+        // Hide modal on success
+        if (deleteModal) deleteModal.hide();
+
         // Reload locations
         await loadStorageLocations();
 
-        showAlert('success', `Storage location "${name}" deleted successfully.`);
+        showToast(`Storage location "${name}" deleted successfully.`, 'success');
     } catch (error) {
         console.error('Error deleting storage location:', error);
-        showAlert('danger', error.message);
+        showToast(error.message, 'error');
+        
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+        }
     }
 }
 
@@ -184,23 +197,3 @@ function escapeHtml(unsafe) {
         .replace(/'/g, "&#039;");
 }
 
-/**
- * Show alert message
- */
-function showAlert(type, message) {
-    const alertContainer = document.getElementById('alert-container');
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
-    alertDiv.role = 'alert';
-    alertDiv.innerHTML = `
-        ${message}
-        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-    `;
-
-    alertContainer.appendChild(alertDiv);
-
-    // Auto-dismiss after 5 seconds
-    setTimeout(() => {
-        alertDiv.remove();
-    }, 5000);
-}

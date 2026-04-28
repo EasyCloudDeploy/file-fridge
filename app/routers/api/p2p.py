@@ -2,20 +2,28 @@
 
 from __future__ import annotations
 
+import os
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.constants import RESOURCE_REMOTE_CONNECTIONS
 from app.database import get_db
-from app.models import P2PPeer, RemoteSharedFileCache
+from app.models import FileInventory, FileStatus, P2PPeer, P2PPeerStatus, RemoteSharedFileCache
 from app.schemas import (
+    P2PManifestPushRequest,
     P2PNetworkConfigCreate,
     P2PNetworkConfigResponse,
+    P2PNetworkConfigSetupResponse,
     P2PNetworkConfigUpdate,
+    P2PNetworkPskResponse,
+    P2PNetworkStatsResponse,
     P2PPeerJoinRequest,
     P2PPeerResponse,
+    P2PPullRequest,
+    P2PPullResponse,
     P2PRemoteFileCacheResponse,
 )
 from app.security import PermissionChecker
@@ -37,21 +45,32 @@ def get_network_config(
     return config
 
 
-@router.post("/network", response_model=P2PNetworkConfigResponse)
+@router.post("/network", response_model=P2PNetworkConfigSetupResponse)
 def create_or_replace_network_config(
     payload: P2PNetworkConfigCreate,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     _ = current_user
-    return p2p_service.upsert_network_config(
+    existing = p2p_service.get_network_config(db)
+    auto_generated_psk = None
+    setup_psk = payload.psk
+    if not setup_psk and not existing:
+        auto_generated_psk = p2p_service.generate_psk()
+        setup_psk = auto_generated_psk
+
+    config = p2p_service.upsert_network_config(
         db,
         network_name=payload.network_name,
         listen_host=payload.listen_host,
         listen_port=payload.listen_port,
         enabled=payload.enabled,
-        psk=payload.psk,
+        psk=setup_psk,
     )
+    response = P2PNetworkConfigSetupResponse.model_validate(config, from_attributes=True)
+    if auto_generated_psk:
+        response.setup_psk = auto_generated_psk
+    return response
 
 
 @router.patch("/network", response_model=P2PNetworkConfigResponse)
@@ -79,6 +98,37 @@ def update_network_config(
     )
 
 
+@router.delete("/network")
+def destroy_network_config(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+):
+    _ = current_user
+    try:
+        removed = p2p_service.destroy_network(db)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"status": "destroyed", **removed}
+
+
+@router.post("/network/psk/regenerate", response_model=P2PNetworkPskResponse)
+def regenerate_network_psk(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+):
+    _ = current_user
+    current = p2p_service.get_network_config(db)
+    if not current:
+        raise HTTPException(status_code=404, detail="P2P network is not configured")
+
+    new_psk = p2p_service.generate_psk()
+    p2p_service.rotate_psk(db, new_psk)
+    return P2PNetworkPskResponse(
+        psk=new_psk,
+        note="PSK rotated. Existing peer connections were cleared and must rejoin with the new PSK.",
+    )
+
+
 @router.get("/peers", response_model=list[P2PPeerResponse])
 def list_peers(
     db: Annotated[Session, Depends(get_db)],
@@ -92,6 +142,7 @@ def list_peers(
 def join_peer(
     payload: P2PPeerJoinRequest,
     db: Annotated[Session, Depends(get_db)],
+    request: Request,
     current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     _ = current_user
@@ -108,8 +159,42 @@ def join_peer(
 
     config = p2p_service.get_network_config(db)
     if config:
-        p2p_service.sync_peer_manifest(db, peer=peer, psk_hash=config.psk_hash)
+        p2p_service.sync_peer_manifest(
+            db,
+            peer=peer,
+            psk_hash=config.psk_hash,
+            local_host=request.url.hostname,
+            local_port=request.url.port,
+        )
         db.refresh(peer)
+        if peer.status != P2PPeerStatus.CONNECTED:
+            endpoint = f"http://{peer.host}:{peer.port}/api/v1/p2p/manifest"
+            db.delete(peer)
+            db.commit()
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Could not reach peer manifest at {endpoint}. "
+                    "Use the peer File Fridge API port/address and ensure both nodes use the same PSK."
+                ),
+            )
+        # Best-effort reciprocal registration so the target peer can also discover this node.
+        local_host = request.url.hostname
+        local_port = request.url.port
+        if local_host and local_port:
+            local_peer_name = instance_config_service.get_instance_name(db) or "File Fridge"
+            try:
+                p2p_service.push_local_manifest_to_peer(
+                    db,
+                    peer=peer,
+                    psk_hash=config.psk_hash,
+                    local_host=local_host,
+                    local_port=local_port,
+                    local_peer_name=local_peer_name,
+                )
+            except Exception:
+                # Do not fail join when callback registration is unavailable.
+                pass
     return peer
 
 
@@ -128,14 +213,38 @@ def delete_peer(
     return {"status": "deleted"}
 
 
-@router.post("/sync")
-def sync_peers(
+@router.delete("/peers")
+def unjoin_network(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     _ = current_user
-    synced = p2p_service.sync_all_peer_manifests(db)
+    removed = p2p_service.unjoin_all_peers(db)
+    return {"status": "unjoined", **removed}
+
+
+@router.post("/sync")
+def sync_peers(
+    db: Annotated[Session, Depends(get_db)],
+    request: Request,
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+):
+    _ = current_user
+    synced = p2p_service.sync_all_peer_manifests(
+        db,
+        local_host=request.url.hostname,
+        local_port=request.url.port,
+    )
     return {"synced": synced}
+
+
+@router.get("/stats", response_model=P2PNetworkStatsResponse)
+def get_network_stats(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+):
+    _ = current_user
+    return p2p_service.get_network_stats(db)
 
 
 @router.get("/remote-files", response_model=list[P2PRemoteFileCacheResponse])
@@ -154,6 +263,8 @@ def get_manifest_for_peers(
     db: Annotated[Session, Depends(get_db)],
     x_ff_psk: Annotated[str, Header(alias="X-FF-PSK")],
     x_ff_peer_id: Annotated[str | None, Header(alias="X-FF-PEER-ID")] = None,
+    x_ff_local_host: Annotated[str | None, Header(alias="X-FF-LOCAL-HOST")] = None,
+    x_ff_local_port: Annotated[str | None, Header(alias="X-FF-LOCAL-PORT")] = None,
 ):
     config = p2p_service.get_network_config(db)
     if not config or not config.enabled:
@@ -161,7 +272,22 @@ def get_manifest_for_peers(
     if x_ff_psk != config.psk_hash:
         raise HTTPException(status_code=403, detail="Invalid PSK")
 
-    if x_ff_peer_id:
+    # Auto-register the caller as a peer when they advertise their address.
+    # This makes discovery self-healing: any successful manifest fetch also registers the caller.
+    if x_ff_local_host and x_ff_local_port:
+        try:
+            port_int = int(x_ff_local_port)
+            if 1 <= port_int <= 65535:
+                p2p_service.upsert_peer_from_manifest(
+                    db,
+                    host=x_ff_local_host,
+                    port=port_int,
+                    psk_hash=config.psk_hash,
+                    peer_name=None,
+                )
+        except (ValueError, TypeError):
+            pass
+    elif x_ff_peer_id:
         peer = db.query(P2PPeer).filter(P2PPeer.peer_id == x_ff_peer_id).first()
         if peer:
             from datetime import datetime, timezone
@@ -171,3 +297,95 @@ def get_manifest_for_peers(
 
     instance_name = instance_config_service.get_instance_name(db) or "File Fridge"
     return p2p_service.generate_manifest(db, instance_name=instance_name)
+
+
+@router.post("/manifest/push")
+def push_manifest_from_peer(
+    payload: P2PManifestPushRequest,
+    db: Annotated[Session, Depends(get_db)],
+    x_ff_psk: Annotated[str, Header(alias="X-FF-PSK")],
+):
+    config = p2p_service.get_network_config(db)
+    if not config or not config.enabled:
+        raise HTTPException(status_code=503, detail="P2P network is disabled")
+    if x_ff_psk != config.psk_hash:
+        raise HTTPException(status_code=403, detail="Invalid PSK")
+
+    peer = p2p_service.upsert_peer_from_manifest(
+        db,
+        host=payload.host,
+        port=payload.port,
+        psk_hash=config.psk_hash,
+        peer_name=payload.peer_name,
+    )
+    p2p_service.replace_peer_manifest(
+        db,
+        peer=peer,
+        peer_name=payload.peer_name or peer.peer_name,
+        files=payload.files or [],
+    )
+    return {"status": "ok", "peer_id": peer.id}
+
+
+@router.get("/files/{remote_file_id}/content")
+def get_peer_file_content(
+    remote_file_id: str,
+    db: Annotated[Session, Depends(get_db)],
+    x_ff_psk: Annotated[str, Header(alias="X-FF-PSK")],
+):
+    """Serve a shared file's content to an authenticated peer."""
+    config = p2p_service.get_network_config(db)
+    if not config or not config.enabled:
+        raise HTTPException(status_code=503, detail="P2P network is disabled")
+    if x_ff_psk != config.psk_hash:
+        raise HTTPException(status_code=403, detail="Invalid PSK")
+
+    if not remote_file_id.startswith("local:"):
+        raise HTTPException(status_code=404, detail="File not found")
+    try:
+        file_id = int(remote_file_id[6:])
+    except ValueError:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    file = (
+        db.query(FileInventory)
+        .filter(
+            FileInventory.id == file_id,
+            FileInventory.status == FileStatus.ACTIVE,
+            FileInventory.is_shareable.is_(True),
+        )
+        .first()
+    )
+    if not file or not os.path.isfile(file.file_path):
+        raise HTTPException(status_code=404, detail="File not found or not available")
+
+    return FileResponse(
+        file.file_path,
+        filename=os.path.basename(file.file_path),
+        media_type="application/octet-stream",
+    )
+
+
+@router.post("/pull", response_model=P2PPullResponse)
+def pull_p2p_files(
+    payload: P2PPullRequest,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+):
+    """Pull one or more cached remote P2P files into a local monitored path."""
+    _ = current_user
+    config = p2p_service.get_network_config(db)
+    if not config:
+        raise HTTPException(status_code=404, detail="P2P network is not configured")
+
+    try:
+        result = p2p_service.pull_files(
+            db,
+            remote_file_cache_ids=payload.remote_file_cache_ids,
+            local_path_id=payload.local_path_id,
+            psk_hash=config.psk_hash,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return result

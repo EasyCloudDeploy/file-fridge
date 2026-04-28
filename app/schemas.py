@@ -3,7 +3,7 @@
 import base64
 import re
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, TypeAdapter, validator
 
@@ -879,7 +879,7 @@ class P2PNetworkConfigBase(BaseModel):
 
 
 class P2PNetworkConfigCreate(P2PNetworkConfigBase):
-    psk: str = Field(..., min_length=8, max_length=512)
+    psk: Optional[str] = Field(None, min_length=8, max_length=512)
 
 
 class P2PNetworkConfigUpdate(BaseModel):
@@ -899,11 +899,22 @@ class P2PNetworkConfigResponse(P2PNetworkConfigBase):
         from_attributes = True
 
 
+class P2PNetworkConfigSetupResponse(P2PNetworkConfigResponse):
+    setup_psk: Optional[str] = None
+
+
 class P2PPeerJoinRequest(BaseModel):
     host: str = Field(..., min_length=1, max_length=255)
     port: int = Field(..., ge=1, le=65535)
     psk: str = Field(..., min_length=8, max_length=512)
     peer_name: Optional[str] = Field(None, min_length=1, max_length=255)
+
+
+class P2PManifestPushRequest(BaseModel):
+    host: str = Field(..., min_length=1, max_length=255)
+    port: int = Field(..., ge=1, le=65535)
+    peer_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    files: List[dict[str, Any]] = Field(default_factory=list)
 
 
 class P2PPeerResponse(BaseModel):
@@ -940,6 +951,45 @@ class P2PRemoteFileCacheResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class P2PNetworkStatsResponse(BaseModel):
+    network_configured: bool
+    backend: str
+    node_running: bool
+    total_peers: int
+    connected_peers: int
+    degraded_peers: int
+    remote_cached_files: int
+    health: str
+
+
+class P2PNetworkPskResponse(BaseModel):
+    psk: str
+    note: str
+
+
+class P2PPullRequest(BaseModel):
+    remote_file_cache_ids: List[int] = Field(..., min_length=1)
+    local_path_id: int = Field(..., ge=1)
+
+
+class P2PPullResultItem(BaseModel):
+    id: int
+    dest_path: str
+    filename: str
+
+
+class P2PPullErrorItem(BaseModel):
+    id: int
+    error: str
+
+
+class P2PPullResponse(BaseModel):
+    pulled: int
+    failed: int
+    results: List[P2PPullResultItem]
+    errors: List[P2PPullErrorItem]
 
 
 class RemoteConnectionBase(BaseModel):

@@ -13,6 +13,8 @@ from app.models import (
     FileStatus,
     FileTransactionHistory,
     MonitoredPath,
+    P2PPeer,
+    RemoteSharedFileCache,
     RelocationTask,
     RelocationTaskStatus,
     StorageType,
@@ -217,6 +219,47 @@ def _serialize_freeze_thaw_transaction(
     }
 
 
+def _serialize_p2p_sync_event(remote_file: RemoteSharedFileCache, peer: P2PPeer) -> Dict[str, Any]:
+    """Convert cached P2P manifest rows into migration-like recent activity rows."""
+    sync_time = remote_file.last_announced_at or remote_file.created_at
+    file_path = remote_file.display_file_path or remote_file.file_path or ""
+    file_size = remote_file.file_size or 0
+    peer_name = peer.peer_name if peer and peer.peer_name else f"{peer.host}:{peer.port}"
+
+    return {
+        "task_id": f"p2p-{remote_file.id}",
+        "inventory_id": remote_file.path_id or 0,
+        "file_path": file_path,
+        "source_location_id": peer.id if peer else 0,
+        "source_location_name": f"P2P: {peer_name}",
+        "target_location_id": 0,
+        "target_location_name": "Local P2P Cache",
+        "status": "p2p_synced",
+        "created_at": (sync_time.isoformat() if sync_time else datetime.now(timezone.utc).isoformat()),
+        "started_at": None,
+        "completed_at": sync_time.isoformat() if sync_time else None,
+        "bytes_total": file_size,
+        "bytes_transferred": file_size,
+        "error_message": None,
+        "new_file_path": None,
+        "destination_path": None,
+        "percent_complete": 100,
+        "_sort_time": sync_time.isoformat() if sync_time else None,
+    }
+
+
+def get_recent_p2p_sync_events(db: Session, limit: int = 20) -> List[Dict[str, Any]]:
+    """Return recent P2P manifest sync/index events for /migrations."""
+    rows = (
+        db.query(RemoteSharedFileCache, P2PPeer)
+        .join(P2PPeer, RemoteSharedFileCache.peer_id == P2PPeer.id)
+        .order_by(RemoteSharedFileCache.last_announced_at.desc(), RemoteSharedFileCache.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [_serialize_p2p_sync_event(remote_file, peer) for remote_file, peer in rows]
+
+
 def get_recent_migrations(db: Session, limit: int = 20) -> List[Dict[str, Any]]:
     """Return recent migrations including relocations and freeze/thaw operations."""
     relocation_recent = relocation_manager.get_recent_tasks(limit, db)
@@ -258,8 +301,9 @@ def get_recent_migrations(db: Session, limit: int = 20) -> List[Dict[str, Any]]:
         }
 
     tx_rows = [_serialize_freeze_thaw_transaction(tx, locations_by_id) for tx in freeze_thaw_txs]
+    p2p_rows = get_recent_p2p_sync_events(db, limit)
 
-    combined = relocation_rows + tx_rows
+    combined = relocation_rows + tx_rows + p2p_rows
     combined.sort(key=lambda row: _coerce_iso_to_datetime(row.get("_sort_time")), reverse=True)
     trimmed = combined[:limit]
     for row in trimmed:

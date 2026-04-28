@@ -39,9 +39,11 @@ test.describe('Settings and Security', () => {
         // Click on Remote Connections in nav
         await page.locator('#nav-remote-connections').click();
         
-        // Check P2P Network card heading
-        await expect(page.getByRole('heading', { name: /P2P Network/i })).toBeVisible();
-        await expect(page.locator('#p2p-network-name')).toBeVisible();
+        // Check P2P setup wizard heading and primary actions
+        await expect(page.getByRole('heading', { name: /P2P Setup Wizard/i })).toBeVisible();
+        await expect(page.locator('#p2p-setup-wizard')).toBeVisible();
+        await expect(page.locator('#wizard-choice-create')).toBeVisible();
+        await expect(page.locator('#wizard-choice-join')).toBeVisible();
 
         const filteredFailures = browserFailures.failures.filter(
             (entry) => !entry.includes('/api/v1/remote/connections')

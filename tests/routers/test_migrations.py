@@ -12,6 +12,9 @@ from app.models import (
     FileInventory,
     FileStatus,
     FileTransactionHistory,
+    P2PPeer,
+    P2PPeerStatus,
+    RemoteSharedFileCache,
     RelocationTask,
     RelocationTaskStatus,
     StorageType,
@@ -164,6 +167,52 @@ def test_get_recent_migrations_includes_freeze_thaw_transactions(
     assert entry["status"] == "completed"
     assert entry["bytes_total"] == 4096
     assert entry["bytes_transferred"] == 4096
+
+
+def test_get_recent_migrations_includes_p2p_sync_events(
+    authenticated_client: Any,
+    db_session: Session,
+    monitored_path_factory: Any,
+) -> None:
+    monitored_path = monitored_path_factory(name="p2p-path", source_path="/tmp/p2p-path")
+    peer = P2PPeer(
+        peer_name="Site B",
+        peer_id="site-b-peer",
+        host="10.0.0.2",
+        port=9119,
+        status=P2PPeerStatus.CONNECTED,
+        psk_hash="x" * 64,
+    )
+    db_session.add(peer)
+    db_session.flush()
+    db_session.add(
+        RemoteSharedFileCache(
+            peer_id=peer.id,
+            remote_file_id="remote-p2p-1",
+            path_id=monitored_path.id,
+            file_path="/remote/p2p/food.jpg",
+            display_file_path="/remote/p2p/food.jpg",
+            relative_path="food.jpg",
+            storage_type=StorageType.HOT,
+            file_size=1024,
+            checksum="p2p-checksum-1",
+            path_name="p2p-path",
+        )
+    )
+    db_session.commit()
+
+    response = authenticated_client.get("/api/v1/migrations/recent?limit=20")
+    assert response.status_code == 200
+    data = response.json()
+
+    matching = [row for row in data if row.get("status") == "p2p_synced"]
+    assert matching, "Expected P2P sync event to appear in recent migrations"
+    row = matching[0]
+    assert row["file_path"] == "/remote/p2p/food.jpg"
+    assert row["source_location_name"] == "P2P: Site B"
+    assert row["target_location_name"] == "Local P2P Cache"
+    assert row["bytes_total"] == 1024
+    assert row["percent_complete"] == 100
 
 
 def test_get_migrations_unauthorized(
