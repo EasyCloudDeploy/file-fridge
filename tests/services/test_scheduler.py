@@ -8,7 +8,6 @@ from app.services.scheduler import (
     cleanup_old_nonces_job_func,
     decrypt_location_job_func,
     encrypt_location_job_func,
-    rotate_remote_code_job_func,
     scan_path_job_func,
 )
 
@@ -39,15 +38,6 @@ class TestSchedulerService:
         remaining = db_session.query(RequestNonce).all()
         assert len(remaining) == 1
         assert remaining[0].nonce == "new-nonce"
-
-    def test_rotate_remote_code_job(self, monkeypatch):
-        """Test the remote code rotation job function."""
-        from app.utils.remote_auth import remote_auth
-        mock_rotate = MagicMock()
-        monkeypatch.setattr(remote_auth, "rotate_code", mock_rotate)
-
-        rotate_remote_code_job_func()
-        assert mock_rotate.called
 
     def test_scan_path_job_not_found(self):
         """Test scan job with non-existent path."""

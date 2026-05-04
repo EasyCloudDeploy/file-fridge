@@ -147,6 +147,7 @@ async function loadNotifiers() {
             content: '#notifiers_content',
             empty: '#notifiers_empty',
             state: 'error',
+        });
         showToast('Failed to load notifiers: ' + error.message, 'error');
     }
 }

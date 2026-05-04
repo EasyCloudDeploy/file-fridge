@@ -75,6 +75,13 @@ class FileFreezer:
             # Calculate destination path preserving directory structure
             base_source = Path(monitored_path.source_path)
             operation_mode = storage_location.operation_mode or monitored_path.operation_type
+            # If the storage location defaults to MOVE but the monitored path explicitly
+            # requests COPY or SYMLINK, honour the monitored path setting.
+            if operation_mode == OperationType.MOVE and monitored_path.operation_type in (
+                OperationType.COPY,
+                OperationType.SYMLINK,
+            ):
+                operation_mode = monitored_path.operation_type
             try:
                 relative_path = source_path.relative_to(base_source)
             except ValueError:

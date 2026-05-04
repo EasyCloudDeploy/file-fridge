@@ -41,6 +41,12 @@ def check_path_permission(db: Session, current_user: User, resolved_path: Path) 
     if "admin" in current_user.roles:
         return
 
+    # Resolve symlinks on the incoming path so it can be compared with resolved allowed paths
+    try:
+        resolved_path = resolved_path.resolve()
+    except (OSError, ValueError):
+        pass
+
     allowed_paths = []
 
     # Get monitored paths
