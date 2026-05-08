@@ -361,7 +361,7 @@ class CriteriaMatcher:
 
             # Method 2: Try xattr (fallback)
             xattr_result = subprocess.run(
-                ["xattr", "-p", "com.apple.lastuseddate#PS", str(file_path)],
+                ["xattr", "-p", "com.apple.lastuseddate#PS", "--", str(file_path)],
                 check=False,
                 capture_output=True,
                 timeout=2,
