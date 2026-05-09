@@ -7,13 +7,17 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import (
     ColdStorageLocation,
     FileInventory,
     FileRecord,
     FileStatus,
     OperationType,
+    P2PPeer,
+    P2PPeerStatus,
     PinnedFile,
+    RemoteSharedFileCache,
     StorageType,
 )
 from app.schemas import StorageType as StorageTypeSchema
@@ -164,6 +168,127 @@ def test_list_files_filter_by_storage_location_id(
     assert files[0]["id"] == s3_file.id
     assert files[0]["storage_location"]["id"] == s3_location.id
     assert files[0]["storage_location_name"] == "S3 Archive"
+
+
+def test_list_files_includes_peer_availability_hints(
+    authenticated_client: TestClient, db_session: Session, file_inventory_factory, tmp_path
+):
+    local_file = file_inventory_factory(
+        str(tmp_path / "shared.bin"),
+        path_name="shared_path",
+        checksum="shared-checksum-123",
+    )
+    peer = P2PPeer(
+        peer_name="Site B",
+        peer_id="site-b-peer",
+        host="10.0.0.2",
+        port=8000,
+        status=P2PPeerStatus.CONNECTED,
+        psk_hash="x" * 64,
+    )
+    db_session.add(peer)
+    db_session.flush()
+    db_session.add(
+        RemoteSharedFileCache(
+            peer_id=peer.id,
+            remote_file_id="remote-shared-1",
+            path_id=local_file.path_id,
+            file_path=str(tmp_path / "shared.bin"),
+            display_file_path=str(tmp_path / "shared.bin"),
+            storage_type=StorageType.HOT,
+            file_size=123,
+            checksum="shared-checksum-123",
+            path_name="shared_path",
+        )
+    )
+    db_session.commit()
+
+    response = authenticated_client.get("/api/v1/files")
+    assert response.status_code == 200
+
+    lines = response.content.decode().strip().split("\n")
+    metadata = json.loads(lines[0])
+    files = [json.loads(line)["data"] for line in lines[1:-1]]
+    local_rows = [row for row in files if row.get("id") == local_file.id]
+    remote_rows = [row for row in files if row.get("is_remote")]
+    local_peer_name = settings.instance_name or "Local node"
+    assert metadata["total"] == 1
+    assert len(local_rows) == 1
+    assert len(remote_rows) == 0
+    assert local_rows[0]["also_available_on_peer_count"] == 2
+    assert local_peer_name in local_rows[0]["also_available_on_peers"]
+    assert "Site B" in local_rows[0]["also_available_on_peers"]
+
+
+def test_list_files_deduplicates_remote_files_by_checksum(
+    authenticated_client: TestClient, db_session: Session, file_inventory_factory, tmp_path
+):
+    local_file = file_inventory_factory(
+        str(tmp_path / "report.pdf"),
+        path_name="reports",
+        checksum="same-hash-on-two-peers",
+    )
+    peer_a = P2PPeer(
+        peer_name="Site A",
+        peer_id="site-a-peer",
+        host="10.0.0.10",
+        port=9101,
+        status=P2PPeerStatus.CONNECTED,
+        psk_hash="a" * 64,
+    )
+    peer_b = P2PPeer(
+        peer_name="Site B",
+        peer_id="site-b-peer",
+        host="10.0.0.11",
+        port=9102,
+        status=P2PPeerStatus.CONNECTED,
+        psk_hash="a" * 64,
+    )
+    db_session.add_all([peer_a, peer_b])
+    db_session.flush()
+    db_session.add_all(
+        [
+            RemoteSharedFileCache(
+                peer_id=peer_a.id,
+                remote_file_id="remote-file-a",
+                path_id=local_file.path_id,
+                file_path=str(tmp_path / "report.pdf"),
+                display_file_path=str(tmp_path / "report.pdf"),
+                storage_type=StorageType.HOT,
+                file_size=512,
+                checksum="same-hash-on-two-peers",
+                path_name="reports",
+            ),
+            RemoteSharedFileCache(
+                peer_id=peer_b.id,
+                remote_file_id="remote-file-b",
+                path_id=local_file.path_id,
+                file_path=str(tmp_path / "report.pdf"),
+                display_file_path=str(tmp_path / "report.pdf"),
+                storage_type=StorageType.HOT,
+                file_size=512,
+                checksum="same-hash-on-two-peers",
+                path_name="reports",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = authenticated_client.get("/api/v1/files")
+    assert response.status_code == 200
+
+    lines = response.content.decode().strip().split("\n")
+    metadata = json.loads(lines[0])
+    rows = [json.loads(line)["data"] for line in lines[1:-1]]
+    remote_rows = [row for row in rows if row.get("is_remote")]
+    local_rows = [row for row in rows if not row.get("is_remote")]
+    local_peer_name = settings.instance_name or "Local node"
+
+    assert metadata["total"] == 1
+    assert len(remote_rows) == 0
+    assert len(local_rows) == 1
+    assert local_rows[0]["also_available_on_peer_count"] == 3
+    assert set(local_rows[0]["also_available_on_peers"]) == {"Site A", "Site B", local_peer_name}
 
 
 def test_list_files_sort_by_storage_location(

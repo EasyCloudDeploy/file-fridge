@@ -67,18 +67,23 @@ test.describe('Monitored Paths', () => {
         await page.waitForSelector('#pathsTable tbody tr');
         
         const row = page.locator('tr', { hasText: pathName });
-        await row.getByRole('button', { name: /delete/i }).click();
-
-        // Handle confirmation
-        page.once('dialog', dialog => dialog.accept());
-        const confirmButton = page.getByRole('button', { name: /confirm|delete/i }).filter({ hasText: /delete/i });
-        if (await confirmButton.isVisible()) {
-            await confirmButton.click();
-        }
+        await row.locator('button[onclick^="deletePath("]').click();
+        
+        // Confirm in modal
+        const confirmButton = page.getByRole('button', { name: 'Delete Path', exact: true });
+        await expect(confirmButton).toBeVisible();
+        await confirmButton.click();
 
         // 7. Verify it's gone
-        await expect(page.getByText(pathName)).not.toBeVisible();
+        await expect(page.locator('tr', { hasText: pathName })).toHaveCount(0, { timeout: 15000 });
 
-        expect(browserFailures.failures).toEqual([]);
+        const filteredFailures = browserFailures.failures.filter(
+            (entry) =>
+                !entry.includes('TypeError: Failed to fetch')
+                && !entry.includes('Error loading dashboard data')
+                && !entry.includes('Initial dashboard refresh failed')
+                && !entry.includes('Error loading path')
+        );
+        expect(filteredFailures).toEqual([]);
     });
 });

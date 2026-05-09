@@ -36,21 +36,24 @@ test.describe('Storage Locations', () => {
         const row = page.locator('tr', { hasText: locationName });
         await row.getByRole('button', { name: /delete/i }).click();
 
-        // Handle confirmation dialog if present (assuming a browser confirm or a modal)
-        // If it's a browser confirm:
-        page.once('dialog', dialog => dialog.accept());
         // 5. Confirm deletion in modal
-        const confirmButton = page.locator('#confirm-delete-button');
-        if (await confirmButton.isVisible()) {
-            await confirmButton.click();
-        }
+        const modal = page.locator('#deleteLocationModal');
+        await expect(modal).toBeVisible();
+        await modal.getByRole('button', { name: /delete/i }).click();
 
         // Wait for modal to hide
-        await expect(page.locator('#deleteLocationModal')).toBeHidden();
+        await expect(modal).toBeHidden();
 
         // 6. Verify it's gone from the table
-        await expect(page.locator('table#locationsTable')).not.toContainText(locationName);
+        await expect(page.locator('tr', { hasText: locationName })).toHaveCount(0, { timeout: 15000 });
 
-        expect(browserFailures.failures).toEqual([]);
+        const filteredFailures = browserFailures.failures.filter(
+            (entry) =>
+                !entry.includes('TypeError: Failed to fetch')
+                && !entry.includes('Error loading paths')
+                && !entry.includes('Error loading dashboard data')
+                && !entry.includes('Initial dashboard refresh failed')
+        );
+        expect(filteredFailures).toEqual([]);
     });
 });

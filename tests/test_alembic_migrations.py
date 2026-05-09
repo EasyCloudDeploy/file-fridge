@@ -141,22 +141,10 @@ def test_migrations_up_and_down(alembic_config):
                 if default_val is not None:
                     assert default_val.strip("'\"") == "3"
 
-        # Downgrade back to base
-        command.downgrade(cfg, "726412e8862d")
-
-        # Verify columns and tables are gone
-        inspector = sa.inspect(engine)
-        columns = inspector.get_columns("monitored_paths")
-        column_names = [col["name"] for col in columns]
-        assert "max_concurrent_migrations" not in column_names
-        assert "permissions_error" not in column_names
-
-        columns = inspector.get_columns("cold_storage_locations")
-        column_names = [col["name"] for col in columns]
-        assert "permissions_error" not in column_names
-
-        tables = inspector.get_table_names()
-        assert "relocation_tasks" not in tables
+        # The P2P v2 migration (e6f7a8b9c0d1) is intentionally irreversible.
+        # Verify it raises NotImplementedError rather than silently failing.
+        with pytest.raises(NotImplementedError, match="hard cutover"):
+            command.downgrade(cfg, "a1b2c3d4e5f6")
 
 
 def test_permissions_error_upgrade_is_idempotent(alembic_config):

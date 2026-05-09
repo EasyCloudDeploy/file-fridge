@@ -22,6 +22,31 @@ Think of it as a smart assistant that keeps your desk (Hot Storage) clean by mov
 *   **Stay Organized**: Use tags and automated rules to categorize your data across all storage locations.
 *   **Installable PWA**: Install File Fridge as a native app on mobile and desktop for a seamless experience.
 
+## P2P File Sharing (V2)
+
+File Fridge now supports private inter-instance file sharing over a **PSK-protected P2P network**.
+
+### How it works
+
+1. Configure a P2P network in **Settings** by creating a PSK and listen address/port.
+2. Join additional File Fridge instances using **IP + Port + PSK**.
+3. Each instance publishes metadata for local files marked as shareable.
+4. Remote shared files are visible in the **`/files`** page and can be filtered from the **Storage** dropdown by peer.
+
+### Share controls in `/files`
+
+- Local files are shareable by default.
+- Administrators can mark files as **Do Not Share** (single or bulk actions).
+- Non-shareable files are excluded from P2P manifest publication.
+
+### Breaking change notice
+
+This release includes a **hard protocol cutover**:
+
+- Legacy HTTP/signature-based remote sharing is removed.
+- Existing legacy remote connections/transfers are dropped during migration.
+- Older File Fridge versions using the legacy remote protocol cannot connect to updated instances.
+
 ## User Interface
 
 Here is a glimpse of what File Fridge looks like:
@@ -135,6 +160,18 @@ npm run build
 ```
 
 Jinja templates load these bundles through the `vite_assets(...)` helper, so new frontend dependencies should be added to the local build instead of linked from external CDNs.
+
+## P2P E2E Test (Two Instances)
+
+The P2P v2 end-to-end test boots **two isolated File Fridge instances**, creates a real file on instance A, joins instance B over PSK, verifies remote file visibility in `/files`, and then verifies unshare propagation.
+
+```bash
+PLAYWRIGHT_P2P_E2E=1 npm run test:e2e -- e2e/p2p-sharing.spec.ts
+```
+
+Notes:
+- The test self-manages temporary DB/storage directories and cleans them up.
+- It is intentionally gated behind `PLAYWRIGHT_P2P_E2E=1` because it is heavier than standard UI smoke tests.
 
 ## Getting Started
 

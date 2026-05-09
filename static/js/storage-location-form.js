@@ -35,9 +35,9 @@ async function copyGoogleCallbackUrl() {
     if (!value) return;
     try {
         await navigator.clipboard.writeText(value);
-        showAlert('success', 'Google callback URL copied to clipboard.');
+        showToast('Google callback URL copied to clipboard.', 'success');
     } catch (_error) {
-        showAlert('warning', 'Unable to copy automatically. Please copy the URL manually.');
+        showToast('Unable to copy automatically. Please copy the URL manually.', 'warning');
     }
 }
 
@@ -175,7 +175,7 @@ async function connectGoogleDrive() {
         }
         window.location.href = data.auth_url;
     } catch (error) {
-        showAlert('danger', error.message);
+        showToast(error.message, 'error');
     }
 }
 
@@ -206,10 +206,10 @@ async function initStorageLocationForm() {
 
     const query = new URLSearchParams(window.location.search);
     if (query.get('gdrive_oauth') === 'success') {
-        showAlert('success', 'Google Drive account connected successfully.');
+        showToast('Google Drive account connected successfully.', 'success');
     }
     if (query.get('gdrive_oauth') === 'error') {
-        showAlert('danger', `Google OAuth failed: ${query.get('reason') || 'unknown error'}`);
+        showToast(`Google OAuth failed: ${query.get('reason') || 'unknown error'}`, 'error');
     }
 
     // Set up form submission
@@ -252,7 +252,7 @@ async function loadLocation() {
 
     } catch (error) {
         console.error('Error loading storage location:', error);
-        showAlert('danger', error.message);
+        showToast(error.message, 'error');
     }
 }
 
@@ -345,7 +345,7 @@ async function handleSubmit(event) {
 
     } catch (error) {
         console.error('Error saving storage location:', error);
-        showAlert('danger', error.message);
+        showToast(error.message, 'error');
 
         // Re-enable submit button
         submitBtn.disabled = false;
@@ -353,36 +353,3 @@ async function handleSubmit(event) {
     }
 }
 
-/**
- * Show alert message
- */
-function showAlert(type, message) {
-    const alertDiv = document.createElement('div');
-    alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
-    alertDiv.role = 'alert';
-    // Use textContent for the message to prevent XSS, then append the close button separately.
-    const textSpan = document.createElement('span');
-    textSpan.textContent = message;
-    alertDiv.appendChild(textSpan);
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'btn-close';
-    closeBtn.setAttribute('data-bs-dismiss', 'alert');
-    closeBtn.setAttribute('aria-label', 'Close');
-    alertDiv.appendChild(closeBtn);
-
-    const container = document.getElementById('storage-form-alerts');
-    if (container) {
-        container.appendChild(alertDiv);
-    } else {
-        const cardBody = document.querySelector('.card-body');
-        if (cardBody) {
-            cardBody.insertBefore(alertDiv, cardBody.firstChild);
-        }
-    }
-
-    // Auto-dismiss after 5 seconds
-    setTimeout(() => {
-        alertDiv.remove();
-    }, 5000);
-}

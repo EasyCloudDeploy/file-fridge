@@ -321,7 +321,9 @@ class RemoteConnectionService:
             public_key_b64=identity.ed25519_public_key,
             signature_hex=signature_hex,
             parsed_identity=identity,
-            raw_identity_payload=raw_identity_payload if isinstance(raw_identity_payload, dict) else None,
+            raw_identity_payload=(
+                raw_identity_payload if isinstance(raw_identity_payload, dict) else None
+            ),
         ):
             raise ValueError("Signature verification failed for connection request.")
 

@@ -1,6 +1,5 @@
 export type RouteContext = {
     primaryPathId: number | null;
-    remoteConnectionId: number | null;
 };
 
 export type RouteContract = {
@@ -113,14 +112,5 @@ export const routeContracts: RouteContract[] = [
         expectedApis: ['/api/v1/migrations/active', '/api/v1/migrations/freezing', '/api/v1/migrations/recent'],
         loadingSelectors: ['tbody output.spinner-border'],
         readySelectors: [],
-    },
-    {
-        name: 'remote-files',
-        path: (context) =>
-            context.remoteConnectionId ? `/remote-files/${context.remoteConnectionId}` : null,
-        scripts: ['/static/js/remote_files.js'],
-        expectedApis: ['/api/v1/remote/connections/', '/api/v1/paths/monitored'],
-        loadingSelectors: ['.ag-overlay-loading-center'],
-        readySelectors: ['#remote-instance-name', '#filesGrid'],
     },
 ];

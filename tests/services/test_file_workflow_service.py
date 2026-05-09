@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.models import (
+    ColdStorageBackendType,
     ColdStorageLocation,
     Criteria,
     CriterionType,
@@ -15,6 +16,7 @@ from app.models import (
     FileStatus,
     MonitoredPath,
     Operator,
+    OperationType,
     ScanStatus,
     StorageType,
 )
@@ -282,23 +284,19 @@ def test_scan_path(
     mock_update_inventory.assert_called_once()
 
 
-@patch("app.services.file_workflow_service.FileMover.move_with_rollback")
+@patch("app.services.file_workflow_service.FileFreezer.freeze_file")
 @patch("app.services.file_workflow_service.storage_routing_service.select_storage_location")
-@patch("app.services.file_workflow_service.checksum_verifier.calculate_checksum")
-@patch("app.services.file_workflow_service.audit_trail_service")
 @patch("app.services.file_workflow_service.scan_progress_manager")
 def test_process_single_file(
     mock_scan_progress,
-    mock_audit_trail,
-    mock_checksum,
     mock_select_location,
-    mock_move,
+    mock_freeze,
     monitored_path,
     file_inventory,
     db_session,
     tmp_path,
 ):
-    """Test the _process_single_file method for a successful move."""
+    """Test the _process_single_file method for a successful move via FileFreezer."""
     hot_path = tmp_path / "hot"
     hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
@@ -310,13 +308,25 @@ def test_process_single_file(
 
     inventory = file_inventory(file_to_move, StorageType.HOT, FileStatus.ACTIVE)
 
-    mock_select_location.return_value = MagicMock(id=1, path=str(cold_path))
-    mock_move.return_value = (True, None, "checksum_after")
-    mock_checksum.return_value = "checksum_before"
+    mock_select_location.return_value = MagicMock(
+        id=1,
+        path=str(cold_path),
+        backend_type=ColdStorageBackendType.LOCAL,
+        is_encrypted=False,
+        operation_mode=OperationType.MOVE,
+    )
+
+    def freeze_side_effect(file, monitored_path, storage_location, pin, db, initiated_by):
+        # Simulate what FileFreezer does: update the inventory entry
+        file.storage_type = StorageType.COLD
+        file.file_path = str(cold_path / "file.txt")
+        db.commit()
+        return True, None, str(cold_path / "file.txt")
+
+    mock_freeze.side_effect = freeze_side_effect
 
     service = FileWorkflowService()
 
-    # Suppress close() so the shared session stays alive across internal calls
     original_close = db_session.close
     db_session.close = lambda: None
     try:
@@ -335,31 +345,22 @@ def test_process_single_file(
     assert reloaded_inventory.storage_type == StorageType.COLD
     assert reloaded_inventory.file_path == str(cold_path / "file.txt")
 
-    mock_audit_trail.log_freeze_operation.assert_called_once()
-    mock_move.assert_called_once()
-    move_args = mock_move.call_args
-    assert move_args.args == (file_to_move, cold_path / "file.txt", monitored_path.operation_type)
-    assert move_args.kwargs["verify_checksum"] is True
-    assert callable(move_args.kwargs["progress_callback"])
+    mock_freeze.assert_called_once()
 
 
-@patch("app.services.file_workflow_service.FileMover.move_with_rollback")
+@patch("app.services.file_workflow_service.FileFreezer.freeze_file")
 @patch("app.services.file_workflow_service.storage_routing_service.select_storage_location")
-@patch("app.services.file_workflow_service.checksum_verifier.calculate_checksum")
-@patch("app.services.file_workflow_service.audit_trail_service")
 @patch("app.services.file_workflow_service.scan_progress_manager")
 def test_process_single_file_passes_callable_progress_callback_on_move(
     mock_scan_progress,
-    mock_audit_trail,
-    mock_checksum,
     mock_select_location,
-    mock_move,
+    mock_freeze,
     monitored_path,
     file_inventory,
     db_session,
     tmp_path,
 ):
-    """Test freeze moves pass a callable progress callback into the mover."""
+    """Test that _process_single_file delegates to FileFreezer for LOCAL backend."""
     hot_path = tmp_path / "hot"
     hot_path.mkdir(exist_ok=True)
     cold_path = tmp_path / "cold"
@@ -370,20 +371,15 @@ def test_process_single_file_passes_callable_progress_callback_on_move(
     file_to_move.write_text("content")
 
     file_inventory(file_to_move, StorageType.HOT, FileStatus.ACTIVE)
-    mock_select_location.return_value = MagicMock(id=1, path=str(cold_path))
-    mock_checksum.return_value = "checksum_before"
-    mock_audit_trail.log_freeze_operation.return_value = None
+    mock_select_location.return_value = MagicMock(
+        id=1,
+        path=str(cold_path),
+        backend_type=ColdStorageBackendType.LOCAL,
+        is_encrypted=False,
+        operation_mode=OperationType.MOVE,
+    )
     mock_scan_progress.start_file_operation.return_value = "freeze-op-1"
-
-    def move_side_effect(source, destination, operation_type, **kwargs):
-        assert source == file_to_move
-        assert destination == cold_path / "file.txt"
-        assert operation_type == monitored_path.operation_type
-        assert kwargs["verify_checksum"] is True
-        assert callable(kwargs["progress_callback"])
-        return True, None, "checksum_after"
-
-    mock_move.side_effect = move_side_effect
+    mock_freeze.return_value = (True, None, str(cold_path / "file.txt"))
 
     service = FileWorkflowService()
 
@@ -399,7 +395,7 @@ def test_process_single_file_passes_callable_progress_callback_on_move(
         db_session.close = original_close
 
     assert result["success"] is True
-    mock_move.assert_called_once()
+    mock_freeze.assert_called_once()
 
 
 @patch("app.services.file_workflow_service.scan_progress_manager")

@@ -141,16 +141,13 @@ async def test_push_transfer_success(
         assert job.status == TransferStatus.COMPLETED
 
 
-@respx.mock
-async def test_pull_transfer_success(
+def test_pull_transfer_legacy_endpoint_removed(
     db_session: Session,
     local_monitored_path,
     local_connection,
     authenticated_client,
 ):
-    # Mock remote serve-transfer endpoint
-    respx.post(url__regex=r".*/serve-transfer").mock(return_value=httpx.Response(200, json={"status": "accepted", "job_id": "remote_pull_job_1"}))
-
+    """Legacy /remote/pull endpoint returns 426 after P2P v2 hard cutover."""
     pull_data = {
         "remote_file_inventory_id": 99,
         "remote_connection_id": local_connection.id,
@@ -159,8 +156,8 @@ async def test_pull_transfer_success(
     }
 
     response = authenticated_client.post("/api/v1/remote/pull", json=pull_data)
-    assert response.status_code == 200
-    assert response.json()["status"] == "accepted"
+    assert response.status_code == 426
+    assert "P2P v2" in response.json()["detail"]
 
 
 @respx.mock

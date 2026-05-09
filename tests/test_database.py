@@ -157,18 +157,15 @@ def test_run_startup_migrations_stamps_max_concurrent_schema_to_matching_revisio
 def test_determine_schema_revision_returns_head_for_full_head_schema():
     inspector = MagicMock()
     inspector.get_table_names.return_value = [
-        "monitored_paths",
-        "remote_connections",
-        "remote_transfer_jobs",
-        "remote_audit_logs",
-        "remote_connection_path_permissions",
+        "file_inventory",
+        "p2p_network_config",
+        "p2p_peers",
+        "remote_shared_file_cache",
     ]
 
     def get_columns(table_name):
         columns = {
-            "remote_connections": [{"name": "last_seen_at"}, {"name": "is_reachable"}],
-            "remote_transfer_jobs": [{"name": "created_at"}, {"name": "updated_at"}],
-            "monitored_paths": [{"name": "permissions_error"}],
+            "file_inventory": [{"name": "is_shareable"}],
         }
         return columns.get(table_name, [{"name": "id"}])
 

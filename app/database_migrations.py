@@ -17,7 +17,7 @@ INITIAL_REVISION = "726412e8862d"
 MAX_CONCURRENT_MIGRATIONS_REVISION = "6b398cde9d3e"
 RELOCATION_TASK_REVISION = "4cb41a7faab6"
 PERMISSIONS_ERROR_REVISION = "764abe6a5a03"
-HEAD_REVISION = "a1b2c3d4e5f6"
+HEAD_REVISION = "e6f7a8b9c0d1"
 BACKEND_MODULES_REVISION = "9f3d6e2aa1b1"
 LOCAL_DRIVE_IDENTITY_REVISION = "b17d9f43c2aa"
 ALLOW_OFFLINE_REVISION = "c3e1d8f7aa42"
@@ -33,20 +33,16 @@ def _schema_has_head_markers(inspector) -> bool:
     """Return True when schema already matches the current head structure."""
     tables = set(inspector.get_table_names())
 
-    required_tables = {"remote_audit_logs", "remote_connection_path_permissions"}
+    required_tables = {"p2p_network_config", "p2p_peers", "remote_shared_file_cache"}
     if not required_tables.issubset(tables):
         return False
 
-    if "remote_connections" not in tables or "remote_transfer_jobs" not in tables:
+    if "file_inventory" not in tables:
         return False
 
-    remote_connection_columns = _table_columns(inspector, "remote_connections")
-    transfer_job_columns = _table_columns(inspector, "remote_transfer_jobs")
+    file_inventory_columns = _table_columns(inspector, "file_inventory")
 
-    return {"last_seen_at", "is_reachable"}.issubset(remote_connection_columns) and {
-        "created_at",
-        "updated_at",
-    }.issubset(transfer_job_columns)
+    return "is_shareable" in file_inventory_columns
 
 
 def _cold_storage_values_need_normalization(db) -> bool:
@@ -150,6 +146,32 @@ def _prune_backups(backup_dir: Path, database_filename: str) -> None:
             logger.warning("Failed to prune old backup: %s", backup)
 
 
+def _ensure_post_migration_schema() -> None:
+    """Apply idempotent safety fixes for legacy SQLite schemas."""
+    if engine.dialect.name != "sqlite":
+        return
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if "file_inventory" not in tables:
+        return
+
+    columns = _table_columns(inspector, "file_inventory")
+    if "is_shareable" in columns:
+        return
+
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE file_inventory ADD COLUMN is_shareable BOOLEAN NOT NULL DEFAULT 1")
+        )
+        connection.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_file_inventory_is_shareable "
+                "ON file_inventory (is_shareable)"
+            )
+        )
+    logger.warning("Applied fallback schema fix: added file_inventory.is_shareable")
+
+
 def run_startup_migrations() -> None:
     """
     Run database migrations using Alembic on application startup.
@@ -165,6 +187,8 @@ def run_startup_migrations() -> None:
 
         # Check if we need to stamp the database
         # This happens when init_db() created tables but alembic_version is empty or missing
+        should_run_upgrade = True
+        revision_to_stamp: str | None = None
         db = SessionLocal()
         try:
             inspector = inspect(engine)
@@ -181,7 +205,6 @@ def run_startup_migrations() -> None:
                     current_revision = result[0]
 
             has_app_tables = len(tables) > (1 if has_alembic_table else 0)
-            revision_to_stamp: str | None = None
 
             # If we have tables but no alembic version, determine the closest
             # revision from the live schema before upgrading further.
@@ -194,7 +217,6 @@ def run_startup_migrations() -> None:
                 revision_to_stamp = _determine_schema_revision(inspector, db)
                 logger.info("Detected schema equivalent to revision %s", revision_to_stamp)
 
-            should_run_upgrade = True
             if has_app_tables:
                 if has_version and current_revision == HEAD_REVISION:
                     should_run_upgrade = False
@@ -215,6 +237,8 @@ def run_startup_migrations() -> None:
             logger.info("✓ Database migrations completed successfully")
         else:
             logger.info("✓ Database already at head; no migration upgrade needed")
+
+        _ensure_post_migration_schema()
     except Exception as e:
         if isinstance(e, RuntimeError) and str(e).startswith("Pre-migration backup failed:"):
             raise
@@ -225,7 +249,5 @@ def run_startup_migrations() -> None:
             "`uv run alembic downgrade -3`."
         )
         if backup_path is not None:
-            recovery_message = (
-                f"{recovery_message} Latest automatic backup: {backup_path}."
-            )
+            recovery_message = f"{recovery_message} Latest automatic backup: {backup_path}."
         raise RuntimeError(recovery_message) from e

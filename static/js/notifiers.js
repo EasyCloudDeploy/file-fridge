@@ -39,7 +39,6 @@ async function initNotifiersPage() {
             'create_notifier_btn',
             'save_notifier_btn',
             'confirm_delete_btn',
-            'alert_container',
         ],
         'notifiers page'
     );
@@ -148,9 +147,8 @@ async function loadNotifiers() {
             content: '#notifiers_content',
             empty: '#notifiers_empty',
             state: 'error',
-            errorMessage: `Failed to load notifiers: ${error.message}`,
         });
-        showAlert('Failed to load notifiers: ' + error.message, 'danger');
+        showToast('Failed to load notifiers: ' + error.message, 'error');
     }
 }
 
@@ -315,7 +313,7 @@ async function saveNotifier() {
 
     // Validate events selection
     if (selectedEvents.length === 0) {
-        showAlert('Please select at least one event to subscribe to', 'warning');
+        showToast('Please select at least one event to subscribe to', 'warning');
         return;
     }
 
@@ -334,12 +332,12 @@ async function saveNotifier() {
 
         // Validate required SMTP fields
         if (!smtpHost) {
-            showAlert('SMTP Host is required for email notifiers', 'danger');
+            showToast('SMTP Host is required for email notifiers', 'error');
             document.getElementById('smtp_host').focus();
             return;
         }
         if (!smtpSender) {
-            showAlert('From Address is required for email notifiers', 'danger');
+            showToast('From Address is required for email notifiers', 'error');
             document.getElementById('smtp_sender').focus();
             return;
         }
@@ -381,14 +379,14 @@ async function saveNotifier() {
         }
 
         notifierModal.hide();
-        showAlert(
+        showToast(
             notifierId ? 'Notifier updated successfully' : 'Notifier created successfully',
             'success'
         );
         await loadNotifiers();
     } catch (error) {
         console.error('Error saving notifier:', error);
-        showAlert('Failed to save notifier: ' + error.message, 'danger');
+        showToast('Failed to save notifier: ' + error.message, 'error');
     } finally {
         saveBtn.disabled = false;
         saveBtn.innerHTML = originalBtnText;
@@ -428,11 +426,11 @@ async function confirmDelete() {
         }
 
         deleteModal.hide();
-        showAlert('Notifier deleted successfully', 'success');
+        showToast('Notifier deleted successfully', 'success');
         await loadNotifiers();
     } catch (error) {
         console.error('Error deleting notifier:', error);
-        showAlert('Failed to delete notifier: ' + error.message, 'danger');
+        showToast('Failed to delete notifier: ' + error.message, 'error');
     } finally {
         deleteBtn.disabled = false;
         deleteBtn.innerHTML = originalBtnText;
@@ -447,7 +445,7 @@ async function testNotifier(id) {
     const notifier = allNotifiers.find(n => n.id === id);
     if (!notifier) return;
 
-    showAlert(`Sending test notification to ${notifier.name}...`, 'info');
+    showToast(`Sending test notification to ${notifier.name}...`, 'info');
 
     try {
         const response = await authenticatedFetch(`/api/v1/notifiers/${id}/test`, {
@@ -462,41 +460,16 @@ async function testNotifier(id) {
         const result = await response.json();
 
         if (result.success) {
-            showAlert(`✓ Test successful! Notification sent to ${notifier.name}`, 'success');
+            showToast(`✓ Test successful! Notification sent to ${notifier.name}`, 'success');
         } else {
-            showAlert(`✗ Test failed: ${result.message}`, 'warning');
+            showToast(`✗ Test failed: ${result.message}`, 'warning');
         }
     } catch (error) {
         console.error('Error testing notifier:', error);
-        showAlert('Test failed: ' + error.message, 'danger');
+        showToast('Test failed: ' + error.message, 'error');
     }
 }
 
-/**
- * Show an alert message
- */
-function showAlert(message, type = 'info') {
-    const alertContainer = document.getElementById('alert_container');
-    const alertId = 'alert_' + Date.now();
-
-    const alertHtml = `
-        <div id="${alertId}" class="alert alert-${type} alert-dismissible fade show" role="alert">
-            ${escapeHtml(message)}
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-    `;
-
-    alertContainer.innerHTML = alertHtml;
-
-    // Auto-dismiss after 5 seconds
-    setTimeout(() => {
-        const alertEl = document.getElementById(alertId);
-        if (alertEl) {
-            const bsAlert = new bootstrap.Alert(alertEl);
-            bsAlert.close();
-        }
-    }, 5000);
-}
 
 /**
  * Escape HTML to prevent XSS

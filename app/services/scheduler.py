@@ -22,10 +22,9 @@ from app.services.notification_events import (
     StoragePermissionErrorData,
 )
 from app.services.notification_service import notification_service
-from app.services.remote_transfer_service import remote_transfer_service
+from app.services.p2p_service import p2p_service
 from app.services.stats_cleanup import cleanup_old_stats_job_func
 from app.utils.local_drive_identity import update_local_drive_identity_fields
-from app.utils.remote_auth import remote_auth
 
 logger = logging.getLogger(__name__)
 
@@ -74,11 +73,9 @@ class SchedulerService:
                 self._add_disk_space_monitoring_job()
                 self._add_storage_permissions_job()
                 self._add_nonce_cleanup_job()
-                self._add_remote_code_rotation_job()
-                self._add_remote_transfer_job()
                 self._add_fftmp_cleanup_job()
                 self._add_transfer_job_cleanup_job()
-                self._add_remote_health_check_job()
+                self._add_p2p_manifest_sync_job()
             except Exception:
                 logger.exception("Error starting scheduler")
                 # Try to clean up
@@ -212,54 +209,6 @@ class SchedulerService:
         except Exception:
             logger.exception("Error adding stats cleanup job")
 
-    def _add_remote_transfer_job(self):
-        """Add scheduled job for processing remote transfers."""
-        if not self.scheduler.running:
-            logger.warning("Scheduler not running, skipping remote transfer job addition")
-            return
-
-        job_id = "remote_transfer_processing"
-        try:
-            # Remove existing job if present
-            if self.scheduler.get_job(job_id):
-                self.scheduler.remove_job(job_id)
-
-            # Schedule to run every minute
-            self.scheduler.add_job(
-                process_remote_transfers_job_func,
-                "interval",
-                minutes=1,
-                id=job_id,
-                replace_existing=True,
-            )
-            logger.info("Added scheduled job for processing remote transfers (runs every minute)")
-        except Exception:
-            logger.exception("Error adding remote transfer job")
-
-    def _add_remote_code_rotation_job(self):
-        """Add scheduled job for rotating remote connection code hourly."""
-        if not self.scheduler.running:
-            logger.warning("Scheduler not running, skipping remote code rotation job addition")
-            return
-
-        job_id = "remote_code_rotation"
-        try:
-            # Remove existing job if present
-            if self.scheduler.get_job(job_id):
-                self.scheduler.remove_job(job_id)
-
-            # Schedule to run every hour
-            self.scheduler.add_job(
-                rotate_remote_code_job_func,
-                "interval",
-                hours=1,
-                id=job_id,
-                replace_existing=True,
-            )
-            logger.info("Added scheduled job for hourly remote code rotation")
-        except Exception:
-            logger.exception("Error adding remote code rotation job")
-
     def _add_nonce_cleanup_job(self):
         """Add scheduled job for cleaning up old request nonces (runs every 10 minutes)."""
         if not self.scheduler.running:
@@ -377,26 +326,26 @@ class SchedulerService:
         except Exception:
             logger.exception("Error adding transfer job cleanup job")
 
-    def _add_remote_health_check_job(self):
-        """Add scheduled job for remote connection health checks (runs every 15 minutes)."""
+    def _add_p2p_manifest_sync_job(self):
+        """Add scheduled job for syncing remote manifests from configured peers."""
         if not self.scheduler.running:
             return
 
-        job_id = "remote_health_check"
+        job_id = "p2p_manifest_sync"
         try:
             if self.scheduler.get_job(job_id):
                 self.scheduler.remove_job(job_id)
 
             self.scheduler.add_job(
-                remote_health_check_job_func,
+                sync_p2p_manifests_job_func,
                 "interval",
-                minutes=15,
+                minutes=1,
                 id=job_id,
                 replace_existing=True,
             )
-            logger.info("Added scheduled job for remote health check (every 15 minutes)")
+            logger.info("Added scheduled job for P2P manifest sync (runs every minute)")
         except Exception:
-            logger.exception("Error adding remote health check job")
+            logger.exception("Error adding P2P manifest sync job")
 
 
 def _check_and_notify_disk_space(location, db: Session):
@@ -475,20 +424,16 @@ def check_disk_space_and_notify(path: MonitoredPath, db: Session):
             logger.exception(f"Error checking disk space for {location.name}")
 
 
-def process_remote_transfers_job_func():
-    """Job function to process pending remote transfers."""
-    import asyncio
-
+def sync_p2p_manifests_job_func():
+    """Fetch manifests from all configured peers and refresh the local remote-file cache."""
+    db = SchedulerSessionLocal()
     try:
-        asyncio.run(remote_transfer_service.process_pending_transfers())
+        synced = p2p_service.sync_all_peer_manifests(db)
+        logger.debug("P2P manifest sync processed %s peer(s)", synced)
     except Exception:
-        logger.exception("Error in remote transfer job")
-
-
-def rotate_remote_code_job_func():
-    """Job function to rotate the remote connection code."""
-    remote_auth.rotate_code()
-    logger.info("Rotated remote connection code")
+        logger.exception("Error in P2P manifest sync job")
+    finally:
+        db.close()
 
 
 def _check_path_permissions(path: str) -> list[str]:
@@ -1083,79 +1028,6 @@ def cleanup_old_transfer_jobs_job_func():
             logger.info(f"Cleaned up {deleted} old transfer job records")
     except Exception:
         logger.exception("Error cleaning up old transfer jobs")
-        db.rollback()
-    finally:
-        db.close()
-
-
-# In-memory failure tracking for remote connections (connection_id -> consecutive_failures)
-remote_failure_counts = {}
-
-
-def remote_health_check_job_func():
-    """Job to ping all trusted remote connections and track health."""
-    from datetime import datetime, timezone
-
-    import anyio
-    import httpx
-
-    from app.models import RemoteConnection, TrustStatus
-    from app.schemas import RemoteConnectionIdentity
-    from app.utils.remote_signature import get_signed_headers
-
-    db = SchedulerSessionLocal()
-    try:
-        # Get all trusted connections
-        trusted_connections = (
-            db.query(RemoteConnection)
-            .filter(RemoteConnection.trust_status == TrustStatus.TRUSTED)
-            .all()
-        )
-
-        for conn in trusted_connections:
-            url = f"{conn.url.rstrip('/')}/api/v1/remote/identity"
-            success = False
-            error_msg = None
-
-            try:
-
-                async def do_ping():
-                    signed_headers = await get_signed_headers(db, "GET", url, b"")
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        response = await client.get(url, headers=signed_headers)
-                        response.raise_for_status()
-
-                        identity_data = response.json()
-                        remote_identity = RemoteConnectionIdentity.model_validate(identity_data)
-                        if remote_identity.fingerprint != conn.remote_fingerprint:
-                            raise ValueError("Fingerprint mismatch")
-                        return True
-
-                anyio.run(do_ping)
-                success = True
-            except Exception as e:
-                success = False
-                error_msg = str(e)
-
-            if success:
-                conn.is_reachable = True
-                conn.last_seen_at = datetime.now(timezone.utc)
-                remote_failure_counts[conn.id] = 0
-            else:
-                logger.warning(
-                    f"Health check failed for connection {conn.id} ({conn.name}): {error_msg}"
-                )
-                count = remote_failure_counts.get(conn.id, 0) + 1
-                remote_failure_counts[conn.id] = count
-                if count >= 3:
-                    conn.is_reachable = False
-                    # Cap at 3
-                    remote_failure_counts[conn.id] = 3
-
-            db.commit()
-
-    except Exception:
-        logger.exception("Error in remote health check job")
         db.rollback()
     finally:
         db.close()

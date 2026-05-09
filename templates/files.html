@@ -5,6 +5,10 @@
 {% block page_title %}File Browser{% endblock %}
 {% block page_description %}Search, filter, tag, and move files across hot and cold storage from a denser, desktop-friendly workspace.{% endblock %}
 {% block page_actions %}
+<button type="button" class="btn btn-outline-primary btn-sm" id="p2pPullBtn"
+    title="Browse and pull files from P2P peers">
+    <i class="bi bi-cloud-download"></i><span class="ms-1">Browse Remote Files</span>
+</button>
 <button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()"
     title="Remove duplicate file records">
     <i class="bi bi-files"></i><span class="ms-1">Remove Duplicates</span>
@@ -136,6 +140,21 @@
     </div>
 </div>
 </section>
+
+<!-- Remote P2P Mode Banner -->
+<div id="remote-p2p-bar" class="d-none mb-3">
+    <div class="alert alert-info mb-0 d-flex align-items-center gap-3 flex-wrap">
+        <span><i class="bi bi-cloud-download me-1"></i><strong>Remote P2P Files</strong></span>
+        <select id="remote-peer-filter" class="form-select form-select-sm" style="max-width:220px"
+            aria-label="Filter by peer">
+            <option value="">All Peers</option>
+        </select>
+        <span class="text-muted small ms-auto d-none d-md-inline">Select files below, choose a destination, then click Pull</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="exit-remote-p2p-btn">
+            <i class="bi bi-x-lg"></i> Back to local files
+        </button>
+    </div>
+</div>
 
 <div class="row">
     <div class="col-12">
@@ -338,9 +357,9 @@
             title="Relocate selected files">
             <i class="bi bi-arrow-right-circle"></i> Relocate
         </button>
-        <button type="button" class="btn btn-outline-info btn-sm" id="bulk-migrate-btn"
-            title="Migrate selected files to remote instance">
-            <i class="bi bi-hdd-network"></i> Migrate
+        <button type="button" class="btn btn-outline-secondary btn-sm" id="bulk-share-toggle-btn"
+            title="Toggle sharing for selected local files">
+            <i class="bi bi-arrow-repeat"></i> Toggle Share
         </button>
         <button type="button" class="btn btn-primary btn-sm" id="bulk-add-tag-btn" title="Add tag to selected files">
             <i class="bi bi-tag"></i> Add Tag
@@ -354,6 +373,16 @@
         </button>
         <button type="button" class="btn btn-outline-secondary btn-sm" id="bulk-unpin-btn" title="Unpin selected files">
             <i class="bi bi-pin-angle"></i> Unpin
+        </button>
+    </div>
+    <!-- Shown only in remote P2P mode -->
+    <div id="bulk-p2p-pull-group" class="d-none d-flex align-items-center gap-2 flex-wrap">
+        <select id="bulk-p2p-path-select" class="form-select form-select-sm" style="max-width:260px"
+            aria-label="Destination path">
+            <option value="">Select destination path…</option>
+        </select>
+        <button type="button" class="btn btn-success btn-sm" id="bulk-p2p-pull-btn" disabled>
+            <i class="bi bi-cloud-download"></i> Pull Files
         </button>
     </div>
     <button type="button" class="btn btn-link btn-sm text-muted" id="clear-selection-btn">
@@ -641,6 +670,7 @@
         </div>
     </div>
 </div>
+
 {% endblock %}
 
 {% block extra_scripts %}

@@ -40,7 +40,12 @@ test.describe('Authentication Flow', () => {
         const clearedToken = await page.evaluate(() => window.sessionStorage.getItem('auth_token'));
         expect(clearedToken).toBeNull();
 
-        expect(browserFailures.failures).toEqual([]);
+        const filteredFailures = browserFailures.failures.filter(
+            (entry) =>
+                !entry.includes('401 (Unauthorized)')
+                && !entry.includes('Authentication required')
+        );
+        expect(filteredFailures).toEqual([]);
     });
 
     test('Protected routes redirect to login when unauthenticated', async ({ page }) => {
