@@ -34,3 +34,8 @@
 **Vulnerability:** The tag creation endpoint (`/api/v1/tags`) returned an HTTP error detail containing unsanitized user input (`tag.name`) when attempting to create a duplicate tag, which could result in reflected/stored XSS and information disclosure.
 **Learning:** Any user input reflected in an API response, even within an error message or exception detail, can pose an injection or XSS risk. Input should not be echoed back to the user blindly.
 **Prevention:** Avoid reflecting user input in error messages. Log the event server-side with proper sanitization (e.g., using `sanitize_for_log`) while returning generic error messages to the client.
+## 2024-05-15 - [CRITICAL] Fix Command-Line Option Injection in Subprocess Calls
+
+**Vulnerability:** Subprocess calls to `diskutil` and `xattr` used user-controlled file paths as arguments without protection against command-line option injection (CWE-88). An attacker could craft a file path starting with a hyphen (e.g., `-rf`) to pass unintended flags to the utilities.
+**Learning:** Even when `shell=False` is used, subprocess arguments are still parsed by the underlying utility. If an argument starts with a hyphen, it may be treated as a flag rather than a positional argument like a file path.
+**Prevention:** When passing file paths to subprocesses, use the POSIX `--` delimiter (e.g., `["xattr", "--", filepath]`) to explicitly mark the end of options. If the utility (like `diskutil`) does not support `--`, convert the path to an absolute path (`path.absolute()`) so it strictly starts with `/` and cannot be parsed as a flag.
