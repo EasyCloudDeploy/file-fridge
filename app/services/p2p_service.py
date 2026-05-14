@@ -469,7 +469,9 @@ class P2PService:
 
             dest_path = os.path.join(local_path.source_path, filename)
             if os.path.exists(dest_path):
-                failed.append({"id": cache_id, "error": f"{filename} already exists in the destination path"})
+                failed.append(
+                    {"id": cache_id, "error": f"{filename} already exists in the destination path"}
+                )
                 continue
 
             encoded_id = quote(cache_entry.remote_file_id, safe="")
