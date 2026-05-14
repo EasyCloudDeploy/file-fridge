@@ -756,9 +756,7 @@ def list_files(
 
             remote_rows = remote_query.all()
             aggregated_remote_rows: list[tuple[RemoteSharedFileCache, P2PPeer, list[str], int]] = []
-            grouped_remote_rows: dict[
-                tuple[str, str], dict[str, object]
-            ] = {}
+            grouped_remote_rows: dict[tuple[str, str], dict[str, object]] = {}
             for remote_file, peer in remote_rows:
                 dedupe_key = _build_remote_dedupe_key(remote_file)
                 existing_group = grouped_remote_rows.get(dedupe_key)
@@ -776,12 +774,9 @@ def list_files(
                     current_latest.last_announced_at if current_latest else None
                 )
                 remote_last_announced = remote_file.last_announced_at
-                if (
-                    remote_last_announced
-                    and (
-                        current_latest_announced is None
-                        or remote_last_announced > current_latest_announced
-                    )
+                if remote_last_announced and (
+                    current_latest_announced is None
+                    or remote_last_announced > current_latest_announced
                 ):
                     existing_group["remote_file"] = remote_file
                     existing_group["peer"] = peer
@@ -807,7 +802,10 @@ def list_files(
             }
             visible_remote_rows = []
             for remote_file, peer, peer_names, peer_count in aggregated_remote_rows:
-                if remote_file.checksum and str(remote_file.checksum).lower() in local_checksum_keys:
+                if (
+                    remote_file.checksum
+                    and str(remote_file.checksum).lower() in local_checksum_keys
+                ):
                     continue
                 visible_remote_rows.append((remote_file, peer, peer_names, peer_count))
 
@@ -864,13 +862,19 @@ def list_files(
                 for local_file in files_list:
                     local_peer_availability[local_file.id] = set()
                     if local_file.checksum:
-                        checksum_to_local_ids.setdefault(local_file.checksum, set()).add(local_file.id)
+                        checksum_to_local_ids.setdefault(local_file.checksum, set()).add(
+                            local_file.id
+                        )
                     if local_file.file_path:
-                        path_to_local_ids.setdefault(str(local_file.file_path), set()).add(local_file.id)
+                        path_to_local_ids.setdefault(str(local_file.file_path), set()).add(
+                            local_file.id
+                        )
 
                 match_clauses = []
                 if checksum_to_local_ids:
-                    match_clauses.append(RemoteSharedFileCache.checksum.in_(checksum_to_local_ids.keys()))
+                    match_clauses.append(
+                        RemoteSharedFileCache.checksum.in_(checksum_to_local_ids.keys())
+                    )
                 if path_to_local_ids:
                     match_clauses.extend(
                         [
@@ -894,7 +898,9 @@ def list_files(
                                 checksum_to_local_ids.get(remote_file.checksum, set())
                             )
                         if remote_file.file_path:
-                            matched_local_ids.update(path_to_local_ids.get(remote_file.file_path, set()))
+                            matched_local_ids.update(
+                                path_to_local_ids.get(remote_file.file_path, set())
+                            )
                         if remote_file.display_file_path:
                             matched_local_ids.update(
                                 path_to_local_ids.get(remote_file.display_file_path, set())
@@ -959,7 +965,9 @@ def list_files(
                     else:
                         network_peer_names = peer_names
                     effective_peer_names = network_peer_names if network_peer_names else peer_names
-                    effective_peer_count = len(effective_peer_names) if effective_peer_names else peer_count
+                    effective_peer_count = (
+                        len(effective_peer_names) if effective_peer_names else peer_count
+                    )
                     file_dict = _serialize_remote_cached_file(
                         remote_file,
                         peer,

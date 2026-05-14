@@ -34,3 +34,8 @@
 **Vulnerability:** The tag creation endpoint (`/api/v1/tags`) returned an HTTP error detail containing unsanitized user input (`tag.name`) when attempting to create a duplicate tag, which could result in reflected/stored XSS and information disclosure.
 **Learning:** Any user input reflected in an API response, even within an error message or exception detail, can pose an injection or XSS risk. Input should not be echoed back to the user blindly.
 **Prevention:** Avoid reflecting user input in error messages. Log the event server-side with proper sanitization (e.g., using `sanitize_for_log`) while returning generic error messages to the client.
+
+## 2026-03-18 - [CRITICAL] Fix Command-Line Argument/Option Injection
+**Vulnerability:** The application executed `subprocess.run` with variable file paths without explicitly terminating command-line options. A file path beginning with a hyphen (`-`) could be misinterpreted as a command-line flag by commands like `xattr` or `diskutil`, potentially leading to argument injection or denial of service depending on the underlying tool.
+**Learning:** Even when avoiding shell execution (`shell=False`), argument injection is possible if user-provided or variable strings are interpreted as flags by the invoked command-line application.
+**Prevention:** Always use the POSIX double-dash `--` to signal the end of command options before providing variable arguments like file paths (e.g., `["xattr", "-p", "name", "--", filepath]`). For commands that do not support `--` (like macOS `diskutil`), convert file paths to absolute paths (`str(path.absolute())`) so they begin with a `/` rather than a `-`.
