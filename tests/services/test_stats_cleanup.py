@@ -60,7 +60,6 @@ class TestStatsCleanupService:
 
         assert stats["records_deleted"] == 1
         assert stats["inventory_deleted"] == 1
-        assert stats["transfers_deleted"] == 0
 
         # Verify remaining
         assert db_session.query(FileRecord).count() == 1
@@ -72,7 +71,7 @@ class TestStatsCleanupService:
         """Test cleaning up orphaned .fftmp files."""
         hot_dir = tmp_path / "hot_tmp"
         hot_dir.mkdir()
-        path = monitored_path_factory("Temp Path", str(hot_dir))
+        monitored_path_factory("Temp Path", str(hot_dir))
 
         # Create an old temp file
         temp_file = hot_dir / "orphaned.fftmp"

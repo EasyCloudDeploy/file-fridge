@@ -166,7 +166,6 @@ class StatsCleanupService:
                 "success": True,
                 "records_deleted": records_deleted,
                 "inventory_deleted": inventory_deleted,
-                "transfers_deleted": 0,
                 "cutoff_date": cutoff_date.isoformat(),
                 "message": f"Successfully deleted {records_deleted + inventory_deleted} records",
             }
