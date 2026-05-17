@@ -49,13 +49,16 @@ class TestSchedulerService:
         path = monitored_path_factory("Scan Job Path", "/tmp/hot_job")
 
         from app.services.file_workflow_service import file_workflow_service
+
         mock_process = MagicMock(return_value={"files_moved": 5, "bytes_saved": 500, "errors": []})
         monkeypatch.setattr(file_workflow_service, "process_path", mock_process)
 
         scan_path_job_func(path.id)
         assert mock_process.called
 
-    def test_encrypt_location_job(self, db_session, storage_location, file_inventory_factory, monkeypatch):
+    def test_encrypt_location_job(
+        self, db_session, storage_location, file_inventory_factory, monkeypatch
+    ):
         """Test the bulk encryption job function."""
         # Setup files in location
         storage_location.is_encrypted = False
@@ -65,15 +68,17 @@ class TestSchedulerService:
             path="/tmp/cold/f1.txt",
             storage_type=StorageType.COLD,
             is_encrypted=False,
-            cold_storage_location=storage_location
+            cold_storage_location=storage_location,
         )
 
         # Mock file encryption service
         from app.services.encryption_service import file_encryption_service
+
         monkeypatch.setattr(file_encryption_service, "encrypt_file", MagicMock())
 
         # Mock Path.exists and unlink
         from pathlib import Path
+
         monkeypatch.setattr(Path, "exists", lambda self: True)
         monkeypatch.setattr(Path, "unlink", MagicMock())
 
@@ -84,7 +89,9 @@ class TestSchedulerService:
         db_session.refresh(storage_location)
         assert storage_location.encryption_status == "encrypted"
 
-    def test_decrypt_location_job(self, db_session, storage_location, file_inventory_factory, monkeypatch):
+    def test_decrypt_location_job(
+        self, db_session, storage_location, file_inventory_factory, monkeypatch
+    ):
         """Test the bulk decryption job function."""
         storage_location.is_encrypted = True
         db_session.commit()
@@ -93,13 +100,15 @@ class TestSchedulerService:
             path="/tmp/cold/f1.txt.ffenc",
             storage_type=StorageType.COLD,
             is_encrypted=True,
-            cold_storage_location=storage_location
+            cold_storage_location=storage_location,
         )
 
         from app.services.encryption_service import file_encryption_service
+
         monkeypatch.setattr(file_encryption_service, "decrypt_file", MagicMock())
 
         from pathlib import Path
+
         monkeypatch.setattr(Path, "exists", lambda self: True)
         monkeypatch.setattr(Path, "unlink", MagicMock())
 
@@ -117,9 +126,13 @@ class TestCheckStoragePermissionsJob:
     @pytest.fixture(autouse=True)
     def mock_scheduler_session(self, monkeypatch, db_session):
         monkeypatch.setattr(db_session, "close", lambda: None)
-        monkeypatch.setattr("app.services.scheduler.SchedulerSessionLocal", MagicMock(return_value=db_session))
+        monkeypatch.setattr(
+            "app.services.scheduler.SchedulerSessionLocal", MagicMock(return_value=db_session)
+        )
 
-    def _make_cold_location(self, db_session, path: str, name: str = "Cold Storage") -> ColdStorageLocation:
+    def _make_cold_location(
+        self, db_session, path: str, name: str = "Cold Storage"
+    ) -> ColdStorageLocation:
         loc = ColdStorageLocation(name=name, path=path)
         db_session.add(loc)
         db_session.commit()
@@ -128,6 +141,7 @@ class TestCheckStoragePermissionsJob:
 
     def _make_hot_path(self, db_session, path: str, name: str = "Hot Path") -> MonitoredPath:
         from app.models import ColdStorageLocation, MonitoredPath
+
         cold = ColdStorageLocation(name=f"Cold for {name}", path="/tmp/cold_dummy")
         db_session.add(cold)
         db_session.flush()
@@ -137,7 +151,9 @@ class TestCheckStoragePermissionsJob:
         db_session.refresh(mp)
         return mp
 
-    def test_sets_permissions_error_on_cold_location_when_not_writable(self, db_session, tmp_path, monkeypatch):
+    def test_sets_permissions_error_on_cold_location_when_not_writable(
+        self, db_session, tmp_path, monkeypatch
+    ):
         """permissions_error is populated when the cold storage path is not writable."""
         from app.services.scheduler import check_storage_permissions_job_func
 
@@ -146,7 +162,9 @@ class TestCheckStoragePermissionsJob:
         loc = self._make_cold_location(db_session, str(cold_path))
 
         # Simulate missing write permission
-        monkeypatch.setattr("app.services.scheduler.os.access", lambda path, mode: mode != 2)  # W_OK == 2
+        monkeypatch.setattr(
+            "app.services.scheduler.os.access", lambda path, mode: mode != 2
+        )  # W_OK == 2
 
         check_storage_permissions_job_func()
 
@@ -205,7 +223,9 @@ class TestCheckStoragePermissionsJob:
         assert loc.permissions_error is not None
         assert "write" in loc.permissions_error
 
-    def test_clears_permissions_error_when_permissions_restored(self, db_session, tmp_path, monkeypatch):
+    def test_clears_permissions_error_when_permissions_restored(
+        self, db_session, tmp_path, monkeypatch
+    ):
         """permissions_error is cleared once the path becomes accessible again."""
         from app.services.scheduler import check_storage_permissions_job_func
 
@@ -223,7 +243,9 @@ class TestCheckStoragePermissionsJob:
         db_session.refresh(loc)
         assert loc.permissions_error is None
 
-    def test_sets_permissions_error_on_monitored_path_when_not_readable(self, db_session, tmp_path, monkeypatch):
+    def test_sets_permissions_error_on_monitored_path_when_not_readable(
+        self, db_session, tmp_path, monkeypatch
+    ):
         """permissions_error is set on a MonitoredPath when its source is not readable."""
         from app.services.scheduler import check_storage_permissions_job_func
 
@@ -266,11 +288,11 @@ class TestCheckStoragePermissionsJob:
 
         db_session.refresh(loc)
         assert loc.permissions_error is not None
-        assert "not found" in loc.permissions_error.lower() or "nonexistent" in loc.permissions_error
+        assert (
+            "not found" in loc.permissions_error.lower() or "nonexistent" in loc.permissions_error
+        )
 
-    def test_missing_cold_path_is_ignored_when_allow_offline_enabled(
-        self, db_session, monkeypatch
-    ):
+    def test_missing_cold_path_is_ignored_when_allow_offline_enabled(self, db_session, monkeypatch):
         """Missing removable local path does not produce permissions_error when allow_offline is enabled."""
         from app.services.scheduler import check_storage_permissions_job_func
 
@@ -282,7 +304,9 @@ class TestCheckStoragePermissionsJob:
         db_session.commit()
 
         # Ensure identity refresh does not clobber removable/offline state in this test.
-        monkeypatch.setattr("app.services.scheduler.update_local_drive_identity_fields", lambda _loc: None)
+        monkeypatch.setattr(
+            "app.services.scheduler.update_local_drive_identity_fields", lambda _loc: None
+        )
 
         check_storage_permissions_job_func()
 
@@ -330,9 +354,12 @@ class TestCheckStoragePermissionsJob:
 
         assert len(dispatched) >= 1
         from app.services.notification_events import NotificationEventType
+
         assert dispatched[0]["event_type"] == NotificationEventType.STORAGE_PERMISSION_ERROR
 
-    def test_does_not_redispatch_notification_when_error_unchanged(self, db_session, tmp_path, monkeypatch):
+    def test_does_not_redispatch_notification_when_error_unchanged(
+        self, db_session, tmp_path, monkeypatch
+    ):
         """Notification is not re-dispatched on subsequent runs when the error message is unchanged."""
         from app.services.scheduler import check_storage_permissions_job_func
 

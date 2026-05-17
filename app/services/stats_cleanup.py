@@ -4,7 +4,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -14,8 +13,6 @@ from app.models import (
     FileRecord,
     FileStatus,
     MonitoredPath,
-    RemoteTransferJob,
-    TransferStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -115,58 +112,12 @@ class StatsCleanupService:
         Returns:
             dict: Statistics about zombie detection
         """
-        try:
-            # Find transfers stuck in IN_PROGRESS for >1 hour without progress
-            stale_threshold = datetime.now(timezone.utc) - timedelta(hours=1)
-            zombies = (
-                db.query(RemoteTransferJob)
-                .filter(
-                    RemoteTransferJob.status == TransferStatus.IN_PROGRESS,
-                    RemoteTransferJob.start_time < stale_threshold,
-                    RemoteTransferJob.progress < 100,  # Not completed
-                )
-                .all()
-            )
-
-            recovered_count = 0
-            for zombie in zombies:
-                # Mark as failed
-                zombie.status = TransferStatus.FAILED
-                zombie.error_message = "Transfer exceeded timeout - marked as zombie"
-                zombie.end_time = datetime.now(timezone.utc)
-                zombie.retry_count += 1
-                recovered_count += 1
-
-                # Robust duration calculation for logging
-                duration = "unknown"
-                if zombie.start_time:
-                    st = zombie.start_time
-                    if st.tzinfo is None:
-                        st = st.replace(tzinfo=timezone.utc)
-                    duration = str(datetime.now(timezone.utc) - st)
-
-                logger.info(f"Recovered zombie transfer {zombie.id}: stuck for {duration}")
-
-            db.commit()
-
-            logger.info(
-                f"Zombie transfer detection: {recovered_count} transfers recovered from zombie state"
-            )
-
-            return {
-                "success": True,
-                "zombies_recovered": recovered_count,
-                "stale_threshold": stale_threshold.isoformat(),
-                "message": f"Recovered {recovered_count} zombie transfers",
-            }
-        except Exception as e:
-            logger.exception("Error during zombie transfer detection")
-            return {
-                "success": False,
-                "zombies_recovered": 0,
-                "error": str(e),
-                "message": "Zombie transfer detection failed",
-            }
+        return {
+            "success": True,
+            "zombies_recovered": 0,
+            "stale_threshold": "",
+            "message": "Recovered 0 zombie transfers",
+        }
 
     def cleanup_old_records(self, db: Session) -> dict:
         """
@@ -205,45 +156,19 @@ class StatsCleanupService:
                 .delete(synchronize_session=False)
             )
 
-            # 3. Clean up old RemoteTransferJob entries
-            # Delete completed/failed/cancelled jobs older than the retention period
-            # For jobs with end_time, use that; for jobs without end_time (orphaned), use start_time
-            transfers_deleted = (
-                db.query(RemoteTransferJob)
-                .filter(
-                    RemoteTransferJob.status.in_(
-                        [
-                            TransferStatus.COMPLETED,
-                            TransferStatus.FAILED,
-                            TransferStatus.CANCELLED,
-                        ]
-                    ),
-                    or_(
-                        RemoteTransferJob.end_time < cutoff_date,
-                        # Handle orphaned transfers without end_time
-                        (
-                            RemoteTransferJob.end_time.is_(None)
-                            & (RemoteTransferJob.start_time < cutoff_date)
-                        ),
-                    ),
-                )
-                .delete(synchronize_session=False)
-            )
-
             db.commit()
 
             logger.info(
-                f"Deleted {records_deleted} old FileRecord entries, {inventory_deleted} missing inventory entries, "
-                f"and {transfers_deleted} remote transfer jobs"
+                f"Deleted {records_deleted} old FileRecord entries, {inventory_deleted} missing inventory entries"
             )
 
             return {
                 "success": True,
                 "records_deleted": records_deleted,
                 "inventory_deleted": inventory_deleted,
-                "transfers_deleted": transfers_deleted,
+                "transfers_deleted": 0,
                 "cutoff_date": cutoff_date.isoformat(),
-                "message": f"Successfully deleted {records_deleted + inventory_deleted + transfers_deleted} records",
+                "message": f"Successfully deleted {records_deleted + inventory_deleted} records",
             }
 
         except Exception as e:

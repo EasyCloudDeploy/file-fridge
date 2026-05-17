@@ -143,6 +143,7 @@ def storage_location(db_session: Session):
 @pytest.fixture
 def monitored_path_factory(db_session: Session, storage_location: ColdStorageLocation):
     """Factory fixture to create MonitoredPath objects."""
+
     def _factory(name: str, source_path: str):
         path = MonitoredPath(
             name=name,
@@ -155,12 +156,14 @@ def monitored_path_factory(db_session: Session, storage_location: ColdStorageLoc
         # Create the directory
         Path(path.source_path).mkdir(exist_ok=True, parents=True)
         return path
+
     return _factory
 
 
 @pytest.fixture
 def file_inventory_factory(db_session: Session, monitored_path_factory):
     """Fixture for creating FileInventory objects."""
+
     def _create_file(
         path="/tmp/test.txt",
         size=1024,
@@ -210,6 +213,7 @@ def file_inventory_factory(db_session: Session, monitored_path_factory):
 
         if is_pinned:
             from app.models import PinnedFile
+
             pin = PinnedFile(path_id=file_inv.path_id, file_path=file_inv.file_path)
             db_session.add(pin)
             db_session.commit()
@@ -222,6 +226,7 @@ def file_inventory_factory(db_session: Session, monitored_path_factory):
 @pytest.fixture
 def create_tag(db_session: Session):
     """Fixture for creating tags."""
+
     def _create_tag(name: str, color: str = "#000000"):
         tag = Tag(name=name, color=color)
         db_session.add(tag)
@@ -230,75 +235,3 @@ def create_tag(db_session: Session):
         return tag
 
     return _create_tag
-
-
-@pytest.fixture
-def remote_connection_factory(db_session: Session):
-    """Factory for RemoteConnection objects."""
-    def _factory(
-        name: str = "Test Remote",
-        url: str = "http://remote.example.com",
-        fingerprint: str = "testfingerprint",
-        trust_status = "TRUSTED",
-        remote_transfer_mode = "BIDIRECTIONAL",
-    ):
-        from app.models import RemoteConnection, TransferMode
-        conn = RemoteConnection(
-            name=name,
-            url=url,
-            remote_fingerprint=fingerprint,
-            remote_ed25519_public_key="3YGphBPL4ioYr/v66Frj0IxKQZrBuSBbO2VXLWp1L5Q=",
-            remote_x25519_public_key="rhjY0TbxIvRP94vmjq8LLBCEbjefwurwSe35qQIo1EA=",
-            trust_status=trust_status,
-            remote_transfer_mode=remote_transfer_mode,
-            transfer_mode=TransferMode.BIDIRECTIONAL
-        )
-        db_session.add(conn)
-        db_session.commit()
-        db_session.refresh(conn)
-        return conn
-    return _factory
-
-
-@pytest.fixture
-def remote_transfer_job_factory(db_session: Session, remote_connection_factory, monitored_path_factory, tmp_path):
-    """Factory for RemoteTransferJob objects."""
-    import itertools
-    _counter = itertools.count(1)
-
-    def _factory(
-        file_inventory_id: int = 1,
-        remote_connection = None,
-        remote_monitored_path = None,
-        direction = "PUSH",
-        status = "PENDING",
-    ):
-        from app.models import RemoteTransferJob, StorageType, TransferDirection, TransferStatus
-        n = next(_counter)
-        if remote_connection is None:
-            remote_connection = remote_connection_factory(fingerprint=f"testfingerprint{n}")
-        if remote_monitored_path is None:
-            remote_monitored_path = monitored_path_factory(f"Remote Path {n}", str(tmp_path / f"remote{n}"))
-
-        if isinstance(direction, str):
-            direction = TransferDirection[direction]
-        if isinstance(status, str):
-            status = TransferStatus[status]
-
-        job = RemoteTransferJob(
-            file_inventory_id=file_inventory_id,
-            remote_connection_id=remote_connection.id,
-            remote_monitored_path_id=remote_monitored_path.id,
-            direction=direction,
-            status=status,
-            source_path=str(tmp_path),
-            relative_path=f"test_file_{n}.txt",
-            total_size=1024,
-            storage_type=StorageType.HOT,
-            checksum="testchecksum",
-        )
-        db_session.add(job)
-        db_session.commit()
-        db_session.refresh(job)
-        return job
-    return _factory
