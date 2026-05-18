@@ -102,23 +102,6 @@ class StatsCleanupService:
                 "message": "Orphaned temp file cleanup failed",
             }
 
-    def detect_zombie_transfers(self, db: Session) -> dict:
-        """
-        Detect and recover zombie transfers (stuck in IN_PROGRESS >1 hour without progress).
-
-        Args:
-            db: Database session
-
-        Returns:
-            dict: Statistics about zombie detection
-        """
-        return {
-            "success": True,
-            "zombies_recovered": 0,
-            "stale_threshold": "",
-            "message": "Recovered 0 zombie transfers",
-        }
-
     def cleanup_old_records(self, db: Session) -> dict:
         """
         Delete FileRecord and old MISSING FileInventory entries older than the retention period.
@@ -193,10 +176,6 @@ def cleanup_old_stats_job_func():
         # Clean up orphaned temp files
         temp_cleanup = service.cleanup_orphaned_temp_files(db)
         logger.info(f"Orphaned temp file cleanup completed: {temp_cleanup}")
-
-        # Detect and recover zombie transfers
-        zombie_detection = service.detect_zombie_transfers(db)
-        logger.info(f"Zombie transfer detection completed: {zombie_detection}")
 
         # Clean up old database records
         result = service.cleanup_old_records(db)
