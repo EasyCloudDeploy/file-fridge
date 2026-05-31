@@ -28,10 +28,13 @@ jobs:
         run: uv sync
 
       - name: Apply migrations to temp DB and check for model drift
+        env:
+          SECRET_KEY: ci-migration-check
+          DATABASE_PATH: /tmp/ff-migration-check/check.db
         run: |
           mkdir -p /tmp/ff-migration-check
-          DATABASE_PATH=/tmp/ff-migration-check/check.db uv run alembic upgrade head
-          DATABASE_PATH=/tmp/ff-migration-check/check.db uv run alembic check
+          uv run alembic upgrade head
+          uv run alembic check
         # alembic check exits non-zero if models have changes not covered by migrations.
         # This catches the class of bug where a column is added to models.py without a migration.
 
