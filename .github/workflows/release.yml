@@ -12,8 +12,32 @@ env:
   DOCKER_REPO: martinoj2009/file-fridge
 
 jobs:
+  check-migrations:
+    name: Check for missing Alembic migrations
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Apply migrations to temp DB and check for model drift
+        run: |
+          mkdir -p /tmp/ff-migration-check
+          DATABASE_PATH=/tmp/ff-migration-check/check.db uv run alembic upgrade head
+          DATABASE_PATH=/tmp/ff-migration-check/check.db uv run alembic check
+        # alembic check exits non-zero if models have changes not covered by migrations.
+        # This catches the class of bug where a column is added to models.py without a migration.
+
   build-and-push:
     name: Build and Push Docker Image
+    needs: check-migrations
     runs-on: ubuntu-latest
     permissions:
       contents: read

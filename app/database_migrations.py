@@ -17,11 +17,11 @@ INITIAL_REVISION = "726412e8862d"
 MAX_CONCURRENT_MIGRATIONS_REVISION = "6b398cde9d3e"
 RELOCATION_TASK_REVISION = "4cb41a7faab6"
 PERMISSIONS_ERROR_REVISION = "764abe6a5a03"
-HEAD_REVISION = "e6f7a8b9c0d1"
 BACKEND_MODULES_REVISION = "9f3d6e2aa1b1"
 LOCAL_DRIVE_IDENTITY_REVISION = "b17d9f43c2aa"
 ALLOW_OFFLINE_REVISION = "c3e1d8f7aa42"
 NORMALIZE_COLD_STORAGE_ENUM_VALUES_REVISION = "d4f9b8a1c2e3"
+P2P_V2_REVISION = "e6f7a8b9c0d1"
 BACKUP_RETENTION_COUNT = 10
 
 
@@ -29,8 +29,8 @@ def _table_columns(inspector, table_name: str) -> set[str]:
     return {column["name"] for column in inspector.get_columns(table_name)}
 
 
-def _schema_has_head_markers(inspector) -> bool:
-    """Return True when schema already matches the current head structure."""
+def _schema_has_p2p_v2_markers(inspector) -> bool:
+    """Return True when schema matches the P2P v2 cutover revision (e6f7a8b9c0d1)."""
     tables = set(inspector.get_table_names())
 
     required_tables = {"p2p_network_config", "p2p_peers", "remote_shared_file_cache"}
@@ -65,8 +65,8 @@ def _determine_schema_revision(inspector, db) -> str:
     """Infer the closest Alembic revision from the live schema."""
     tables = set(inspector.get_table_names())
 
-    if _schema_has_head_markers(inspector):
-        return HEAD_REVISION
+    if _schema_has_p2p_v2_markers(inspector):
+        return P2P_V2_REVISION
 
     if "monitored_paths" in tables:
         monitored_path_columns = _table_columns(inspector, "monitored_paths")
@@ -185,45 +185,33 @@ def run_startup_migrations() -> None:
         alembic_cfg = Config("alembic.ini")
         alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url))
 
-        # Check if we need to stamp the database
-        # This happens when init_db() created tables but alembic_version is empty or missing
-        should_run_upgrade = True
+        # Stamp legacy databases that have tables but no alembic_version yet.
+        # This happens when init_db() (create_all) was used before Alembic was introduced.
+        # We infer the closest revision from the live schema so that upgrade head
+        # only runs the migrations that are actually missing.
         revision_to_stamp: str | None = None
         db = SessionLocal()
         try:
             inspector = inspect(engine)
             tables = inspector.get_table_names()
 
-            # Check for existing version
             has_alembic_table = "alembic_version" in tables
             has_version = False
-            current_revision: str | None = None
             if has_alembic_table:
                 result = db.execute(text("SELECT version_num FROM alembic_version")).fetchone()
                 has_version = result is not None
-                if has_version:
-                    current_revision = result[0]
 
             has_app_tables = len(tables) > (1 if has_alembic_table else 0)
 
-            # If we have tables but no alembic version, determine the closest
-            # revision from the live schema before upgrading further.
             if not has_version and has_app_tables:
                 logger.info(
                     "Database tables exist but alembic version is not set. "
                     "Determining correct version based on schema..."
                 )
-
                 revision_to_stamp = _determine_schema_revision(inspector, db)
                 logger.info("Detected schema equivalent to revision %s", revision_to_stamp)
 
             if has_app_tables:
-                if has_version and current_revision == HEAD_REVISION:
-                    should_run_upgrade = False
-                if not has_version and revision_to_stamp == HEAD_REVISION:
-                    should_run_upgrade = False
-
-            if has_app_tables and should_run_upgrade:
                 backup_path = _create_sqlite_backup()
 
             if not has_version and has_app_tables and revision_to_stamp is not None:
@@ -232,11 +220,8 @@ def run_startup_migrations() -> None:
         finally:
             db.close()
 
-        if should_run_upgrade:
-            command.upgrade(alembic_cfg, "head")
-            logger.info("✓ Database migrations completed successfully")
-        else:
-            logger.info("✓ Database already at head; no migration upgrade needed")
+        command.upgrade(alembic_cfg, "head")
+        logger.info("✓ Database migrations complete")
 
         _ensure_post_migration_schema()
     except Exception as e:
