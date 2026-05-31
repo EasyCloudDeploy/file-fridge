@@ -324,11 +324,23 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
             query_parts.append(f"'{folder_id}' in parents")
         return " and ".join(query_parts)
 
-    def _list_app_files_page(
-        self, location: ColdStorageLocation, page_size: int, page_token: Optional[str] = None
+    def _build_folder_query(self, location: ColdStorageLocation) -> str:
+        """Query for all non-trashed files in the configured folder, app-managed or not."""
+        query_parts = ["trashed=false", "mimeType!='application/vnd.google-apps.folder'"]
+        folder_id = self._ensure_folder_id(location)
+        if folder_id:
+            query_parts.append(f"'{folder_id}' in parents")
+        return " and ".join(query_parts)
+
+    def _list_files_page(
+        self,
+        location: ColdStorageLocation,
+        query: str,
+        page_size: int,
+        page_token: Optional[str] = None,
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {
-            "q": self._build_app_query(location),
+            "q": query,
             "pageSize": max(1, min(page_size, 1000)),
             "fields": "nextPageToken,files(id,name,size,mimeType,createdTime,modifiedTime,appProperties)",
             "supportsAllDrives": "true",
@@ -347,23 +359,54 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
         response.raise_for_status()
         return response.json()
 
+    def _list_app_files_page(
+        self, location: ColdStorageLocation, page_size: int, page_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        return self._list_files_page(
+            location, self._build_app_query(location), page_size, page_token
+        )
+
+    @staticmethod
+    def _normalise_file_item(item: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert a raw Drive API file object to the canonical File Fridge dict."""
+        app_props = item.get("appProperties") or {}
+        return {
+            "id": item.get("id"),
+            "name": item.get("name"),
+            "size": int(item.get("size") or 0),
+            "mime_type": item.get("mimeType"),
+            "created_time": item.get("createdTime"),
+            "modified_time": item.get("modifiedTime"),
+            "relative_path": app_props.get("ff_relative_path"),
+            # Whether this file was uploaded by File Fridge.
+            "is_managed": app_props.get("file_fridge_managed") == "true",
+            # The location ID recorded in appProperties (may differ from the current location).
+            "ff_location_id": app_props.get("ff_location_id"),
+        }
+
     def list_managed_files(
         self, location: ColdStorageLocation, page_size: int = 100, page_token: Optional[str] = None
     ) -> Dict[str, Any]:
         payload = self._list_app_files_page(location, page_size=page_size, page_token=page_token)
-        files = []
-        for item in payload.get("files", []):
-            files.append(
-                {
-                    "id": item.get("id"),
-                    "name": item.get("name"),
-                    "size": int(item.get("size") or 0),
-                    "mime_type": item.get("mimeType"),
-                    "created_time": item.get("createdTime"),
-                    "modified_time": item.get("modifiedTime"),
-                    "relative_path": (item.get("appProperties") or {}).get("ff_relative_path"),
-                }
-            )
+        files = [self._normalise_file_item(item) for item in payload.get("files", [])]
+        return {
+            "files": files,
+            "next_page_token": payload.get("nextPageToken"),
+        }
+
+    def list_all_folder_files(
+        self, location: ColdStorageLocation, page_size: int = 100, page_token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """List every file in the configured folder, including externally-added ones.
+
+        Each returned item includes ``is_managed`` (bool) and ``ff_location_id`` (str|None)
+        so callers can distinguish files owned by this location, files owned by another
+        File Fridge location, and files that were added outside the application.
+        """
+        payload = self._list_files_page(
+            location, self._build_folder_query(location), page_size, page_token
+        )
+        files = [self._normalise_file_item(item) for item in payload.get("files", [])]
         return {
             "files": files,
             "next_page_token": payload.get("nextPageToken"),
@@ -603,17 +646,17 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
             return False, f"Google Drive thaw failed: {exc}"
 
     def exists(self, storage_reference: str, location: ColdStorageLocation) -> bool:
-        try:
-            file_id = self._parse_reference(storage_reference)
-            response = httpx.get(
-                f"{self._API_BASE}/files/{quote(file_id)}",
-                params={"fields": "id", "supportsAllDrives": "true"},
-                headers=self._auth_headers(location),
-                timeout=20.0,
-            )
-            return response.status_code == 200
-        except Exception:
+        file_id = self._parse_reference(storage_reference)
+        response = httpx.get(
+            f"{self._API_BASE}/files/{quote(file_id)}",
+            params={"fields": "id", "supportsAllDrives": "true"},
+            headers=self._auth_headers(location),
+            timeout=20.0,
+        )
+        if response.status_code == 404:
             return False
+        self._raise_for_status_with_google_detail(response, "Google Drive existence check failed")
+        return True
 
     def delete(
         self, storage_reference: str, location: ColdStorageLocation
