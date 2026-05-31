@@ -560,9 +560,38 @@ def check_storage_permissions_job_func() -> None:
                     if not is_valid:
                         location.permissions_error = validation_error or "Backend validation failed"
                     else:
-                        if location.permissions_error is not None:
-                            logger.info(f"Permissions restored on cold storage '{location.name}'")
-                        location.permissions_error = None
+                        cred_ok, cred_error = backend.test_credentials(location)
+                        if not cred_ok:
+                            error = cred_error or "Credential check failed"
+                            if location.permissions_error != error:
+                                location.permissions_error = error
+                                logger.warning(
+                                    "Credential check failed for cold storage '%s': %s",
+                                    location.name,
+                                    error,
+                                )
+                                try:
+                                    notification_service.dispatch_event_sync(
+                                        db=db,
+                                        event_type=NotificationEventType.STORAGE_PERMISSION_ERROR,
+                                        event_data=StoragePermissionErrorData(
+                                            storage_type="cold",
+                                            location_name=location.name,
+                                            location_path=location.path,
+                                            missing_permissions=["authentication"],
+                                        ),
+                                    )
+                                except Exception:
+                                    logger.exception(
+                                        "Failed to dispatch credential error notification for '%s'",
+                                        location.name,
+                                    )
+                        else:
+                            if location.permissions_error is not None:
+                                logger.info(
+                                    "Credentials restored on cold storage '%s'", location.name
+                                )
+                            location.permissions_error = None
             except FileNotFoundError:
                 backend_type = (
                     location.backend_type.value

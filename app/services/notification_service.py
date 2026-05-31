@@ -23,6 +23,7 @@ from app.models import (
     Notifier,
     NotifierType,
 )
+from app.services.instance_config_service import instance_config_service
 from app.services.notification_events import (
     DiskSpaceCautionData,
     DiskSpaceCriticalData,
@@ -33,8 +34,8 @@ from app.services.notification_events import (
     PathUpdatedData,
     ScanCompletedData,
     ScanErrorData,
+    StoragePermissionErrorData,
 )
-from app.services.instance_config_service import instance_config_service
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,7 @@ class NotificationService:
             Formatted message string
         """
         if isinstance(event_data, ScanCompletedData):
+
             def _fmt_bytes(b: int) -> str:
                 if b >= 1024**3:
                     return f"{b / 1024**3:.2f} GB"
@@ -214,7 +216,9 @@ class NotificationService:
             if event_data.files_moved > 0:
                 lines.append(f"Data moved to cold storage: {_fmt_bytes(event_data.bytes_moved)}")
             if event_data.cold_storages_updated:
-                lines.append(f"Cold storage(s) updated: {', '.join(event_data.cold_storages_updated)}")
+                lines.append(
+                    f"Cold storage(s) updated: {', '.join(event_data.cold_storages_updated)}"
+                )
             if event_data.hot_storage:
                 hs = event_data.hot_storage
                 lines.append(
@@ -276,6 +280,12 @@ class NotificationService:
             )
 
         if isinstance(event_data, StoragePermissionErrorData):
+            if event_data.missing_permissions == ["authentication"]:
+                return (
+                    f"AUTH ERROR: Credentials for '{event_data.location_name}' have expired or been revoked\n"
+                    f"Path: {event_data.location_path}\n"
+                    f"Please reconnect the account in storage settings."
+                )
             missing_str = ", ".join(event_data.missing_permissions)
             return (
                 f"PERMISSION ERROR: Missing {missing_str} access on {event_data.storage_type} storage\n"
@@ -441,7 +451,9 @@ class NotificationService:
                     smtp_user = notifier.smtp_user
                     smtp_password = notifier.smtp_password
                     smtp_sender = notifier.smtp_sender
-                    smtp_use_tls = notifier.smtp_use_tls if notifier.smtp_use_tls is not None else True
+                    smtp_use_tls = (
+                        notifier.smtp_use_tls if notifier.smtp_use_tls is not None else True
+                    )
 
                 success, details = await self._send_email(
                     address=notifier.address,
@@ -607,7 +619,9 @@ class NotificationService:
                     smtp_user = notifier.smtp_user
                     smtp_password = notifier.smtp_password
                     smtp_sender = notifier.smtp_sender
-                    smtp_use_tls = notifier.smtp_use_tls if notifier.smtp_use_tls is not None else True
+                    smtp_use_tls = (
+                        notifier.smtp_use_tls if notifier.smtp_use_tls is not None else True
+                    )
 
                 return await self._send_email(
                     address=notifier.address,
