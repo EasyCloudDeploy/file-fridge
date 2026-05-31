@@ -53,6 +53,9 @@
                                     <option value="user">User</option>
                                     <option value="group">Group</option>
                                 </select>
+                                <small class="form-text text-muted">
+                                    The type of file attribute to match against
+                                </small>
                             </div>
 
                             <div class="mb-3">
@@ -68,34 +71,47 @@
                                     <option value="matches">Matches (glob pattern)</option>
                                     <option value="regex">Regex</option>
                                 </select>
+                                <small class="form-text text-muted">
+                                    The comparison operator to use
+                                </small>
                             </div>
 
                             <div class="mb-3">
                                 <label for="value" class="form-label">Value *</label>
                                 <input type="text" class="form-control" id="value" name="value" required>
-                                <div id="value-hint" class="form-text text-muted mt-1" style="display:none"></div>
-                            </div>
-
-                            <!-- Live plain-English preview -->
-                            <div id="criterion-preview" class="mb-3" style="display:none">
-                                <div id="preview-warning" class="alert alert-warning d-flex gap-2 mb-2 py-2" style="display:none">
-                                    <i class="bi bi-exclamation-triangle-fill fs-5 flex-shrink-0 mt-1"></i>
-                                    <div>
-                                        <strong>Unusual configuration</strong>
-                                        <div id="preview-warning-tip" class="small mt-1"></div>
+                                <small class="form-text text-muted">
+                                    <div id="value-help">
+                                        <strong>Examples:</strong><br>
+                                        <span id="mtime-help" style="display: none;">
+                                            Minutes since modification (e.g., "30" to keep files modified within the last 30 minutes)
+                                        </span>
+                                        <span id="atime-help" style="display: none;">
+                                            Minutes since access (e.g., "30" to keep files accessed within the last 30 minutes)
+                                        </span>
+                                        <span id="ctime-help" style="display: none;">
+                                            Minutes since change (e.g., "30" to keep files changed within the last 30 minutes)
+                                        </span>
+                                        <span id="size-help" style="display: none;">
+                                            Size with optional suffix: c (bytes), k (KB), M (MB), G (GB)<br>
+                                            Example: "100M" to keep files smaller/larger than 100MB
+                                        </span>
+                                        <span id="name-help" style="display: none;">
+                                            Filename pattern (e.g., "*.log", "*.txt", "app*")
+                                        </span>
+                                        <span id="type-help" style="display: none;">
+                                            File type: "f" or "file" for files, "d" or "directory" for directories, "l" or "link" for symlinks
+                                        </span>
+                                        <span id="perm-help" style="display: none;">
+                                            Permissions in octal (e.g., "755") or symbolic (e.g., "rwx")
+                                        </span>
+                                        <span id="user-help" style="display: none;">
+                                            Username or UID (e.g., "www-data" or "33")
+                                        </span>
+                                        <span id="group-help" style="display: none;">
+                                            Group name or GID (e.g., "www-data" or "33")
+                                        </span>
                                     </div>
-                                </div>
-                                <div class="rounded border p-3 bg-light">
-                                    <p class="mb-2 small fw-semibold text-uppercase text-muted" style="letter-spacing:.05em">What this criterion does</p>
-                                    <div class="d-flex align-items-start gap-2 mb-2">
-                                        <span class="badge bg-success text-nowrap" style="min-width:82px;text-align:center">✅ Stays hot</span>
-                                        <span id="preview-stay-text" class="small"></span>
-                                    </div>
-                                    <div class="d-flex align-items-start gap-2">
-                                        <span class="badge bg-primary text-nowrap" style="min-width:82px;text-align:center">❄️ Moves cold</span>
-                                        <span id="preview-cold-text" class="small"></span>
-                                    </div>
-                                </div>
+                                </small>
                             </div>
 
                             <div class="mb-3">
@@ -106,7 +122,7 @@
                                     </label>
                                 </div>
                                 <small class="form-text text-muted">
-                                    When disabled, this criterion is ignored and does not affect file routing.
+                                    Enable or disable this criterion. Active files must match ALL enabled criteria to STAY in hot storage. If a file fails to match any enabled criterion, it will be automatically moved to cold storage.
                                 </small>
                             </div>
 
@@ -122,51 +138,21 @@
 
                 <div class="card mt-3">
                     <div class="card-header">
-                        <h6 class="mb-0">Common Examples</h6>
+                        <h6 class="mb-0">Criteria Examples (To Keep Files in Hot Storage)</h6>
                     </div>
-                    <div class="card-body p-0">
-                        <table class="table table-sm mb-0">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>Goal</th>
-                                    <th>Type</th>
-                                    <th>Operator</th>
-                                    <th>Value</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>Move files not accessed in last 30 min to cold</td>
-                                    <td><code>atime</code></td>
-                                    <td><code>&lt;</code></td>
-                                    <td><code>30</code></td>
-                                </tr>
-                                <tr>
-                                    <td>Move files not accessed in last 24 h to cold</td>
-                                    <td><code>atime</code></td>
-                                    <td><code>&lt;</code></td>
-                                    <td><code>1440</code></td>
-                                </tr>
-                                <tr>
-                                    <td>Move files not modified in last 7 days to cold</td>
-                                    <td><code>mtime</code></td>
-                                    <td><code>&lt;</code></td>
-                                    <td><code>10080</code></td>
-                                </tr>
-                                <tr>
-                                    <td>Keep only files &lt; 1 GB in hot storage</td>
-                                    <td><code>size</code></td>
-                                    <td><code>&lt;</code></td>
-                                    <td><code>1G</code></td>
-                                </tr>
-                                <tr>
-                                    <td>Keep only <code>.log</code> files in hot storage</td>
-                                    <td><code>name</code></td>
-                                    <td><code>matches</code></td>
-                                    <td><code>*.log</code></td>
-                                </tr>
-                            </tbody>
-                        </table>
+                    <div class="card-body">
+                        <ul class="list-unstyled mb-0">
+                            <li><strong>Keep files modified in the last 30 minutes (move older to cold):</strong> Type: mtime, Operator: &lt;, Value: 30</li>
+                            <li><strong>Keep files accessed in the last 1 day (1440 minutes) (move older to cold):</strong> Type: atime, Operator: &lt;, Value: 1440</li>
+                            <li><strong>Keep files smaller than 1GB (move larger files to cold):</strong> Type: size, Operator: &lt;, Value: 1G</li>
+                            <li><strong>Keep only .log files in hot storage (move all other files to cold):</strong> Type: name, Operator: matches, Value: *.log</li>
+                            <li><strong>Keep only regular files in hot storage (move directories/links to cold):</strong> Type: type, Operator: =, Value: f</li>
+                        </ul>
+            <div class="d-flex align-items-center">
+                <span class="badge bg-light text-dark">
+                    <i class="bi bi-thermometer-snow"></i> <span id="app-version">Loading...</span>
+                </span>
+            </div>
                     </div>
                 </div>
             </div>
@@ -176,108 +162,17 @@
 {% block extra_scripts %}
     <script src="/static/js/paths.js"></script>
     <script>
-        // Operators available per criterion type
-        const NUMERIC_OPS  = ['>', '<', '=', '>=', '<='];
-        const TEXT_OPS     = ['=', 'contains', 'matches', 'regex'];
-        const EXACT_OPS    = ['='];
-        const TYPE_OPERATORS = {
-            atime: NUMERIC_OPS, mtime: NUMERIC_OPS, ctime: NUMERIC_OPS,
-            size:  NUMERIC_OPS,
-            name:  TEXT_OPS, iname: TEXT_OPS,
-            type:  EXACT_OPS, perm: EXACT_OPS, user: EXACT_OPS, group: EXACT_OPS,
-        };
-        const OP_LABELS = {
-            '>':       '> (Greater Than)',
-            '<':       '< (Less Than)',
-            '=':       '= (Equal To)',
-            '>=':      '>= (Greater Than or Equal)',
-            '<=':      '<= (Less Than or Equal)',
-            contains:  'contains',
-            matches:   'matches (glob pattern)',
-            regex:     'regex',
-        };
-        const VALUE_HINTS = {
-            atime: 'Minutes since last access. Example: <code>1440</code> = 24 hours.',
-            mtime: 'Minutes since last modification. Example: <code>10080</code> = 7 days.',
-            ctime: 'Minutes since last status change. Example: <code>60</code> = 1 hour.',
-            size:  'Size with optional suffix: <code>c</code> bytes, <code>k</code> KB, <code>M</code> MB, <code>G</code> GB. Example: <code>500M</code>.',
-            name:  'Exact name, glob (<code>*.log</code>), or regex depending on operator.',
-            iname: 'Same as name but case-insensitive.',
-            type:  '<code>f</code> or <code>file</code> &nbsp;|&nbsp; <code>d</code> or <code>directory</code> &nbsp;|&nbsp; <code>l</code> or <code>link</code>',
-            perm:  'Octal permissions, e.g. <code>755</code>.',
-            user:  'Username or UID, e.g. <code>www-data</code> or <code>33</code>.',
-            group: 'Group name or GID, e.g. <code>staff</code> or <code>20</code>.',
-        };
-
-        const typeEl  = document.getElementById('criterion_type');
-        const opEl    = document.getElementById('operator');
-        const valEl   = document.getElementById('value');
-
-        function updateOperatorOptions() {
-            const type = typeEl.value;
-            const allowed = TYPE_OPERATORS[type] || Object.keys(OP_LABELS);
-            const current = opEl.value;
-            opEl.innerHTML = '<option value="">Select an operator…</option>';
-            allowed.forEach(op => {
-                const opt = document.createElement('option');
-                opt.value = op;
-                opt.textContent = OP_LABELS[op] || op;
-                if (op === current) opt.selected = true;
-                opEl.appendChild(opt);
+        // Show contextual help based on selected criterion type
+        document.getElementById('criterion_type').addEventListener('change', function() {
+            const type = this.value;
+            // Hide all help texts
+            document.querySelectorAll('#value-help > span').forEach(span => {
+                span.style.display = 'none';
             });
-            // If the previously selected operator is no longer valid, clear it
-            if (current && !allowed.includes(current)) opEl.value = '';
-        }
-
-        function updateValueHint() {
-            const hint = document.getElementById('value-hint');
-            const type = typeEl.value;
-            if (VALUE_HINTS[type]) {
-                hint.innerHTML = VALUE_HINTS[type];
-                hint.style.display = '';
-            } else {
-                hint.style.display = 'none';
+            // Show relevant help
+            if (type && document.getElementById(type + '-help')) {
+                document.getElementById(type + '-help').style.display = 'block';
             }
-        }
-
-        function updatePreview() {
-            const type  = typeEl.value;
-            const op    = opEl.value;
-            const val   = valEl.value.trim();
-            const preview     = document.getElementById('criterion-preview');
-            const warning     = document.getElementById('preview-warning');
-            const warningTip  = document.getElementById('preview-warning-tip');
-            const stayEl      = document.getElementById('preview-stay-text');
-            const coldEl      = document.getElementById('preview-cold-text');
-
-            if (!type || !op) { preview.style.display = 'none'; return; }
-
-            const { stayText, coldText, isUnusual, unusualTip } = criterionToPlainEnglish(type, op, val || '…');
-
-            stayEl.textContent = stayText;
-            coldEl.textContent = coldText;
-
-            if (isUnusual) {
-                warning.style.display = '';
-                warningTip.innerHTML = unusualTip || '';
-            } else {
-                warning.style.display = 'none';
-            }
-
-            preview.style.display = '';
-        }
-
-        typeEl.addEventListener('change', () => {
-            updateOperatorOptions();
-            updateValueHint();
-            updatePreview();
         });
-        opEl.addEventListener('change', updatePreview);
-        valEl.addEventListener('input', updatePreview);
-
-        // Run once on page load in case the form is pre-filled (edit mode)
-        updateOperatorOptions();
-        updateValueHint();
-        updatePreview();
     </script>
 {% endblock %}

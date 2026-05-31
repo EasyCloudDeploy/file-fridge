@@ -26,16 +26,6 @@ class ColdStorageBackend(Protocol):
 
     def validate_location(self, location: ColdStorageLocation) -> Tuple[bool, Optional[str]]: ...
 
-    def test_credentials(
-        self, location: ColdStorageLocation
-    ) -> Tuple[bool, Optional[str]]:  # noqa: ARG002
-        """Verify that stored credentials are valid and can authenticate with the backend.
-
-        Called by the hourly health-check job. Default implementation always returns success;
-        backends with OAuth or API-key auth should override this to attempt a real auth call.
-        """
-        return True, None
-
     def build_reference(self, location: ColdStorageLocation, relative_path: Path) -> str: ...
 
     def freeze_file(

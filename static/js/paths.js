@@ -4,82 +4,6 @@ const authenticatedFetch = (...args) => window.authenticatedFetch(...args);
 const setRegionState = (...args) => window.setRegionState(...args);
 const showConfirmModal = (...args) => window.showConfirmModal(...args);
 
-/**
- * Translate a raw criterion (type / operator / value) into plain-English stay/move descriptions.
- *
- * Returns { stayText, coldText, isUnusual, unusualTip }
- *   stayText   – condition under which a file STAYS in hot storage
- *   coldText   – condition under which a file is MOVED to cold storage
- *   isUnusual  – true when the combination is almost certainly a misconfiguration
- *   unusualTip – short corrective hint shown alongside the warning
- */
-function criterionToPlainEnglish(type, operator, value) {
-    const isTimeType = ['atime', 'mtime', 'ctime'].includes(type);
-    const typeLabels = {
-        atime: 'last access time',
-        mtime: 'last modification time',
-        ctime: 'last change time',
-        size:  'file size',
-        name:  'filename',
-        iname: 'filename (case-insensitive)',
-        type:  'file type',
-        perm:  'permissions',
-        user:  'owner user',
-        group: 'owner group',
-    };
-    const typeName = typeLabels[type] || type;
-    const val = (value !== undefined && value !== null && value !== '') ? value : '…';
-
-    let stayText, coldText, isUnusual = false, unusualTip = null;
-
-    if (isTimeType) {
-        const isGt  = operator === '>'  || operator === '>=';
-        const isLt  = operator === '<'  || operator === '<=';
-        const orEq  = operator.includes('=') ? ' or equal to' : '';
-
-        if (isGt) {
-            stayText   = `${typeName} is more than${orEq} ${val} min ago`;
-            coldText   = `${typeName} is within the last ${val} min — moves recently-accessed files to cold immediately`;
-            isUnusual  = true;
-            unusualTip = `Using <strong>&gt;</strong> with a time criterion keeps <em>old</em> files in hot storage and moves <em>recently-accessed</em> files to cold immediately — the opposite of the typical use case. Use <strong>&lt;</strong> to keep active files hot and archive stale ones.`;
-        } else if (isLt) {
-            stayText = `${typeName} is within the last ${val} min`;
-            coldText = `${typeName} is more than${orEq} ${val} min ago`;
-        } else {
-            // EQ
-            stayText = `${typeName} is exactly ${val} min ago (±30 sec tolerance)`;
-            coldText = `${typeName} is anything other than ${val} min ago`;
-        }
-    } else if (type === 'size') {
-        const opWords = { '>': 'larger than', '<': 'smaller than', '=': 'exactly', '>=': 'at least', '<=': 'at most' };
-        const opWord  = opWords[operator] || operator;
-        const coldOp  = { '>': 'at most', '<': 'at least', '=': 'anything other than', '>=': 'smaller than', '<=': 'larger than' };
-        stayText = `file size is ${opWord} ${val}`;
-        coldText = `file size is ${coldOp[operator] || 'not'} ${val}`;
-    } else if (type === 'name' || type === 'iname') {
-        const ci     = type === 'iname' ? ' (case-insensitive)' : '';
-        const opWords = { '=': 'is exactly', contains: 'contains', matches: 'matches glob pattern', regex: 'matches regex' };
-        const opWord  = opWords[operator] || operator;
-        stayText = `filename${ci} ${opWord} "${val}"`;
-        coldText = `filename${ci} does not ${opWord.replace('is ', '')} "${val}"`;
-    } else if (type === 'type') {
-        const typeWords = { f: 'a regular file', file: 'a regular file', d: 'a directory', directory: 'a directory', l: 'a symlink', link: 'a symlink' };
-        stayText = `file is ${typeWords[val] || val}`;
-        coldText = `file is not ${typeWords[val] || val}`;
-    } else {
-        stayText = `${typeName} ${operator} ${val}`;
-        coldText = `${typeName} does not satisfy ${operator} ${val}`;
-    }
-
-    return { stayText, coldText, isUnusual, unusualTip };
-}
-
-function stripHtml(html) {
-    const tmp = document.createElement('div');
-    tmp.innerHTML = html;
-    return tmp.textContent || tmp.innerText || '';
-}
-
 function formatBytes(bytes, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -594,8 +518,8 @@ async function loadPathDetail(pathId) {
             if (criteria.length === 0) {
                 criteriaTableBody.innerHTML = `
                     <tr>
-                        <td colspan="3" class="text-center text-muted">
-                            No criteria configured — all files will stay in hot storage indefinitely.
+                        <td colspan="5" class="text-center text-muted">
+                            No criteria configured. Files will match all criteria (move all files).
                             <br><a href="/paths/${pathId}/criteria/new" class="btn btn-sm btn-primary mt-2">
                                 <i class="bi bi-plus"></i> Add Your First Criterion
                             </a>
@@ -603,48 +527,28 @@ async function loadPathDetail(pathId) {
                     </tr>
                 `;
             } else {
-                criteriaTableBody.innerHTML = criteria.map(c => {
-                    const { stayText, coldText, isUnusual, unusualTip } = criterionToPlainEnglish(
-                        c.criterion_type, c.operator, c.value
-                    );
-                    const warningBadge = isUnusual
-                        ? `<span class="badge bg-warning text-dark ms-1"
-                                title="${escapeHtml(unusualTip ? stripHtml(unusualTip) : 'Unusual configuration')}">
-                                <i class="bi bi-exclamation-triangle-fill"></i> Unusual
-                           </span>`
-                        : '';
-                    return `
-                        <tr${isUnusual ? ' class="table-warning"' : ''}>
-                            <td>
-                                <div class="d-flex align-items-center gap-1 flex-wrap mb-1">
-                                    <code class="small">${escapeHtml(c.criterion_type)} ${escapeHtml(c.operator)} ${escapeHtml(c.value)}</code>
-                                    ${warningBadge}
-                                </div>
-                                <div class="small text-muted lh-sm">
-                                    <span class="fw-semibold text-success">Stay hot:</span> ${escapeHtml(stayText)}
-                                </div>
-                                <div class="small text-muted lh-sm">
-                                    <span class="fw-semibold" style="color:#0d6efd">Move cold:</span> ${escapeHtml(coldText)}
-                                </div>
-                            </td>
-                            <td class="align-middle">
-                                <span class="badge bg-${c.enabled ? 'success' : 'secondary'}">
-                                    ${c.enabled ? 'Enabled' : 'Disabled'}
-                                </span>
-                            </td>
-                            <td class="align-middle">
-                                <div class="btn-group btn-group-sm">
-                                    <a href="/criteria/${c.id}/edit" class="btn btn-outline-secondary" title="Edit">
-                                        <i class="bi bi-pencil"></i>
-                                    </a>
-                                    <button type="button" class="btn btn-outline-danger" onclick="deleteCriteria(${c.id}, ${pathId})" title="Delete">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </div>
-                            </td>
-                        </tr>
-                    `;
-                }).join('');
+                criteriaTableBody.innerHTML = criteria.map(c => `
+                    <tr>
+                        <td><code>${escapeHtml(c.criterion_type)}</code></td>
+                        <td><code>${escapeHtml(c.operator)}</code></td>
+                        <td><code>${escapeHtml(c.value)}</code></td>
+                        <td>
+                            <span class="badge bg-${c.enabled ? 'success' : 'secondary'}">
+                                ${c.enabled ? 'Enabled' : 'Disabled'}
+                            </span>
+                        </td>
+                        <td>
+                            <div class="btn-group btn-group-sm">
+                                <a href="/criteria/${c.id}/edit" class="btn btn-outline-secondary" title="Edit">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <button type="button" class="btn btn-outline-danger" onclick="deleteCriteria(${c.id}, ${pathId})" title="Delete">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                `).join('');
             }
         }
         

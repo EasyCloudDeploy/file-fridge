@@ -1,45 +1,54 @@
-"""add paused to cold_storage_locations and psk_encrypted to p2p_network_config
+"""Add paused to cold storage locations
 
 Revision ID: 099b10f2eff5
 Revises: e6f7a8b9c0d1
-Create Date: 2026-05-31 15:44:19.848900
+Create Date: 2026-05-31 20:00:00.000000
 
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-from sqlalchemy import inspect
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = '099b10f2eff5'
-down_revision: Union[str, None] = 'e6f7a8b9c0d1'
+revision: str = "099b10f2eff5"
+down_revision: Union[str, None] = "e6f7a8b9c0d1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _has_column(table: str, column: str) -> bool:
-    bind = op.get_bind()
-    return column in {col["name"] for col in inspect(bind).get_columns(table)}
-
-
 def upgrade() -> None:
-    # SQLite supports ALTER TABLE ADD COLUMN natively; skip if already present
-    # (handles databases that received the column via SQLAlchemy create_all).
-    if not _has_column("cold_storage_locations", "paused"):
-        op.execute("ALTER TABLE cold_storage_locations ADD COLUMN paused BOOLEAN NOT NULL DEFAULT 0")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+    if "cold_storage_locations" not in tables:
+        return
 
-    if not _has_column("p2p_network_config", "psk_encrypted"):
-        op.execute("ALTER TABLE p2p_network_config ADD COLUMN psk_encrypted TEXT")
+    columns = {column["name"] for column in inspector.get_columns("cold_storage_locations")}
+
+    with op.batch_alter_table("cold_storage_locations") as batch_op:
+        if "paused" not in columns:
+            batch_op.add_column(
+                sa.Column(
+                    "paused",
+                    sa.Boolean(),
+                    nullable=False,
+                    server_default=sa.false(),
+                )
+            )
 
 
 def downgrade() -> None:
-    # SQLite does not support DROP COLUMN in older versions; use batch mode.
-    if _has_column("p2p_network_config", "psk_encrypted"):
-        with op.batch_alter_table("p2p_network_config") as batch_op:
-            batch_op.drop_column("psk_encrypted")
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    tables = set(inspector.get_table_names())
+    if "cold_storage_locations" not in tables:
+        return
 
-    if _has_column("cold_storage_locations", "paused"):
-        with op.batch_alter_table("cold_storage_locations") as batch_op:
+    columns = {column["name"] for column in inspector.get_columns("cold_storage_locations")}
+
+    with op.batch_alter_table("cold_storage_locations") as batch_op:
+        if "paused" in columns:
             batch_op.drop_column("paused")

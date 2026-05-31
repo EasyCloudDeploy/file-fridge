@@ -46,7 +46,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
     def _get_config(self, location: ColdStorageLocation) -> Dict[str, Any]:
         return location.get_backend_config() or {}
 
-    def _get_access_token(self, location: ColdStorageLocation, force_refresh: bool = False) -> str:
+    def _get_access_token(self, location: ColdStorageLocation) -> str:
         """Return a valid access token, refreshing only when the cached one has expired."""
         config = self._get_config(location)
         client_id = config.get("client_id")
@@ -64,7 +64,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
             cached = self._token_cache.get(cache_key)
             # Leave a 60-second buffer before expiry so we don't use a token that
             # expires mid-request.
-            if not force_refresh and cached and time.time() < cached[1] - 60:
+            if cached and time.time() < cached[1] - 60:
                 return cached[0]
 
         # Token missing or expired — fetch a fresh one outside the lock to avoid
@@ -423,18 +423,6 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
         if not config.get("client_secret"):
             return False, "Missing Google Drive client secret"
         return True, None
-
-    def test_credentials(self, location: ColdStorageLocation) -> Tuple[bool, Optional[str]]:
-        """Attempt a real token refresh to verify the stored credentials are still valid.
-
-        Uses force_refresh=True so the hourly health-check always hits Google's token endpoint
-        rather than returning a cached token that may have been obtained before revocation.
-        """
-        try:
-            self._get_access_token(location, force_refresh=True)
-            return True, None
-        except Exception as exc:
-            return False, str(exc)
 
     def build_reference(self, location: ColdStorageLocation, relative_path: Path) -> str:
         scope_prefix = self._location_scope_prefix(location)
