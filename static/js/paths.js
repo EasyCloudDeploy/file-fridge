@@ -74,6 +74,12 @@ function criterionToPlainEnglish(type, operator, value) {
     return { stayText, coldText, isUnusual, unusualTip };
 }
 
+function stripHtml(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+}
+
 function formatBytes(bytes, decimals = 2) {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;
@@ -603,7 +609,7 @@ async function loadPathDetail(pathId) {
                     );
                     const warningBadge = isUnusual
                         ? `<span class="badge bg-warning text-dark ms-1"
-                                title="${escapeHtml(unusualTip ? unusualTip.replace(/<[^>]+>/g, '') : 'Unusual configuration')}">
+                                title="${escapeHtml(unusualTip ? stripHtml(unusualTip) : 'Unusual configuration')}">
                                 <i class="bi bi-exclamation-triangle-fill"></i> Unusual
                            </span>`
                         : '';
