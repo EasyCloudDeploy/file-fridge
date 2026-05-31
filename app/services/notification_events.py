@@ -29,15 +29,29 @@ class NotificationEventType(str, Enum):
 # Event data models (for type safety and validation)
 
 
+class StorageLocationStats(BaseModel):
+    """Disk usage snapshot for a single storage location."""
+
+    name: str
+    free_bytes: int
+    total_bytes: int
+    free_percent: float
+
+
 class ScanCompletedData(BaseModel):
     """Data for SCAN_COMPLETED event."""
 
     path_id: int
     path_name: str
+    files_scanned: int = 0
     files_moved: int
-    bytes_saved: int
+    files_skipped: int = 0
+    bytes_moved: int
     scan_duration_seconds: float
     errors: int = 0
+    cold_storages_updated: list[str] = []
+    hot_storage: Optional[StorageLocationStats] = None
+    cold_storages: list[StorageLocationStats] = []
 
 
 class ScanErrorData(BaseModel):

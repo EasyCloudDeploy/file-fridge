@@ -34,6 +34,7 @@ from app.services.notification_events import (
     ScanCompletedData,
     ScanErrorData,
 )
+from app.services.instance_config_service import instance_config_service
 
 logger = logging.getLogger(__name__)
 
@@ -191,13 +192,45 @@ class NotificationService:
             Formatted message string
         """
         if isinstance(event_data, ScanCompletedData):
-            return (
-                f"Scan completed for path '{event_data.path_name}'\n"
-                f"Files moved: {event_data.files_moved}\n"
-                f"Bytes saved: {event_data.bytes_saved:,}\n"
-                f"Duration: {event_data.scan_duration_seconds:.2f}s\n"
-                f"Errors: {event_data.errors}"
+            def _fmt_bytes(b: int) -> str:
+                if b >= 1024**3:
+                    return f"{b / 1024**3:.2f} GB"
+                if b >= 1024**2:
+                    return f"{b / 1024**2:.1f} MB"
+                return f"{b / 1024:.1f} KB"
+
+            def _fmt_duration(s: float) -> str:
+                if s >= 60:
+                    return f"{int(s // 60)}m {int(s % 60)}s"
+                return f"{s:.1f}s"
+
+            lines = [f"Scan completed for path '{event_data.path_name}'"]
+            lines.append(
+                f"Duration: {_fmt_duration(event_data.scan_duration_seconds)}"
+                f"  |  Scanned: {event_data.files_scanned}"
+                f"  |  Moved: {event_data.files_moved}"
+                f"  |  Skipped: {event_data.files_skipped}"
             )
+            if event_data.files_moved > 0:
+                lines.append(f"Data moved to cold storage: {_fmt_bytes(event_data.bytes_moved)}")
+            if event_data.cold_storages_updated:
+                lines.append(f"Cold storage(s) updated: {', '.join(event_data.cold_storages_updated)}")
+            if event_data.hot_storage:
+                hs = event_data.hot_storage
+                lines.append(
+                    f"Hot storage ({hs.name}): "
+                    f"{_fmt_bytes(hs.free_bytes)} free of {_fmt_bytes(hs.total_bytes)} "
+                    f"({hs.free_percent:.1f}% free)"
+                )
+            for cs in event_data.cold_storages:
+                lines.append(
+                    f"Cold storage ({cs.name}): "
+                    f"{_fmt_bytes(cs.free_bytes)} free of {_fmt_bytes(cs.total_bytes)} "
+                    f"({cs.free_percent:.1f}% free)"
+                )
+            if event_data.errors:
+                lines.append(f"Errors: {event_data.errors}")
+            return "\n".join(lines)
 
         if isinstance(event_data, ScanErrorData):
             return (
@@ -394,18 +427,34 @@ class NotificationService:
 
         try:
             if notifier.type == NotifierType.EMAIL:
+                global_smtp_host = instance_config_service.get_smtp_host(db)
+                if global_smtp_host:
+                    smtp_host = global_smtp_host
+                    smtp_port = instance_config_service.get_smtp_port(db)
+                    smtp_user = instance_config_service.get_smtp_user(db)
+                    smtp_password = instance_config_service.get_smtp_password(db)
+                    smtp_sender = instance_config_service.get_smtp_sender(db)
+                    smtp_use_tls = instance_config_service.get_smtp_use_tls(db)
+                else:
+                    smtp_host = notifier.smtp_host
+                    smtp_port = notifier.smtp_port or 587
+                    smtp_user = notifier.smtp_user
+                    smtp_password = notifier.smtp_password
+                    smtp_sender = notifier.smtp_sender
+                    smtp_use_tls = notifier.smtp_use_tls if notifier.smtp_use_tls is not None else True
+
                 success, details = await self._send_email(
                     address=notifier.address,
                     level=notification.level.value,
                     message=notification.message,
                     metadata=metadata,
                     smtp_config={
-                        "smtp_host": notifier.smtp_host,
-                        "smtp_port": notifier.smtp_port,
-                        "smtp_user": notifier.smtp_user,
-                        "smtp_password": notifier.smtp_password,
-                        "smtp_sender": notifier.smtp_sender,
-                        "smtp_use_tls": notifier.smtp_use_tls,
+                        "smtp_host": smtp_host,
+                        "smtp_port": smtp_port,
+                        "smtp_user": smtp_user,
+                        "smtp_password": smtp_password,
+                        "smtp_sender": smtp_sender,
+                        "smtp_use_tls": smtp_use_tls,
                     },
                 )
             elif notifier.type == NotifierType.GENERIC_WEBHOOK:
@@ -544,18 +593,34 @@ class NotificationService:
 
         try:
             if notifier.type == NotifierType.EMAIL:
+                global_smtp_host = instance_config_service.get_smtp_host(db)
+                if global_smtp_host:
+                    smtp_host = global_smtp_host
+                    smtp_port = instance_config_service.get_smtp_port(db)
+                    smtp_user = instance_config_service.get_smtp_user(db)
+                    smtp_password = instance_config_service.get_smtp_password(db)
+                    smtp_sender = instance_config_service.get_smtp_sender(db)
+                    smtp_use_tls = instance_config_service.get_smtp_use_tls(db)
+                else:
+                    smtp_host = notifier.smtp_host
+                    smtp_port = notifier.smtp_port or 587
+                    smtp_user = notifier.smtp_user
+                    smtp_password = notifier.smtp_password
+                    smtp_sender = notifier.smtp_sender
+                    smtp_use_tls = notifier.smtp_use_tls if notifier.smtp_use_tls is not None else True
+
                 return await self._send_email(
                     address=notifier.address,
                     level="INFO",
                     message=test_message,
                     metadata=test_metadata,
                     smtp_config={
-                        "smtp_host": notifier.smtp_host,
-                        "smtp_port": notifier.smtp_port,
-                        "smtp_user": notifier.smtp_user,
-                        "smtp_password": notifier.smtp_password,
-                        "smtp_sender": notifier.smtp_sender,
-                        "smtp_use_tls": notifier.smtp_use_tls,
+                        "smtp_host": smtp_host,
+                        "smtp_port": smtp_port,
+                        "smtp_user": smtp_user,
+                        "smtp_password": smtp_password,
+                        "smtp_sender": smtp_sender,
+                        "smtp_use_tls": smtp_use_tls,
                     },
                 )
             if notifier.type == NotifierType.GENERIC_WEBHOOK:

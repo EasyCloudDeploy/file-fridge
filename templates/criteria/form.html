@@ -26,6 +26,18 @@
                 <div class="card">
                     <div class="card-body">
                         <form id="criteria-form">
+                            <div class="mb-4 alert alert-info border-0 shadow-sm d-flex gap-3">
+                                <div class="fs-4 text-info"><i class="bi bi-info-circle-fill"></i></div>
+                                <div>
+                                    <h6 class="fw-bold mb-1 text-info-emphasis">How Criteria Matching Works (Keep-in-Hot Logic)</h6>
+                                    <p class="mb-0 small text-secondary" style="line-height: 1.4;">
+                                        In File Fridge, <strong>Criteria define what files should STAY in hot storage</strong>. 
+                                        Files must match <strong>ALL</strong> enabled criteria to remain in hot storage. 
+                                        If a file fails to match <strong>ANY</strong> enabled criterion, it is considered inactive and will be automatically moved to cold storage during the next scan.
+                                    </p>
+                                </div>
+                            </div>
+
                             <div class="mb-3">
                                 <label for="criterion_type" class="form-label">Criteria Type *</label>
                                 <select class="form-select" id="criterion_type" name="criterion_type" required>
@@ -71,17 +83,17 @@
                                     <div id="value-help">
                                         <strong>Examples:</strong><br>
                                         <span id="mtime-help" style="display: none;">
-                                            Minutes since modification (e.g., "30" for files older than 30 minutes, "1440" for 1 day)
+                                            Minutes since modification (e.g., "30" to keep files modified within the last 30 minutes)
                                         </span>
                                         <span id="atime-help" style="display: none;">
-                                            Minutes since access (e.g., "30" for files older than 30 minutes, "1440" for 1 day)
+                                            Minutes since access (e.g., "30" to keep files accessed within the last 30 minutes)
                                         </span>
                                         <span id="ctime-help" style="display: none;">
-                                            Minutes since change (e.g., "30" for files older than 30 minutes, "1440" for 1 day)
+                                            Minutes since change (e.g., "30" to keep files changed within the last 30 minutes)
                                         </span>
                                         <span id="size-help" style="display: none;">
                                             Size with optional suffix: c (bytes), k (KB), M (MB), G (GB)<br>
-                                            Example: "100M" for files larger than 100MB, "1G" for files larger than 1GB
+                                            Example: "100M" to keep files smaller/larger than 100MB
                                         </span>
                                         <span id="name-help" style="display: none;">
                                             Filename pattern (e.g., "*.log", "*.txt", "app*")
@@ -110,7 +122,7 @@
                                     </label>
                                 </div>
                                 <small class="form-text text-muted">
-                                    Enable or disable this criterion. All enabled criteria must match for a file to be moved.
+                                    Enable or disable this criterion. Active files must match ALL enabled criteria to STAY in hot storage. If a file fails to match any enabled criterion, it will be automatically moved to cold storage.
                                 </small>
                             </div>
 
@@ -126,16 +138,15 @@
 
                 <div class="card mt-3">
                     <div class="card-header">
-                        <h6 class="mb-0">Criteria Examples</h6>
+                        <h6 class="mb-0">Criteria Examples (To Keep Files in Hot Storage)</h6>
                     </div>
                     <div class="card-body">
                         <ul class="list-unstyled mb-0">
-                            <li><strong>Files older than 30 minutes:</strong> Type: mtime, Operator: &gt;, Value: 30</li>
-                            <li><strong>Files older than 1 day (1440 minutes):</strong> Type: mtime, Operator: &gt;, Value: 1440</li>
-                            <li><strong>Files larger than 1GB:</strong> Type: size, Operator: &gt;, Value: 1G</li>
-                            <li><strong>All .log files:</strong> Type: name, Operator: matches, Value: *.log</li>
-                            <li><strong>Files containing "backup":</strong> Type: name, Operator: contains, Value: backup</li>
-                            <li><strong>Only files (not directories):</strong> Type: type, Operator: =, Value: f</li>
+                            <li><strong>Keep files modified in the last 30 minutes (move older to cold):</strong> Type: mtime, Operator: &lt;, Value: 30</li>
+                            <li><strong>Keep files accessed in the last 1 day (1440 minutes) (move older to cold):</strong> Type: atime, Operator: &lt;, Value: 1440</li>
+                            <li><strong>Keep files smaller than 1GB (move larger files to cold):</strong> Type: size, Operator: &lt;, Value: 1G</li>
+                            <li><strong>Keep only .log files in hot storage (move all other files to cold):</strong> Type: name, Operator: matches, Value: *.log</li>
+                            <li><strong>Keep only regular files in hot storage (move directories/links to cold):</strong> Type: type, Operator: =, Value: f</li>
                         </ul>
             <div class="d-flex align-items-center">
                 <span class="badge bg-light text-dark">

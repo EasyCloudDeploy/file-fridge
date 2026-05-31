@@ -1092,3 +1092,101 @@ def test_list_files_invalid_params(authenticated_client: TestClient):
     response = authenticated_client.get("/api/v1/files?tag_ids=abc")
     assert response.status_code == 200
     assert "Invalid tag_ids format" in response.text
+
+
+def test_list_files_local_only_and_remote_only(
+    authenticated_client: TestClient, db_session: Session, file_inventory_factory, tmp_path
+):
+    """Test local_only and remote_only filters in file listing."""
+    # Create a local file
+    local_file = file_inventory_factory(
+        str(tmp_path / "local.txt"),
+        path_name="local_path",
+        checksum="local-checksum",
+    )
+
+    # Create a remote P2P peer and a remote cached file
+    peer = P2PPeer(
+        peer_name="Site C",
+        peer_id="site-c-peer",
+        host="10.0.0.3",
+        port=8000,
+        status=P2PPeerStatus.CONNECTED,
+        psk_hash="z" * 64,
+    )
+    db_session.add(peer)
+    db_session.flush()
+    remote_row = RemoteSharedFileCache(
+        peer_id=peer.id,
+        remote_file_id="remote-2",
+        path_id=local_file.path_id,
+        file_path="/remote/data/remote.mkv",
+        display_file_path="/remote/data/remote.mkv",
+        storage_type=StorageType.HOT,
+        file_size=555,
+        checksum="remote-checksum",
+        path_name="remote_path",
+    )
+    db_session.add(remote_row)
+    db_session.commit()
+    remote_row_id = remote_row.id
+
+    # Query with local_only=true
+    response = authenticated_client.get("/api/v1/files?local_only=true")
+    assert response.status_code == 200
+    lines = response.content.decode().strip().split("\n")
+    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    assert len(files) == 1
+    assert files[0]["id"] == local_file.id
+    assert files[0].get("is_remote") is not True
+
+    # Query with remote_only=true
+    response = authenticated_client.get("/api/v1/files?remote_only=true")
+    assert response.status_code == 200
+    lines = response.content.decode().strip().split("\n")
+    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    assert len(files) == 1
+    assert files[0]["id"] == f"remote-{remote_row_id}"
+    assert files[0].get("is_remote") is True
+
+
+def test_list_files_google_search_syntax(
+    authenticated_client: TestClient, file_inventory_factory, tmp_path
+):
+    """Test Google-style search operators in files listing."""
+    # Create files with different extensions, sizes, and keywords
+    file_inventory_factory(str(tmp_path / "Quarterly_Report_Draft.pdf"), file_extension=".pdf", size=100)
+    file_inventory_factory(str(tmp_path / "Quarterly_Report_Final.pdf"), file_extension=".pdf", size=5000000) # 5MB
+    file_inventory_factory(str(tmp_path / "Report_Final.docx"), file_extension=".docx", size=1000)
+
+
+    # 1. Search with ext operator and exclusion: "Report" ext:pdf -Draft
+    response = authenticated_client.get("/api/v1/files?search=Report+ext:pdf+-Draft")
+    assert response.status_code == 200
+    lines = response.content.decode().strip().split("\n")
+    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    # Should only match Quarterly_Report_Final.pdf (has "Report", extension pdf, does not contain "Draft")
+    assert len(files) == 1
+    assert "Quarterly_Report_Final.pdf" in files[0]["file_path"]
+
+    # 2. Search with size operator: size:>1mb
+    response = authenticated_client.get("/api/v1/files?search=size:>1mb")
+    assert response.status_code == 200
+    lines = response.content.decode().strip().split("\n")
+    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    # Should only match Quarterly_Report_Final.pdf (5MB > 1MB)
+    assert len(files) == 1
+    assert "Quarterly_Report_Final.pdf" in files[0]["file_path"]
+
+    # 3. Search with exact phrase
+    file_inventory_factory(str(tmp_path / "Quarterly Report Final.pdf"), file_extension=".pdf")
+    response = authenticated_client.get('/api/v1/files?search="Quarterly+Report"')
+    assert response.status_code == 200
+    lines = response.content.decode().strip().split("\n")
+    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    assert len(files) == 1
+    assert "Quarterly Report Final.pdf" in files[0]["file_path"]
+
+
+
+

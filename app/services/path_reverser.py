@@ -108,10 +108,19 @@ class PathReverser:
         if not cold_path.exists():
             return False, f"File not found in cold storage: {cold_path}"
 
+        from app.services.file_mover import FileMover
+
         if operation_type == OperationType.MOVE:
             try:
                 original_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(cold_path), str(original_path))
+                success, error, _ = FileMover.move_with_rollback(
+                    source=cold_path,
+                    destination=original_path,
+                    operation_type=OperationType.MOVE,
+                    verify_checksum=True,
+                )
+                if not success:
+                    return False, error or "Failed to move file back during reversal"
                 return True, None
             except Exception as e:
                 return False, f"Failed to move file back: {e!s}"
@@ -120,7 +129,14 @@ class PathReverser:
             if not original_path.exists():
                 try:
                     original_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(cold_path), str(original_path))
+                    success, error, _ = FileMover.move_with_rollback(
+                        source=cold_path,
+                        destination=original_path,
+                        operation_type=OperationType.MOVE,
+                        verify_checksum=True,
+                    )
+                    if not success:
+                        return False, error or "Failed to move file back during reversal"
                     return True, None
                 except Exception as e:
                     return False, f"Failed to move file back: {e!s}"
@@ -135,7 +151,14 @@ class PathReverser:
                 original_path.unlink()
             try:
                 original_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(cold_path), str(original_path))
+                success, error, _ = FileMover.move_with_rollback(
+                    source=cold_path,
+                    destination=original_path,
+                    operation_type=OperationType.MOVE,
+                    verify_checksum=True,
+                )
+                if not success:
+                    return False, error or "Failed to move file back during reversal"
                 return True, None
             except Exception as e:
                 return False, f"Failed to move file back: {e!s}"

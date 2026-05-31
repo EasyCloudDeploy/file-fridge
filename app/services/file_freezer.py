@@ -191,8 +191,8 @@ class FileFreezer:
                                 source_path.unlink()
 
                             checksum_after = (
-                                checksum_verifier.calculate_checksum(source_path)
-                                if source_path.exists()
+                                checksum_verifier.calculate_checksum(encrypted_temp_path)
+                                if encrypted_temp_path and encrypted_temp_path.exists()
                                 else None
                             )
                         except Exception as e:

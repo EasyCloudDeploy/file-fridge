@@ -7,21 +7,24 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.constants import RESOURCE_REMOTE_CONNECTIONS
 from app.database import get_db
 from app.models import FileInventory, FileStatus, P2PPeer, P2PPeerStatus, RemoteSharedFileCache
 from app.schemas import (
+    P2PCurrentPskResponse,
     P2PManifestPushRequest,
     P2PNetworkConfigCreate,
     P2PNetworkConfigResponse,
     P2PNetworkConfigSetupResponse,
     P2PNetworkConfigUpdate,
-    P2PNetworkPskResponse,
     P2PNetworkStatsResponse,
     P2PPeerJoinRequest,
     P2PPeerResponse,
+    P2PPskAcceptRequest,
+    P2PPskRotationResponse,
     P2PPullRequest,
     P2PPullResponse,
     P2PRemoteFileCacheResponse,
@@ -111,7 +114,20 @@ def destroy_network_config(
     return {"status": "destroyed", **removed}
 
 
-@router.post("/network/psk/regenerate", response_model=P2PNetworkPskResponse)
+@router.get("/network/psk", response_model=P2PCurrentPskResponse)
+def get_network_psk(
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+):
+    _ = current_user
+    config = p2p_service.get_network_config(db)
+    if not config:
+        raise HTTPException(status_code=404, detail="P2P network is not configured")
+    psk = config.get_psk()
+    return P2PCurrentPskResponse(psk=psk, available=psk is not None)
+
+
+@router.post("/network/psk/regenerate", response_model=P2PPskRotationResponse)
 def regenerate_network_psk(
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
@@ -122,11 +138,33 @@ def regenerate_network_psk(
         raise HTTPException(status_code=404, detail="P2P network is not configured")
 
     new_psk = p2p_service.generate_psk()
+    try:
+        result = p2p_service.rotate_psk_with_push(db, new_psk)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return P2PPskRotationResponse(**result)
+
+
+@router.post("/network/psk/accept")
+def accept_psk_rotation(
+    payload: P2PPskAcceptRequest,
+    db: Annotated[Session, Depends(get_db)],
+    x_ff_psk: Annotated[str, Header(alias="X-FF-PSK")],
+):
+    """Receive a coordinated PSK rotation from a peer node."""
+    config = p2p_service.get_network_config(db)
+    if not config or not config.enabled:
+        raise HTTPException(status_code=503, detail="P2P network is disabled")
+    if x_ff_psk != config.psk_hash:
+        raise HTTPException(status_code=403, detail="Invalid PSK")
+
+    try:
+        new_psk = p2p_service.decrypt_new_psk(payload.encrypted_new_psk, config.psk_hash)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Failed to decrypt PSK payload") from exc
+
     p2p_service.rotate_psk(db, new_psk)
-    return P2PNetworkPskResponse(
-        psk=new_psk,
-        note="PSK rotated. Existing peer connections were cleared and must rejoin with the new PSK.",
-    )
+    return {"status": "accepted"}
 
 
 @router.get("/peers", response_model=list[P2PPeerResponse])
@@ -135,7 +173,31 @@ def list_peers(
     current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     _ = current_user
-    return p2p_service.list_peers(db)
+    peers = p2p_service.list_peers(db)
+    counts = dict(
+        db.query(
+            RemoteSharedFileCache.peer_id,
+            func.count(RemoteSharedFileCache.id),
+        )
+        .group_by(RemoteSharedFileCache.peer_id)
+        .all()
+    )
+    result = []
+    for peer in peers:
+        peer_dict = {
+            "id": peer.id,
+            "peer_name": peer.peer_name,
+            "peer_id": peer.peer_id,
+            "host": peer.host,
+            "port": peer.port,
+            "status": peer.status,
+            "last_seen_at": peer.last_seen_at,
+            "created_at": peer.created_at,
+            "updated_at": peer.updated_at,
+            "file_count": counts.get(peer.id, 0),
+        }
+        result.append(P2PPeerResponse(**peer_dict))
+    return result
 
 
 @router.post("/peers/join", response_model=P2PPeerResponse)

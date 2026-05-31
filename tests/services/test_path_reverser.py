@@ -170,10 +170,11 @@ class TestPathReverser:
         db_session.add(record)
         db_session.commit()
 
-        def mock_move(src, dst):
-            raise OSError("Disk full")
+        def mock_move_with_rollback(**kwargs):
+            return False, "Disk full", None
 
-        monkeypatch.setattr(shutil, "move", mock_move)
+        from app.services.file_mover import FileMover
+        monkeypatch.setattr(FileMover, "move_with_rollback", mock_move_with_rollback)
 
         results = PathReverser.reverse_path_operations(1, db_session)
 

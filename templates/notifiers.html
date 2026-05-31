@@ -108,73 +108,7 @@
                         <div class="form-text" id="address_help">Email address or webhook URL</div>
                     </div>
 
-                    <!-- SMTP Configuration (only for email notifiers) -->
-                    <div id="smtp_config_section" style="display: none;">
-                        <hr class="my-3">
-                        <h6 class="mb-3"><i class="bi bi-envelope-at"></i> SMTP Server Configuration</h6>
 
-                        <div class="row">
-                            <div class="col-md-8">
-                                <div class="mb-3">
-                                    <label for="smtp_host" class="form-label">SMTP Host <span
-                                            class="text-danger">*</span></label>
-                                    <input type="text" class="form-control" id="smtp_host"
-                                        placeholder="e.g., smtp.gmail.com">
-                                    <div class="form-text">SMTP server hostname</div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="mb-3">
-                                    <label for="smtp_port" class="form-label">Port</label>
-                                    <input type="number" class="form-control" id="smtp_port" value="587"
-                                        placeholder="587">
-                                    <div class="form-text">Default: 587</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="smtp_user" class="form-label">Username</label>
-                                    <input type="text" class="form-control" id="smtp_user"
-                                        placeholder="Username for authentication">
-                                    <div class="form-text">Leave blank if not required</div>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label for="smtp_password" class="form-label">Password</label>
-                                    <input type="password" class="form-control" id="smtp_password"
-                                        placeholder="Password for authentication">
-                                    <div class="form-text">Leave blank if not required</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="row">
-                            <div class="col-md-8">
-                                <div class="mb-3">
-                                    <label for="smtp_sender" class="form-label">From Address <span
-                                            class="text-danger">*</span></label>
-                                    <input type="email" class="form-control" id="smtp_sender"
-                                        placeholder="e.g., notifications@example.com">
-                                    <div class="form-text">Email address to send from</div>
-                                </div>
-                            </div>
-                            <div class="col-md-4">
-                                <div class="mb-3">
-                                    <label class="form-label d-block">Encryption</label>
-                                    <div class="form-check mt-2">
-                                        <input type="checkbox" class="form-check-input" id="smtp_use_tls" checked>
-                                        <label class="form-check-label" for="smtp_use_tls">
-                                            Use TLS
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
 
                     <hr class="my-3">
 

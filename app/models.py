@@ -258,6 +258,7 @@ class ColdStorageLocation(Base):
         nullable=False,
         default=False,
     )  # If true, missing/disconnected storage is treated as expected (deep-cold removable media)
+    paused = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -751,7 +752,34 @@ class InstanceMetadata(Base):
         String, nullable=True
     )  # Instance URL for remote connections (fallback if env var not set)
     instance_name = Column(String, nullable=True)  # Custom instance name
+    
+    # Global SMTP settings (database fallback)
+    smtp_host = Column(String, nullable=True)
+    smtp_port = Column(Integer, nullable=True, default=587)
+    smtp_user = Column(String, nullable=True)
+    smtp_password_encrypted = Column("smtp_password", String, nullable=True)
+    smtp_sender = Column(String, nullable=True)
+    smtp_use_tls = Column(Boolean, default=True, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    @property
+    def smtp_password(self) -> Optional[str]:
+        """Decrypt and return SMTP password."""
+        if self.smtp_password_encrypted:
+            try:
+                return encryption_manager.decrypt(self.smtp_password_encrypted)
+            except InvalidToken:
+                return self.smtp_password_encrypted
+        return None
+
+    @smtp_password.setter
+    def smtp_password(self, value: Optional[str]):
+        """Encrypt and store SMTP password."""
+        if value:
+            self.smtp_password_encrypted = encryption_manager.encrypt(value)
+        else:
+            self.smtp_password_encrypted = None
 
 
 class P2PPeerStatus(str, enum.Enum):
@@ -770,12 +798,21 @@ class P2PNetworkConfig(Base):
     id = Column(Integer, primary_key=True, index=True)
     network_name = Column(String, nullable=False, default="File Fridge P2P")
     psk_hash = Column(String, nullable=False, unique=True, index=True)
+    psk_encrypted = Column(Text, nullable=True)  # PSK stored encrypted; null for pre-feature nodes
     # Accepts connections from arbitrary peers on the LAN/Internet; restrict via firewall or config.
     listen_host = Column(String, nullable=False, default="0.0.0.0")
     listen_port = Column(Integer, nullable=False, default=9119)
     enabled = Column(Boolean, nullable=False, default=True, server_default=sa.text("'1'"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def get_psk(self) -> str | None:
+        if not self.psk_encrypted:
+            return None
+        return encryption_manager.decrypt(self.psk_encrypted) or None
+
+    def set_psk(self, psk: str) -> None:
+        self.psk_encrypted = encryption_manager.encrypt(psk)
 
 
 class P2PPeer(Base):

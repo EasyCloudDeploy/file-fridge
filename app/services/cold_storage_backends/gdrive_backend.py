@@ -494,6 +494,61 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
         except Exception as exc:
             return False, f"Google Drive freeze failed: {exc}", None, None
 
+    def _stream_to_local(
+        self, file_id: str, destination_path: Path, headers: Dict[str, str]
+    ) -> None:
+        """Stream a Drive file to a local path using an atomic temp-then-replace write."""
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = destination_path.with_suffix(destination_path.suffix + ".tmp")
+        if temp_path.exists():
+            temp_path.unlink()
+
+        with httpx.stream(
+            "GET",
+            f"{self._API_BASE}/files/{quote(file_id)}",
+            params={"alt": "media", "supportsAllDrives": "true"},
+            headers=headers,
+            timeout=120.0,
+        ) as response:
+            self._raise_for_status_with_google_detail(response, "Google Drive download failed")
+            with temp_path.open("wb") as handle:
+                for chunk in response.iter_bytes():
+                    if chunk:
+                        handle.write(chunk)
+
+        temp_path.replace(destination_path)
+
+    def download_file(
+        self,
+        storage_reference: str,
+        destination_path: Path,
+        location: ColdStorageLocation,
+    ) -> Tuple[bool, Optional[str]]:
+        """Download a file to a local path without removing it from Drive."""
+        try:
+            file_id = self._parse_reference(storage_reference)
+            headers = self._auth_headers(location)
+
+            metadata_resp = httpx.get(
+                f"{self._API_BASE}/files/{quote(file_id)}",
+                params={"fields": "id,mimeType", "supportsAllDrives": "true"},
+                headers=headers,
+                timeout=20.0,
+            )
+            self._raise_for_status_with_google_detail(
+                metadata_resp, "Google Drive metadata fetch failed"
+            )
+            mime_type = metadata_resp.json().get("mimeType") or ""
+            if mime_type.startswith("application/vnd.google-apps."):
+                return False, "Google Workspace native files cannot be downloaded"
+
+            self._stream_to_local(file_id, destination_path, headers)
+            return True, None
+        except Exception as exc:
+            if destination_path.exists():
+                destination_path.unlink()
+            return False, f"Google Drive download failed: {exc}"
+
     def thaw_file(
         self,
         storage_reference: str,
@@ -532,25 +587,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
                 self._raise_for_status_with_google_detail(delete_resp, "Google Drive delete failed")
                 return True, None
 
-            destination_path.parent.mkdir(parents=True, exist_ok=True)
-            temp_path = destination_path.with_suffix(destination_path.suffix + ".tmp")
-            if temp_path.exists():
-                temp_path.unlink()
-
-            with httpx.stream(
-                "GET",
-                f"{self._API_BASE}/files/{quote(file_id)}",
-                params={"alt": "media", "supportsAllDrives": "true"},
-                headers=headers,
-                timeout=120.0,
-            ) as response:
-                self._raise_for_status_with_google_detail(response, "Google Drive download failed")
-                with temp_path.open("wb") as handle:
-                    for chunk in response.iter_bytes():
-                        if chunk:
-                            handle.write(chunk)
-
-            temp_path.replace(destination_path)
+            self._stream_to_local(file_id, destination_path, headers)
 
             if operation_mode in (OperationType.MOVE, OperationType.COPY):
                 delete_resp = httpx.delete(

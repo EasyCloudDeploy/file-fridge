@@ -2,34 +2,34 @@
 {% from "components/ui.html" import empty_state %}
 
 {% block title %}Files - File Fridge{% endblock %}
-{% block page_title %}File Browser{% endblock %}
-{% block page_description %}Search, filter, tag, and move files across hot and cold storage from a denser, desktop-friendly workspace.{% endblock %}
-{% block page_actions %}
-<button type="button" class="btn btn-outline-primary btn-sm" id="p2pPullBtn"
-    title="Browse and pull files from P2P peers">
-    <i class="bi bi-cloud-download"></i><span class="ms-1">Browse Remote Files</span>
-</button>
-<button type="button" class="btn btn-outline-warning btn-sm" onclick="cleanupDuplicates()"
-    title="Remove duplicate file records">
-    <i class="bi bi-files"></i><span class="ms-1">Remove Duplicates</span>
-</button>
-{% endblock %}
+
 
 {% block extra_head %}
 {{ vite_assets('grid') }}
 <style>
     #filesGrid {
         height: 70vh;
-        min-height: 400px;
+        min-height: 500px;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
     }
 
     .ag-theme-quartz {
         --ag-font-size: 13px;
+        --ag-header-background-color: var(--bs-light);
+        --ag-odd-row-background-color: #fafbfc;
+        --ag-row-hover-color: #f1f3f5;
+        --ag-border-color: #e9ecef;
     }
 
     .file-path-cell {
-        font-family: monospace;
-        font-size: 12px;
+        line-height: 1.35;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        height: 100%;
+        padding: 4px 0;
     }
 
     /* Ensure dropdown menus appear above all grid content */
@@ -78,81 +78,197 @@
             justify-content: center;
         }
     }
+    /* Google Search style page elements */
+    .search-hero-section {
+        background: radial-gradient(circle at 10% 20%, rgba(244,247,254,1) 0%, rgba(255,255,255,1) 90%);
+        border: 1px solid rgba(226, 232, 240, 0.8) !important;
+        border-radius: 1.5rem !important;
+    }
+    .search-bar-google {
+        border-radius: 50px !important;
+        border: 1px solid #dfe1e5;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        overflow: hidden;
+    }
+    .search-bar-google:focus-within {
+        box-shadow: 0 4px 20px rgba(32,33,36,0.12) !important;
+        border-color: #3b82f6;
+    }
+    .search-bar-google input:focus {
+        box-shadow: none !important;
+    }
+    .filter-pill .btn {
+        font-weight: 500;
+        font-size: 0.825rem;
+        background-color: #f8f9fa;
+        color: #4a5568;
+        border-color: #e2e8f0;
+        transition: all 0.2s ease;
+    }
+    .filter-pill .btn:hover, .filter-pill .btn:focus {
+        background-color: #edf2f7;
+        color: #2d3748;
+    }
+    .filter-pill .dropdown-item.active, .filter-pill .dropdown-item:active {
+        background-color: #3b82f6;
+        color: white;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
 <!-- Search and Filters -->
-<section class="panel-section mb-3">
-<div class="row g-3 filters-row">
-    <div class="col-12 col-md-6 mb-2 mb-md-0">
-        <div class="input-group">
-            <span class="input-group-text"><i class="bi bi-search"></i></span>
-            <input type="text" class="form-control" id="search_input" placeholder="Search file paths..."
-                inputmode="search">
-            <button class="btn btn-primary" type="button" id="search_btn">
-                <i class="bi bi-search d-md-none"></i>
-                <span class="d-none d-md-inline">Search</span>
-            </button>
-            <button class="btn btn-outline-secondary" type="button" id="clear_search_btn">
-                <i class="bi bi-x-lg d-md-none"></i>
-                <span class="d-none d-md-inline">Clear</span>
-            </button>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="input-group">
-            <label class="input-group-text d-none d-sm-flex" for="path_id_filter">Path:</label>
-            <select class="form-select" id="path_id_filter" aria-label="Filter by path">
-                <option value="">All Paths</option>
-            </select>
-        </div>
-    </div>
-    <div class="col-6 col-md-3">
-        <div class="input-group">
-            <label class="input-group-text d-none d-sm-flex" for="storage_filter">Storage:</label>
-            <select class="form-select" id="storage_filter" aria-label="Filter by storage">
-                <option value="">All</option>
-                <option value="hot">Hot</option>
-                <option value="cold">Cold</option>
-            </select>
-        </div>
-    </div>
-</div>
+<section class="search-hero-section py-3 px-3 mb-3 shadow-sm bg-white border rounded-4">
+    <div class="mx-auto" style="max-width: 800px;">
 
-<!-- Tag Filter -->
-<div class="row mb-3 filters-row">
-    <div class="col-12 col-md-6 mb-2 mb-md-0">
-        <div class="input-group">
-            <label class="input-group-text" for="tag_filter"><i class="bi bi-tags"></i><span
-                    class="d-none d-sm-inline ms-1">Tags:</span></label>
-            <select class="form-select" id="tag_filter" multiple size="1" aria-label="Filter by tags">
-                <option value="">All Tags</option>
-            </select>
-            <button class="btn btn-outline-secondary" type="button" id="clear_tag_filter_btn" title="Clear tag filter">
-                <i class="bi bi-x-circle"></i><span class="d-none d-sm-inline ms-1">Clear</span>
+        
+        <!-- Large Google-Style Search Input -->
+        <div class="search-box-container mb-3 position-relative">
+            <div class="input-group input-group-lg shadow-sm search-bar-google">
+                <span class="input-group-text bg-white border-end-0 rounded-start-pill ps-4 text-muted"><i class="bi bi-search fs-5"></i></span>
+                <input type="text" class="form-control border-start-0 border-end-0 py-3 fs-5" id="search_input" placeholder="Search files, extensions, or sizes..." inputmode="search" style="box-shadow: none;">
+                <button class="btn btn-primary rounded-end-pill px-4 fs-6 fw-semibold" type="button" id="search_btn">
+                    Search
+                </button>
+            </div>
+        </div>
+        
+        <!-- Google-Style Filter Pills Row directly under search box -->
+        <div class="d-flex align-items-center justify-content-center flex-wrap gap-2 text-muted small mt-2">
+            <!-- Path Filter Pill -->
+            <div class="filter-pill dropdown">
+                <button class="btn btn-light btn-sm rounded-pill border px-3 dropdown-toggle d-flex align-items-center gap-1" type="button" id="pathFilterDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-folder"></i> <span id="selected-path-label">All Paths</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm" aria-labelledby="pathFilterDropdown" id="path_id_filter_menu" style="max-height: 250px; overflow-y: auto;">
+                    <li><a class="dropdown-item active" href="#" data-val="">All Paths</a></li>
+                </ul>
+            </div>
+
+            <!-- Storage Filter Pill -->
+            <div class="filter-pill dropdown">
+                <button class="btn btn-light btn-sm rounded-pill border px-3 dropdown-toggle d-flex align-items-center gap-1" type="button" id="storageFilterDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-cloud"></i> <span id="selected-storage-label">All Tiers & Peers</span>
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow-sm" aria-labelledby="storageFilterDropdown" id="storage_filter_menu" style="max-height: 250px; overflow-y: auto;">
+                    <li><a class="dropdown-item active" href="#" data-val="">All Tiers & Peers</a></li>
+                </ul>
+            </div>
+
+            <!-- Tags Filter Pill -->
+            <div class="filter-pill dropdown" id="tagFilterPill">
+                <button class="btn btn-light btn-sm rounded-pill border px-3 dropdown-toggle d-flex align-items-center gap-1" type="button" id="tagFilterDropdown" data-bs-toggle="dropdown" aria-expanded="false" data-bs-auto-close="outside">
+                    <i class="bi bi-tags"></i> <span id="selected-tags-label">Tags</span>
+                </button>
+                <div class="dropdown-menu p-3 shadow-sm" aria-labelledby="tagFilterDropdown" style="width: 260px;">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-bold text-muted small">Select Tags</span>
+                        <button class="btn btn-link btn-sm text-danger p-0 text-decoration-none small" id="custom-clear-tags-btn">Clear</button>
+                    </div>
+                    <div id="custom-tags-container" style="max-height: 180px; overflow-y: auto;">
+                        <!-- Checkboxes dynamically populated -->
+                    </div>
+                    <div class="form-text mt-2 text-muted" style="font-size: 0.7rem; line-height: 1.2;">Hold Ctrl/Cmd to multi-select. Matches <strong>all</strong> checked tags.</div>
+                </div>
+            </div>
+
+            <!-- Advanced Filters Button -->
+            <button class="btn btn-light btn-sm rounded-pill border px-3 d-flex align-items-center gap-1" type="button" data-bs-toggle="collapse" data-bs-target="#advancedFiltersCollapse" aria-expanded="false" aria-controls="advancedFiltersCollapse">
+                <i class="bi bi-sliders"></i> Advanced Filters
+            </button>
+
+            <!-- Clear All Pill -->
+            <button class="btn btn-light btn-sm rounded-pill border px-3 text-danger d-flex align-items-center gap-1" type="button" id="clear_filters_btn">
+                <i class="bi bi-trash"></i> Reset All
+            </button>
+
+            <!-- Remove Duplicates Button -->
+            <button type="button" class="btn btn-light btn-sm rounded-pill border px-3 text-warning d-flex align-items-center gap-1" onclick="cleanupDuplicates()" title="Remove duplicate file records">
+                <i class="bi bi-files"></i> Remove Duplicates
             </button>
         </div>
-        <div class="form-text d-none d-md-block">Hold Ctrl/Cmd to select multiple tags. Files must match <strong>all</strong> selected tags.</div>
     </div>
-    <div class="col-12 col-md-6 text-md-end">
-        <div class="filters-row__hint text-muted small">Use tag and storage filters together for faster triage.</div>
+
+    <!-- Hidden Select Elements for original code compatibility -->
+    <div class="d-none">
+        <select id="path_id_filter">
+            <option value="">All Paths</option>
+        </select>
+        <select id="storage_filter">
+            <option value="">All</option>
+            <option value="hot">Hot</option>
+            <option value="cold">Cold</option>
+        </select>
+        <select id="tag_filter" multiple>
+            <option value="">All Tags</option>
+        </select>
     </div>
-</div>
 </section>
 
-<!-- Remote P2P Mode Banner -->
-<div id="remote-p2p-bar" class="d-none mb-3">
-    <div class="alert alert-info mb-0 d-flex align-items-center gap-3 flex-wrap">
-        <span><i class="bi bi-cloud-download me-1"></i><strong>Remote P2P Files</strong></span>
-        <select id="remote-peer-filter" class="form-select form-select-sm" style="max-width:220px"
-            aria-label="Filter by peer">
-            <option value="">All Peers</option>
-        </select>
-        <span class="text-muted small ms-auto d-none d-md-inline">Select files below, choose a destination, then click Pull</span>
-        <button type="button" class="btn btn-sm btn-outline-secondary" id="exit-remote-p2p-btn">
-            <i class="bi bi-x-lg"></i> Back to local files
-        </button>
+<!-- Collapsible Advanced Filters Panel -->
+<div class="collapse mt-2 mb-3" id="advancedFiltersCollapse">
+    <div class="card card-body bg-light border-0 shadow-sm p-4">
+        <h6 class="fw-bold mb-3 text-primary"><i class="bi bi-funnel-fill me-2"></i>Advanced Filtering</h6>
+        <div class="row g-3">
+            <!-- Row 1: Extension, MIME, Pinned, Checksum -->
+            <div class="col-12 col-sm-6 col-md-3">
+                <label for="extension_filter" class="form-label small fw-semibold">File Extension</label>
+                <input type="text" class="form-control form-control-sm" id="extension_filter" placeholder="e.g. .pdf, .zip">
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+                <label for="mime_filter" class="form-label small fw-semibold">MIME Type</label>
+                <input type="text" class="form-control form-control-sm" id="mime_filter" placeholder="e.g. image/jpeg">
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+                <label for="pinned_filter" class="form-label small fw-semibold">Pinned Status</label>
+                <select class="form-select form-select-sm" id="pinned_filter">
+                    <option value="">All</option>
+                    <option value="true">Pinned Only</option>
+                    <option value="false">Unpinned Only</option>
+                </select>
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+                <label for="checksum_filter" class="form-label small fw-semibold">Checksum Status</label>
+                <select class="form-select form-select-sm" id="checksum_filter">
+                    <option value="">All</option>
+                    <option value="true">Has Checksum</option>
+                    <option value="false">No Checksum</option>
+                </select>
+            </div>
+            
+            <!-- Row 2: Status, Size Range -->
+            <div class="col-12 col-sm-6 col-md-3">
+                <label for="status_filter" class="form-label small fw-semibold">File Status</label>
+                <select class="form-select form-select-sm" id="status_filter">
+                    <option value="">All Statuses</option>
+                    <option value="active">Active</option>
+                    <option value="migrating">Migrating</option>
+                    <option value="missing">Missing</option>
+                    <option value="deleted">Deleted</option>
+                </select>
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+                <label for="min_size_filter" class="form-label small fw-semibold">Min Size (Bytes)</label>
+                <input type="number" class="form-control form-control-sm" id="min_size_filter" min="0" placeholder="0">
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+                <label for="max_size_filter" class="form-label small fw-semibold">Max Size (Bytes)</label>
+                <input type="number" class="form-control form-control-sm" id="max_size_filter" min="0" placeholder="e.g. 1048576">
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+                <!-- Empty for grid alignment -->
+            </div>
+            
+            <!-- Row 3: Date Range -->
+            <div class="col-12 col-sm-6 col-md-4">
+                <label for="min_mtime_filter" class="form-label small fw-semibold">Modified After</label>
+                <input type="datetime-local" class="form-control form-control-sm" id="min_mtime_filter">
+            </div>
+            <div class="col-12 col-sm-6 col-md-4">
+                <label for="max_mtime_filter" class="form-label small fw-semibold">Modified Before</label>
+                <input type="datetime-local" class="form-control form-control-sm" id="max_mtime_filter">
+            </div>
+        </div>
     </div>
 </div>
 
@@ -675,4 +791,172 @@
 
 {% block extra_scripts %}
 <script src="/static/js/files.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Sync custom dropdowns with the hidden selects that files.js expects
+    const pathSelect = document.getElementById('path_id_filter');
+    const pathMenu = document.getElementById('path_id_filter_menu');
+    const pathLabel = document.getElementById('selected-path-label');
+    
+    if (pathSelect && pathMenu) {
+        const pathObserver = new MutationObserver(() => {
+            pathMenu.innerHTML = '';
+            Array.from(pathSelect.options).forEach(opt => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.className = 'dropdown-item' + (opt.selected ? ' active' : '');
+                a.href = '#';
+                a.dataset.val = opt.value;
+                a.textContent = opt.textContent;
+                a.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    pathSelect.value = opt.value;
+                    pathSelect.dispatchEvent(new Event('change'));
+                    pathLabel.textContent = opt.textContent;
+                    pathMenu.querySelectorAll('.dropdown-item').forEach(el => el.classList.remove('active'));
+                    a.classList.add('active');
+                });
+                li.appendChild(a);
+                pathMenu.appendChild(li);
+            });
+        });
+        pathObserver.observe(pathSelect, { childList: true });
+
+        // Bi-directional change listener
+        pathSelect.addEventListener('change', () => {
+            const selectedOpt = pathSelect.options[pathSelect.selectedIndex];
+            if (selectedOpt) {
+                pathLabel.textContent = selectedOpt.textContent;
+                pathMenu.querySelectorAll('.dropdown-item').forEach(a => {
+                    a.classList.toggle('active', a.dataset.val === pathSelect.value);
+                });
+            }
+        });
+    }
+
+    const storageSelect = document.getElementById('storage_filter');
+    const storageMenu = document.getElementById('storage_filter_menu');
+    const storageLabel = document.getElementById('selected-storage-label');
+    
+    if (storageSelect && storageMenu) {
+        const storageObserver = new MutationObserver(() => {
+            storageMenu.innerHTML = '';
+            
+            let currentGroup = null;
+            Array.from(storageSelect.options).forEach(opt => {
+                const parent = opt.parentNode;
+                if (parent.tagName === 'OPTGROUP' && parent !== currentGroup) {
+                    currentGroup = parent;
+                    const header = document.createElement('li');
+                    header.className = 'dropdown-header fw-bold text-primary text-uppercase mt-2';
+                    header.style.fontSize = '0.7rem';
+                    header.textContent = parent.label;
+                    storageMenu.appendChild(header);
+                } else if (parent.tagName !== 'OPTGROUP') {
+                    currentGroup = null;
+                }
+
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.className = 'dropdown-item' + (opt.selected ? ' active' : '');
+                a.href = '#';
+                a.dataset.val = opt.value;
+                a.textContent = opt.textContent;
+                a.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    storageSelect.value = opt.value;
+                    storageSelect.dispatchEvent(new Event('change'));
+                    storageLabel.textContent = opt.textContent;
+                    storageMenu.querySelectorAll('.dropdown-item').forEach(el => el.classList.remove('active'));
+                    a.classList.add('active');
+                });
+                li.appendChild(a);
+                storageMenu.appendChild(li);
+            });
+        });
+        storageObserver.observe(storageSelect, { childList: true });
+
+        // Bi-directional change listener
+        storageSelect.addEventListener('change', () => {
+            const selectedOpt = storageSelect.options[storageSelect.selectedIndex];
+            if (selectedOpt) {
+                storageLabel.textContent = selectedOpt.textContent;
+                storageMenu.querySelectorAll('.dropdown-item').forEach(a => {
+                    a.classList.toggle('active', a.dataset.val === storageSelect.value);
+                });
+            }
+        });
+    }
+
+    const tagSelect = document.getElementById('tag_filter');
+    const tagsContainer = document.getElementById('custom-tags-container');
+    const tagsLabel = document.getElementById('selected-tags-label');
+    const customClearTagsBtn = document.getElementById('custom-clear-tags-btn');
+    
+    if (tagSelect && tagsContainer) {
+        const tagObserver = new MutationObserver(() => {
+            tagsContainer.innerHTML = '';
+            Array.from(tagSelect.options).forEach(opt => {
+                if (!opt.value) return; // Skip "All Tags"
+                const div = document.createElement('div');
+                div.className = 'form-check mb-1';
+                
+                const input = document.createElement('input');
+                input.type = 'checkbox';
+                input.className = 'form-check-input';
+                input.id = `chk-tag-${opt.value}`;
+                input.value = opt.value;
+                input.checked = opt.selected;
+                
+                input.addEventListener('change', () => {
+                    opt.selected = input.checked;
+                    tagSelect.dispatchEvent(new Event('change'));
+                    updateTagsLabel();
+                });
+                
+                const label = document.createElement('label');
+                label.className = 'form-check-label small';
+                label.htmlFor = `chk-tag-${opt.value}`;
+                label.textContent = opt.textContent;
+                
+                div.appendChild(input);
+                div.appendChild(label);
+                tagsContainer.appendChild(div);
+            });
+            updateTagsLabel();
+        });
+        tagObserver.observe(tagSelect, { childList: true });
+        
+        // Bi-directional change listener
+        tagSelect.addEventListener('change', () => {
+            updateTagsLabel();
+            tagsContainer.querySelectorAll('input').forEach(input => {
+                const opt = Array.from(tagSelect.options).find(o => o.value === input.value);
+                input.checked = opt ? opt.selected : false;
+            });
+        });
+        
+        function updateTagsLabel() {
+            const selectedOptions = Array.from(tagSelect.options).filter(o => o.selected && o.value);
+            if (selectedOptions.length === 0) {
+                tagsLabel.textContent = 'Tags';
+            } else if (selectedOptions.length === 1) {
+                tagsLabel.textContent = selectedOptions[0].textContent;
+            } else {
+                tagsLabel.textContent = `${selectedOptions.length} Tags`;
+            }
+        }
+        
+        if (customClearTagsBtn) {
+            customClearTagsBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                Array.from(tagSelect.options).forEach(o => o.selected = false);
+                tagSelect.dispatchEvent(new Event('change'));
+                tagsContainer.querySelectorAll('input').forEach(i => i.checked = false);
+                updateTagsLabel();
+            });
+        }
+    }
+});
+</script>
 {% endblock %}

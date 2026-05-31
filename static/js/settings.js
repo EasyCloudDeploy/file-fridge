@@ -38,6 +38,11 @@ function initSettingsPage() {
                 loadEncryptionKeys();
             }
 
+            // Initial load for SMTP if clicked
+            if (sectionId === 'smtp') {
+                loadSmtpConfig();
+            }
+
             // Update URL hash without jumping
             history.pushState(null, null, '#' + sectionId);
         });
@@ -403,6 +408,16 @@ function initSettingsPage() {
                 loadUsers();
             }
         }
+
+        if (payload.roles && (payload.roles.includes('admin') || payload.roles.includes('manager'))) {
+            // Show notifiers-only elements
+            document.querySelectorAll('.notifiers-only').forEach(el => el.classList.remove('d-none'));
+
+            // If the hash is #smtp, load the SMTP config
+            if (globalThis.location.hash === '#smtp') {
+                loadSmtpConfig();
+            }
+        }
     }
 
     initUserManagement();
@@ -621,6 +636,139 @@ function initSettingsPage() {
             setButtonTextLoading(btn, false, 'Deleting...', 'Delete User');
         }
     });
+
+    // --- SMTP Server Configuration ---
+
+    async function loadSmtpConfig() {
+        const warningBanner = document.getElementById('smtp-env-warning');
+        const form = document.getElementById('smtp-config-form');
+        if (!form) return;
+
+        const inputs = [
+            document.getElementById('global-smtp-host'),
+            document.getElementById('global-smtp-port'),
+            document.getElementById('global-smtp-user'),
+            document.getElementById('global-smtp-password'),
+            document.getElementById('global-smtp-sender'),
+            document.getElementById('global-smtp-use-tls')
+        ];
+        const saveBtn = document.getElementById('save-smtp-btn');
+
+        try {
+            const response = await authenticatedFetch('/api/v1/settings/config');
+            if (response.ok) {
+                const config = await response.json();
+                const smtp = config.smtp || {};
+
+                // Hydrate inputs
+                document.getElementById('global-smtp-host').value = smtp.smtp_host?.value || '';
+                document.getElementById('global-smtp-port').value = smtp.smtp_port?.value ?? 587;
+                document.getElementById('global-smtp-user').value = smtp.smtp_user?.value || '';
+                document.getElementById('global-smtp-sender').value = smtp.smtp_sender?.value || '';
+                document.getElementById('global-smtp-use-tls').checked = smtp.smtp_use_tls?.value !== false;
+
+                // Handle password placeholder
+                const passwordInput = document.getElementById('global-smtp-password');
+                if (passwordInput) {
+                    if (smtp.smtp_host?.value) {
+                        passwordInput.placeholder = '••••••••';
+                    } else {
+                        passwordInput.placeholder = 'Password for authentication (optional)';
+                    }
+                    passwordInput.value = '';
+                }
+
+                // Handle environment lock
+                if (smtp.is_env_configured) {
+                    warningBanner?.classList.remove('d-none');
+                    inputs.forEach(input => {
+                        if (input) input.disabled = true;
+                    });
+                    if (saveBtn) saveBtn.disabled = true;
+                } else {
+                    warningBanner?.classList.add('d-none');
+                    inputs.forEach(input => {
+                        if (input) input.disabled = false;
+                    });
+                    if (saveBtn) saveBtn.disabled = false;
+                }
+            } else {
+                showToast('Failed to load global SMTP configuration', 'error');
+            }
+        } catch (error) {
+            console.error('Error loading SMTP config:', error);
+            showToast('Failed to connect to server for SMTP settings', 'error');
+        }
+    }
+
+    const smtpConfigForm = document.getElementById('smtp-config-form');
+    if (smtpConfigForm) {
+        smtpConfigForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const smtpHost = document.getElementById('global-smtp-host').value || null;
+            const smtpPort = parseInt(document.getElementById('global-smtp-port').value) || 587;
+            const smtpUser = document.getElementById('global-smtp-user').value || null;
+            const smtpPasswordInput = document.getElementById('global-smtp-password').value;
+            const smtpPassword = smtpPasswordInput === '' ? null : smtpPasswordInput;
+            const smtpSender = document.getElementById('global-smtp-sender').value || null;
+            const smtpUseTls = document.getElementById('global-smtp-use-tls').checked;
+
+            const payload = {
+                smtp_host: smtpHost,
+                smtp_port: smtpPort,
+                smtp_user: smtpUser,
+                smtp_sender: smtpSender,
+                smtp_use_tls: smtpUseTls
+            };
+            if (smtpPassword !== null) {
+                payload.smtp_password = smtpPassword;
+            }
+
+            const successMsg = document.getElementById('smtp-success-message');
+            const successText = document.getElementById('smtp-success-text');
+            const errorMsg = document.getElementById('smtp-error-message');
+            const errorText = document.getElementById('smtp-error-text');
+
+            successMsg?.classList.add('d-none');
+            errorMsg?.classList.add('d-none');
+
+            setFormButtonLoading('save-smtp', true);
+
+            try {
+                const response = await authenticatedFetch('/api/v1/settings/smtp', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    if (successMsg && successText) {
+                        successText.textContent = 'Global SMTP configuration updated successfully!';
+                        successMsg.classList.remove('d-none');
+                    }
+                    showToast('Global SMTP settings saved successfully', 'success');
+                    await loadSmtpConfig();
+                } else {
+                    const data = await response.json();
+                    if (errorMsg && errorText) {
+                        errorText.textContent = data.detail || 'Failed to update SMTP settings.';
+                        errorMsg.classList.remove('d-none');
+                    }
+                    showToast(data.detail || 'Failed to update SMTP settings', 'error');
+                }
+            } catch (error) {
+                console.error('SMTP configuration error:', error);
+                if (errorMsg && errorText) {
+                    errorText.textContent = 'Connection error. Please try again.';
+                    errorMsg.classList.remove('d-none');
+                }
+                showToast('Failed to connect to server', 'error');
+            } finally {
+                setFormButtonLoading('save-smtp', false);
+            }
+        });
+    }
 }
 
 window.runWhenFileFridgeReady(initSettingsPage);

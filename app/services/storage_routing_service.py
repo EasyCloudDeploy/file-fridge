@@ -108,6 +108,10 @@ class StorageRoutingService:
 
         for location in monitored_path.storage_locations:
             try:
+                if location.paused:
+                    logger.debug(f"Skipping paused storage location: {location.name}")
+                    continue
+
                 backend = get_backend(location)
                 is_valid, _validation_error = backend.validate_location(location)
                 if not is_valid:
@@ -153,7 +157,7 @@ class StorageRoutingService:
                     db.query(FileTransactionHistory)
                     .filter(
                         FileTransactionHistory.new_storage_location_id == location.id,
-                        not FileTransactionHistory.success,
+                        FileTransactionHistory.success == False,
                         FileTransactionHistory.created_at >= error_cutoff,
                     )
                     .count()
@@ -293,7 +297,7 @@ class StorageRoutingService:
                 db.query(FileTransactionHistory)
                 .filter(
                     FileTransactionHistory.new_storage_location_id == location.id,
-                    not FileTransactionHistory.success,
+                    FileTransactionHistory.success == False,
                     FileTransactionHistory.created_at >= error_cutoff,
                 )
                 .count()

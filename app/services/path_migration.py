@@ -126,7 +126,16 @@ class PathMigrationService:
 
                     # Move file
                     logger.debug(f"Moving {old_file} -> {new_file}")
-                    shutil.move(str(old_file), str(new_file))
+                    from app.services.file_mover import FileMover
+                    from app.models import OperationType
+                    success, error, _ = FileMover.move_with_rollback(
+                        source=old_file,
+                        destination=new_file,
+                        operation_type=OperationType.MOVE,
+                        verify_checksum=True,
+                    )
+                    if not success:
+                        raise RuntimeError(error or "Move failed during path migration")
 
                     # Preserve timestamps
                     stat_info = new_file.stat()

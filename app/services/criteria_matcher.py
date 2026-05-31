@@ -109,8 +109,8 @@ class CriteriaMatcher:
                 else:
                     used_source = "atime (newer than Last Open)"
             else:
-                atime = 0.0  # Unix epoch (Jan 1, 1970)
-                used_source = "macOS Last Open (never opened - using epoch)"
+                atime = max(stat_info.st_atime, stat_info.st_mtime, stat_info.st_ctime)
+                used_source = "macOS Last Open (never opened - fallback to max of atime/mtime/ctime)"
 
         logger.debug(
             f"File {file_path}: Final atime for criteria check: "
@@ -265,7 +265,7 @@ class CriteriaMatcher:
                 return False
             if "w" in value and not (mode & stat.S_IWUSR):
                 return False
-            return not ("x" in value and not mode & stat.S_IXUSR)
+            return not ("x" in value and not (mode & stat.S_IXUSR))
         except (ValueError, TypeError):
             return False
 

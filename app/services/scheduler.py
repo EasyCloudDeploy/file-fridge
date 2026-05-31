@@ -19,6 +19,7 @@ from app.services.notification_events import (
     NotificationEventType,
     ScanCompletedData,
     ScanErrorData,
+    StorageLocationStats,
     StoragePermissionErrorData,
 )
 from app.services.notification_service import notification_service
@@ -175,6 +176,16 @@ class SchedulerService:
         self.scheduler.add_job(
             decrypt_location_job_func,
             id=f"decrypt_location_{location_id}",
+            args=[location_id],
+            replace_existing=True,
+            misfire_grace_time=None,
+        )
+
+    def trigger_recall_job(self, location_id: int) -> None:
+        """Trigger background job to thaw all files from a cold storage location."""
+        self.scheduler.add_job(
+            recall_location_job_func,
+            id=f"recall_location_{location_id}",
             args=[location_id],
             replace_existing=True,
             misfire_grace_time=None,
@@ -697,13 +708,41 @@ def scan_path_job_func(path_id: int):
                     logger.error(f"Failed to dispatch SCAN_ERROR notification: {e}")
 
         # Send scan completed notification
+        def _disk_stats(loc_path: str, name: str) -> StorageLocationStats | None:
+            try:
+                usage = shutil.disk_usage(loc_path)
+                free_pct = (usage.free / usage.total * 100) if usage.total else 0.0
+                return StorageLocationStats(
+                    name=name,
+                    free_bytes=usage.free,
+                    total_bytes=usage.total,
+                    free_percent=round(free_pct, 1),
+                )
+            except Exception:
+                return None
+
+        hot_stats = _disk_stats(path.source_path, path.name)
+        cold_stats: list[StorageLocationStats] = []
+        cold_updated_names: list[str] = []
+        for loc in path.storage_locations:
+            stats = _disk_stats(loc.path, loc.name)
+            if stats:
+                cold_stats.append(stats)
+        if result.get("files_moved", 0) > 0:
+            cold_updated_names = [loc.name for loc in path.storage_locations]
+
         success_payload = ScanCompletedData(
             path_id=path_id,
             path_name=path.name,
+            files_scanned=result.get("total_scanned", 0),
             files_moved=result.get("files_moved", 0),
-            bytes_saved=result.get("bytes_saved", 0),
+            files_skipped=result.get("files_skipped", 0),
+            bytes_moved=result.get("bytes_saved", 0),
             scan_duration_seconds=round(duration, 2),
             errors=len(result.get("errors", [])),
+            cold_storages_updated=cold_updated_names,
+            hot_storage=hot_stats,
+            cold_storages=cold_stats,
         )
         try:
             notification_service.dispatch_event_sync(
@@ -753,9 +792,19 @@ def scan_path_job_func(path_id: int):
 
 def encrypt_location_job_func(location_id: int):
     """Job to encrypt all files in a storage location."""
+    import tempfile
     from pathlib import Path
 
-    from app.models import ColdStorageLocation, EncryptionStatus, FileInventory, StorageType
+    from app.models import (
+        ColdStorageLocation,
+        EncryptionStatus,
+        FileInventory,
+        FileRecord,
+        MonitoredPath,
+        OperationType,
+        StorageType,
+    )
+    from app.services.cold_storage_backends import get_backend
     from app.services.encryption_service import file_encryption_service
 
     db = SchedulerSessionLocal()
@@ -768,6 +817,9 @@ def encrypt_location_job_func(location_id: int):
             return
 
         logger.info(f"Starting bulk encryption for location {location.name}")
+
+        backend = get_backend(location)
+        is_local = backend.backend_name() == "local"
 
         # Get all unencrypted files in this location
         files = (
@@ -787,34 +839,108 @@ def encrypt_location_job_func(location_id: int):
 
         for file in files:
             try:
-                source_path = Path(file.file_path)
-                if not source_path.exists():
-                    logger.warning(f"File missing during encryption: {source_path}")
-                    continue
+                if is_local:
+                    source_path = Path(file.file_path)
+                    if not source_path.exists():
+                        logger.warning(f"File missing during encryption: {source_path}")
+                        continue
 
-                target_path = source_path.with_suffix(source_path.suffix + ".ffenc")
+                    target_path = source_path.with_suffix(source_path.suffix + ".ffenc")
+                    file_encryption_service.encrypt_file(db, source_path, target_path)
+                    file.file_path = str(target_path)
+                    file.is_encrypted = True
 
-                # Encrypt
-                file_encryption_service.encrypt_file(db, source_path, target_path)
+                    try:
+                        source_path.unlink()
+                        db.commit()
+                        success_count += 1
+                    except Exception:
+                        db.rollback()
+                        if target_path.exists():
+                            target_path.unlink()
+                        raise
+                else:
+                    # Remote backend (GDrive, S3, etc.): download, encrypt, re-upload, delete original
+                    storage_reference = file.file_path
+                    with tempfile.NamedTemporaryFile(prefix="ff-enc-dl-", delete=False) as _dl_tmp:
+                        download_path = Path(_dl_tmp.name)
+                    with tempfile.NamedTemporaryFile(
+                        prefix="ff-enc-", suffix=".ffenc", delete=False
+                    ) as _enc_tmp:
+                        encrypt_path = Path(_enc_tmp.name)
 
-                # Update DB (but don't commit until file operations are safe)
-                file.file_path = str(target_path)
-                file.is_encrypted = True
+                    try:
+                        dl_success, dl_error = backend.download_file(
+                            storage_reference, download_path, location
+                        )
+                        if not dl_success:
+                            logger.warning(
+                                f"Failed to download file {file.id} for encryption: {dl_error}"
+                            )
+                            continue
 
-                # Delete original file
-                try:
-                    source_path.unlink()
-                    # Only commit if deletion succeeded (or file was gone)
-                    db.commit()
-                    success_count += 1
-                except Exception:
-                    # Failed to delete source, rollback DB changes to match filesystem state
-                    # (where source still exists, possibly alongside target)
-                    db.rollback()
-                    # Clean up target if we can't switch over
-                    if target_path.exists():
-                        target_path.unlink()
-                    raise
+                        file_encryption_service.encrypt_file(db, download_path, encrypt_path)
+
+                        # Derive encrypted relative path from the original file record
+                        file_record = (
+                            db.query(FileRecord)
+                            .filter(FileRecord.cold_storage_path == storage_reference)
+                            .first()
+                        )
+                        if file_record:
+                            original_path = Path(file_record.original_path)
+                            monitored_path = (
+                                db.query(MonitoredPath)
+                                .filter(MonitoredPath.id == file_record.path_id)
+                                .first()
+                            )
+                            if monitored_path:
+                                try:
+                                    relative = original_path.relative_to(
+                                        Path(monitored_path.source_path)
+                                    )
+                                except ValueError:
+                                    relative = Path(original_path.name)
+                            else:
+                                relative = Path(original_path.name)
+                            encrypted_relative = relative.with_suffix(relative.suffix + ".ffenc")
+                        else:
+                            encrypted_relative = Path(
+                                storage_reference.rstrip("/").split("/")[-1] + ".ffenc"
+                            )
+
+                        ul_success, ul_error, new_reference, _ = backend.freeze_file(
+                            source_path=encrypt_path,
+                            relative_path=encrypted_relative,
+                            location=location,
+                            operation_mode=OperationType.COPY,
+                        )
+                        if not ul_success:
+                            logger.warning(f"Failed to upload encrypted file {file.id}: {ul_error}")
+                            continue
+
+                        del_success, del_error = backend.delete(storage_reference, location)
+                        if not del_success:
+                            logger.warning(
+                                f"Failed to delete original unencrypted file {file.id} "
+                                f"from backend: {del_error}"
+                            )
+
+                        file.file_path = new_reference
+                        file.is_encrypted = True
+                        if file_record:
+                            file_record.cold_storage_path = new_reference
+                        db.commit()
+                        success_count += 1
+
+                    except Exception:
+                        db.rollback()
+                        raise
+                    finally:
+                        if download_path.exists():
+                            download_path.unlink()
+                        if encrypt_path.exists():
+                            encrypt_path.unlink()
 
             except Exception:
                 db.rollback()
@@ -836,9 +962,19 @@ def encrypt_location_job_func(location_id: int):
 
 def decrypt_location_job_func(location_id: int):
     """Job to decrypt all files in a storage location."""
+    import tempfile
     from pathlib import Path
 
-    from app.models import ColdStorageLocation, EncryptionStatus, FileInventory, StorageType
+    from app.models import (
+        ColdStorageLocation,
+        EncryptionStatus,
+        FileInventory,
+        FileRecord,
+        MonitoredPath,
+        OperationType,
+        StorageType,
+    )
+    from app.services.cold_storage_backends import get_backend
     from app.services.encryption_service import file_encryption_service
 
     db = SchedulerSessionLocal()
@@ -851,6 +987,9 @@ def decrypt_location_job_func(location_id: int):
             return
 
         logger.info(f"Starting bulk decryption for location {location.name}")
+
+        backend = get_backend(location)
+        is_local = backend.backend_name() == "local"
 
         # Get all encrypted files in this location
         files = (
@@ -870,37 +1009,115 @@ def decrypt_location_job_func(location_id: int):
 
         for file in files:
             try:
-                source_path = Path(file.file_path)
-                if not source_path.exists():
-                    logger.warning(f"File missing during decryption: {source_path}")
-                    continue
+                if is_local:
+                    source_path = Path(file.file_path)
+                    if not source_path.exists():
+                        logger.warning(f"File missing during decryption: {source_path}")
+                        continue
 
-                # Remove .ffenc suffix if present
-                if source_path.suffix == ".ffenc":
-                    target_path = source_path.with_suffix("")
+                    if source_path.suffix == ".ffenc":
+                        target_path = source_path.with_suffix("")
+                    else:
+                        target_path = source_path.with_name(source_path.name + ".decrypted")
+
+                    file_encryption_service.decrypt_file(db, source_path, target_path)
+                    file.file_path = str(target_path)
+                    file.is_encrypted = False
+
+                    try:
+                        source_path.unlink()
+                        db.commit()
+                        success_count += 1
+                    except Exception:
+                        db.rollback()
+                        if target_path.exists():
+                            target_path.unlink()
+                        raise
                 else:
-                    # Fallback if no suffix (shouldn't happen with our naming convention but good to handle)
-                    target_path = source_path.with_name(source_path.name + ".decrypted")
+                    # Remote backend (GDrive, S3, etc.): download, decrypt, re-upload, delete original
+                    storage_reference = file.file_path
+                    with tempfile.NamedTemporaryFile(prefix="ff-dec-dl-", delete=False) as _dl_tmp:
+                        download_path = Path(_dl_tmp.name)
+                    with tempfile.NamedTemporaryFile(prefix="ff-dec-", delete=False) as _dec_tmp:
+                        decrypt_path = Path(_dec_tmp.name)
 
-                # Decrypt
-                file_encryption_service.decrypt_file(db, source_path, target_path)
+                    try:
+                        dl_success, dl_error = backend.download_file(
+                            storage_reference, download_path, location
+                        )
+                        if not dl_success:
+                            logger.warning(
+                                f"Failed to download file {file.id} for decryption: {dl_error}"
+                            )
+                            continue
 
-                # Update DB
-                file.file_path = str(target_path)
-                file.is_encrypted = False
+                        file_encryption_service.decrypt_file(db, download_path, decrypt_path)
 
-                try:
-                    # Delete encrypted original
-                    source_path.unlink()
-                    # Commit only after successful filesystem update
-                    db.commit()
-                    success_count += 1
-                except Exception:
-                    db.rollback()
-                    # Clean up target
-                    if target_path.exists():
-                        target_path.unlink()
-                    raise
+                        # Derive decrypted relative path from the original file record
+                        file_record = (
+                            db.query(FileRecord)
+                            .filter(FileRecord.cold_storage_path == storage_reference)
+                            .first()
+                        )
+                        if file_record:
+                            original_path = Path(file_record.original_path)
+                            monitored_path = (
+                                db.query(MonitoredPath)
+                                .filter(MonitoredPath.id == file_record.path_id)
+                                .first()
+                            )
+                            if monitored_path:
+                                try:
+                                    relative = original_path.relative_to(
+                                        Path(monitored_path.source_path)
+                                    )
+                                except ValueError:
+                                    relative = Path(original_path.name)
+                            else:
+                                relative = Path(original_path.name)
+                            # Strip .ffenc from relative path if present
+                            if relative.suffix == ".ffenc":
+                                decrypted_relative = relative.with_suffix("")
+                            else:
+                                decrypted_relative = relative
+                        else:
+                            name = storage_reference.rstrip("/").split("/")[-1]
+                            if name.endswith(".ffenc"):
+                                name = name[: -len(".ffenc")]
+                            decrypted_relative = Path(name)
+
+                        ul_success, ul_error, new_reference, _ = backend.freeze_file(
+                            source_path=decrypt_path,
+                            relative_path=decrypted_relative,
+                            location=location,
+                            operation_mode=OperationType.COPY,
+                        )
+                        if not ul_success:
+                            logger.warning(f"Failed to upload decrypted file {file.id}: {ul_error}")
+                            continue
+
+                        del_success, del_error = backend.delete(storage_reference, location)
+                        if not del_success:
+                            logger.warning(
+                                f"Failed to delete original encrypted file {file.id} "
+                                f"from backend: {del_error}"
+                            )
+
+                        file.file_path = new_reference
+                        file.is_encrypted = False
+                        if file_record:
+                            file_record.cold_storage_path = new_reference
+                        db.commit()
+                        success_count += 1
+
+                    except Exception:
+                        db.rollback()
+                        raise
+                    finally:
+                        if download_path.exists():
+                            download_path.unlink()
+                        if decrypt_path.exists():
+                            decrypt_path.unlink()
 
             except Exception:
                 db.rollback()
@@ -1029,6 +1246,99 @@ def cleanup_old_transfer_jobs_job_func():
     except Exception:
         logger.exception("Error cleaning up old transfer jobs")
         db.rollback()
+    finally:
+        db.close()
+
+
+def recall_location_job_func(location_id: int):
+    """Job to thaw all cold files from a storage location back to hot storage."""
+    from app.models import ColdStorageLocation, FileInventory, FileRecord, FileStatus, StorageType
+    from app.services.file_thawer import FileThawer
+
+    db = SchedulerSessionLocal()
+    try:
+        location = (
+            db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
+        )
+        if not location:
+            logger.error(f"Location {location_id} not found for recall job")
+            return
+
+        logger.info(f"Starting recall (thaw all) for location {location.name}")
+
+        inventory_entries = (
+            db.query(FileInventory)
+            .filter(
+                FileInventory.cold_storage_location_id == location_id,
+                FileInventory.storage_type == StorageType.COLD,
+            )
+            .all()
+        )
+
+        total = len(inventory_entries)
+        logger.info(f"Found {total} files to recall from {location.name}")
+        success_count = 0
+
+        for inventory_entry in inventory_entries:
+            if inventory_entry.status == FileStatus.MIGRATING:
+                logger.debug(f"Skipping file {inventory_entry.id} — thaw already in progress")
+                continue
+
+            file_record = (
+                db.query(FileRecord)
+                .filter(
+                    (FileRecord.cold_storage_path == inventory_entry.file_path)
+                    | (
+                        (FileRecord.path_id == inventory_entry.path_id)
+                        & (FileRecord.original_path == inventory_entry.file_path)
+                    )
+                )
+                .first()
+            )
+
+            if not file_record:
+                logger.warning(
+                    f"No file record found for inventory entry {inventory_entry.id}, skipping"
+                )
+                continue
+
+            try:
+                inventory_entry.status = FileStatus.MIGRATING
+                db.commit()
+
+                success, error = FileThawer.thaw_file(
+                    file_record=file_record,
+                    pin=False,
+                    db=db,
+                    initiated_by="recall_job",
+                )
+                if success:
+                    success_count += 1
+                else:
+                    logger.warning(f"Failed to recall file {inventory_entry.id}: {error}")
+                    db.refresh(inventory_entry)
+                    if inventory_entry.storage_type == StorageType.COLD:
+                        inventory_entry.status = FileStatus.ACTIVE
+                        db.commit()
+            except Exception:
+                logger.exception(f"Error recalling file {inventory_entry.id}")
+                try:
+                    db.rollback()
+                    db.refresh(inventory_entry)
+                    if inventory_entry.storage_type == StorageType.COLD:
+                        inventory_entry.status = FileStatus.ACTIVE
+                        db.commit()
+                except Exception:
+                    logger.exception(
+                        f"Failed to reset status for inventory entry {inventory_entry.id}"
+                    )
+
+        logger.info(
+            f"Completed recall for location {location.name}. Recalled {success_count}/{total} files."
+        )
+
+    except Exception:
+        logger.exception(f"Error in recall job for location {location_id}")
     finally:
         db.close()
 

@@ -348,3 +348,31 @@ def test_match_file_not_found(tmp_path):
 
     assert matches is False
     assert matched_ids == []
+
+
+def test_match_perm_executable():
+    """Test PERM criteria matching for executable bits, verifying C2 fix."""
+    # 0o755 has executable bits set
+    assert CriteriaMatcher._match_perm(0o755, "x") is True
+    # 0o644 does not have executable bits set
+    assert CriteriaMatcher._match_perm(0o644, "x") is False
+
+
+@patch("platform.system", return_value="Darwin")
+@patch("app.services.criteria_matcher.CriteriaMatcher._get_macos_last_open_time", return_value=None)
+def test_match_atime_macos_fallback_m1(mock_get_last_open, mock_platform, real_file):
+    """Test macOS ATIME fallback when no last open time is available, verifying M1 fix."""
+    now = time.time()
+    # Set different times for atime, mtime, ctime
+    file_atime = now - (60 * 60)  # 1 hour ago
+    file_mtime = now - (10 * 60)  # 10 mins ago
+
+    with real_file(atime=file_atime, mtime=file_mtime) as file_path:
+        stat_info = file_path.stat()
+        # Fallback should use max of (atime, mtime, ctime) which will be close to mtime or atime depending on how OS is configured,
+        # but definitely not 0.0 (Unix Epoch) which would be age ~ 56 years.
+        # If fallback is max, then age is at most 60 mins. Let's test Operator.LT with a large value like 120 mins (2 hours).
+        # It should be True because age is <= 60 mins.
+        criterion = Criteria(criterion_type=CriterionType.ATIME, operator=Operator.LT, value="120")
+        assert CriteriaMatcher._match_criterion(file_path, stat_info, criterion) is True
+

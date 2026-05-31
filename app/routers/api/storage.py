@@ -96,6 +96,7 @@ def _location_to_schema(location: ColdStorageLocation, path_count: Optional[int]
         "local_drive_is_connected": location.local_drive_is_connected,
         "local_drive_last_seen_at": location.local_drive_last_seen_at,
         "allow_offline": location.allow_offline,
+        "paused": location.paused,
         "caution_threshold_percent": location.caution_threshold_percent,
         "critical_threshold_percent": location.critical_threshold_percent,
         "is_encrypted": location.is_encrypted,
@@ -683,6 +684,70 @@ def update_storage_location(
             ) from e
 
     return _location_to_schema(location)
+
+
+@router.post("/locations/{location_id}/pause", response_model=ColdStorageLocationSchema)
+def pause_storage_location(location_id: int, db: Annotated[Session, Depends(get_db)]):
+    """Pause a cold storage location so no new files are routed to it."""
+    location = db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
+    if not location:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Storage location with id {location_id} not found",
+        )
+    location.paused = True
+    db.commit()
+    db.refresh(location)
+    return _location_to_schema(location)
+
+
+@router.post("/locations/{location_id}/unpause", response_model=ColdStorageLocationSchema)
+def unpause_storage_location(location_id: int, db: Annotated[Session, Depends(get_db)]):
+    """Unpause a cold storage location to resume routing files to it."""
+    location = db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
+    if not location:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Storage location with id {location_id} not found",
+        )
+    location.paused = False
+    db.commit()
+    db.refresh(location)
+    return _location_to_schema(location)
+
+
+@router.post("/locations/{location_id}/recall", status_code=status.HTTP_202_ACCEPTED)
+def recall_storage_location(location_id: int, db: Annotated[Session, Depends(get_db)]):
+    """Trigger a background job to thaw all files from a cold storage location back to hot storage."""
+    location = db.query(ColdStorageLocation).filter(ColdStorageLocation.id == location_id).first()
+    if not location:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Storage location with id {location_id} not found",
+        )
+
+    cold_file_count = (
+        db.query(FileInventory)
+        .filter(
+            FileInventory.cold_storage_location_id == location_id,
+            FileInventory.storage_type == "cold",
+        )
+        .count()
+    )
+
+    try:
+        scheduler_service.trigger_recall_job(location_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to schedule recall job: {e!s}",
+        ) from e
+
+    return {
+        "message": f"Recall job started for location '{location.name}'",
+        "location_id": location_id,
+        "files_queued": cold_file_count,
+    }
 
 
 @router.post("/locations/{location_id}/gdrive/oauth/start")

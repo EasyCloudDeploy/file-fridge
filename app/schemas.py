@@ -92,6 +92,10 @@ class ColdStorageLocationBase(BaseModel):
             "(for example, ejected long-term removable drives)"
         ),
     )
+    paused: bool = Field(
+        False,
+        description="If true, no new files will be routed to this location",
+    )
 
     @validator("critical_threshold_percent")
     def validate_critical_less_than_caution(cls, v, values):
@@ -118,6 +122,7 @@ class ColdStorageLocationUpdate(BaseModel):
     critical_threshold_percent: Optional[int] = Field(None, ge=0, le=100)
     is_encrypted: Optional[bool] = None
     allow_offline: Optional[bool] = None
+    paused: Optional[bool] = None
 
 
 class FilterCriteria(BaseModel):
@@ -138,6 +143,8 @@ class FilterCriteria(BaseModel):
     max_mtime: Optional[datetime] = None
     storage_location_id: Optional[int] = None
     remote_peer_id: Optional[int] = None
+    remote_only: Optional[bool] = None
+    local_only: Optional[bool] = None
 
 
 class ColdStorageLocation(ColdStorageLocationBase):
@@ -618,24 +625,6 @@ class NotifierBase(BaseModel):
 class NotifierCreate(NotifierBase):
     """Schema for creating a notifier."""
 
-    @validator("smtp_host")
-    @classmethod
-    def validate_smtp_host_for_email(cls, v, values):
-        """Ensure smtp_host is provided for email notifiers."""
-        if values.get("type") == NotifierType.EMAIL and not v:
-            msg = "smtp_host is required for EMAIL notifiers"
-            raise ValueError(msg)
-        return v
-
-    @validator("smtp_sender")
-    @classmethod
-    def validate_smtp_sender_for_email(cls, v, values):
-        """Ensure smtp_sender is provided for email notifiers."""
-        if values.get("type") == NotifierType.EMAIL and not v:
-            msg = "smtp_sender is required for EMAIL notifiers"
-            raise ValueError(msg)
-        return v
-
     @validator("smtp_sender")
     @classmethod
     def validate_smtp_sender_format(cls, v, values):
@@ -927,6 +916,7 @@ class P2PPeerResponse(BaseModel):
     last_seen_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    file_count: int = 0
 
     class Config:
         from_attributes = True
@@ -961,12 +951,28 @@ class P2PNetworkStatsResponse(BaseModel):
     connected_peers: int
     degraded_peers: int
     remote_cached_files: int
+    cluster_file_count: int
     health: str
 
 
 class P2PNetworkPskResponse(BaseModel):
     psk: str
     note: str
+
+
+class P2PCurrentPskResponse(BaseModel):
+    psk: Optional[str] = None
+    available: bool
+
+
+class P2PPskAcceptRequest(BaseModel):
+    encrypted_new_psk: str = Field(..., min_length=1)
+
+
+class P2PPskRotationResponse(BaseModel):
+    psk: str
+    updated_peers: List[str]
+    offline_peers: List[str]
 
 
 class P2PPullRequest(BaseModel):
@@ -1349,6 +1355,22 @@ class BrowserResponse(BaseModel):
     total_files: int = Field(0, description="Number of files in current directory")
     total_dirs: int = Field(0, description="Number of directories in current directory")
     items: List[BrowserItem] = Field(default_factory=list, description="List of items in directory")
+
+
+# ========================================
+# SMTP Global Settings Schema
+# ========================================
+
+
+class SMTPSettingsUpdate(BaseModel):
+    """Schema to update global SMTP settings."""
+
+    smtp_host: Optional[str] = Field(None, description="SMTP server hostname")
+    smtp_port: Optional[int] = Field(587, description="SMTP server port")
+    smtp_user: Optional[str] = Field(None, description="SMTP username")
+    smtp_password: Optional[str] = Field(None, description="SMTP password")
+    smtp_sender: Optional[str] = Field(None, description="SMTP sender address")
+    smtp_use_tls: Optional[bool] = Field(True, description="Use TLS encryption")
 
 
 # Rebuild models to resolve forward references

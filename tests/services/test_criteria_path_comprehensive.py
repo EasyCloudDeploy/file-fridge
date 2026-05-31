@@ -514,17 +514,35 @@ class TestAtimeCriteria:
 
     @patch("platform.system", return_value="Darwin")
     @patch("app.services.criteria_matcher.CriteriaMatcher._get_macos_last_open_time")
-    def test_atime_macos_never_opened_treated_as_epoch(
+    def test_atime_macos_never_opened_fallback_to_max(
         self, mock_get_last_open, mock_platform, hot_storage, make_criterion
     ):
-        """On macOS, if Last Open returns None, file is treated as infinitely old."""
+        """On macOS, if Last Open returns None, fallback to max(atime, mtime, ctime)."""
         f = make_text_file(hot_storage / "file.txt")
+        _age_file(f, 90)
         mock_get_last_open.return_value = None  # never opened
 
-        c = make_criterion(CriterionType.ATIME, Operator.LT, "60")
-        result, _ = CriteriaMatcher.match_file(f, [c])
-        # epoch age is enormous → NOT < 60 → False → move to cold
-        assert result is False
+        # Let's mock Path.stat to return a controlled ctime as well
+        original_stat = f.stat()
+        class MockStat:
+            def __init__(self, orig, atime, mtime, ctime):
+                self._orig = orig
+                self.st_atime = atime
+                self.st_mtime = mtime
+                self.st_ctime = ctime
+                self.st_size = orig.st_size
+                self.st_mode = orig.st_mode
+            def __getattr__(self, name):
+                return getattr(self._orig, name)
+
+        t_90_ago = time.time() - (90 * 60)
+        mock_stat_val = MockStat(original_stat, atime=t_90_ago, mtime=t_90_ago, ctime=t_90_ago)
+
+        with patch.object(Path, "stat", return_value=mock_stat_val):
+            c = make_criterion(CriterionType.ATIME, Operator.LT, "60")
+            result, _ = CriteriaMatcher.match_file(f, [c])
+            # t_90_ago is 90 min old. 90 < 60 is False -> move to cold.
+            assert result is False
 
 
 class TestCtimeCriteria:

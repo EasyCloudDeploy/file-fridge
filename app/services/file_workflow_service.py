@@ -804,24 +804,18 @@ class FileWorkflowService:
                         hot_path.unlink()
                     hot_path.parent.mkdir(parents=True, exist_ok=True)
 
-                    checksum_before = checksum_verifier.calculate_checksum(local_cold_path)
-                    try:
-                        local_cold_path.rename(hot_path)
-                        checksum_after = checksum_verifier.calculate_checksum(hot_path)
-                    except OSError:
-                        prepared_path, prepared_stat = FileThawer._move_preserving_timestamps(
-                            local_cold_path,
-                            hot_path,
-                            progress_callback=progress_callback,
-                        )
-                        checksum_after = checksum_verifier.calculate_checksum(prepared_path)
-                        if prepared_path != hot_path:
-                            FileThawer._finalize_staged_move(
-                                local_cold_path,
-                                prepared_path,
-                                hot_path,
-                                prepared_stat,
-                            )
+                    success, error, checksum = FileMover.move_with_rollback(
+                        source=local_cold_path,
+                        destination=hot_path,
+                        operation_type=OperationType.MOVE,
+                        verify_checksum=True,
+                        progress_callback=progress_callback,
+                    )
+                    if not success:
+                        raise RuntimeError(error or "Thaw failed during file transfer")
+
+                    checksum_before = checksum
+                    checksum_after = checksum
 
                     if inventory_entry:
                         inventory_entry.file_path = str(hot_path)
@@ -921,8 +915,16 @@ class FileWorkflowService:
         if not file_records:
             return candidates, skipped
 
-        records_by_cold = {record.cold_storage_path: record for record in file_records}
-        records_by_original = {record.original_path: record for record in file_records}
+        records_by_cold = {}
+        records_by_original = {}
+        for record in file_records:
+            if record.cold_storage_path in records_by_cold:
+                logger.warning(f"Duplicate FileRecord found for cold_storage_path: {record.cold_storage_path}")
+            records_by_cold[record.cold_storage_path] = record
+
+            if record.original_path in records_by_original:
+                logger.warning(f"Duplicate FileRecord found for original_path: {record.original_path}")
+            records_by_original[record.original_path] = record
         location_ids = {
             record.cold_storage_location_id
             for record in file_records
@@ -1081,6 +1083,7 @@ class FileWorkflowService:
                 (FileRecord.original_path == str(file_path))
                 | (FileRecord.cold_storage_path == str(dest_path))
             )
+            .with_for_update()
             .first()
         )
 
@@ -1112,6 +1115,7 @@ class FileWorkflowService:
         inventory_entry = (
             db.query(FileInventory)
             .filter(FileInventory.path_id == path.id, FileInventory.file_path == str(file_path))
+            .with_for_update()
             .first()
         )
 

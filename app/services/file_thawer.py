@@ -47,9 +47,13 @@ class FileThawer:
         if prepared_destination != final_destination:
             prepared_destination.replace(final_destination)
 
-        shutil.copystat(str(source), str(final_destination))
-        os.utime(str(final_destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
-        source.unlink()
+        try:
+            shutil.copystat(str(source), str(final_destination))
+            os.utime(str(final_destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
+            source.unlink()
+        except Exception as e:
+            logger.error("Failed to copy metadata or remove source in staged thaw finalization: %s", e)
+            raise
 
     @staticmethod
     def thaw_file(

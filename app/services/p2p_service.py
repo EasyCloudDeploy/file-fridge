@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import logging
 import os
@@ -13,6 +14,7 @@ from typing import Any, Optional
 from urllib.parse import quote
 
 import httpx
+from cryptography.fernet import Fernet
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -59,6 +61,22 @@ class P2PService:
     def generate_psk() -> str:
         return secrets.token_urlsafe(32)
 
+    @staticmethod
+    def _rotation_fernet(psk_hash: str) -> Fernet:
+        """Return a Fernet instance keyed from the PSK hash for rotation envelope encryption."""
+        key = base64.urlsafe_b64encode(
+            hashlib.sha256((psk_hash + ":ff-psk-rotation-v1").encode()).digest()
+        )
+        return Fernet(key)
+
+    @classmethod
+    def encrypt_new_psk(cls, new_psk: str, current_psk_hash: str) -> str:
+        return cls._rotation_fernet(current_psk_hash).encrypt(new_psk.encode()).decode()
+
+    @classmethod
+    def decrypt_new_psk(cls, token: str, current_psk_hash: str) -> str:
+        return cls._rotation_fernet(current_psk_hash).decrypt(token.encode()).decode()
+
     def start_node(self) -> None:
         """Start runtime for P2P features."""
         self._running = True
@@ -91,6 +109,7 @@ class P2PService:
                 enabled=enabled,
                 psk_hash=self.hash_psk(psk),
             )
+            config.set_psk(psk)
             db.add(config)
         else:
             config.network_name = network_name
@@ -99,25 +118,78 @@ class P2PService:
             config.enabled = enabled
             if psk:
                 config.psk_hash = self.hash_psk(psk)
+                config.set_psk(psk)
 
         db.commit()
         db.refresh(config)
         return config
 
     def rotate_psk(self, db: Session, psk: str) -> P2PNetworkConfig:
+        """Hard-reset rotation: update PSK and clear all peers and remote cache."""
         config = self.get_network_config(db)
         if config is None:
             raise ValueError("P2P network is not configured")
 
-        new_hash = self.hash_psk(psk)
-        config.psk_hash = new_hash
+        config.psk_hash = self.hash_psk(psk)
+        config.set_psk(psk)
 
-        # Hard cutover: all existing peers and remote cache are invalidated.
         db.query(RemoteSharedFileCache).delete()
         db.query(P2PPeer).delete()
         db.commit()
         db.refresh(config)
         return config
+
+    def rotate_psk_with_push(self, db: Session, new_psk: str) -> dict[str, Any]:
+        """Coordinated rotation: push new PSK to all online peers, then rotate locally.
+
+        Online peers receive the new PSK encrypted with a key derived from the current PSK hash —
+        only nodes already in the cluster can decrypt it. Peers that cannot be reached are removed
+        and must be reconfigured manually when they come back online.
+        """
+        config = self.get_network_config(db)
+        if config is None:
+            raise ValueError("P2P network is not configured")
+
+        current_psk_hash = config.psk_hash
+        peers = self.list_peers(db)
+
+        updated: list[str] = []
+        offline: list[str] = []
+
+        for peer in peers:
+            try:
+                self._push_rotation_to_peer(peer, current_psk_hash, new_psk)
+                updated.append(peer.peer_name)
+            except Exception:
+                logger.warning("PSK rotation push failed for peer %s", peer.peer_id)
+                offline.append(peer.peer_name)
+                db.query(RemoteSharedFileCache).filter(
+                    RemoteSharedFileCache.peer_id == peer.id
+                ).delete()
+                db.delete(peer)
+
+        config.psk_hash = self.hash_psk(new_psk)
+        config.set_psk(new_psk)
+        db.commit()
+        db.refresh(config)
+
+        return {
+            "psk": new_psk,
+            "updated_peers": updated,
+            "offline_peers": offline,
+        }
+
+    def _push_rotation_to_peer(self, peer: P2PPeer, current_psk_hash: str, new_psk: str) -> None:
+        """Send the encrypted new PSK to a single peer."""
+        encrypted = self.encrypt_new_psk(new_psk, current_psk_hash)
+        url = f"http://{peer.host}:{peer.port}/api/v1/p2p/network/psk/accept"
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(
+                url,
+                headers={"X-FF-PSK": current_psk_hash, "Content-Type": "application/json"},
+                json={"encrypted_new_psk": encrypted},
+            )
+            response.raise_for_status()
 
     def destroy_network(self, db: Session) -> dict[str, int]:
         """Destroy local P2P network configuration and clear all P2P state."""
@@ -163,6 +235,7 @@ class P2PService:
                 enabled=True,
                 psk_hash=join_hash,
             )
+            config.set_psk(join_psk)
             db.add(config)
             db.commit()
             db.refresh(config)
@@ -172,6 +245,10 @@ class P2PService:
 
         if join_hash != config.psk_hash:
             raise ValueError("PSK mismatch; cannot join private network")
+        # Opportunistically store plaintext if this node hasn't done so yet.
+        if not config.psk_encrypted:
+            config.set_psk(join_psk)
+            db.commit()
         return config
 
     @staticmethod
@@ -469,7 +546,9 @@ class P2PService:
 
             dest_path = os.path.join(local_path.source_path, filename)
             if os.path.exists(dest_path):
-                failed.append({"id": cache_id, "error": f"{filename} already exists in the destination path"})
+                failed.append(
+                    {"id": cache_id, "error": f"{filename} already exists in the destination path"}
+                )
                 continue
 
             encoded_id = quote(cache_entry.remote_file_id, safe="")
@@ -514,6 +593,15 @@ class P2PService:
         connected_peers = remote_connected_peers + local_peer_connected
         degraded_peers = remote_degraded_peers + local_peer_degraded
         remote_cached_files = db.query(RemoteSharedFileCache).count()
+        local_file_count = (
+            db.query(FileInventory)
+            .filter(
+                FileInventory.status == FileStatus.ACTIVE,
+                FileInventory.is_shareable.is_(True),
+            )
+            .count()
+        )
+        cluster_file_count = local_file_count + remote_cached_files
 
         if not config:
             health = "UNCONFIGURED"
@@ -532,6 +620,7 @@ class P2PService:
             "connected_peers": connected_peers,
             "degraded_peers": degraded_peers,
             "remote_cached_files": remote_cached_files,
+            "cluster_file_count": cluster_file_count,
             "health": health,
         }
 

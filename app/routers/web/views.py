@@ -22,6 +22,7 @@ TEMPLATE_ROUTES = [
     ("/tags", "tags.html", "tags"),
     ("/migrations", "migrations.html", "migrations"),
     ("/notifiers", "notifiers.html", "notifiers"),
+    ("/p2p", "p2p.html", "p2p"),
     ("/settings", "settings.html", "settings"),
     ("/login", "login.html", None),  # Login page (no active page highlight)
 ]

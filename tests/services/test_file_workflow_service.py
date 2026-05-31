@@ -400,7 +400,7 @@ def test_process_single_file_passes_callable_progress_callback_on_move(
 
 @patch("app.services.file_workflow_service.scan_progress_manager")
 @patch("app.services.file_workflow_service.checksum_verifier.calculate_checksum")
-@patch("app.services.file_workflow_service.audit_trail_service")
+@patch("app.services.file_thawer.audit_trail_service")
 def test_thaw_single_file(
     mock_audit_trail,
     mock_checksum,
@@ -425,6 +425,18 @@ def test_thaw_single_file(
     symlink_path.symlink_to(cold_file)
 
     inventory = file_inventory(cold_file, StorageType.COLD, FileStatus.ACTIVE)
+    from app.models import FileRecord
+    file_rec = FileRecord(
+        path_id=monitored_path.id,
+        original_path=str(symlink_path),
+        cold_storage_path=str(cold_file),
+        cold_storage_location_id=monitored_path.storage_locations[0].id,
+        file_size=len("content"),
+        operation_type=monitored_path.operation_type,
+    )
+    db_session.add(file_rec)
+    db_session.commit()
+
     mock_scan_progress.start_file_operation.return_value = "thaw-op-1"
 
     mock_checksum.side_effect = ["checksum1", "checksum1"]
@@ -476,7 +488,7 @@ def test_thaw_single_file(
 
 @patch("app.services.file_workflow_service.scan_progress_manager")
 @patch("app.services.file_workflow_service.checksum_verifier.calculate_checksum")
-@patch("app.services.file_workflow_service.audit_trail_service")
+@patch("app.services.file_thawer.audit_trail_service")
 @patch("app.services.file_workflow_service.FileThawer._move_preserving_timestamps")
 def test_thaw_single_file_uses_callable_progress_callback_for_fallback_move(
     mock_move_preserving_timestamps,
@@ -502,6 +514,18 @@ def test_thaw_single_file_uses_callable_progress_callback_for_fallback_move(
     symlink_path = hot_path / "file.txt"
 
     inventory = file_inventory(cold_file, StorageType.COLD, FileStatus.ACTIVE)
+    from app.models import FileRecord
+    file_rec = FileRecord(
+        path_id=monitored_path.id,
+        original_path=str(symlink_path),
+        cold_storage_path=str(cold_file),
+        cold_storage_location_id=monitored_path.storage_locations[0].id,
+        file_size=len("content"),
+        operation_type=monitored_path.operation_type,
+    )
+    db_session.add(file_rec)
+    db_session.commit()
+
     mock_scan_progress.start_file_operation.return_value = "thaw-op-1"
     mock_checksum.side_effect = ["checksum1", "checksum1"]
 
@@ -946,3 +970,211 @@ def test_process_path_integration_real_files(db_session, tmp_path):
     inv_new = db_session.query(FileInventory).filter(FileInventory.file_path.contains("new.txt")).first()
     assert inv_new is not None
     assert inv_new.storage_type == StorageType.HOT
+
+
+def test_thaw_single_file_no_file_record_success(monitored_path, file_inventory, db_session, tmp_path):
+    """Test thawing a file when no FileRecord exists, verifying the H3 fix with FileMover.move_with_rollback."""
+    from app.services.file_workflow_service import FileWorkflowService
+    from app.models import StorageType, FileStatus
+    from unittest.mock import patch
+
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir(exist_ok=True)
+    cold_path = tmp_path / "cold"
+    cold_path.mkdir(exist_ok=True)
+
+    monitored_path.source_path = str(hot_path)
+    monitored_path.storage_locations[0].path = str(cold_path)
+
+    cold_file = cold_path / "file.txt"
+    cold_file.write_text("content")
+    symlink_path = hot_path / "file.txt"
+    symlink_path.symlink_to(cold_file)
+
+    inventory = file_inventory(cold_file, StorageType.COLD, FileStatus.ACTIVE)
+
+    service = FileWorkflowService()
+
+    original_close = db_session.close
+    db_session.close = lambda: None
+    try:
+        with patch("app.services.file_workflow_service.SessionFactory", side_effect=lambda: db_session), \
+             patch("app.services.file_workflow_service.scan_progress_manager") as mock_progress:
+            mock_progress.start_file_operation.return_value = "thaw-op-1"
+
+            # Note: file_record is None in DB since we haven't created one!
+            result = service._thaw_single_file(symlink_path, cold_file, monitored_path)
+    finally:
+        db_session.close = original_close
+
+    assert result["success"] is True
+    assert not cold_file.exists()
+    assert symlink_path.exists()
+    assert not symlink_path.is_symlink()
+    assert symlink_path.read_text() == "content"
+
+
+def test_collect_cold_thaw_candidates_with_duplicates(monitored_path, file_inventory, db_session, tmp_path):
+    """Test that _collect_cold_thaw_candidates handles duplicate FileRecords without throwing a key collision error (M3 fix)."""
+    from app.services.file_workflow_service import FileWorkflowService
+    from app.models import FileRecord, OperationType, StorageType, FileStatus
+    import logging
+
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir(exist_ok=True)
+    cold_path = tmp_path / "cold"
+    cold_path.mkdir(exist_ok=True)
+
+    monitored_path.source_path = str(hot_path)
+    monitored_path.storage_locations[0].path = str(cold_path)
+
+    f1 = cold_path / "file1.txt"
+    f1.write_text("content1")
+
+    # Create duplicate FileRecords
+    record1 = FileRecord(
+        path_id=monitored_path.id,
+        original_path=str(hot_path / "file1.txt"),
+        cold_storage_path=str(f1),
+        file_size=8,
+        operation_type=OperationType.MOVE,
+        cold_storage_location_id=monitored_path.storage_locations[0].id
+    )
+    record2 = FileRecord(
+        path_id=monitored_path.id,
+        original_path=str(hot_path / "file1.txt"),
+        cold_storage_path=str(f1),
+        file_size=8,
+        operation_type=OperationType.MOVE,
+        cold_storage_location_id=monitored_path.storage_locations[0].id
+    )
+    db_session.add(record1)
+    db_session.add(record2)
+
+    # Create cold inventory entry
+    inventory = file_inventory(f1, StorageType.COLD, FileStatus.ACTIVE)
+    db_session.commit()
+
+    service = FileWorkflowService()
+    
+    # Run _collect_cold_thaw_candidates and verify it completes without raising KeyError or other exceptions
+    candidates, skipped = service._collect_cold_thaw_candidates(
+        monitored_path, db_session, pinned_paths=set(), pinned_path_strings=set()
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0][0] == Path(hot_path / "file1.txt")
+    assert candidates[0][1] == f1
+    assert skipped == 0
+
+
+def test_concurrent_process_single_file(monitored_path, file_inventory, db_session, tmp_path):
+    """Test that sequential/concurrent executions of _record_file_in_db serialize correctly and deduplicate using with_for_update."""
+    from app.services.file_workflow_service import FileWorkflowService
+    from app.models import FileRecord, OperationType, StorageType, FileStatus
+
+    hot_path = tmp_path / "hot"
+    hot_path.mkdir(exist_ok=True)
+    cold_path = tmp_path / "cold"
+    cold_path.mkdir(exist_ok=True)
+
+    monitored_path.source_path = str(hot_path)
+    monitored_path.storage_locations[0].path = str(cold_path)
+
+    f1 = hot_path / "concurrent.txt"
+    f1.write_text("concurrent content")
+    dest = cold_path / "concurrent.txt"
+
+    # Set up inventory entry
+    inventory = file_inventory(f1, StorageType.HOT, FileStatus.ACTIVE)
+    db_session.commit()
+
+    service = FileWorkflowService()
+
+    # Call _record_file_in_db twice to simulate subsequent concurrent processing
+    record_id1 = service._record_file_in_db(
+        db=db_session,
+        path=monitored_path,
+        file_path=f1,
+        dest_path=dest,
+        file_size=18,
+        matched_criteria_ids=[1],
+        storage_location_id=monitored_path.storage_locations[0].id
+    )
+
+    record_id2 = service._record_file_in_db(
+        db=db_session,
+        path=monitored_path,
+        file_path=f1,
+        dest_path=dest,
+        file_size=18,
+        matched_criteria_ids=[1],
+        storage_location_id=monitored_path.storage_locations[0].id
+    )
+
+    assert record_id1 == record_id2
+
+    # Check that only one FileRecord exists
+    db_session.expire_all()
+    records = db_session.query(FileRecord).filter(FileRecord.original_path == str(f1)).all()
+    assert len(records) == 1
+    assert records[0].id == record_id1
+
+
+def test_match_inventory_criteria_fallback(monitored_path, file_inventory, db_session):
+    """Test _match_inventory_criteria with unsupported criterion type returning False."""
+    from app.services.file_workflow_service import FileWorkflowService
+    from app.models import Criteria, Operator, StorageType, FileStatus
+    from unittest.mock import MagicMock
+
+    service = FileWorkflowService()
+    entry = MagicMock(spec=FileInventory)
+
+    # An unsupported criterion type should fallback to returning False
+    unsupported_criterion = MagicMock()
+    unsupported_criterion.enabled = True
+    unsupported_criterion.criterion_type = "UNSUPPORTED_TYPE"
+    unsupported_criterion.operator = Operator.EQ
+    unsupported_criterion.value = "val"
+    unsupported_criterion.id = 999
+
+    res, matched_ids = service._match_inventory_criteria(
+        hot_path=Path("/tmp/hot.txt"),
+        inventory_entry=entry,
+        criteria=[unsupported_criterion]
+    )
+
+    assert res is False
+    assert len(matched_ids) == 0
+
+
+def test_record_file_in_db_legacy_path(monitored_path, db_session, tmp_path):
+    """Test _record_file_in_db when no FileInventory record exists in DB (legacy path)."""
+    from app.services.file_workflow_service import FileWorkflowService
+    from app.models import FileRecord
+
+    hot_file = tmp_path / "hot.txt"
+    dest_file = tmp_path / "cold.txt"
+
+    service = FileWorkflowService()
+
+    # Call _record_file_in_db for a file that does not have a FileInventory entry
+    record_id = service._record_file_in_db(
+        db=db_session,
+        path=monitored_path,
+        file_path=hot_file,
+        dest_path=dest_file,
+        file_size=100,
+        matched_criteria_ids=[1],
+        storage_location_id=monitored_path.storage_locations[0].id
+    )
+
+    # FileRecord should still be successfully created
+    db_session.expire_all()
+    record = db_session.query(FileRecord).filter(FileRecord.id == record_id).first()
+    assert record is not None
+    assert record.original_path == str(hot_file)
+    assert record.cold_storage_path == str(dest_file)
+
+
+

@@ -249,7 +249,7 @@ def test_move_with_rollback_success(mock_move, mock_verifier, source_and_dest):
     assert success is True
     assert error is None
     assert checksum == "checksum1"
-    mock_move.assert_called_once_with(source, dest, None)
+    mock_move.assert_called_once_with(source, dest, None, [])
     mock_verifier.calculate_checksum.assert_has_calls([call(source), call(dest)])
 
 
@@ -270,7 +270,7 @@ def test_move_with_rollback_creates_destination_parent(mock_move, mock_verifier,
     assert error is None
     assert checksum == "checksum1"
     assert dest.parent.exists() is True
-    mock_move.assert_called_once_with(source, dest, None)
+    mock_move.assert_called_once_with(source, dest, None, [])
 
 
 @patch("app.services.file_mover.checksum_verifier")

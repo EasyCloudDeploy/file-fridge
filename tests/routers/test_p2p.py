@@ -293,7 +293,7 @@ def test_regenerate_psk_returns_new_psk_and_clears_peers(authenticated_client, d
     payload = response.json()
     assert isinstance(payload['psk'], str)
     assert len(payload['psk']) >= 16
-    assert 'cleared' in payload['note'].lower()
+    assert 'Site D' in payload['offline_peers']
 
     peers = authenticated_client.get('/api/v1/p2p/peers')
     assert peers.status_code == 200

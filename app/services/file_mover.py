@@ -19,6 +19,27 @@ PROGRESS_THRESHOLD_MB = 10
 PROGRESS_UPDATE_BYTES = 1024 * 1024
 
 
+from app.utils.retry import retry_with_backoff
+
+
+@retry_with_backoff(max_attempts=3, allowed_exceptions=(OSError,))
+def resilient_unlink(path: Path) -> None:
+    """Resiliently unlink a file with retries and exponential backoff."""
+    if path.exists() or path.is_symlink():
+        path.unlink()
+
+
+def resilient_copy(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> None:
+    """Resiliently copy a file with retries, exponential backoff, and clean destination recreation."""
+    @retry_with_backoff(max_attempts=3, allowed_exceptions=(OSError,))
+    def _do_copy():
+        if destination.exists():
+            with contextlib.suppress(OSError):
+                destination.unlink()
+        _copy_with_progress(source, destination, progress_callback)
+    _do_copy()
+
+
 def _cleanup_partial_destination(
     source: Path, destination: Path, error: Optional[str], context: str
 ) -> None:
@@ -142,13 +163,16 @@ def move_file(
 
 
 def _move(
-    source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None
+    source: Path,
+    destination: Path,
+    progress_callback: Optional[Callable[[int], None]] = None,
+    deferred_unlinks: Optional[list[Path]] = None,
 ) -> tuple[bool, Optional[str]]:
     """Move file (atomic if same filesystem, otherwise copy+delete)."""
     try:
         logger.debug("Attempting move operation: %s -> %s", source, destination)
         if source.is_symlink():
-            return _move_symlink(source, destination, progress_callback)
+            return _move_symlink(source, destination, progress_callback, deferred_unlinks)
 
         # Try atomic rename first (same filesystem)
         try:
@@ -163,8 +187,11 @@ def _move(
                 exc,
             )
             # Cross-filesystem move
-            _copy_with_progress(source, destination, progress_callback)
-            source.unlink()
+            resilient_copy(source, destination, progress_callback)
+            if deferred_unlinks is not None:
+                deferred_unlinks.append(source)
+            else:
+                resilient_unlink(source)
             logger.debug("Move completed via copy+delete: %s -> %s", source, destination)
             return True, None
     except Exception as e:
@@ -172,7 +199,10 @@ def _move(
 
 
 def _move_symlink(
-    source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None
+    source: Path,
+    destination: Path,
+    progress_callback: Optional[Callable[[int], None]] = None,
+    deferred_unlinks: Optional[list[Path]] = None,
 ) -> tuple[bool, Optional[str]]:
     """Handle moving a symlink."""
     try:
@@ -184,22 +214,34 @@ def _move_symlink(
 
         # If symlink already points to destination, just remove the symlink
         if resolved_target.resolve() == destination.resolve():
-            source.unlink()
+            if deferred_unlinks is not None:
+                deferred_unlinks.append(source)
+            else:
+                resilient_unlink(source)
             return True, None
 
         # Move the actual file
         actual_file = source.resolve(strict=True)
         if actual_file.resolve() == destination.resolve():
-            source.unlink()
+            if deferred_unlinks is not None:
+                deferred_unlinks.append(source)
+            else:
+                resilient_unlink(source)
             return True, None
 
         try:
             actual_file.rename(destination)
         except OSError:
-            _copy_with_progress(actual_file, destination, progress_callback)
-            actual_file.unlink()
+            resilient_copy(actual_file, destination, progress_callback)
+            if deferred_unlinks is not None:
+                deferred_unlinks.append(actual_file)
+            else:
+                resilient_unlink(actual_file)
 
-        source.unlink()
+        if deferred_unlinks is not None:
+            deferred_unlinks.append(source)
+        else:
+            resilient_unlink(source)
         return True, None
     except (OSError, RuntimeError) as e:
         return False, f"Failed to handle symlink: {e!s}"
@@ -211,7 +253,7 @@ def _copy(
     """Copy file preserving metadata."""
     try:
         logger.debug("Attempting copy operation: %s -> %s", source, destination)
-        _copy_with_progress(source, destination, progress_callback)
+        resilient_copy(source, destination, progress_callback)
         logger.debug("Copy completed successfully: %s -> %s", source, destination)
         return True, None
     except Exception as e:
@@ -305,13 +347,15 @@ def move_with_rollback(
             source_checksum[:16] if source_checksum else None,
         )
 
+    deferred_unlinks = []
     # Perform the move operation
     if operation_type == OperationType.MOVE:
-        success, error = _move(source, destination, progress_callback)
+        success, error = _move(source, destination, progress_callback, deferred_unlinks)
     elif operation_type == OperationType.COPY:
         success, error = _copy(source, destination, progress_callback)
     elif operation_type == OperationType.SYMLINK:
-        success, error = _move_and_symlink(source, destination, progress_callback)
+        actual_source = source.resolve(strict=True) if source.is_symlink() else source
+        success, error = _copy(actual_source, destination, progress_callback)
     else:
         return False, f"Unknown operation type: {operation_type}", None
 
@@ -338,6 +382,31 @@ def move_with_rollback(
             )
 
             return False, "Checksum verification failed", source_checksum
+
+    # Verify succeeded! Now finalize deferred unlinks or symlink creation
+    if operation_type == OperationType.MOVE:
+        for path_to_unlink in deferred_unlinks:
+            try:
+                resilient_unlink(path_to_unlink)
+            except Exception as e:
+                logger.warning("Failed to unlink deferred source file %s: %s", path_to_unlink, e)
+    elif operation_type == OperationType.SYMLINK:
+        try:
+            actual_source = source.resolve(strict=True) if source.is_symlink() else source
+            if source.is_symlink():
+                resilient_unlink(source)
+            if actual_source.exists():
+                resilient_unlink(actual_source)
+
+            symlink_target = translate_path_for_symlink(str(destination))
+            source.symlink_to(symlink_target)
+        except OSError as e:
+            logger.error("Failed to create symlink at %s pointing to %s: %s", source, destination, e)
+            try:
+                resilient_copy(destination, actual_source)
+            except Exception as restore_err:
+                logger.error("Failed to restore original file %s: %s", actual_source, restore_err)
+            return False, f"Symlink creation failed: {e!s}", source_checksum
 
     logger.info(
         "Completed file transfer: source=%s destination=%s operation=%s",

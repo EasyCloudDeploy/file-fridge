@@ -116,10 +116,11 @@ class TestPathMigrationService:
         inv1 = file_inventory_factory(path=str(f1), storage_type=StorageType.COLD)
         path_id = inv1.path_id
 
-        def mock_move(src, dst):
-            raise OSError("Permission denied")
+        def mock_move_with_rollback(**kwargs):
+            return False, "Permission denied", None
 
-        monkeypatch.setattr(shutil, "move", mock_move)
+        from app.services.file_mover import FileMover
+        monkeypatch.setattr(FileMover, "move_with_rollback", mock_move_with_rollback)
 
         success, error, stats = PathMigrationService.migrate_files(
             str(old_path), str(new_path), path_id, db_session

@@ -71,6 +71,7 @@ function renderStorageLocations() {
                 <strong>${escapeHtml(location.name)}</strong>
                 <br><span class="badge bg-info mt-1">${escapeHtml(location.backend_type || 'local')}</span>
                 <span class="badge bg-secondary mt-1">${escapeHtml(location.operation_mode || 'move')}</span>
+                ${location.paused ? `<span class="badge bg-warning text-dark mt-1"><i class="bi bi-pause-circle"></i> Paused</span>` : ''}
                 ${location.allow_offline ? `<span class="badge bg-primary mt-1">Offline Allowed</span>` : ''}
                 ${location.backend_type === 'local' && location.local_drive_is_removable ? `
                     <span class="badge bg-dark mt-1">Removable</span>` : ''}
@@ -99,6 +100,11 @@ function renderStorageLocations() {
                     <a href="/storage-locations/${location.id}/edit" class="btn btn-outline-primary">
                         <i class="bi bi-pencil"></i> Edit
                     </a>
+                    <button type="button" class="btn ${location.paused ? 'btn-outline-success' : 'btn-outline-warning'}"
+                            onclick="togglePause(${location.id}, ${location.paused}, '${escapeHtml(location.name)}')">
+                        <i class="bi bi-${location.paused ? 'play-circle' : 'pause-circle'}"></i>
+                        ${location.paused ? 'Unpause' : 'Pause'}
+                    </button>
                     <button type="button" class="btn btn-outline-danger" onclick="showDeleteModal(${location.id}, '${escapeHtml(location.name)}')">
                         <i class="bi bi-trash"></i> Delete
                     </button>
@@ -106,6 +112,30 @@ function renderStorageLocations() {
             </td>
         </tr>
     `).join('');
+}
+
+/**
+ * Toggle pause state for a storage location
+ */
+async function togglePause(id, currentlyPaused, name) {
+    const action = currentlyPaused ? 'unpause' : 'pause';
+    try {
+        const response = await authenticatedFetch(`/api/v1/storage/locations/${id}/${action}`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || `Failed to ${action} storage location`);
+        }
+        await loadStorageLocations();
+        showToast(
+            `Storage location "${name}" ${currentlyPaused ? 'unpaused' : 'paused'} successfully.`,
+            'success'
+        );
+    } catch (error) {
+        console.error(`Error toggling pause for storage location ${id}:`, error);
+        showToast(error.message, 'error');
+    }
 }
 
 /**

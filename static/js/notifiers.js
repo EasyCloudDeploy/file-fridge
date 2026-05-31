@@ -88,27 +88,23 @@ function setupEventListeners() {
         document.querySelectorAll('.event-checkbox').forEach(cb => cb.checked = false);
     });
 
-    // Notifier type change - update placeholder and show/hide SMTP config
+    // Notifier type change - update placeholder
     document.getElementById('notifier_type').addEventListener('change', (e) => {
         const addressInput = document.getElementById('notifier_address');
         const addressHelp = document.getElementById('address_help');
-        const smtpSection = document.getElementById('smtp_config_section');
 
         if (e.target.value === 'email') {
             addressInput.placeholder = 'admin@example.com';
             addressInput.type = 'email';
             addressHelp.textContent = 'Email address to receive notifications';
-            smtpSection.style.display = 'block';
         } else if (e.target.value === 'generic_webhook') {
             addressInput.placeholder = 'https://hooks.example.com/webhook';
             addressInput.type = 'url';
             addressHelp.textContent = 'Webhook URL to POST notifications to';
-            smtpSection.style.display = 'none';
         } else {
             addressInput.placeholder = 'Email address or webhook URL';
             addressInput.type = 'text';
             addressHelp.textContent = 'Email address or webhook URL';
-            smtpSection.style.display = 'none';
         }
     });
 
@@ -260,24 +256,12 @@ function openNotifierModal(notifier = null) {
             cb.checked = subscribedEvents.includes(cb.value);
         });
 
-        // Populate SMTP fields if email notifier
-        if (notifier.type === 'email') {
-            document.getElementById('smtp_host').value = notifier.smtp_host || '';
-            document.getElementById('smtp_port').value = notifier.smtp_port || 587;
-            document.getElementById('smtp_user').value = notifier.smtp_user || '';
-            document.getElementById('smtp_password').value = notifier.smtp_password || '';
-            document.getElementById('smtp_sender').value = notifier.smtp_sender || '';
-            document.getElementById('smtp_use_tls').checked = notifier.smtp_use_tls !== false;
-        }
-
-        // Trigger type change to update placeholder and show/hide SMTP section
+        // Trigger type change to update placeholder
         document.getElementById('notifier_type').dispatchEvent(new Event('change'));
     } else {
         // Default values for new notifier
         document.getElementById('notifier_enabled').checked = true;
         document.querySelectorAll('.event-checkbox').forEach(cb => cb.checked = true); // All by default
-        document.getElementById('smtp_port').value = 587;
-        document.getElementById('smtp_use_tls').checked = true;
     }
 
     notifierModal.show();
@@ -325,30 +309,7 @@ async function saveNotifier() {
         enabled: document.getElementById('notifier_enabled').checked
     };
 
-    // Add SMTP configuration for email notifiers
-    if (notifierType === 'email') {
-        const smtpHost = document.getElementById('smtp_host').value;
-        const smtpSender = document.getElementById('smtp_sender').value;
 
-        // Validate required SMTP fields
-        if (!smtpHost) {
-            showToast('SMTP Host is required for email notifiers', 'error');
-            document.getElementById('smtp_host').focus();
-            return;
-        }
-        if (!smtpSender) {
-            showToast('From Address is required for email notifiers', 'error');
-            document.getElementById('smtp_sender').focus();
-            return;
-        }
-
-        data.smtp_host = smtpHost;
-        data.smtp_port = parseInt(document.getElementById('smtp_port').value) || 587;
-        data.smtp_user = document.getElementById('smtp_user').value || null;
-        data.smtp_password = document.getElementById('smtp_password').value || null;
-        data.smtp_sender = smtpSender;
-        data.smtp_use_tls = document.getElementById('smtp_use_tls').checked;
-    }
 
     const saveBtn = document.getElementById('save_notifier_btn');
     const originalBtnText = saveBtn.innerHTML;

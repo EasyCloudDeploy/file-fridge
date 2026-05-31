@@ -348,16 +348,24 @@ class FileCleanup:
                     # Also remove entries with suspiciously small file sizes that might be symlinks
                     # Symlinks are typically < MAX_SYMLINK_SIZE bytes (path string length)
                     # AND marked as missing (since they're no longer being scanned)
+                    from datetime import datetime, timezone, timedelta
+                    now = datetime.now(tz=timezone.utc)
+                    last_seen_time = entry.last_seen
+                    if last_seen_time.tzinfo is None:
+                        last_seen_time = last_seen_time.replace(tzinfo=timezone.utc)
+                    is_stale_missing = now - last_seen_time > timedelta(hours=24)
+
                     if (
                         entry.file_size < FileCleanup.MAX_SYMLINK_SIZE
                         and entry.status.value == "missing"
                         and entry.checksum is not None
+                        and is_stale_missing
                     ):
                         # This heuristic catches symlinks that existed before but are now missing
                         # The checksum indicates it was scanned at some point
                         # Small size + missing status suggests it might be a stale symlink entry
                         logger.info(
-                            f"Removing suspected symlink entry (small size + missing): {entry.id} - {entry.file_path}"
+                            f"Removing suspected symlink entry (small size + missing for >24h): {entry.id} - {entry.file_path}"
                         )
                         db.delete(entry)
                         results["removed"] += 1

@@ -449,23 +449,34 @@ async function loadPathDetail(pathId) {
                 });
 
                 storageCardBody.innerHTML = locationStats.map(({location, stat}) => {
+                    const pausedBadge = location.paused
+                        ? `<span class="badge bg-warning text-dark ms-1"><i class="bi bi-pause-circle"></i> Paused</span>`
+                        : '';
+                    const recallBtn = `
+                        <button class="btn btn-sm btn-outline-secondary mt-2"
+                                onclick="recallLocation(${location.id}, '${escapeHtml(location.name)}')">
+                            <i class="bi bi-arrow-return-left"></i> Recall Files
+                        </button>`;
+
                     if (!stat) {
                         return `
                             <div class="mb-3">
-                                <strong>${escapeHtml(location.name)}</strong>
+                                <strong>${escapeHtml(location.name)}</strong>${pausedBadge}
                                 <p class="text-muted small"><code>${escapeHtml(location.path)}</code></p>
                                 <p class="text-muted">Storage stats not available.</p>
+                                ${recallBtn}
                             </div>`;
                     }
 
                     if (stat.error) {
                         return `
                             <div class="mb-3">
-                                <strong>${escapeHtml(location.name)}</strong>
+                                <strong>${escapeHtml(location.name)}</strong>${pausedBadge}
                                 <p class="text-muted small"><code>${escapeHtml(location.path)}</code></p>
                                 <div class="alert alert-danger mb-0">
                                     <strong>Error:</strong> ${escapeHtml(stat.error)}
                                 </div>
+                                ${recallBtn}
                             </div>`;
                     }
 
@@ -479,7 +490,7 @@ async function loadPathDetail(pathId) {
 
                     return `
                         <div class="mb-3">
-                            <strong>${escapeHtml(location.name)}</strong>
+                            <strong>${escapeHtml(location.name)}</strong>${pausedBadge}
                             <p class="text-muted small mb-2"><code>${escapeHtml(location.path)}</code></p>
                             <div class="progress" style="height: 20px;">
                                 <div class="progress-bar ${progressBarClass}" role="progressbar" style="width: ${usedPercent.toFixed(2)}%;" aria-valuenow="${usedPercent.toFixed(2)}" aria-valuemin="0" aria-valuemax="100">
@@ -491,6 +502,7 @@ async function loadPathDetail(pathId) {
                                 <span>Free: ${formatBytes(stat.free_bytes)}</span>
                                 <span>Total: ${formatBytes(stat.total_bytes)}</span>
                             </div>
+                            ${recallBtn}
                         </div>`;
                 }).join('') + `
                     <div class="mt-2 text-muted small border-top pt-2">
@@ -1361,5 +1373,31 @@ async function loadCriteriaForEdit(criteriaId) {
     } catch (error) {
         console.error('Error loading criterion for edit:', error);
         showNotification(`Failed to load criterion: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Trigger recall of all files from a cold storage location back to hot storage.
+ */
+async function recallLocation(locationId, locationName) {
+    if (!confirm(`Recall all files from "${locationName}" back to hot storage? This will start a background job.`)) {
+        return;
+    }
+    try {
+        const response = await authenticatedFetch(`/api/v1/storage/locations/${locationId}/recall`, {
+            method: 'POST',
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to start recall job');
+        }
+        const result = await response.json();
+        showNotification(
+            `Recall started for "${locationName}": ${result.files_queued} file(s) queued.`,
+            'success'
+        );
+    } catch (error) {
+        console.error('Error starting recall job:', error);
+        showNotification(`Failed to start recall: ${error.message}`, 'error');
     }
 }

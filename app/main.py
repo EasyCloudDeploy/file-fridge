@@ -47,6 +47,7 @@ from app.routers.api import files as api_files
 from app.routers.api import identity as api_identity
 from app.routers.api import migrations as api_migrations
 from app.routers.api import notifiers as api_notifiers
+from app.routers.api import settings as api_settings
 from app.routers.api import p2p as api_p2p
 from app.routers.api import paths as api_paths
 from app.routers.api import remote as api_remote
@@ -196,6 +197,7 @@ app.include_router(api_tag_rules.router, dependencies=[Depends(PermissionChecker
 app.include_router(api_storage.router, dependencies=[Depends(PermissionChecker("storage"))])
 app.include_router(api_storage.public_router)
 app.include_router(api_notifiers.router, dependencies=[Depends(PermissionChecker("notifiers"))])
+app.include_router(api_settings.router, dependencies=[Depends(PermissionChecker("notifiers"))])
 app.include_router(api_encryption.router, dependencies=[Depends(PermissionChecker("Encryption"))])
 app.include_router(api_migrations.router, dependencies=[Depends(PermissionChecker("migrations"))])
 app.include_router(api_users.router)  # Roles handled inside this router

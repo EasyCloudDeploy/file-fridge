@@ -113,9 +113,15 @@ class Settings(BaseSettings):
     # Override via P2P_LISTEN_PORT.
     p2p_listen_port: int = 9119
 
-    # Remote Instance URL (for inter-instance communication)
-    # Override via FF_INSTANCE_URL environment variable
     ff_instance_url: Optional[str] = None
+
+    # SMTP Server Settings (override via SMTP_HOST, SMTP_PORT, etc.)
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_user: Optional[str] = None
+    smtp_password: Optional[str] = None
+    smtp_sender: Optional[str] = None
+    smtp_use_tls: bool = True
 
     # Security settings for remote connections
     # Override via SIGNATURE_TIMESTAMP_TOLERANCE environment variable

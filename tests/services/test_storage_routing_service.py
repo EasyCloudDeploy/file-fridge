@@ -87,3 +87,47 @@ class TestStorageRoutingService:
         health = storage_routing_service.get_location_health(db_session, storage_location, 1)
         assert health["healthy"] is False
         assert health["reason"]  # backend validation returns a non-empty reason string
+
+    def test_get_location_health_with_transactions(self, db_session, storage_location):
+        """Test that only failed transactions are counted as errors in health/routing, verifying C1 fix."""
+        from app.models import FileTransactionHistory, FileInventory
+        from datetime import datetime, timezone
+
+        Path(storage_location.path).mkdir(parents=True, exist_ok=True)
+
+        # Create a FileInventory record first
+        file_record = FileInventory(
+            path_id=1,
+            file_path="/tmp/hot/test.txt",
+            file_size=1024,
+            file_mtime=datetime.now(tz=timezone.utc),
+            storage_type="hot",
+            status="active"
+        )
+        db_session.add(file_record)
+        db_session.commit()
+
+        # Add a successful transaction
+        tx_success = FileTransactionHistory(
+            file_id=file_record.id,
+            new_storage_location_id=storage_location.id,
+            success=True,
+            created_at=datetime.now(tz=timezone.utc),
+            transaction_type="freeze",
+        )
+        # Add a failed transaction
+        tx_fail = FileTransactionHistory(
+            file_id=file_record.id,
+            new_storage_location_id=storage_location.id,
+            success=False,
+            created_at=datetime.now(tz=timezone.utc),
+            transaction_type="freeze",
+        )
+        db_session.add_all([tx_success, tx_fail])
+        db_session.commit()
+
+        with patch("shutil.disk_usage", return_value=MagicMock(total=10**12, used=0, free=10**11)):
+            health = storage_routing_service.get_location_health(db_session, storage_location, 1)
+            # recent_errors should be 1 (only the failed one), NOT 2 (both)
+            assert health["recent_errors"] == 1
+

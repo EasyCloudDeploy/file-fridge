@@ -60,3 +60,15 @@ class ColdStorageBackend(Protocol):
     def delete(
         self, storage_reference: str, location: ColdStorageLocation
     ) -> Tuple[bool, Optional[str]]: ...
+
+    def download_file(
+        self,
+        storage_reference: str,
+        destination_path: Path,
+        location: ColdStorageLocation,
+    ) -> Tuple[bool, Optional[str]]:
+        """Download a file to a local path without removing it from the backend.
+
+        Returns (success, error).
+        """
+        ...

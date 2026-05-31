@@ -9,7 +9,15 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import Criteria, FileInventory, FileRecord, MonitoredPath, PinnedFile, StorageType
+from app.models import (
+    Criteria,
+    FileInventory,
+    FileRecord,
+    FileStatus,
+    MonitoredPath,
+    PinnedFile,
+    StorageType,
+)
 from app.schemas import DetailedStatistics, Statistics
 from app.services.stats_cleanup import stats_cleanup_service
 from app.services.storage_stats import get_file_counts_by_storage
@@ -71,22 +79,33 @@ def get_detailed_statistics(db: Annotated[Session, Depends(get_db)], days: Optio
     total_files_hot = storage_counts["hot_file_count"]
     total_files_cold = storage_counts["cold_file_count"]
 
+    # Use the same valid-status set as get_file_counts_by_storage so totals are consistent.
+    _active_statuses = [FileStatus.ACTIVE, FileStatus.MIGRATING, FileStatus.MOVED]
+
     total_size_hot = (
         db.query(func.sum(FileInventory.file_size))
-        .filter(FileInventory.storage_type == StorageType.HOT)
+        .filter(
+            FileInventory.storage_type == StorageType.HOT,
+            FileInventory.status.in_(_active_statuses),
+        )
         .scalar()
         or 0
     )
 
     total_size_cold = (
         db.query(func.sum(FileInventory.file_size))
-        .filter(FileInventory.storage_type == StorageType.COLD)
+        .filter(
+            FileInventory.storage_type == StorageType.COLD,
+            FileInventory.status.in_(_active_statuses),
+        )
         .scalar()
         or 0
     )
 
-    # Space saved (total moved to cold storage)
-    space_saved = total_size_moved
+    # Space saved = current cold storage size across all locations and paths.
+    # Using FileInventory (one record per file, current state) rather than FileRecord
+    # (append-only history) avoids double-counting files that were relocated cold→cold.
+    space_saved = total_size_cold
 
     # Average file size
     average_file_size = int(total_size_moved / total_files_moved) if total_files_moved > 0 else 0

@@ -12,15 +12,14 @@
             <a href="#accounts" class="list-group-item list-group-item-action active" data-section="accounts">
                 <i class="bi bi-person-circle me-2"></i>Accounts
             </a>
-            <a href="#remote-connections" class="list-group-item list-group-item-action"
-                data-section="remote-connections" id="nav-remote-connections">
-                <i class="bi bi-diagram-3 me-2"></i>P2P Network
-            </a>
             <a href="#encryption" class="list-group-item list-group-item-action" data-section="encryption">
                 <i class="bi bi-shield-lock me-2"></i>Encryption
             </a>
             <a href="#users" class="list-group-item list-group-item-action admin-only d-none" data-section="users">
                 <i class="bi bi-people me-2"></i>Users
+            </a>
+            <a href="#smtp" class="list-group-item list-group-item-action notifiers-only d-none" data-section="smtp">
+                <i class="bi bi-envelope-at me-2"></i>SMTP Server
             </a>
         </div>
     </div>
@@ -174,166 +173,6 @@
             </div>
         </div>
 
-        <!-- P2P Network Section -->
-        <div id="remote-connections-section" class="settings-section d-none">
-            <div id="p2p-setup-wizard" class="card mb-4 border-primary">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="mb-0"><i class="bi bi-magic me-2"></i>P2P Setup Wizard</h5>
-                    <span class="badge bg-primary">V2</span>
-                </div>
-                <div class="card-body">
-                    <p class="text-muted mb-3">Choose one setup path to get this instance onto a private P2P network.</p>
-                    <div class="btn-group mb-3 w-100" role="group" aria-label="P2P setup mode">
-                        <button type="button" class="btn btn-outline-primary active" id="wizard-choice-create">Create Network</button>
-                        <button type="button" class="btn btn-outline-primary" id="wizard-choice-join">Join Network</button>
-                    </div>
-
-                    <div id="p2p-wizard-create-pane">
-                        <form id="p2p-wizard-create-form" class="row g-3">
-                            <div class="col-md-6">
-                                <label for="p2p-wizard-listen-host" class="form-label">Listen IP/Host</label>
-                                <input class="form-control" id="p2p-wizard-listen-host" placeholder="127.0.0.1" value="0.0.0.0" required>
-                            </div>
-                            <div class="col-md-6">
-                                <label for="p2p-wizard-listen-port" class="form-label">Listen Port</label>
-                                <input class="form-control" id="p2p-wizard-listen-port" type="number" min="1" max="65535" placeholder="9119" value="9119" required>
-                            </div>
-                            <div class="col-12 d-flex justify-content-end">
-                                <button type="submit" class="btn btn-primary" id="p2p-wizard-create-btn">
-                                    <i class="bi bi-check-circle me-1"></i>Create Network
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-
-                    <div id="p2p-wizard-join-pane" class="d-none">
-                        <form id="p2p-wizard-join-form" class="row g-3">
-                            <div class="col-md-4">
-                                <label for="p2p-wizard-peer-host" class="form-label">Peer IP/Host</label>
-                                <input class="form-control" id="p2p-wizard-peer-host" placeholder="192.168.1.25" required>
-                            </div>
-                            <div class="col-md-3">
-                                <label for="p2p-wizard-peer-port" class="form-label">Peer Port</label>
-                                <input class="form-control" id="p2p-wizard-peer-port" type="number" min="1" max="65535" placeholder="8000" required>
-                            </div>
-                            <div class="col-md-5">
-                                <label for="p2p-wizard-psk" class="form-label">PSK</label>
-                                <input class="form-control font-monospace" id="p2p-wizard-psk" type="password" required>
-                            </div>
-                            <div class="col-12 d-flex justify-content-end">
-                                <button type="submit" class="btn btn-success" id="p2p-wizard-join-btn">
-                                    <i class="bi bi-plug me-1"></i>Join Network
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-
-                </div>
-            </div>
-
-            <div id="p2p-management" class="d-none">
-                <div class="card mb-4">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0"><i class="bi bi-activity me-2"></i>P2P Network Health</h5>
-                        <span class="badge text-bg-secondary" id="p2p-health-badge">UNKNOWN</span>
-                    </div>
-                    <div class="card-body">
-                        <div class="border rounded p-3 mb-3">
-                            <div class="fw-semibold mb-2"><i class="bi bi-broadcast me-1"></i>Connect New Peers</div>
-                            <div class="text-muted small mb-2">Use this endpoint when joining this instance from another File Fridge node.</div>
-                            <div class="row g-2">
-                                <div class="col-md-7">
-                                    <label for="p2p-connect-host" class="form-label small mb-1">Host/IP</label>
-                                    <div class="input-group input-group-sm">
-                                        <input type="text" class="form-control font-monospace" id="p2p-connect-host" readonly>
-                                        <button type="button" class="btn btn-outline-secondary" id="p2p-copy-connect-host-btn">Copy</button>
-                                    </div>
-                                </div>
-                                <div class="col-md-5">
-                                    <label for="p2p-connect-port" class="form-label small mb-1">Port</label>
-                                    <div class="input-group input-group-sm">
-                                        <input type="text" class="form-control font-monospace" id="p2p-connect-port" readonly>
-                                        <button type="button" class="btn btn-outline-secondary" id="p2p-copy-connect-port-btn">Copy</button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="row g-3">
-                            <div class="col-md-3">
-                                <div class="border rounded p-3 h-100">
-                                    <div class="text-muted small">Connected Peers</div>
-                                    <div class="h4 mb-0" id="p2p-stat-connected">0</div>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="border rounded p-3 h-100">
-                                    <div class="text-muted small">Degraded Peers</div>
-                                    <div class="h4 mb-0" id="p2p-stat-degraded">0</div>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="border rounded p-3 h-100">
-                                    <div class="text-muted small">Remote Cached Files</div>
-                                    <div class="h4 mb-0" id="p2p-stat-remote-files">0</div>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <div class="border rounded p-3 h-100">
-                                    <div class="text-muted small">Backend</div>
-                                    <div class="h6 mb-0 text-uppercase" id="p2p-stat-backend">unknown</div>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="mt-3 d-flex justify-content-end gap-2">
-                            <button type="button" class="btn btn-outline-warning" id="p2p-regenerate-psk-btn">
-                                <i class="bi bi-key me-1"></i>Generate New PSK
-                            </button>
-                            <button type="button" class="btn btn-outline-secondary" id="sync-p2p-peers-btn">
-                                <i class="bi bi-arrow-repeat me-1"></i>Sync Peers
-                            </button>
-                            <button type="button" class="btn btn-outline-danger" id="unjoin-p2p-network-btn">
-                                <i class="bi bi-plug-fill me-1"></i>Unjoin Network
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0"><i class="bi bi-people me-2"></i>P2P Peers</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Endpoint</th>
-                                        <th>Status</th>
-                                        <th>Last Seen</th>
-                                        <th class="text-end">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="p2p-peers-list">
-                                    <tr><td colspan="5" class="text-muted text-center py-3">Loading peers...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div id="p2p-generated-psk-panel" class="alert alert-warning mt-3 d-none" role="alert">
-                <h6 class="alert-heading mb-2">Save this PSK now</h6>
-                <p class="mb-2 small">Share this PSK only with trusted File Fridge instances that should join your private network.</p>
-                <div class="input-group">
-                    <input type="text" class="form-control font-monospace" id="p2p-generated-psk-value" readonly>
-                    <button class="btn btn-outline-secondary" type="button" id="p2p-copy-generated-psk-btn">
-                        <i class="bi bi-clipboard"></i> Copy
-                    </button>
-                </div>
-            </div>
-        </div>
 
         <!-- Encryption Section -->
         <div id="encryption-section" class="settings-section d-none">
@@ -412,6 +251,113 @@
                                 </tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SMTP Server Section -->
+        <div id="smtp-section" class="settings-section d-none">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="bi bi-envelope-at me-2"></i>Global SMTP Server Configuration
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <!-- Environment Warning Alert -->
+                    <div id="smtp-env-warning" class="alert alert-warning d-none" role="alert">
+                        <div class="d-flex">
+                            <i class="bi bi-lock-fill me-2 fs-5"></i>
+                            <div>
+                                <strong>System Managed:</strong> SMTP settings are configured via server environment variables (`SMTP_HOST`, `SMTP_PORT`, etc.) and cannot be changed here.
+                            </div>
+                        </div>
+                    </div>
+
+                    <form id="smtp-config-form">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label for="global-smtp-host" class="form-label">SMTP Host</label>
+                                    <input type="text" class="form-control" id="global-smtp-host" name="smtp_host"
+                                        placeholder="e.g., smtp.gmail.com" required>
+                                    <div class="form-text">SMTP server hostname</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label for="global-smtp-port" class="form-label">Port</label>
+                                    <input type="number" class="form-control" id="global-smtp-port" name="smtp_port"
+                                        placeholder="587" min="1" max="65535" required>
+                                    <div class="form-text">Default: 587</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="global-smtp-user" class="form-label">Username</label>
+                                    <input type="text" class="form-control" id="global-smtp-user" name="smtp_user"
+                                        placeholder="Username for authentication (optional)">
+                                    <div class="form-text">Leave blank if not required</div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="global-smtp-password" class="form-label">Password</label>
+                                    <input type="password" class="form-control" id="global-smtp-password" name="smtp_password"
+                                        placeholder="Password for authentication (optional)">
+                                    <div class="form-text">Leave blank if not required. Character indicator hidden for security.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label for="global-smtp-sender" class="form-label">From Address</label>
+                                    <input type="email" class="form-control" id="global-smtp-sender" name="smtp_sender"
+                                        placeholder="e.g., notifications@example.com" required>
+                                    <div class="form-text">Email address to send notifications from</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label d-block">Encryption</label>
+                                    <div class="form-check mt-2">
+                                        <input type="checkbox" class="form-check-input" id="global-smtp-use-tls" name="smtp_use_tls" checked>
+                                        <label class="form-check-label" for="global-smtp-use-tls">
+                                            Use TLS
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-3">
+                            <button type="submit" class="btn btn-primary" id="save-smtp-btn">
+                                <span id="save-smtp-text">
+                                    <i class="bi bi-check-circle me-2"></i>Save SMTP Settings
+                                </span>
+                                <span id="save-smtp-spinner" class="d-none">
+                                    <span class="spinner-border spinner-border-sm me-2" role="status"
+                                        aria-hidden="true"></span>
+                                    Saving...
+                                </span>
+                            </button>
+                        </div>
+                    </form>
+
+                    <div id="smtp-success-message" class="alert alert-success mt-3 d-none" role="alert">
+                        <i class="bi bi-check-circle me-2"></i>
+                        <span id="smtp-success-text"></span>
+                    </div>
+
+                    <div id="smtp-error-message" class="alert alert-danger mt-3 d-none" role="alert">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <span id="smtp-error-text"></span>
                     </div>
                 </div>
             </div>
@@ -531,5 +477,4 @@
 
 {% block extra_scripts %}
 <script src="/static/js/settings.js"></script>
-<script src="/static/js/p2p_settings.js"></script>
 {% endblock %}

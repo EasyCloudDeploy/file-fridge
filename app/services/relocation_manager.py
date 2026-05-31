@@ -375,44 +375,45 @@ class RelocationTaskManager:
         """
         Create a new relocation task.
         """
-        db = SessionLocal()
-        try:
-            # Check if there's already an active task for this file
-            existing_task = (
-                db.query(RelocationTask)
-                .filter(
-                    RelocationTask.inventory_id == inventory_id,
-                    RelocationTask.status.in_(
-                        [RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING]
-                    ),
+        with self._lock:
+            db = SessionLocal()
+            try:
+                # Check if there's already an active task for this file
+                existing_task = (
+                    db.query(RelocationTask)
+                    .filter(
+                        RelocationTask.inventory_id == inventory_id,
+                        RelocationTask.status.in_(
+                            [RelocationTaskStatus.PENDING, RelocationTaskStatus.RUNNING]
+                        ),
+                    )
+                    .first()
                 )
-                .first()
-            )
 
-            if existing_task:
-                msg = "A relocation task is already in progress for this file"
-                raise ValueError(msg)
+                if existing_task:
+                    msg = "A relocation task is already in progress for this file"
+                    raise ValueError(msg)
 
-            task_id = str(uuid.uuid4())
-            task = RelocationTask(
-                task_id=task_id,
-                inventory_id=inventory_id,
-                file_path=file_path,
-                source_location_id=source_location_id,
-                source_location_name=source_location_name,
-                target_location_id=target_location_id,
-                target_location_name=target_location_name,
-                status=RelocationTaskStatus.PENDING,
-                bytes_total=file_size,
-            )
+                task_id = str(uuid.uuid4())
+                task = RelocationTask(
+                    task_id=task_id,
+                    inventory_id=inventory_id,
+                    file_path=file_path,
+                    source_location_id=source_location_id,
+                    source_location_name=source_location_name,
+                    target_location_id=target_location_id,
+                    target_location_name=target_location_name,
+                    status=RelocationTaskStatus.PENDING,
+                    bytes_total=file_size,
+                )
 
-            db.add(task)
-            db.commit()
+                db.add(task)
+                db.commit()
 
-            logger.info(f"Created relocation task {task_id}: {file_path} -> {target_location_name}")
-            return task_id
-        finally:
-            db.close()
+                logger.info(f"Created relocation task {task_id}: {file_path} -> {target_location_name}")
+                return task_id
+            finally:
+                db.close()
 
     def get_task(self, task_id: str) -> Optional[dict]:
         """Get task status by task ID."""

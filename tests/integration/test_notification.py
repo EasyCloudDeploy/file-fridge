@@ -65,7 +65,7 @@ async def test_dispatch_event_email_success(
     """Test dispatching an event to an email notifier successfully."""
     notification_service = NotificationService()
     event_data = ScanCompletedData(
-        path_id=1, path_name="test_path", files_moved=5, bytes_saved=1024, scan_duration_seconds=10.5
+        path_id=1, path_name="test_path", files_moved=5, bytes_moved=1024, bytes_saved=1024, scan_duration_seconds=10.5
     )
 
     await notification_service.dispatch_event(db_session, NotificationEventType.SCAN_COMPLETED, event_data)
@@ -111,7 +111,7 @@ async def test_dispatch_event_email_failure(
     """Test dispatching an event to an email notifier that fails."""
     notification_service = NotificationService()
     event_data = ScanCompletedData(
-        path_id=1, path_name="test_path", files_moved=5, bytes_saved=1024, scan_duration_seconds=10.5
+        path_id=1, path_name="test_path", files_moved=5, bytes_moved=1024, bytes_saved=1024, scan_duration_seconds=10.5
     )
 
     await notification_service.dispatch_event(db_session, NotificationEventType.SCAN_COMPLETED, event_data)

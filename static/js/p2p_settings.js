@@ -97,7 +97,7 @@
         try {
             const peers = await apiJson('/api/v1/p2p/peers');
             if (!Array.isArray(peers) || peers.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="text-muted text-center py-3">No peers joined yet.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-muted text-center py-3">No peers joined yet.</td></tr>';
                 return [];
             }
 
@@ -111,6 +111,7 @@
                         <td>${escapeHtml(peer.peer_name || peer.peer_id)}</td>
                         <td><code>${escapeHtml(`${peer.host}:${peer.port}`)}</code></td>
                         <td><span class="badge ${badgeClass}">${escapeHtml(status)}</span></td>
+                        <td>${peer.file_count ?? 0}</td>
                         <td>${escapeHtml(toLocalDate(peer.last_seen_at))}</td>
                         <td class="text-end">
                             <button type="button" class="btn btn-sm btn-outline-danger p2p-unjoin-peer-btn" data-peer-id="${Number(peer.id)}">
@@ -132,7 +133,7 @@
             return peers;
         } catch (error) {
             console.error('Failed to load peers:', error);
-            tbody.innerHTML = '<tr><td colspan="5" class="text-danger text-center py-3">Failed to load peers.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-danger text-center py-3">Failed to load peers.</td></tr>';
             return [];
         }
     }
@@ -142,7 +143,7 @@
             const stats = await apiJson('/api/v1/p2p/stats');
             document.getElementById('p2p-stat-connected').textContent = String(stats.connected_peers || 0);
             document.getElementById('p2p-stat-degraded').textContent = String(stats.degraded_peers || 0);
-            document.getElementById('p2p-stat-remote-files').textContent = String(stats.remote_cached_files || 0);
+            document.getElementById('p2p-stat-cluster-files').textContent = String(stats.cluster_file_count || 0);
             document.getElementById('p2p-stat-backend').textContent = String(stats.backend || 'unknown');
 
             const health = String(stats.health || 'UNKNOWN').toUpperCase();
@@ -173,6 +174,57 @@
         if (portInput) portInput.value = port;
     }
 
+    async function loadCurrentPsk() {
+        const pskInput = document.getElementById('p2p-current-psk');
+        const unavailableNote = document.getElementById('p2p-psk-unavailable-note');
+        if (!pskInput) return;
+
+        try {
+            const data = await apiJson('/api/v1/p2p/network/psk');
+            if (data.available && data.psk) {
+                pskInput.value = data.psk;
+                pskInput.placeholder = '';
+                if (unavailableNote) unavailableNote.style.display = 'none';
+            } else {
+                pskInput.value = '';
+                pskInput.placeholder = 'Not available';
+                if (unavailableNote) unavailableNote.style.display = '';
+            }
+        } catch (error) {
+            console.error('Failed to load current PSK:', error);
+            pskInput.value = '';
+            pskInput.placeholder = 'Failed to load';
+        }
+    }
+
+    function showRotationResult(payload) {
+        const panel = document.getElementById('p2p-rotation-result-panel');
+        const updatedRow = document.getElementById('p2p-rotation-updated-row');
+        const offlineRow = document.getElementById('p2p-rotation-offline-row');
+        if (!panel) return;
+
+        if (updatedRow) {
+            const updated = payload.updated_peers || [];
+            updatedRow.innerHTML = updated.length > 0
+                ? `<span class="text-success"><i class="bi bi-check-circle me-1"></i>Updated: ${escapeHtml(updated.join(', '))}</span>`
+                : '<span class="text-muted">No connected peers to update.</span>';
+        }
+        if (offlineRow) {
+            const offline = payload.offline_peers || [];
+            offlineRow.innerHTML = offline.length > 0
+                ? `<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Offline (must rejoin manually): ${escapeHtml(offline.join(', '))}</span>`
+                : '';
+        }
+
+        panel.classList.remove('d-none', 'alert-success', 'alert-warning');
+        const hasOffline = (payload.offline_peers || []).length > 0;
+        panel.classList.add(hasOffline ? 'alert-warning' : 'alert-success');
+    }
+
+    function hideRotationResult() {
+        document.getElementById('p2p-rotation-result-panel')?.classList.add('d-none');
+    }
+
     function showGeneratedPsk(psk) {
         const panel = document.getElementById('p2p-generated-psk-panel');
         const input = document.getElementById('p2p-generated-psk-value');
@@ -195,6 +247,7 @@
         if (config || peers.length > 0) {
             showManagementMode();
             updateJoinEndpointDisplay();
+            await loadCurrentPsk();
         } else {
             showWizardMode();
         }
@@ -304,21 +357,32 @@
     }
 
     async function regeneratePsk() {
-        if (!confirm('Generate a new PSK? Existing peers will be disconnected and must rejoin using the new PSK.')) {
-            return;
-        }
+        const confirmed = await showConfirmModal({
+            title: 'Rotate PSK',
+            message: 'Generate a new PSK? Online peers will be updated automatically. Offline peers will be disconnected and must rejoin with the new PSK.',
+            confirmText: 'Rotate PSK',
+            dangerous: true
+        });
+        if (!confirmed) return;
 
         const btn = document.getElementById('p2p-regenerate-psk-btn');
         const originalText = btn ? btn.innerHTML : '';
         try {
             if (btn) {
                 btn.disabled = true;
-                btn.innerHTML = '<span class=\"spinner-border spinner-border-sm me-1\"></span>Generating...';
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Rotating...';
             }
 
+            hideRotationResult();
             const payload = await apiJson('/api/v1/p2p/network/psk/regenerate', { method: 'POST' });
             showGeneratedPsk(payload.psk || '');
-            toastSuccess('New PSK generated. Existing peers were disconnected.');
+            showRotationResult(payload);
+            const offlineCount = (payload.offline_peers || []).length;
+            if (offlineCount > 0) {
+                toastSuccess(`PSK rotated. ${offlineCount} offline peer(s) must rejoin manually.`);
+            } else {
+                toastSuccess('PSK rotated. All peers updated.');
+            }
             await refreshView();
         } catch (error) {
             console.error('Failed to regenerate psk:', error);
@@ -434,6 +498,19 @@
         document.getElementById('p2p-copy-generated-psk-btn')?.addEventListener('click', () => { void copyGeneratedPsk(); });
         document.getElementById('p2p-copy-connect-host-btn')?.addEventListener('click', () => { void copyValue('p2p-connect-host', 'Host'); });
         document.getElementById('p2p-copy-connect-port-btn')?.addEventListener('click', () => { void copyValue('p2p-connect-port', 'Port'); });
+        document.getElementById('p2p-copy-current-psk-btn')?.addEventListener('click', () => { void copyValue('p2p-current-psk', 'PSK'); });
+        document.getElementById('p2p-reveal-psk-btn')?.addEventListener('click', () => {
+            const input = document.getElementById('p2p-current-psk');
+            const icon = document.querySelector('#p2p-reveal-psk-btn i');
+            if (!input) return;
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon?.classList.replace('bi-eye', 'bi-eye-slash');
+            } else {
+                input.type = 'password';
+                icon?.classList.replace('bi-eye-slash', 'bi-eye');
+            }
+        });
         document.getElementById('sync-p2p-peers-btn')?.addEventListener('click', () => { void syncPeers(); });
         document.getElementById('p2p-regenerate-psk-btn')?.addEventListener('click', () => { void regeneratePsk(); });
         document.getElementById('unjoin-p2p-network-btn')?.addEventListener('click', () => { void unjoinNetwork(); });
