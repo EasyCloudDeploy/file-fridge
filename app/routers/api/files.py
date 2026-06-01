@@ -393,6 +393,7 @@ def _parse_tag_ids(tag_ids: Optional[str]) -> Optional[List[int]]:
 def parse_google_search(query_str: Optional[str]) -> dict:
     """Parses a Google-like search query string into structured parameters securely."""
     import re
+
     result = {
         "positive_terms": [],
         "negative_terms": [],
@@ -410,9 +411,9 @@ def parse_google_search(query_str: Optional[str]) -> dict:
 
     # 1. Extract operators using regex
     operator_pattern = re.compile(
-        r'\b(ext|extension|filetype|mime|status|pinned|has_checksum|size|path|inpath):'
+        r"\b(ext|extension|filetype|mime|status|pinned|has_checksum|size|path|inpath):"
         r'(?:"([^"]*)"|\'([^\']*)\'|([^\s]+))',
-        re.IGNORECASE
+        re.IGNORECASE,
     )
 
     remaining_query = query_str
@@ -447,7 +448,7 @@ def parse_google_search(query_str: Optional[str]) -> dict:
                 val_clean = val_clean[1:]
 
             size_bytes = None
-            size_match = re.match(r'^(\d+)(kb|mb|gb|b)?$', val_clean)
+            size_match = re.match(r"^(\d+)(kb|mb|gb|b)?$", val_clean)
             if size_match:
                 num = int(size_match.group(1))
                 unit = size_match.group(2)
@@ -477,7 +478,6 @@ def parse_google_search(query_str: Optional[str]) -> dict:
     return result
 
 
-
 def _apply_filters(
     query: "Query",
     db: Session,
@@ -494,48 +494,48 @@ def _apply_filters(
         query = query.filter(FileInventory.status == criteria.file_status)
     if criteria.search:
         search_params = parse_google_search(criteria.search)
-        
+
         # Apply positive terms
         for term in search_params.get("positive_terms", []):
             escaped_term = escape_like_string(term)
             query = query.filter(FileInventory.file_path.ilike(f"%{escaped_term}%", escape="\\"))
-            
+
         # Apply negative terms
         for term in search_params.get("negative_terms", []):
             escaped_term = escape_like_string(term)
             query = query.filter(~FileInventory.file_path.ilike(f"%{escaped_term}%", escape="\\"))
-            
+
         # Apply operators securely
         if search_params.get("ext"):
             ext = search_params["ext"]
             if not ext.startswith("."):
                 ext = f".{ext}"
             query = query.filter(FileInventory.file_extension == ext.lower())
-            
+
         if search_params.get("mime"):
             escaped_mime = escape_like_string(search_params["mime"])
             query = query.filter(FileInventory.mime_type.ilike(f"%{escaped_mime}%", escape="\\"))
-            
+
         if search_params.get("status"):
             query = query.filter(FileInventory.status == search_params["status"])
-            
+
         if search_params.get("pinned") is not None:
             pinned_subquery = db.query(PinnedFile.file_path)
             if search_params["pinned"]:
                 query = query.filter(FileInventory.file_path.in_(pinned_subquery))
             else:
                 query = query.filter(FileInventory.file_path.notin_(pinned_subquery))
-                
+
         if search_params.get("has_checksum") is not None:
             if search_params["has_checksum"]:
                 query = query.filter(FileInventory.checksum.isnot(None))
             else:
                 query = query.filter(FileInventory.checksum.is_(None))
-                
+
         if search_params.get("path"):
             escaped_path = escape_like_string(search_params["path"])
             query = query.filter(FileInventory.file_path.ilike(f"%{escaped_path}%", escape="\\"))
-            
+
         if search_params.get("size_val") is not None:
             val = search_params["size_val"]
             op = search_params["size_op"]
@@ -799,7 +799,7 @@ def list_files(
                     # Filter local files that also exist on the remote peer by matching checksums
                     peer_checksums_subquery = db.query(RemoteSharedFileCache.checksum).filter(
                         RemoteSharedFileCache.peer_id == filter_criteria.remote_peer_id,
-                        RemoteSharedFileCache.checksum.isnot(None)
+                        RemoteSharedFileCache.checksum.isnot(None),
                     )
                     query = query.filter(FileInventory.checksum.in_(peer_checksums_subquery))
 
@@ -830,11 +830,17 @@ def list_files(
                 if cursor:
                     try:
                         cursor_data = json.loads(base64.b64decode(cursor).decode("utf-8"))
-                        query = _apply_cursor_pagination(query, sort_field, cursor_data, is_descending)
+                        query = _apply_cursor_pagination(
+                            query, sort_field, cursor_data, is_descending
+                        )
                     except (ValueError, json.JSONDecodeError) as e:
                         yield (
                             json.dumps(
-                                {"type": "error", "message": f"Invalid cursor: {e}", "partial_count": 0}
+                                {
+                                    "type": "error",
+                                    "message": f"Invalid cursor: {e}",
+                                    "partial_count": 0,
+                                }
                             )
                             + "\n"
                         )
@@ -852,7 +858,9 @@ def list_files(
                     files_list = files_list[:page_size]
 
                 next_cursor = (
-                    _generate_next_cursor(files_list, sort_by, valid_sort_fields) if has_more else None
+                    _generate_next_cursor(files_list, sort_by, valid_sort_fields)
+                    if has_more
+                    else None
                 )
 
             # Metadata and Context
@@ -896,25 +904,33 @@ def list_files(
                     )
                 if filter_criteria.search:
                     search_params = parse_google_search(filter_criteria.search)
-                    
+
                     # Apply positive terms
                     for term in search_params.get("positive_terms", []):
                         escaped_term = escape_like_string(term)
                         remote_query = remote_query.filter(
                             or_(
-                                RemoteSharedFileCache.file_path.ilike(f"%{escaped_term}%", escape="\\"),
-                                RemoteSharedFileCache.display_file_path.ilike(f"%{escaped_term}%", escape="\\"),
+                                RemoteSharedFileCache.file_path.ilike(
+                                    f"%{escaped_term}%", escape="\\"
+                                ),
+                                RemoteSharedFileCache.display_file_path.ilike(
+                                    f"%{escaped_term}%", escape="\\"
+                                ),
                             )
                         )
-                        
+
                     # Apply negative terms
                     for term in search_params.get("negative_terms", []):
                         escaped_term = escape_like_string(term)
                         remote_query = remote_query.filter(
-                            ~RemoteSharedFileCache.file_path.ilike(f"%{escaped_term}%", escape="\\"),
-                            ~RemoteSharedFileCache.display_file_path.ilike(f"%{escaped_term}%", escape="\\"),
+                            ~RemoteSharedFileCache.file_path.ilike(
+                                f"%{escaped_term}%", escape="\\"
+                            ),
+                            ~RemoteSharedFileCache.display_file_path.ilike(
+                                f"%{escaped_term}%", escape="\\"
+                            ),
                         )
-                        
+
                     # Apply operators securely
                     if search_params.get("ext"):
                         ext = search_params["ext"]
@@ -923,31 +939,41 @@ def list_files(
                         remote_query = remote_query.filter(
                             RemoteSharedFileCache.file_extension == ext.lower()
                         )
-                        
+
                     if search_params.get("mime"):
                         escaped_mime = escape_like_string(search_params["mime"])
                         remote_query = remote_query.filter(
                             RemoteSharedFileCache.mime_type.ilike(f"%{escaped_mime}%", escape="\\")
                         )
-                        
+
                     if search_params.get("path"):
                         escaped_path = escape_like_string(search_params["path"])
                         remote_query = remote_query.filter(
                             or_(
-                                RemoteSharedFileCache.file_path.ilike(f"%{escaped_path}%", escape="\\"),
-                                RemoteSharedFileCache.display_file_path.ilike(f"%{escaped_path}%", escape="\\"),
+                                RemoteSharedFileCache.file_path.ilike(
+                                    f"%{escaped_path}%", escape="\\"
+                                ),
+                                RemoteSharedFileCache.display_file_path.ilike(
+                                    f"%{escaped_path}%", escape="\\"
+                                ),
                             )
                         )
-                        
+
                     if search_params.get("size_val") is not None:
                         val = search_params["size_val"]
                         op = search_params["size_op"]
                         if op == ">":
-                            remote_query = remote_query.filter(RemoteSharedFileCache.file_size > val)
+                            remote_query = remote_query.filter(
+                                RemoteSharedFileCache.file_size > val
+                            )
                         elif op == "<":
-                            remote_query = remote_query.filter(RemoteSharedFileCache.file_size < val)
+                            remote_query = remote_query.filter(
+                                RemoteSharedFileCache.file_size < val
+                            )
                         else:
-                            remote_query = remote_query.filter(RemoteSharedFileCache.file_size == val)
+                            remote_query = remote_query.filter(
+                                RemoteSharedFileCache.file_size == val
+                            )
                 if filter_criteria.extension:
                     ext = (
                         filter_criteria.extension
@@ -964,10 +990,10 @@ def list_files(
                     )
 
                 remote_rows = remote_query.all()
-                aggregated_remote_rows: list[tuple[RemoteSharedFileCache, P2PPeer, list[str], int]] = []
-                grouped_remote_rows: dict[
-                    tuple[str, str], dict[str, object]
-                ] = {}
+                aggregated_remote_rows: list[
+                    tuple[RemoteSharedFileCache, P2PPeer, list[str], int]
+                ] = []
+                grouped_remote_rows: dict[tuple[str, str], dict[str, object]] = {}
                 for remote_file, peer in remote_rows:
                     dedupe_key = _build_remote_dedupe_key(remote_file)
                     existing_group = grouped_remote_rows.get(dedupe_key)
@@ -985,12 +1011,9 @@ def list_files(
                         current_latest.last_announced_at if current_latest else None
                     )
                     remote_last_announced = remote_file.last_announced_at
-                    if (
-                        remote_last_announced
-                        and (
-                            current_latest_announced is None
-                            or remote_last_announced > current_latest_announced
-                        )
+                    if remote_last_announced and (
+                        current_latest_announced is None
+                        or remote_last_announced > current_latest_announced
                     ):
                         existing_group["remote_file"] = remote_file
                         existing_group["peer"] = peer
@@ -1012,11 +1035,16 @@ def list_files(
                 # Hide remote rows that represent files already present locally on this page.
                 # The local row will carry the peer count and peer list metadata.
                 local_checksum_keys = {
-                    str(local_file.checksum).lower() for local_file in files_list if local_file.checksum
+                    str(local_file.checksum).lower()
+                    for local_file in files_list
+                    if local_file.checksum
                 }
                 visible_remote_rows = []
                 for remote_file, peer, peer_names, peer_count in aggregated_remote_rows:
-                    if remote_file.checksum and str(remote_file.checksum).lower() in local_checksum_keys:
+                    if (
+                        remote_file.checksum
+                        and str(remote_file.checksum).lower() in local_checksum_keys
+                    ):
                         continue
                     visible_remote_rows.append((remote_file, peer, peer_names, peer_count))
 
@@ -1073,13 +1101,19 @@ def list_files(
                 for local_file in files_list:
                     local_peer_availability[local_file.id] = set()
                     if local_file.checksum:
-                        checksum_to_local_ids.setdefault(local_file.checksum, set()).add(local_file.id)
+                        checksum_to_local_ids.setdefault(local_file.checksum, set()).add(
+                            local_file.id
+                        )
                     if local_file.file_path:
-                        path_to_local_ids.setdefault(str(local_file.file_path), set()).add(local_file.id)
+                        path_to_local_ids.setdefault(str(local_file.file_path), set()).add(
+                            local_file.id
+                        )
 
                 match_clauses = []
                 if checksum_to_local_ids:
-                    match_clauses.append(RemoteSharedFileCache.checksum.in_(checksum_to_local_ids.keys()))
+                    match_clauses.append(
+                        RemoteSharedFileCache.checksum.in_(checksum_to_local_ids.keys())
+                    )
                 if path_to_local_ids:
                     match_clauses.extend(
                         [
@@ -1103,7 +1137,9 @@ def list_files(
                                 checksum_to_local_ids.get(remote_file.checksum, set())
                             )
                         if remote_file.file_path:
-                            matched_local_ids.update(path_to_local_ids.get(remote_file.file_path, set()))
+                            matched_local_ids.update(
+                                path_to_local_ids.get(remote_file.file_path, set())
+                            )
                         if remote_file.display_file_path:
                             matched_local_ids.update(
                                 path_to_local_ids.get(remote_file.display_file_path, set())
@@ -1168,7 +1204,9 @@ def list_files(
                     else:
                         network_peer_names = peer_names
                     effective_peer_names = network_peer_names if network_peer_names else peer_names
-                    effective_peer_count = len(effective_peer_names) if effective_peer_names else peer_count
+                    effective_peer_count = (
+                        len(effective_peer_names) if effective_peer_names else peer_count
+                    )
                     file_dict = _serialize_remote_cached_file(
                         remote_file,
                         peer,

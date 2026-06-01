@@ -1,7 +1,6 @@
 """Service for handling cold storage path migrations."""
 
 import logging
-import shutil
 from pathlib import Path
 from typing import Dict, Tuple
 
@@ -126,8 +125,9 @@ class PathMigrationService:
 
                     # Move file
                     logger.debug(f"Moving {old_file} -> {new_file}")
-                    from app.services.file_mover import FileMover
                     from app.models import OperationType
+                    from app.services.file_mover import FileMover
+
                     success, error, _ = FileMover.move_with_rollback(
                         source=old_file,
                         destination=new_file,

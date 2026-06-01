@@ -356,7 +356,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
             headers=self._auth_headers(location),
             timeout=30.0,
         )
-        response.raise_for_status()
+        self._raise_for_status_with_google_detail(response, "Google Drive file listing failed")
         return response.json()
 
     def _list_app_files_page(

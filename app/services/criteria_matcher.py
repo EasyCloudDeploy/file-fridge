@@ -110,7 +110,9 @@ class CriteriaMatcher:
                     used_source = "atime (newer than Last Open)"
             else:
                 atime = max(stat_info.st_atime, stat_info.st_mtime, stat_info.st_ctime)
-                used_source = "macOS Last Open (never opened - fallback to max of atime/mtime/ctime)"
+                used_source = (
+                    "macOS Last Open (never opened - fallback to max of atime/mtime/ctime)"
+                )
 
         logger.debug(
             f"File {file_path}: Final atime for criteria check: "

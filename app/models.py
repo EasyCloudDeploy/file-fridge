@@ -752,7 +752,7 @@ class InstanceMetadata(Base):
         String, nullable=True
     )  # Instance URL for remote connections (fallback if env var not set)
     instance_name = Column(String, nullable=True)  # Custom instance name
-    
+
     # Global SMTP settings (database fallback)
     smtp_host = Column(String, nullable=True)
     smtp_port = Column(Integer, nullable=True, default=587)

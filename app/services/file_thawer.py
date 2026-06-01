@@ -52,7 +52,9 @@ class FileThawer:
             os.utime(str(final_destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
             source.unlink()
         except Exception as e:
-            logger.error("Failed to copy metadata or remove source in staged thaw finalization: %s", e)
+            logger.error(
+                "Failed to copy metadata or remove source in staged thaw finalization: %s", e
+            )
             raise
 
     @staticmethod

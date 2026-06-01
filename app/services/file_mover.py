@@ -29,14 +29,18 @@ def resilient_unlink(path: Path) -> None:
         path.unlink()
 
 
-def resilient_copy(source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None) -> None:
+def resilient_copy(
+    source: Path, destination: Path, progress_callback: Optional[Callable[[int], None]] = None
+) -> None:
     """Resiliently copy a file with retries, exponential backoff, and clean destination recreation."""
+
     @retry_with_backoff(max_attempts=3, allowed_exceptions=(OSError,))
     def _do_copy():
         if destination.exists():
             with contextlib.suppress(OSError):
                 destination.unlink()
         _copy_with_progress(source, destination, progress_callback)
+
     _do_copy()
 
 
@@ -401,7 +405,9 @@ def move_with_rollback(
             symlink_target = translate_path_for_symlink(str(destination))
             source.symlink_to(symlink_target)
         except OSError as e:
-            logger.error("Failed to create symlink at %s pointing to %s: %s", source, destination, e)
+            logger.error(
+                "Failed to create symlink at %s pointing to %s: %s", source, destination, e
+            )
             try:
                 resilient_copy(destination, actual_source)
             except Exception as restore_err:
