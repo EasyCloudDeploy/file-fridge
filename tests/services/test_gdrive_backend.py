@@ -9,7 +9,9 @@ from app.services.cold_storage_backends.gdrive_backend import GoogleDriveColdSto
 @pytest.mark.unit
 class TestGoogleDriveColdStorageBackend:
     @respx.mock
-    def test_list_files_page_error_surfaces_google_detail(self, monkeypatch):
+    def test_list_files_page_error_surfaces_google_detail(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that a failure during file listing correctly raises RuntimeError with Google details."""
         backend = GoogleDriveColdStorageBackend()
 
@@ -62,3 +64,75 @@ class TestGoogleDriveColdStorageBackend:
 
         assert "Google Drive file listing failed" in str(exc_info.value)
         assert "The user does not have sufficient permissions for this file." in str(exc_info.value)
+
+    @respx.mock
+    def test_exists_returns_false_on_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that exists() returns False when Google Drive API returns 404."""
+        backend = GoogleDriveColdStorageBackend()
+
+        location = ColdStorageLocation(
+            id=999,
+            name="Google Drive Test",
+            path="gdrive://test-folder",
+            backend_type=ColdStorageBackendType.GDRIVE,
+            operation_mode=OperationType.MOVE,
+        )
+        location.set_backend_config(
+            {
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "refresh_token": "refresh-token",
+                "folder_id": "test-folder-id",
+            }
+        )
+
+        monkeypatch.setattr(backend, "_get_access_token", lambda _loc: "dummy-access-token")
+
+        file_id = "test-file-id"
+        respx.get(f"https://www.googleapis.com/drive/v3/files/{file_id}").mock(
+            return_value=httpx.Response(404)
+        )
+
+        ref = "gdrive://test-folder/test-file-id"
+        assert backend.exists(ref, location) is False
+
+    @respx.mock
+    def test_exists_raises_on_non_404(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Test that exists() propagates the error when a non-404 error is returned."""
+        backend = GoogleDriveColdStorageBackend()
+
+        location = ColdStorageLocation(
+            id=999,
+            name="Google Drive Test",
+            path="gdrive://test-folder",
+            backend_type=ColdStorageBackendType.GDRIVE,
+            operation_mode=OperationType.MOVE,
+        )
+        location.set_backend_config(
+            {
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "refresh_token": "refresh-token",
+                "folder_id": "test-folder-id",
+            }
+        )
+
+        monkeypatch.setattr(backend, "_get_access_token", lambda _loc: "dummy-access-token")
+
+        file_id = "test-file-id"
+        error_json = {
+            "error": {
+                "code": 500,
+                "message": "Internal Server Error",
+            }
+        }
+        respx.get(f"https://www.googleapis.com/drive/v3/files/{file_id}").mock(
+            return_value=httpx.Response(500, json=error_json)
+        )
+
+        ref = "gdrive://test-folder/test-file-id"
+        with pytest.raises(RuntimeError) as exc_info:
+            backend.exists(ref, location)
+
+        assert "Google Drive existence check failed" in str(exc_info.value)
+        assert "Internal Server Error" in str(exc_info.value)
