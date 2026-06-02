@@ -13,6 +13,7 @@ from app.models import (
     Criteria,
     CriterionType,
     FileInventory,
+    FileRecord,
     FileStatus,
     MonitoredPath,
     Operator,
@@ -20,6 +21,7 @@ from app.models import (
     ScanStatus,
     StorageType,
 )
+from app.services.cold_storage_backends import get_backend
 from app.services.file_workflow_service import FileWorkflowService
 
 
@@ -1175,6 +1177,162 @@ def test_record_file_in_db_legacy_path(monitored_path, db_session, tmp_path):
     assert record is not None
     assert record.original_path == str(hot_file)
     assert record.cold_storage_path == str(dest_file)
+
+
+class MockRemoteBackend:
+    def backend_name(self) -> str:
+        return "gdrive"
+
+    def build_reference(self, location, path) -> str:
+        return f"gdrive://test-folder/{path}"
+
+    def list_managed_files(self, location, page_size, page_token) -> dict:
+        return {"files": []}
+
+    def list_all_folder_files(self, location, page_size, page_token) -> dict:
+        return {
+            "files": [
+                {
+                    "id": "file-123",
+                    "name": "photo.jpg",
+                    "size": 5000,
+                    "modified_time": "2026-06-01T12:00:00Z",
+                    "created_time": "2026-06-01T11:00:00Z",
+                    "is_managed": True,
+                    "ff_location_id": str(location.id),
+                    "relative_path": "photo.jpg",
+                },
+                {
+                    "id": "file-456",
+                    "name": "document.pdf",
+                    "size": 2500,
+                    "modified_time": "2026-06-01T13:00:00Z",
+                    "created_time": "2026-06-01T10:00:00Z",
+                    "is_managed": False,
+                    "ff_location_id": None,
+                    "relative_path": None,
+                },
+                {
+                    "id": "file-789",
+                    "name": "invalid_time.txt",
+                    "size": 100,
+                    "modified_time": "invalid-time-string",
+                    "created_time": None,
+                    "is_managed": True,
+                    "ff_location_id": str(location.id),
+                    "relative_path": "invalid_time.txt",
+                },
+            ]
+        }
+
+
+def test_sync_remote_cold_inventory_success(monitored_path, db_session, monkeypatch) -> None:
+    """Test sync_remote_cold_inventory successfully discovers remote files, backfills NULL location IDs, and handles fallback mtimes."""
+    # Set up remote location
+    location = ColdStorageLocation(
+        id=888,
+        name="Mock Remote GDrive",
+        path="gdrive://test-folder",
+        backend_type=ColdStorageBackendType.GDRIVE,
+        operation_mode=OperationType.MOVE,
+    )
+    db_session.add(location)
+    db_session.commit()
+
+    # Link the remote location to monitored path
+    monitored_path.storage_locations.append(location)
+    db_session.commit()
+
+    # Pre-create a legacy FileInventory entry (cold_storage_location_id is None) to test backfilling
+    legacy_inventory = FileInventory(
+        path_id=monitored_path.id,
+        file_path="gdrive://test-folder/file-123",
+        storage_type=StorageType.COLD,
+        file_size=5000,
+        file_mtime=datetime.now(timezone.utc),
+        status=FileStatus.ACTIVE,
+        cold_storage_location_id=None,
+        is_encrypted=False,
+    )
+    db_session.add(legacy_inventory)
+
+    # Pre-create a legacy FileRecord entry (cold_storage_location_id is None) to test backfilling
+    legacy_record = FileRecord(
+        path_id=monitored_path.id,
+        original_path=str(Path(monitored_path.source_path) / "photo.jpg"),
+        cold_storage_path="gdrive://test-folder/file-123",
+        cold_storage_location_id=None,
+        file_size=5000,
+        operation_type=OperationType.MOVE,
+    )
+    db_session.add(legacy_record)
+    db_session.commit()
+
+    # Mock get_backend to return our MockRemoteBackend
+    mock_backend = MockRemoteBackend()
+    monkeypatch.setattr(
+        "app.services.file_workflow_service.get_backend",
+        lambda loc: mock_backend if loc.id == 888 else get_backend(loc),
+    )
+
+    service = FileWorkflowService()
+    scan_time = datetime.now(timezone.utc)
+
+    # Run remote sync
+    synced_count = service._sync_remote_cold_inventory(monitored_path, db_session, scan_time)
+
+    # Assertions
+    assert synced_count == 3  # Discover 3 files from mock backend
+
+    # Query entries from database to check updates/creations
+    db_session.expire_all()
+
+    # 1. Check legacy entry backfill for file-123
+    inv_123 = (
+        db_session.query(FileInventory)
+        .filter(FileInventory.file_path == "gdrive://test-folder/file-123")
+        .first()
+    )
+    assert inv_123 is not None
+    assert inv_123.cold_storage_location_id == 888
+    assert inv_123.last_seen.replace(tzinfo=None) == scan_time.replace(tzinfo=None)
+
+    rec_123 = (
+        db_session.query(FileRecord)
+        .filter(FileRecord.cold_storage_path == "gdrive://test-folder/file-123")
+        .first()
+    )
+    assert rec_123 is not None
+    assert rec_123.cold_storage_location_id == 888
+
+    # 2. Check external file entry creation for file-456
+    inv_456 = (
+        db_session.query(FileInventory)
+        .filter(FileInventory.file_path == "gdrive://test-folder/file-456")
+        .first()
+    )
+    assert inv_456 is not None
+    assert inv_456.cold_storage_location_id == 888
+    assert inv_456.file_size == 2500
+    assert inv_456.file_extension == ".pdf"
+    assert inv_456.last_seen.replace(tzinfo=None) == scan_time.replace(tzinfo=None)
+
+    rec_456 = (
+        db_session.query(FileRecord)
+        .filter(FileRecord.cold_storage_path == "gdrive://test-folder/file-456")
+        .first()
+    )
+    assert rec_456 is not None
+    assert rec_456.original_path == "document.pdf"
+
+    # 3. Check invalid/missing modified time fallback for file-789
+    inv_789 = (
+        db_session.query(FileInventory)
+        .filter(FileInventory.file_path == "gdrive://test-folder/file-789")
+        .first()
+    )
+    assert inv_789 is not None
+    assert inv_789.file_mtime.replace(tzinfo=None) == scan_time.replace(tzinfo=None)
 
 
 

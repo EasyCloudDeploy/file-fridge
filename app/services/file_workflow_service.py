@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import ClassVar, Dict, Iterator, List, Optional, Set
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import engine
@@ -1233,13 +1234,17 @@ class FileWorkflowService:
             return 0
 
         # Index existing inventory entries for this remote location by storage reference.
+        # Include entries where cold_storage_location_id is NULL (legacy entries).
         existing_by_ref: Dict[str, FileInventory] = {
             entry.file_path: entry
             for entry in db.query(FileInventory)
             .filter(
                 FileInventory.path_id == path.id,
-                FileInventory.cold_storage_location_id == location.id,
                 FileInventory.storage_type == StorageType.COLD,
+                or_(
+                    FileInventory.cold_storage_location_id == location.id,
+                    FileInventory.cold_storage_location_id.is_(None),
+                ),
             )
             .all()
         }
@@ -1274,7 +1279,8 @@ class FileWorkflowService:
                 )
                 ext = Path(bare_relative).suffix.lower() or None
 
-                mtime = self._parse_iso_datetime(remote_file.get("modified_time"))
+                # Provide scan_time as fallback for non-nullable file_mtime in DB.
+                mtime = self._parse_iso_datetime(remote_file.get("modified_time")) or scan_time
                 ctime = self._parse_iso_datetime(remote_file.get("created_time"))
 
                 entry = existing_by_ref.get(storage_reference)
@@ -1283,6 +1289,9 @@ class FileWorkflowService:
                     entry.last_seen = scan_time
                     if entry.status != FileStatus.ACTIVE:
                         entry.status = FileStatus.ACTIVE
+                    # Backfill cold_storage_location_id if it was never set.
+                    if entry.cold_storage_location_id is None:
+                        entry.cold_storage_location_id = location.id
                 else:
                     action = "App-managed" if is_managed else "External"
                     logger.info(
@@ -1338,6 +1347,8 @@ class FileWorkflowService:
                             operation_type=OperationType.MOVE,
                         )
                         db.add(file_record)
+                    elif existing_record.cold_storage_location_id is None:
+                        existing_record.cold_storage_location_id = location.id
 
             page_token = result.get("next_page_token")
             if not page_token:
