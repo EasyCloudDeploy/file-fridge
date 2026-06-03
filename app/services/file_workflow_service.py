@@ -1,6 +1,7 @@
 """Unified file workflow service - scanning, moving, and inventory management."""
 
 import fnmatch
+from contextlib import suppress
 import json
 import logging
 import os
@@ -8,7 +9,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import ClassVar, Dict, Iterator, List, Optional, Set
+from typing import ClassVar, Dict, Iterator, List, Optional, Set, Tuple
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, sessionmaker
@@ -25,6 +26,7 @@ from app.models import (
     PinnedFile,
     ScanStatus,
     StorageType,
+    TagRule,
 )
 from app.services.audit_trail_service import (
     audit_trail_service,  # Backward-compatible test patch target
@@ -35,6 +37,8 @@ from app.services.checksum_verifier import (
 from app.services.cold_storage_backends import get_backend
 from app.services.criteria_matcher import CriteriaMatcher
 from app.services.file_cleanup import FileCleanup
+from app.services.file_metadata import FileMetadataExtractor
+from app.services.tag_rule_service import TagRuleService
 from app.services.file_freezer import FileFreezer
 from app.services.file_mover import FileMover  # Backward-compatible test patch target
 from app.services.file_reconciliation import FileReconciliation
@@ -1255,170 +1259,20 @@ class FileWorkflowService:
         synced = 0
         page_token: Optional[str] = None
 
+        ctx = {
+            "db": db,
+            "path": path,
+            "location": location,
+            "existing_by_ref": existing_by_ref,
+            "scan_time": scan_time,
+        }
+
         while True:
             result = list_fn(location, page_size=1000, page_token=page_token)
 
             for remote_file in result.get("files", []):
-                file_id = remote_file.get("id")
-                if not file_id:
-                    continue
-
-                # Skip files that are managed by a *different* File Fridge location so
-                # we don't create duplicate inventory entries across locations.
-                ff_location_id = remote_file.get("ff_location_id")
-                if ff_location_id and ff_location_id != str(location.id):
-                    continue
-
-                is_managed = remote_file.get("is_managed", True)
-
-                storage_reference = backend.build_reference(location, Path(file_id))
-
-                # Check for ID-based filename encryption (self-healing / resilient naming)
-                db_id_match = None
-                raw_filename = remote_file.get("name", "")
-                if raw_filename.startswith("ffenc_") and raw_filename.endswith(".ffenc"):
-                    try:
-                        db_id_match = int(raw_filename.removeprefix("ffenc_").removesuffix(".ffenc"))
-                    except ValueError:
-                        db_id_match = None
-
-                matched_entry = None
-                if db_id_match is not None:
-                    matched_entry = (
-                        db.query(FileInventory)
-                        .filter(FileInventory.id == db_id_match, FileInventory.path_id == path.id)
-                        .first()
-                    )
-
-                if matched_entry:
-                    is_managed = True
-                    is_encrypted = matched_entry.is_encrypted
-                    old_storage_ref = matched_entry.file_path
-                    
-                    # Self-healing: if file_id changed in GDrive, update DB reference
-                    if old_storage_ref != storage_reference:
-                        logger.info(
-                            "Self-healing: file ID %s moved/re-uploaded (new ref=%s, old ref=%s)",
-                            db_id_match,
-                            storage_reference,
-                            old_storage_ref,
-                        )
-                        matched_entry.file_path = storage_reference
-                        
-                        # Update the reference in our local cache dictionary
-                        if old_storage_ref in existing_by_ref:
-                            del existing_by_ref[old_storage_ref]
-                        existing_by_ref[storage_reference] = matched_entry
-                        
-                        # Check and update FileRecord
-                        existing_record = (
-                            db.query(FileRecord)
-                            .filter(
-                                FileRecord.path_id == path.id,
-                                FileRecord.cold_storage_path == old_storage_ref,
-                            )
-                            .first()
-                        )
-                        if existing_record:
-                            existing_record.cold_storage_path = storage_reference
-                    else:
-                        existing_record = (
-                            db.query(FileRecord)
-                            .filter(
-                                FileRecord.path_id == path.id,
-                                FileRecord.cold_storage_path == storage_reference,
-                            )
-                            .first()
-                        )
-
-                    # Recover relative path from database FileRecord
-                    if existing_record:
-                        try:
-                            rel = Path(existing_record.original_path).relative_to(Path(path.source_path))
-                            relative_path_str = rel.as_posix()
-                        except ValueError:
-                            relative_path_str = Path(existing_record.original_path).name
-                    else:
-                        relative_path_str = remote_file.get("relative_path") or raw_filename
-                else:
-                    # Regular flow for legacy or externally-added files
-                    relative_path_str = remote_file.get("relative_path") or remote_file.get("name", "")
-                    is_encrypted = relative_path_str.endswith(".ffenc")
-                bare_relative = (
-                    relative_path_str.removesuffix(".ffenc") if is_encrypted else relative_path_str
-                )
-                ext = Path(bare_relative).suffix.lower() or None
-
-                # Provide scan_time as fallback for non-nullable file_mtime in DB.
-                mtime = self._parse_iso_datetime(remote_file.get("modified_time")) or scan_time
-                ctime = self._parse_iso_datetime(remote_file.get("created_time"))
-
-                entry = existing_by_ref.get(storage_reference)
-                if entry:
-                    # Keep existing entry fresh so it is never treated as stale.
-                    entry.last_seen = scan_time
-                    if entry.status != FileStatus.ACTIVE:
-                        entry.status = FileStatus.ACTIVE
-                    # Backfill cold_storage_location_id if it was never set.
-                    if entry.cold_storage_location_id is None:
-                        entry.cold_storage_location_id = location.id
-                else:
-                    action = "App-managed" if is_managed else "External"
-                    logger.info(
-                        "%s file discovered in remote inventory: path_id=%s ref=%s",
-                        action,
-                        path.id,
-                        storage_reference,
-                    )
-                    entry = FileInventory(
-                        path_id=path.id,
-                        file_path=storage_reference,
-                        storage_type=StorageType.COLD,
-                        file_size=remote_file.get("size", 0),
-                        file_mtime=mtime,
-                        file_atime=None,
-                        file_ctime=ctime,
-                        status=FileStatus.ACTIVE,
-                        file_extension=ext,
-                        mime_type=remote_file.get("mime_type"),
-                        cold_storage_location_id=location.id,
-                        is_encrypted=is_encrypted,
-                        last_seen=scan_time,
-                    )
-                    db.add(entry)
-                    existing_by_ref[storage_reference] = entry
-
-                synced += 1
-
-                # Ensure a FileRecord exists so that display_file_path resolves to the
-                # original filename rather than the raw storage reference.
-                # For app-managed files use the full source-path reconstruction;
-                # for external files use just the filename as the display name.
-                if bare_relative:
-                    if is_managed:
-                        original_path = str(Path(path.source_path) / bare_relative)
-                    else:
-                        original_path = Path(bare_relative).name
-                    existing_record = (
-                        db.query(FileRecord)
-                        .filter(
-                            FileRecord.path_id == path.id,
-                            FileRecord.cold_storage_path == storage_reference,
-                        )
-                        .first()
-                    )
-                    if not existing_record:
-                        file_record = FileRecord(
-                            path_id=path.id,
-                            original_path=original_path,
-                            cold_storage_path=storage_reference,
-                            cold_storage_location_id=location.id,
-                            file_size=remote_file.get("size", 0),
-                            operation_type=OperationType.MOVE,
-                        )
-                        db.add(file_record)
-                    elif existing_record.cold_storage_location_id is None:
-                        existing_record.cold_storage_location_id = location.id
+                if self._sync_single_remote_file(remote_file, ctx):
+                    synced += 1
 
             page_token = result.get("next_page_token")
             if not page_token:
@@ -1426,6 +1280,192 @@ class FileWorkflowService:
 
         db.commit()
         return synced
+
+    def _sync_remote_file_heal(
+        self,
+        remote_file: dict,
+        storage_reference: str,
+        ctx: dict,
+    ) -> Tuple[bool, bool, str]:
+        """Check for ID-based filename encryption, run self-healing, and return properties."""
+        db = ctx["db"]
+        path = ctx["path"]
+        existing_by_ref = ctx["existing_by_ref"]
+        raw_filename = remote_file.get("name", "")
+
+        db_id_match = None
+        if raw_filename.startswith("ffenc_") and raw_filename.endswith(".ffenc"):
+            with suppress(ValueError):
+                db_id_match = int(raw_filename.removeprefix("ffenc_").removesuffix(".ffenc"))
+
+        matched_entry = None
+        if db_id_match is not None:
+            matched_entry = (
+                db.query(FileInventory)
+                .filter(FileInventory.id == db_id_match, FileInventory.path_id == path.id)
+                .first()
+            )
+
+        if matched_entry:
+            is_managed = True
+            is_encrypted = matched_entry.is_encrypted
+            old_storage_ref = matched_entry.file_path
+
+            # Self-healing: if file_id changed in GDrive, update DB reference
+            if old_storage_ref != storage_reference:
+                logger.info(
+                    "Self-healing: file ID %s moved/re-uploaded (new ref=%s, old ref=%s)",
+                    db_id_match,
+                    storage_reference,
+                    old_storage_ref,
+                )
+                matched_entry.file_path = storage_reference
+
+                # Update the reference in our local cache dictionary
+                existing_by_ref.pop(old_storage_ref, None)
+                existing_by_ref[storage_reference] = matched_entry
+
+                # Check and update FileRecord
+                existing_record = (
+                    db.query(FileRecord)
+                    .filter(
+                        FileRecord.path_id == path.id,
+                        FileRecord.cold_storage_path == old_storage_ref,
+                    )
+                    .first()
+                )
+                if existing_record:
+                    existing_record.cold_storage_path = storage_reference
+            else:
+                existing_record = (
+                    db.query(FileRecord)
+                    .filter(
+                        FileRecord.path_id == path.id,
+                        FileRecord.cold_storage_path == storage_reference,
+                    )
+                    .first()
+                )
+
+            # Recover relative path from database FileRecord
+            if existing_record:
+                try:
+                    rel = Path(existing_record.original_path).relative_to(Path(path.source_path))
+                    relative_path_str = rel.as_posix()
+                except ValueError:
+                    relative_path_str = Path(existing_record.original_path).name
+            else:
+                relative_path_str = remote_file.get("relative_path") or raw_filename
+            return is_managed, is_encrypted, relative_path_str
+
+        # Regular flow for legacy or externally-added files
+        relative_path_str = remote_file.get("relative_path") or remote_file.get("name", "")
+        is_encrypted = relative_path_str.endswith(".ffenc")
+        return remote_file.get("is_managed", True), is_encrypted, relative_path_str
+
+    def _sync_single_remote_file(
+        self,
+        remote_file: dict,
+        ctx: dict,
+    ) -> bool:
+        """Sync a single file from remote cold storage with the database inventory."""
+        db = ctx["db"]
+        path = ctx["path"]
+        location = ctx["location"]
+        existing_by_ref = ctx["existing_by_ref"]
+        scan_time = ctx["scan_time"]
+
+        file_id = remote_file.get("id")
+        if not file_id:
+            return False
+
+        # Skip files that are managed by a *different* File Fridge location so
+        # we don't create duplicate inventory entries across locations.
+        ff_location_id = remote_file.get("ff_location_id")
+        if ff_location_id and ff_location_id != str(location.id):
+            return False
+
+        backend = get_backend(location)
+        storage_reference = backend.build_reference(location, Path(file_id))
+
+        is_managed, is_encrypted, relative_path_str = self._sync_remote_file_heal(
+            remote_file, storage_reference, ctx
+        )
+
+        bare_relative = (
+            relative_path_str.removesuffix(".ffenc") if is_encrypted else relative_path_str
+        )
+        ext = Path(bare_relative).suffix.lower() or None
+
+        # Provide scan_time as fallback for non-nullable file_mtime in DB.
+        mtime = self._parse_iso_datetime(remote_file.get("modified_time")) or scan_time
+        ctime = self._parse_iso_datetime(remote_file.get("created_time"))
+
+        entry = existing_by_ref.get(storage_reference)
+        if entry:
+            # Keep existing entry fresh so it is never treated as stale.
+            entry.last_seen = scan_time
+            if entry.status != FileStatus.ACTIVE:
+                entry.status = FileStatus.ACTIVE
+            # Backfill cold_storage_location_id if it was never set.
+            if entry.cold_storage_location_id is None:
+                entry.cold_storage_location_id = location.id
+        else:
+            action = "App-managed" if is_managed else "External"
+            logger.info(
+                "%s file discovered in remote inventory: path_id=%s ref=%s",
+                action,
+                path.id,
+                storage_reference,
+            )
+            entry = FileInventory(
+                path_id=path.id,
+                file_path=storage_reference,
+                storage_type=StorageType.COLD,
+                file_size=remote_file.get("size", 0),
+                file_mtime=mtime,
+                file_atime=None,
+                file_ctime=ctime,
+                status=FileStatus.ACTIVE,
+                file_extension=ext,
+                mime_type=remote_file.get("mime_type"),
+                cold_storage_location_id=location.id,
+                is_encrypted=is_encrypted,
+                last_seen=scan_time,
+            )
+            db.add(entry)
+            existing_by_ref[storage_reference] = entry
+
+        # Ensure a FileRecord exists so that display_file_path resolves to the
+        # original filename rather than the raw storage reference.
+        # For app-managed files use the full source-path reconstruction;
+        # for external files use just the filename as the display name.
+        if bare_relative:
+            if is_managed:
+                original_path = str(Path(path.source_path) / bare_relative)
+            else:
+                original_path = Path(bare_relative).name
+            existing_record = (
+                db.query(FileRecord)
+                .filter(
+                    FileRecord.path_id == path.id,
+                    FileRecord.cold_storage_path == storage_reference,
+                )
+                .first()
+            )
+            if not existing_record:
+                file_record = FileRecord(
+                    path_id=path.id,
+                    original_path=original_path,
+                    cold_storage_path=storage_reference,
+                    cold_storage_location_id=location.id,
+                    file_size=remote_file.get("size", 0),
+                    operation_type=OperationType.MOVE,
+                )
+                db.add(file_record)
+            elif existing_record.cold_storage_location_id is None:
+                existing_record.cold_storage_location_id = location.id
+
+        return True
 
     def _update_file_inventory(
         self,
@@ -1530,10 +1570,6 @@ class FileWorkflowService:
         self, path: MonitoredPath, files: List[Dict], tier: StorageType, db: Session
     ) -> int:
         """Synchronize file metadata with the database in batches for performance."""
-        from app.models import TagRule
-        from app.services.file_metadata import FileMetadataExtractor
-        from app.services.tag_rule_service import TagRuleService
-
         count = 0
         tag_rule_service = TagRuleService(db)
         scan_time = datetime.now(tz=timezone.utc)
@@ -1586,7 +1622,7 @@ class FileWorkflowService:
                                     old_ref,
                                 )
                                 entry.file_path = file_path_str
-                                
+
                                 # Update FileRecord
                                 existing_record = (
                                     db.query(FileRecord)

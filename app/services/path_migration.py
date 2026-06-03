@@ -6,7 +6,8 @@ from typing import Dict, Tuple
 
 from sqlalchemy.orm import Session
 
-from app.models import FileInventory, FileRecord
+from app.models import FileInventory, FileRecord, OperationType
+from app.services.file_mover import FileMover
 from app.utils.db_utils import escape_like_string
 
 logger = logging.getLogger(__name__)
@@ -125,9 +126,6 @@ class PathMigrationService:
 
                     # Move file
                     logger.debug(f"Moving {old_file} -> {new_file}")
-                    from app.models import OperationType
-                    from app.services.file_mover import FileMover
-
                     success, error, _ = FileMover.move_with_rollback(
                         source=old_file,
                         destination=new_file,

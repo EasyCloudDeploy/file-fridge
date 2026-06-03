@@ -1,6 +1,7 @@
 """Google Drive cold storage backend."""
 
 import json
+from http import HTTPStatus
 import logging
 import threading
 import time
@@ -653,7 +654,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
             headers=self._auth_headers(location),
             timeout=20.0,
         )
-        if response.status_code == 404:
+        if response.status_code == HTTPStatus.NOT_FOUND:
             return False
         self._raise_for_status_with_google_detail(response, "Google Drive existence check failed")
         return True

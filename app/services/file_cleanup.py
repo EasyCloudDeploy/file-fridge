@@ -1,6 +1,7 @@
 """File cleanup service - removes records for files that no longer exist."""
 
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -348,8 +349,6 @@ class FileCleanup:
                     # Also remove entries with suspiciously small file sizes that might be symlinks
                     # Symlinks are typically < MAX_SYMLINK_SIZE bytes (path string length)
                     # AND marked as missing (since they're no longer being scanned)
-                    from datetime import datetime, timedelta, timezone
-
                     now = datetime.now(tz=timezone.utc)
                     last_seen_time = entry.last_seen
                     if last_seen_time.tzinfo is None:
