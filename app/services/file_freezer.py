@@ -115,7 +115,7 @@ class FileFreezer:
             # Check encryption
             encrypt_file = storage_location.is_encrypted
             if encrypt_file:
-                destination_path = destination_path.with_suffix(destination_path.suffix + ".ffenc")
+                destination_path = destination_path.with_name(f"ffenc_{locked_file.id}.ffenc")
 
             if backend.backend_name() == "local":
                 # Ensure destination directory exists
@@ -162,9 +162,7 @@ class FileFreezer:
                         encrypted_temp_path = None
                         storage_reference = None
                         try:
-                            encrypted_relative_path = relative_path.with_suffix(
-                                relative_path.suffix + ".ffenc"
-                            )
+                            encrypted_relative_path = relative_path.with_name(f"ffenc_{locked_file.id}.ffenc")
                             with tempfile.NamedTemporaryFile(
                                 prefix="file-fridge-", suffix=".ffenc", delete=False
                             ) as encrypted_tmp:

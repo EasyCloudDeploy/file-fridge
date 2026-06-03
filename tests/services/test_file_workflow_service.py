@@ -1335,4 +1335,187 @@ def test_sync_remote_cold_inventory_success(monitored_path, db_session, monkeypa
     assert inv_789.file_mtime.replace(tzinfo=None) == scan_time.replace(tzinfo=None)
 
 
+def test_sync_remote_cold_inventory_self_healing(monitored_path, db_session, monkeypatch) -> None:
+    """Test sync_remote_cold_inventory self-healing functionality when a file ID on Google Drive changes."""
+    # Set up remote location
+    location = ColdStorageLocation(
+        id=889,
+        name="Mock Remote GDrive Self-Healing",
+        path="gdrive://test-folder",
+        backend_type=ColdStorageBackendType.GDRIVE,
+        operation_mode=OperationType.MOVE,
+    )
+    db_session.add(location)
+    db_session.commit()
+
+    # Link the remote location to monitored path
+    monitored_path.storage_locations.append(location)
+    db_session.commit()
+
+    # 1. Pre-create database records for a file that was originally frozen
+    # Original file_path was gdrive://test-folder/old-file-id
+    # We will use id=99999 for this test entry (SQLite allows explicit id insert)
+    inventory_entry = FileInventory(
+        id=99999,
+        path_id=monitored_path.id,
+        file_path="gdrive://test-folder/old-file-id",
+        storage_type=StorageType.COLD,
+        file_size=1000,
+        file_mtime=datetime.now(timezone.utc),
+        status=FileStatus.ACTIVE,
+        cold_storage_location_id=location.id,
+        is_encrypted=True,
+    )
+    db_session.add(inventory_entry)
+
+    file_record = FileRecord(
+        path_id=monitored_path.id,
+        original_path=str(Path(monitored_path.source_path) / "important_document.pdf"),
+        cold_storage_path="gdrive://test-folder/old-file-id",
+        cold_storage_location_id=location.id,
+        file_size=1000,
+        operation_type=OperationType.MOVE,
+    )
+    db_session.add(file_record)
+    db_session.commit()
+
+    # 2. Mock a remote listing where the file has been re-uploaded to Google Drive.
+    # The new file_id is "new-file-id", and the filename is "ffenc_99999.ffenc".
+    class MockSelfHealingBackend:
+        def backend_name(self) -> str:
+            return "gdrive"
+
+        def build_reference(self, location, path) -> str:
+            return f"gdrive://test-folder/{path}"
+
+        def list_managed_files(self, location, page_size, page_token) -> dict:
+            return {"files": []}
+
+        def list_all_folder_files(self, location, page_size, page_token) -> dict:
+            return {
+                "files": [
+                    {
+                        "id": "new-file-id",
+                        "name": "ffenc_99999.ffenc",
+                        "size": 1000,
+                        "modified_time": "2026-06-01T15:00:00Z",
+                        "created_time": "2026-06-01T15:00:00Z",
+                        "is_managed": False, # Strip managed attributes (simulating manual upload)
+                        "ff_location_id": None,
+                        "relative_path": None,
+                    }
+                ]
+            }
+
+    mock_backend = MockSelfHealingBackend()
+    monkeypatch.setattr(
+        "app.services.file_workflow_service.get_backend",
+        lambda loc: mock_backend if loc.id == 889 else get_backend(loc),
+    )
+
+    service = FileWorkflowService()
+    scan_time = datetime.now(timezone.utc)
+
+    # Run remote sync
+    synced_count = service._sync_remote_cold_inventory(monitored_path, db_session, scan_time)
+
+    assert synced_count == 1
+
+    # Query entries from database to check that reference has been healed
+    db_session.expire_all()
+
+    healed_inventory = (
+        db_session.query(FileInventory)
+        .filter(FileInventory.id == 99999)
+        .first()
+    )
+    assert healed_inventory is not None
+    # Verify the reference has been updated to the new file_id
+    assert healed_inventory.file_path == "gdrive://test-folder/new-file-id"
+    assert healed_inventory.status == FileStatus.ACTIVE
+    assert healed_inventory.last_seen.replace(tzinfo=None) == scan_time.replace(tzinfo=None)
+
+    healed_record = (
+        db_session.query(FileRecord)
+        .filter(FileRecord.cold_storage_path == "gdrive://test-folder/new-file-id")
+        .first()
+    )
+    assert healed_record is not None
+    assert healed_record.original_path == str(Path(monitored_path.source_path) / "important_document.pdf")
+
+
+def test_sync_local_cold_inventory_self_healing(monitored_path, db_session) -> None:
+    """Test self-healing database reconciliation when a local/file-based encrypted cold storage file is moved to a new path on disk."""
+    # 1. Pre-create database records for a file that was originally frozen
+    # Original local cold storage path was /old/path/ffenc_99999.ffenc
+    old_cold_path = str(Path(monitored_path.storage_locations[0].path) / "old" / "ffenc_99999.ffenc")
+    
+    inventory_entry = FileInventory(
+        id=99999,
+        path_id=monitored_path.id,
+        file_path=old_cold_path,
+        storage_type=StorageType.COLD,
+        file_size=1200,
+        file_mtime=datetime.now(timezone.utc),
+        status=FileStatus.ACTIVE,
+        cold_storage_location_id=monitored_path.storage_locations[0].id,
+        is_encrypted=True,
+    )
+    db_session.add(inventory_entry)
+
+    file_record = FileRecord(
+        path_id=monitored_path.id,
+        original_path=str(Path(monitored_path.source_path) / "local_secrets.pdf"),
+        cold_storage_path=old_cold_path,
+        cold_storage_location_id=monitored_path.storage_locations[0].id,
+        file_size=1200,
+        operation_type=OperationType.MOVE,
+    )
+    db_session.add(file_record)
+    db_session.commit()
+
+    # 2. Simulate finding the file at a new path on disk: /new/path/ffenc_99999.ffenc
+    new_cold_path = str(Path(monitored_path.storage_locations[0].path) / "new" / "ffenc_99999.ffenc")
+    
+    cold_files = [
+        {
+            "path": new_cold_path,
+            "size": 1200,
+            "mtime": datetime.now(timezone.utc),
+            "atime": datetime.now(timezone.utc),
+            "ctime": datetime.now(timezone.utc),
+            "location_id": monitored_path.storage_locations[0].id,
+        }
+    ]
+
+    service = FileWorkflowService()
+    
+    # Run bulk database entries synchronization for COLD tier
+    updated_count = service._update_db_entries_batch(
+        monitored_path, cold_files, StorageType.COLD, db_session
+    )
+
+    assert updated_count == 1
+
+    # Query database and assert references were healed
+    db_session.expire_all()
+
+    healed_inventory = (
+        db_session.query(FileInventory)
+        .filter(FileInventory.id == 99999)
+        .first()
+    )
+    assert healed_inventory is not None
+    assert healed_inventory.file_path == new_cold_path
+    assert healed_inventory.status == FileStatus.ACTIVE
+
+    healed_record = (
+        db_session.query(FileRecord)
+        .filter(FileRecord.cold_storage_path == new_cold_path)
+        .first()
+    )
+    assert healed_record is not None
+    assert healed_record.original_path == str(Path(monitored_path.source_path) / "local_secrets.pdf")
+
+
 

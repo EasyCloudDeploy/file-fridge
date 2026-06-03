@@ -125,26 +125,6 @@ class FileWorkflowService:
                 "errors": [],
             }
 
-            # Cleanup phase
-            try:
-                cleanup_results = FileCleanup.cleanup_missing_files(db, path_id=path_id)
-                results["files_cleaned"] = cleanup_results["removed"]
-                if cleanup_results["errors"]:
-                    results["errors"].extend(cleanup_results["errors"])
-
-                duplicate_results = FileCleanup.cleanup_duplicates(db, path_id=path_id)
-                results["files_cleaned"] += duplicate_results["removed"]
-                if duplicate_results["errors"]:
-                    results["errors"].extend(duplicate_results["errors"])
-
-                # Clean up symlink entries from inventory
-                symlink_results = FileCleanup.cleanup_symlink_inventory_entries(db, path_id=path_id)
-                results["files_cleaned"] += symlink_results["removed"]
-                if symlink_results["errors"]:
-                    results["errors"].extend(symlink_results["errors"])
-            except Exception as e:
-                logger.warning(f"Error during cleanup for path {path_id}: {e!s}")
-
             try:
                 # Scan phase
                 scan_results = self._scan_path(path, db)
@@ -257,6 +237,26 @@ class FileWorkflowService:
                     path.last_scan_status = ScanStatus.STOPPED
                     db.commit()
                     return results
+
+                # Cleanup phase
+                try:
+                    cleanup_results = FileCleanup.cleanup_missing_files(db, path_id=path_id)
+                    results["files_cleaned"] = cleanup_results["removed"]
+                    if cleanup_results["errors"]:
+                        results["errors"].extend(cleanup_results["errors"])
+
+                    duplicate_results = FileCleanup.cleanup_duplicates(db, path_id=path_id)
+                    results["files_cleaned"] += duplicate_results["removed"]
+                    if duplicate_results["errors"]:
+                        results["errors"].extend(duplicate_results["errors"])
+
+                    # Clean up symlink entries from inventory
+                    symlink_results = FileCleanup.cleanup_symlink_inventory_entries(db, path_id=path_id)
+                    results["files_cleaned"] += symlink_results["removed"]
+                    if symlink_results["errors"]:
+                        results["errors"].extend(symlink_results["errors"])
+                except Exception as e:
+                    logger.warning(f"Error during cleanup for path {path_id}: {e!s}")
 
                 # Reconciliation phase
                 try:
@@ -1021,27 +1021,30 @@ class FileWorkflowService:
             criterion_type = criterion.criterion_type
 
             if criterion_type == CriterionType.MTIME:
-                timestamp = (
-                    inventory_entry.file_mtime.timestamp() if inventory_entry.file_mtime else None
-                )
+                dt = inventory_entry.file_mtime
+                if dt and dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                timestamp = dt.timestamp() if dt else None
                 matches = (
                     CriteriaMatcher._match_time(timestamp, operator, value, "mtime")
                     if timestamp is not None
                     else False
                 )
             elif criterion_type == CriterionType.ATIME:
-                timestamp = (
-                    inventory_entry.file_atime.timestamp() if inventory_entry.file_atime else None
-                )
+                dt = inventory_entry.file_atime
+                if dt and dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                timestamp = dt.timestamp() if dt else None
                 matches = (
                     CriteriaMatcher._match_time(timestamp, operator, value, "atime")
                     if timestamp is not None
                     else False
                 )
             elif criterion_type == CriterionType.CTIME:
-                timestamp = (
-                    inventory_entry.file_ctime.timestamp() if inventory_entry.file_ctime else None
-                )
+                dt = inventory_entry.file_ctime
+                if dt and dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                timestamp = dt.timestamp() if dt else None
                 matches = (
                     CriteriaMatcher._match_time(timestamp, operator, value, "ctime")
                     if timestamp is not None
@@ -1270,10 +1273,77 @@ class FileWorkflowService:
 
                 storage_reference = backend.build_reference(location, Path(file_id))
 
-                # Determine display path and encryption from appProperties when present,
-                # falling back to the raw filename for externally-added files.
-                relative_path_str = remote_file.get("relative_path") or remote_file.get("name", "")
-                is_encrypted = relative_path_str.endswith(".ffenc")
+                # Check for ID-based filename encryption (self-healing / resilient naming)
+                db_id_match = None
+                raw_filename = remote_file.get("name", "")
+                if raw_filename.startswith("ffenc_") and raw_filename.endswith(".ffenc"):
+                    try:
+                        db_id_match = int(raw_filename.removeprefix("ffenc_").removesuffix(".ffenc"))
+                    except ValueError:
+                        db_id_match = None
+
+                matched_entry = None
+                if db_id_match is not None:
+                    matched_entry = (
+                        db.query(FileInventory)
+                        .filter(FileInventory.id == db_id_match, FileInventory.path_id == path.id)
+                        .first()
+                    )
+
+                if matched_entry:
+                    is_managed = True
+                    is_encrypted = matched_entry.is_encrypted
+                    old_storage_ref = matched_entry.file_path
+                    
+                    # Self-healing: if file_id changed in GDrive, update DB reference
+                    if old_storage_ref != storage_reference:
+                        logger.info(
+                            "Self-healing: file ID %s moved/re-uploaded (new ref=%s, old ref=%s)",
+                            db_id_match,
+                            storage_reference,
+                            old_storage_ref,
+                        )
+                        matched_entry.file_path = storage_reference
+                        
+                        # Update the reference in our local cache dictionary
+                        if old_storage_ref in existing_by_ref:
+                            del existing_by_ref[old_storage_ref]
+                        existing_by_ref[storage_reference] = matched_entry
+                        
+                        # Check and update FileRecord
+                        existing_record = (
+                            db.query(FileRecord)
+                            .filter(
+                                FileRecord.path_id == path.id,
+                                FileRecord.cold_storage_path == old_storage_ref,
+                            )
+                            .first()
+                        )
+                        if existing_record:
+                            existing_record.cold_storage_path = storage_reference
+                    else:
+                        existing_record = (
+                            db.query(FileRecord)
+                            .filter(
+                                FileRecord.path_id == path.id,
+                                FileRecord.cold_storage_path == storage_reference,
+                            )
+                            .first()
+                        )
+
+                    # Recover relative path from database FileRecord
+                    if existing_record:
+                        try:
+                            rel = Path(existing_record.original_path).relative_to(Path(path.source_path))
+                            relative_path_str = rel.as_posix()
+                        except ValueError:
+                            relative_path_str = Path(existing_record.original_path).name
+                    else:
+                        relative_path_str = remote_file.get("relative_path") or raw_filename
+                else:
+                    # Regular flow for legacy or externally-added files
+                    relative_path_str = remote_file.get("relative_path") or remote_file.get("name", "")
+                    is_encrypted = relative_path_str.endswith(".ffenc")
                 bare_relative = (
                     relative_path_str.removesuffix(".ffenc") if is_encrypted else relative_path_str
                 )
@@ -1499,6 +1569,37 @@ class FileWorkflowService:
                 entry = existing_entries.get(file_path_str)
 
                 location_id = info.get("location_id") if tier == StorageType.COLD else None
+
+                if not entry and tier == StorageType.COLD:
+                    # Self-healing check for local/file-based backends
+                    leaf_name = Path(file_path_str).name
+                    if leaf_name.startswith("ffenc_") and leaf_name.endswith(".ffenc"):
+                        try:
+                            db_id = int(leaf_name.removeprefix("ffenc_").removesuffix(".ffenc"))
+                            entry = db.query(FileInventory).filter(FileInventory.id == db_id, FileInventory.path_id == path.id).first()
+                            if entry:
+                                old_ref = entry.file_path
+                                logger.info(
+                                    "Self-healing (Local/S3): file ID %s moved (new path=%s, old path=%s)",
+                                    db_id,
+                                    file_path_str,
+                                    old_ref,
+                                )
+                                entry.file_path = file_path_str
+                                
+                                # Update FileRecord
+                                existing_record = (
+                                    db.query(FileRecord)
+                                    .filter(
+                                        FileRecord.path_id == path.id,
+                                        FileRecord.cold_storage_path == old_ref,
+                                    )
+                                    .first()
+                                )
+                                if existing_record:
+                                    existing_record.cold_storage_path = file_path_str
+                        except ValueError:
+                            pass
 
                 if entry:
                     # Always update last_seen for files found during scan

@@ -903,11 +903,10 @@ def encrypt_location_job_func(location_id: int):
                                     relative = Path(original_path.name)
                             else:
                                 relative = Path(original_path.name)
-                            encrypted_relative = relative.with_suffix(relative.suffix + ".ffenc")
+                        if file_record:
+                            encrypted_relative = relative.with_name(f"ffenc_{file.id}.ffenc")
                         else:
-                            encrypted_relative = Path(
-                                storage_reference.rstrip("/").split("/")[-1] + ".ffenc"
-                            )
+                            encrypted_relative = Path(f"ffenc_{file.id}.ffenc")
 
                         ul_success, ul_error, new_reference, _ = backend.freeze_file(
                             source_path=encrypt_path,

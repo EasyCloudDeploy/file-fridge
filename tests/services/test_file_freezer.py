@@ -285,7 +285,7 @@ class TestFileFreezer:
         )
 
         assert success is True, f"Freezer failed: {error}"
-        assert cold_path == "s3://bucket/archive/remote-test.txt.ffenc"
+        assert cold_path == f"s3://bucket/archive/ffenc_{inv.id}.ffenc"
         assert captured["relative_path"].as_posix().endswith(".ffenc")
         assert captured["operation_mode"] == OperationType.COPY
         assert not hot_file.exists()

@@ -484,7 +484,7 @@ class GoogleDriveColdStorageBackend(ColdStorageBackend):
 
         try:
             metadata: Dict[str, Any] = {
-                "name": source_path.name,
+                "name": relative_path.name,
                 "appProperties": {
                     "file_fridge_managed": "true",
                     "ff_location_id": str(location.id),
