@@ -9,6 +9,7 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.config import settings
 from app.database import engine
 from app.models import MonitoredPath
 from app.services.cold_storage_backends import get_backend
