@@ -47,7 +47,15 @@ class SchedulerService:
             jobstore_url = db_url.replace(".db", "_scheduler.db")
         else:
             jobstore_url = db_url
-        jobstore = SQLAlchemyJobStore(url=jobstore_url)
+
+        engine_options = {}
+        if jobstore_url.startswith("sqlite"):
+            engine_options["connect_args"] = {"check_same_thread": False}
+            if ":memory:" in jobstore_url or settings.database_path == ":memory:":
+                from sqlalchemy.pool import StaticPool
+                engine_options["poolclass"] = StaticPool
+
+        jobstore = SQLAlchemyJobStore(url=jobstore_url, engine_options=engine_options)
 
         self.scheduler = BackgroundScheduler(
             jobstores={"default": jobstore},
@@ -73,9 +81,7 @@ class SchedulerService:
                 self._add_stats_cleanup_job()
                 self._add_disk_space_monitoring_job()
                 self._add_storage_permissions_job()
-                self._add_nonce_cleanup_job()
                 self._add_fftmp_cleanup_job()
-                self._add_transfer_job_cleanup_job()
                 self._add_p2p_manifest_sync_job()
             except Exception:
                 logger.exception("Error starting scheduler")
@@ -220,30 +226,6 @@ class SchedulerService:
         except Exception:
             logger.exception("Error adding stats cleanup job")
 
-    def _add_nonce_cleanup_job(self):
-        """Add scheduled job for cleaning up old request nonces (runs every 10 minutes)."""
-        if not self.scheduler.running:
-            logger.warning("Scheduler not running, skipping nonce cleanup job addition")
-            return
-
-        job_id = "nonce_cleanup"
-        try:
-            # Remove existing job if present
-            if self.scheduler.get_job(job_id):
-                self.scheduler.remove_job(job_id)
-
-            # Schedule to run every 10 minutes as per PLAN.md
-            self.scheduler.add_job(
-                cleanup_old_nonces_job_func,
-                "interval",
-                minutes=10,
-                id=job_id,
-                replace_existing=True,
-            )
-            logger.info("Added scheduled job for nonce cleanup (runs every 10 minutes)")
-        except Exception:
-            logger.exception("Error adding nonce cleanup job")
-
     def _add_disk_space_monitoring_job(self):
         """Add scheduled job for disk space monitoring (runs every 10 minutes)."""
         if not self.scheduler.running:
@@ -311,31 +293,6 @@ class SchedulerService:
             logger.info("Added scheduled job for daily .fftmp cleanup (runs at 3 AM)")
         except Exception:
             logger.exception("Error adding fftmp cleanup job")
-
-    def _add_transfer_job_cleanup_job(self):
-        """Add scheduled job for cleaning up old transfer job records (runs weekly on Sunday at 4 AM)."""
-        if not self.scheduler.running:
-            return
-
-        job_id = "transfer_job_cleanup"
-        try:
-            if self.scheduler.get_job(job_id):
-                self.scheduler.remove_job(job_id)
-
-            self.scheduler.add_job(
-                cleanup_old_transfer_jobs_job_func,
-                "cron",
-                day_of_week="sun",
-                hour=4,
-                minute=0,
-                id=job_id,
-                replace_existing=True,
-            )
-            logger.info(
-                "Added scheduled job for weekly transfer job cleanup (runs Sundays at 4 AM)"
-            )
-        except Exception:
-            logger.exception("Error adding transfer job cleanup job")
 
     def _add_p2p_manifest_sync_job(self):
         """Add scheduled job for syncing remote manifests from configured peers."""
@@ -1135,29 +1092,6 @@ def decrypt_location_job_func(location_id: int):
         db.close()
 
 
-def cleanup_old_nonces_job_func():
-    """Job function to clean up old request nonces (runs every 10 minutes)."""
-    import time
-
-    from app.models import RequestNonce
-
-    db = SchedulerSessionLocal()
-    try:
-        # Clean up nonces older than 600 seconds (2x signature tolerance) as per PLAN.md
-        cutoff_time = int(time.time()) - 600
-        deleted = db.query(RequestNonce).filter(RequestNonce.timestamp < cutoff_time).delete()
-        db.commit()
-        if deleted > 0:
-            logger.info(f"Cleaned up {deleted} old request nonces")
-    except Exception:
-        logger.exception("Error cleaning up old nonces")
-        db.rollback()
-    finally:
-        try:
-            db.close()
-        except Exception as e:
-            logger.warning("Error closing scheduler database session in nonce cleanup", exc_info=e)
-
 
 def cleanup_orphaned_fftmp_job_func():
     """Daily job to clean up orphaned .fftmp files older than 7 days."""
@@ -1212,41 +1146,6 @@ def cleanup_orphaned_fftmp_job_func():
     finally:
         db.close()
 
-
-def cleanup_old_transfer_jobs_job_func():
-    """Weekly job to clean up terminal transfer jobs older than 90 days."""
-    from datetime import datetime, timedelta, timezone
-
-    from app.models import RemoteTransferJob, TransferStatus
-
-    db = SchedulerSessionLocal()
-    try:
-        # Retention period 90 days
-        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
-
-        terminal_statuses = [
-            TransferStatus.COMPLETED,
-            TransferStatus.FAILED,
-            TransferStatus.CANCELLED,
-        ]
-
-        deleted = (
-            db.query(RemoteTransferJob)
-            .filter(
-                RemoteTransferJob.status.in_(terminal_statuses),
-                RemoteTransferJob.updated_at < cutoff,
-            )
-            .delete(synchronize_session=False)
-        )
-
-        db.commit()
-        if deleted > 0:
-            logger.info(f"Cleaned up {deleted} old transfer job records")
-    except Exception:
-        logger.exception("Error cleaning up old transfer jobs")
-        db.rollback()
-    finally:
-        db.close()
 
 
 def recall_location_job_func(location_id: int):

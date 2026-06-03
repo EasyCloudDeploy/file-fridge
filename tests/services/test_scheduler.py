@@ -3,9 +3,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.models import ColdStorageLocation, MonitoredPath, RequestNonce, StorageType
+from app.models import ColdStorageLocation, MonitoredPath, StorageType
 from app.services.scheduler import (
-    cleanup_old_nonces_job_func,
     decrypt_location_job_func,
     encrypt_location_job_func,
     scan_path_job_func,
@@ -23,21 +22,6 @@ class TestSchedulerService:
         mock_session_factory = MagicMock(return_value=db_session)
         monkeypatch.setattr("app.services.scheduler.SchedulerSessionLocal", mock_session_factory)
         return mock_session_factory
-
-    def test_cleanup_old_nonces_job(self, db_session):
-        """Test the nonce cleanup job function."""
-        now = int(time.time())
-        old_nonce = RequestNonce(nonce="old-nonce", fingerprint="fp1", timestamp=now - 1000)
-        new_nonce = RequestNonce(nonce="new-nonce", fingerprint="fp2", timestamp=now)
-        db_session.add_all([old_nonce, new_nonce])
-        db_session.commit()
-
-        cleanup_old_nonces_job_func()
-
-        # Verify old one is gone, new one remains
-        remaining = db_session.query(RequestNonce).all()
-        assert len(remaining) == 1
-        assert remaining[0].nonce == "new-nonce"
 
     def test_scan_path_job_not_found(self):
         """Test scan job with non-existent path."""

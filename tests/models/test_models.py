@@ -29,9 +29,6 @@ from app.models import (
     OperationType,
     Operator,
     PinnedFile,
-    RemoteConnection,
-    RemoteTransferJob,
-    RequestNonce,
     ScanStatus,
     SecurityAuditLog,
     ServerEncryptionKey,
@@ -40,9 +37,6 @@ from app.models import (
     TagRule,
     TagRuleCriterionType,
     TransactionType,  # Added TransactionType here
-    TransferDirection,
-    TransferMode,
-    TransferStatus,
     TrustStatus,
     User,
 )
@@ -145,21 +139,6 @@ class UserFactory(factory.alchemy.SQLAlchemyModelFactory):
     roles = ["user"]
 
 
-class RemoteConnectionFactory(factory.alchemy.SQLAlchemyModelFactory):
-    class Meta:
-        model = RemoteConnection
-        sqlalchemy_session = None
-
-    id = factory.Sequence(lambda n: n)
-    name = factory.Sequence(lambda n: f"Remote {n}")
-    url = factory.Sequence(lambda n: f"http://remote_{n}.com")
-    remote_fingerprint = factory.Sequence(lambda n: f"fingerprint_{n}")
-    remote_ed25519_public_key = "remote_ed25519_pub"
-    remote_x25519_public_key = "remote_x25519_pub"
-    trust_status = TrustStatus.TRUSTED
-    transfer_mode = TransferMode.BIDIRECTIONAL
-    remote_transfer_mode = TransferMode.BIDIRECTIONAL
-
 
 # ==================================
 # Fixtures
@@ -175,7 +154,6 @@ def set_session_for_factories(db_session: Session):
     FileInventoryFactory._meta.sqlalchemy_session = db_session
     TagFactory._meta.sqlalchemy_session = db_session
     UserFactory._meta.sqlalchemy_session = db_session
-    RemoteConnectionFactory._meta.sqlalchemy_session = db_session
     FileRecordFactory._meta.sqlalchemy_session = db_session
     FileTransactionHistoryFactory._meta.sqlalchemy_session = db_session
     PinnedFileFactory._meta.sqlalchemy_session = db_session
@@ -186,8 +164,6 @@ def set_session_for_factories(db_session: Session):
     NotificationDispatchFactory._meta.sqlalchemy_session = db_session
     ServerEncryptionKeyFactory._meta.sqlalchemy_session = db_session
     InstanceMetadataFactory._meta.sqlalchemy_session = db_session
-    RemoteTransferJobFactory._meta.sqlalchemy_session = db_session
-    RequestNonceFactory._meta.sqlalchemy_session = db_session
     SecurityAuditLogFactory._meta.sqlalchemy_session = db_session
     InstanceKeyHistoryFactory._meta.sqlalchemy_session = db_session
     yield
@@ -198,7 +174,6 @@ def set_session_for_factories(db_session: Session):
     FileInventoryFactory._meta.sqlalchemy_session = None
     TagFactory._meta.sqlalchemy_session = None
     UserFactory._meta.sqlalchemy_session = None
-    RemoteConnectionFactory._meta.sqlalchemy_session = None
     FileRecordFactory._meta.sqlalchemy_session = None
     FileTransactionHistoryFactory._meta.sqlalchemy_session = None
     PinnedFileFactory._meta.sqlalchemy_session = None
@@ -209,8 +184,6 @@ def set_session_for_factories(db_session: Session):
     NotificationDispatchFactory._meta.sqlalchemy_session = None
     ServerEncryptionKeyFactory._meta.sqlalchemy_session = None
     InstanceMetadataFactory._meta.sqlalchemy_session = None
-    RemoteTransferJobFactory._meta.sqlalchemy_session = None
-    RequestNonceFactory._meta.sqlalchemy_session = None
     SecurityAuditLogFactory._meta.sqlalchemy_session = None
     InstanceKeyHistoryFactory._meta.sqlalchemy_session = None
 
@@ -286,18 +259,6 @@ def test_user_creation(db_session: Session):
     assert user.username == "admin_user"
     assert user.roles == ["admin"]
 
-
-def test_remote_connection_creation(db_session: Session):
-    conn = RemoteConnectionFactory(
-        name="My Remote", url="http://myremote.com", trust_status=TrustStatus.PENDING
-    )
-    db_session.add(conn)
-    db_session.commit()
-    assert conn.id is not None
-    assert conn.name == "My Remote"
-    assert conn.url == "http://myremote.com"
-    assert conn.trust_status == TrustStatus.PENDING
-    assert conn.effective_bidirectional is True
 
 
 @patch("app.models.encryption_manager")
@@ -525,56 +486,6 @@ def test_instance_metadata_creation(db_session: Session):
     db_session.commit()
     assert metadata.id is not None
     assert metadata.instance_uuid is not None
-
-
-class RemoteTransferJobFactory(factory.alchemy.SQLAlchemyModelFactory):
-    class Meta:
-        model = RemoteTransferJob
-        sqlalchemy_session = None
-
-    id = factory.Sequence(lambda n: n)
-    file = factory.SubFactory(FileInventoryFactory)
-    file_inventory_id = factory.SelfAttribute("file.id")
-    remote_connection = factory.SubFactory(RemoteConnectionFactory)
-    remote_connection_id = factory.SelfAttribute("remote_connection.id")
-    remote_monitored_path_id = 1
-    status = TransferStatus.PENDING
-    progress = 0
-    current_size = 0
-    total_size = 1024
-    source_path = factory.SelfAttribute("file.file_path")
-    relative_path = factory.Sequence(lambda n: f"relative/path_{n}.txt")
-    storage_type = StorageType.HOT
-    checksum = "test_checksum"
-    direction = TransferDirection.PUSH
-
-
-def test_remote_transfer_job_creation(db_session: Session):
-    job = RemoteTransferJobFactory()
-    db_session.add(job)
-    db_session.commit()
-    assert job.id is not None
-    assert job.status == TransferStatus.PENDING
-    assert job.file_inventory_id == job.file.id
-
-
-class RequestNonceFactory(factory.alchemy.SQLAlchemyModelFactory):
-    class Meta:
-        model = RequestNonce
-        sqlalchemy_session = None
-
-    id = factory.Sequence(lambda n: n)
-    fingerprint = factory.Sequence(lambda n: f"fingerprint_{n}")
-    nonce = factory.Sequence(lambda n: f"nonce_{n}")
-    timestamp = factory.LazyFunction(lambda: int(datetime.now(timezone.utc).timestamp()))
-
-
-def test_request_nonce_creation(db_session: Session):
-    nonce = RequestNonceFactory()
-    db_session.add(nonce)
-    db_session.commit()
-    assert nonce.id is not None
-    assert nonce.fingerprint is not None
 
 
 class SecurityAuditLogFactory(factory.alchemy.SQLAlchemyModelFactory):

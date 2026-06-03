@@ -9,12 +9,10 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, HttpUrl, TypeAdapte
 
 from app.models import (
     ColdStorageBackendType,
-    ConflictResolution,
     CriterionType,
     DispatchStatus,
     EncryptionStatus,
     FileStatus,
-    FileTransferStrategy,
     NotificationLevel,
     NotifierType,
     OperationType,
@@ -23,9 +21,6 @@ from app.models import (
     ScanStatus,
     StorageType,
     TagRuleCriterionType,
-    TransferDirection,
-    TransferMode,
-    TransferStatus,
 )
 
 
@@ -998,169 +993,8 @@ class P2PPullResponse(BaseModel):
     errors: List[P2PPullErrorItem]
 
 
-class RemoteConnectionBase(BaseModel):
-    """Base remote connection schema."""
-
-    name: str = Field(..., min_length=1, max_length=255)
-    url: str = Field(..., min_length=1)
 
 
-class RemoteConnectionIdentity(BaseModel):
-    """Public identity of a remote File Fridge instance."""
-
-    instance_name: str = Field(..., min_length=1, max_length=255)
-    fingerprint: str = Field(
-        ..., pattern=r"^[a-f0-9]{64}$", description="SHA256 fingerprint of Ed25519 public key"
-    )
-    ed25519_public_key: str = Field(..., description="Base64-encoded Ed25519 public signing key")
-    x25519_public_key: str = Field(..., description="Base64-encoded X25519 public key exchange key")
-    url: HttpUrl = Field(..., description="Base URL of the remote instance")
-    transfer_mode: Optional[TransferMode] = Field(
-        None, description="Current transfer mode of the instance"
-    )
-
-    @validator("ed25519_public_key", "x25519_public_key")
-    def validate_base64(cls, v):
-        """Ensure public keys are valid base64."""
-        try:
-            base64.b64decode(v)
-            return v
-        except Exception:
-            raise ValueError("Invalid base64 encoding")
-
-
-class RemoteConnectionRequest(BaseModel):
-    """Payload for a connection request to a remote instance."""
-
-    identity: RemoteConnectionIdentity
-    signature: str = Field(..., description="Hex-encoded Ed25519 signature of the identity payload")
-    connection_code: Optional[str] = Field(
-        None, description="The rotating code from the remote instance"
-    )
-
-
-class RemoteConnectionResponse(BaseModel):
-    """Response from a remote instance after a connection request."""
-
-    identity: RemoteConnectionIdentity
-    signature: str = Field(..., description="Hex-encoded Ed25519 signature of the identity payload")
-    trust_status: Optional[str] = Field(
-        None,
-        description="Trust status of the connection on the remote side (TRUSTED, PENDING, REJECTED)",
-    )
-
-
-class RemoteConnectionCreate(RemoteConnectionBase):
-    """Schema for creating a remote connection."""
-
-    connection_code: Optional[str] = Field(
-        None, description="The rotating code from the remote instance"
-    )
-    transfer_mode: Optional[TransferMode] = TransferMode.PUSH_ONLY
-
-
-class RemoteConnectionUpdate(BaseModel):
-    """Schema for updating a remote connection."""
-
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    url: Optional[str] = Field(None, min_length=1)
-    transfer_mode: Optional[TransferMode] = None
-
-
-class ConnectionCodeResponse(BaseModel):
-    """Schema for connection code response."""
-
-    code: str = Field(..., description="The current rotating connection code (UUID)")
-    expires_in_seconds: int = Field(..., description="Number of seconds until this code expires")
-
-
-class RemoteConnection(RemoteConnectionBase):
-    """Schema for remote connection response."""
-
-    id: int
-    remote_fingerprint: Optional[str] = None
-    trust_status: str
-    transfer_mode: TransferMode = TransferMode.PUSH_ONLY
-    remote_transfer_mode: TransferMode = TransferMode.PUSH_ONLY
-    effective_bidirectional: bool = False
-    last_seen_at: Optional[datetime] = None
-    is_reachable: Optional[bool] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
-
-
-class RemoteConnectionPathPermissionBase(BaseModel):
-    monitored_path_id: int
-    can_browse: bool = True
-    can_pull: bool = True
-
-
-class RemoteConnectionPathPermissionCreate(RemoteConnectionPathPermissionBase):
-    pass
-
-
-class RemoteConnectionPathPermissionResponse(RemoteConnectionPathPermissionBase):
-    id: int
-    remote_connection_id: int
-
-    class Config:
-        from_attributes = True
-
-
-class ChallengeRequest(BaseModel):
-    """Schema for initiating a challenge-response verification."""
-
-    initiator_uuid: str
-    challenge: str  # Encrypted random hex string
-
-
-class ChallengeResponse(BaseModel):
-    """Schema for challenge-response result."""
-
-    decrypted: str  # Decrypted random hex string
-
-
-class RemoteTransferJobBase(BaseModel):
-    """Base remote transfer job schema."""
-
-    file_inventory_id: int
-    remote_connection_id: int
-    remote_monitored_path_id: int
-    strategy: FileTransferStrategy = FileTransferStrategy.COPY
-    conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE
-
-
-class BulkRemoteMigrationRequest(BaseModel):
-    """Request for bulk remote migration."""
-
-    file_ids: List[int] = Field(..., min_length=1, description="List of file inventory IDs")
-    remote_connection_id: int = Field(..., description="Remote connection ID")
-    remote_monitored_path_id: int = Field(..., description="Target remote monitored path ID")
-    strategy: FileTransferStrategy = FileTransferStrategy.COPY
-    conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE
-
-
-class BulkRetryTransfersRequest(BaseModel):
-    """Request for bulk retry of failed transfer jobs."""
-
-    job_ids: List[int] = Field(..., min_length=1, description="List of transfer job IDs to retry")
-
-
-class BulkRetryFailure(BaseModel):
-    """Details of a failed retry attempt."""
-
-    id: int = Field(..., description="Transfer job ID")
-    reason: str = Field(..., description="Reason for retry failure")
-
-
-class BulkRetryTransfersResponse(BaseModel):
-    """Response for bulk retry operation."""
-
-    succeeded: List[int] = Field(..., description="List of successfully retried job IDs")
-    failed: List[BulkRetryFailure] = Field(..., description="List of failed retry attempts")
 
 
 class RelocationTaskBase(BaseModel):
@@ -1211,37 +1045,6 @@ class FreezingFileSchema(BaseModel):
     error_message: Optional[str] = None
 
 
-class RemoteTransferJob(RemoteTransferJobBase):
-    """Schema for remote transfer job response."""
-
-    id: int
-    status: TransferStatus
-    progress: int
-    current_size: int
-    total_size: int
-    start_time: Optional[datetime] = None
-    end_time: Optional[datetime] = None
-    error_message: Optional[str] = None
-    source_path: str
-    relative_path: str
-    storage_type: StorageType
-    checksum: Optional[str] = None
-    eta: Optional[float] = None  # Seconds remaining, calculated at runtime
-    direction: TransferDirection = TransferDirection.PUSH
-    strategy: FileTransferStrategy = FileTransferStrategy.COPY
-
-    class Config:
-        from_attributes = True
-
-
-class PullTransferRequest(BaseModel):
-    """Request to pull a file from a remote instance."""
-
-    remote_connection_id: int
-    remote_file_inventory_id: int
-    local_monitored_path_id: int
-    strategy: FileTransferStrategy = FileTransferStrategy.COPY
-    conflict_resolution: ConflictResolution = ConflictResolution.OVERWRITE
 
 
 class ConflictCheckRequest(BaseModel):

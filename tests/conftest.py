@@ -1,15 +1,22 @@
 import os
+# Set TESTING and DATABASE_PATH environment variables before any app imports
+os.environ["TESTING"] = "true"
+os.environ["DATABASE_PATH"] = ":memory:"
+
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import Base, get_db
+# Override settings before other imports
+settings.secret_key = "test-secret-key"
+settings.encryption_key_file = "./test_encryption.key"
+settings.require_fingerprint_verification = False
+
+from app.database import Base, get_db, engine, SessionLocal as TestingSessionLocal
 from app.main import app
 from app.models import (
     ColdStorageLocation,
@@ -22,24 +29,6 @@ from app.models import (
 )
 from app.security import hash_password
 from app.utils.rate_limiter import _login_rate_limiter, _remote_rate_limiter
-
-# Set TESTING environment variable for rate limiter bypass
-os.environ["TESTING"] = "true"
-
-# Override settings for testing
-settings.database_path = ":memory:"
-settings.secret_key = "test-secret-key"
-settings.encryption_key_file = "./test_encryption.key"
-settings.require_fingerprint_verification = False
-
-
-# Use an in-memory SQLite database for tests
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
 # Override the get_db dependency to use the test database
@@ -64,29 +53,36 @@ def reset_rate_limiters():
     _remote_rate_limiter.requests.clear()
 
 
-@pytest.fixture(scope="session")
-def db_connection():
-    # The connection object is created once per session
-    connection = engine.connect()
-    yield connection
-    connection.close()
+@pytest.fixture(scope="session", autouse=True)
+def db_migration_setup():
+    # Initialize the database and run migrations exactly like production startup
+    from app.database import init_db, has_schema_objects
+    from app.database_migrations import run_startup_migrations
+    
+    if not has_schema_objects():
+        init_db()
+    run_startup_migrations()
 
 
 @pytest.fixture
-def db_session(db_connection):
-    # Before each test, create all tables
-    Base.metadata.create_all(bind=engine)
-    # A transaction is started
-    transaction = db_connection.begin()
-    # A session is created, bound to the connection
-    session = TestingSessionLocal(bind=db_connection)
+def db_session():
+    # Create a session bound to the engine directly
+    session = TestingSessionLocal()
     yield session
-    # The session is closed
     session.close()
-    # The transaction is rolled back
-    transaction.rollback()
-    # After each test, drop all tables
-    Base.metadata.drop_all(bind=engine)
+    
+    # Clean up all tables to prevent cross-test pollution
+    import sqlalchemy as sa
+    cleanup_session = TestingSessionLocal()
+    try:
+        cleanup_session.execute(sa.text("PRAGMA foreign_keys = OFF;"))
+        for table in reversed(Base.metadata.sorted_tables):
+            cleanup_session.execute(table.delete())
+        cleanup_session.commit()
+    except Exception:
+        cleanup_session.rollback()
+    finally:
+        cleanup_session.close()
 
 
 @pytest.fixture
@@ -231,74 +227,3 @@ def create_tag(db_session: Session):
 
     return _create_tag
 
-
-@pytest.fixture
-def remote_connection_factory(db_session: Session):
-    """Factory for RemoteConnection objects."""
-    def _factory(
-        name: str = "Test Remote",
-        url: str = "http://remote.example.com",
-        fingerprint: str = "testfingerprint",
-        trust_status = "TRUSTED",
-        remote_transfer_mode = "BIDIRECTIONAL",
-    ):
-        from app.models import RemoteConnection, TransferMode
-        conn = RemoteConnection(
-            name=name,
-            url=url,
-            remote_fingerprint=fingerprint,
-            remote_ed25519_public_key="3YGphBPL4ioYr/v66Frj0IxKQZrBuSBbO2VXLWp1L5Q=",
-            remote_x25519_public_key="rhjY0TbxIvRP94vmjq8LLBCEbjefwurwSe35qQIo1EA=",
-            trust_status=trust_status,
-            remote_transfer_mode=remote_transfer_mode,
-            transfer_mode=TransferMode.BIDIRECTIONAL
-        )
-        db_session.add(conn)
-        db_session.commit()
-        db_session.refresh(conn)
-        return conn
-    return _factory
-
-
-@pytest.fixture
-def remote_transfer_job_factory(db_session: Session, remote_connection_factory, monitored_path_factory, tmp_path):
-    """Factory for RemoteTransferJob objects."""
-    import itertools
-    _counter = itertools.count(1)
-
-    def _factory(
-        file_inventory_id: int = 1,
-        remote_connection = None,
-        remote_monitored_path = None,
-        direction = "PUSH",
-        status = "PENDING",
-    ):
-        from app.models import RemoteTransferJob, StorageType, TransferDirection, TransferStatus
-        n = next(_counter)
-        if remote_connection is None:
-            remote_connection = remote_connection_factory(fingerprint=f"testfingerprint{n}")
-        if remote_monitored_path is None:
-            remote_monitored_path = monitored_path_factory(f"Remote Path {n}", str(tmp_path / f"remote{n}"))
-
-        if isinstance(direction, str):
-            direction = TransferDirection[direction]
-        if isinstance(status, str):
-            status = TransferStatus[status]
-
-        job = RemoteTransferJob(
-            file_inventory_id=file_inventory_id,
-            remote_connection_id=remote_connection.id,
-            remote_monitored_path_id=remote_monitored_path.id,
-            direction=direction,
-            status=status,
-            source_path=str(tmp_path),
-            relative_path=f"test_file_{n}.txt",
-            total_size=1024,
-            storage_type=StorageType.HOT,
-            checksum="testchecksum",
-        )
-        db_session.add(job)
-        db_session.commit()
-        db_session.refresh(job)
-        return job
-    return _factory

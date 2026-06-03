@@ -35,6 +35,20 @@ target_metadata = Base.metadata
 # ... etc.
 
 
+def include_object(object, name, type_, reflected, compare_to):
+    # Ignore specific indexes that cause spurious differences on SQLite due to unique constraints
+    if type_ == "index" and name in {
+        "ix_p2p_network_config_psk_hash",
+        "ix_p2p_peers_peer_id",
+        "ix_remote_shared_file_cache_last_announced_at",
+    }:
+        return False
+    # Ignore type/nullability comparisons on SQLite columns that do not support ALTER TABLE modifications natively
+    if type_ == "column" and name in {"backend_type", "operation_mode"} and getattr(object, "table", None) is not None and object.table.name == "cold_storage_locations":
+        return False
+    return True
+
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode.
 
@@ -53,6 +67,8 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=False,
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -66,6 +82,20 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    # Check if a connection was passed programmatically (e.g. from tests)
+    connection = config.attributes.get("connection", None)
+    if connection is not None:
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=False,
+            include_object=include_object,
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     # Overwrite the sqlalchemy.url from settings
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = settings.database_url
@@ -77,10 +107,12 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
-
-    with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=False,
+            include_object=include_object,
+        )
 
         with context.begin_transaction():
             context.run_migrations()

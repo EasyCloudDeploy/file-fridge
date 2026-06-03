@@ -1,6 +1,5 @@
 import pytest
 
-from app.models import RemoteConnection
 
 
 @pytest.mark.unit
@@ -37,40 +36,14 @@ class TestIdentityRouter:
         payload = {"password": "password"}
         keys = authenticated_client.post("/api/v1/identity/private-export", json=payload).json()
 
-        # Add a remote connection to test replacement logic
-        db_session.add(RemoteConnection(name="Test", url="u", remote_fingerprint="f1"))
-        db_session.commit()
-
         import_payload = {
             "password": "password",
             "signing_private_key": keys["signing_private_key"],
             "kx_private_key": keys["kx_private_key"],
-            "confirm_replace": True
         }
         response = authenticated_client.post("/api/v1/identity/import", json=import_payload)
         assert response.status_code == 200
         assert "imported successfully" in response.json()["message"].lower()
-
-        # Verify remote connections were cleared
-        assert db_session.query(RemoteConnection).count() == 0
-
-    def test_import_identity_conflict_no_confirm(self, authenticated_client, db_session):
-        """Test that import fails if remote connections exist and confirm_replace is False."""
-        payload = {"password": "password"}
-        keys = authenticated_client.post("/api/v1/identity/private-export", json=payload).json()
-
-        db_session.add(RemoteConnection(name="Test", url="u", remote_fingerprint="f1"))
-        db_session.commit()
-
-        import_payload = {
-            "password": "password",
-            "signing_private_key": keys["signing_private_key"],
-            "kx_private_key": keys["kx_private_key"],
-            "confirm_replace": False
-        }
-        response = authenticated_client.post("/api/v1/identity/import", json=import_payload)
-        assert response.status_code == 409
-        assert "confirm_replace=true" in response.json()["detail"].lower()
 
     def test_import_identity_invalid_pem(self, authenticated_client):
         """Test importing invalid PEM data."""
@@ -78,7 +51,6 @@ class TestIdentityRouter:
             "password": "password",
             "signing_private_key": "invalid-pem",
             "kx_private_key": "invalid-pem",
-            "confirm_replace": True
         }
         response = authenticated_client.post("/api/v1/identity/import", json=import_payload)
         assert response.status_code == 400
@@ -95,7 +67,6 @@ class TestIdentityRouter:
             "password": "password",
             "signing_private_key": "k1",
             "kx_private_key": "k2",
-            "confirm_replace": True
         }
         response = authenticated_client.post("/api/v1/identity/import", json=import_payload)
         assert response.status_code == 500
