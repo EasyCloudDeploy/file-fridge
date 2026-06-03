@@ -33,7 +33,7 @@ jobs:
           DATABASE_PATH: /tmp/ff-migration-check/check.db
         run: |
           mkdir -p /tmp/ff-migration-check
-          uv run alembic upgrade head
+          uv run python -c "from app.database import init_db; init_db(); from app.database_migrations import run_startup_migrations; run_startup_migrations()"
           uv run alembic check
           # Verify the DB landed on the expected head revision (catches missing migration files
           # and broken chains — the class of bug where a column is added without a migration).
