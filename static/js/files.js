@@ -3118,30 +3118,30 @@ async function initFilesPage() {
     }
 
     // Advanced filters listeners
-    const extensionInput = document.getElementById('extension_filter');
-    if (extensionInput) {
-        extensionInput.addEventListener('keypress', function (e) {
+    const extensionFilter = document.getElementById('extension_filter');
+    if (extensionFilter) {
+        extensionFilter.addEventListener('keypress', function (e) {
             if (e.key === 'Enter') updateFilters();
         });
-        extensionInput.addEventListener('blur', updateFilters);
+        extensionFilter.addEventListener('blur', updateFilters);
     }
 
-    const mimeInput = document.getElementById('mime_filter');
-    if (mimeInput) {
-        mimeInput.addEventListener('keypress', function (e) {
+    const mimeFilter = document.getElementById('mime_filter');
+    if (mimeFilter) {
+        mimeFilter.addEventListener('keypress', function (e) {
             if (e.key === 'Enter') updateFilters();
         });
-        mimeInput.addEventListener('blur', updateFilters);
+        mimeFilter.addEventListener('blur', updateFilters);
     }
 
-    const checksumSelect = document.getElementById('checksum_filter');
-    if (checksumSelect) {
-        checksumSelect.addEventListener('change', updateFilters);
+    const checksumFilter = document.getElementById('checksum_filter');
+    if (checksumFilter) {
+        checksumFilter.addEventListener('change', updateFilters);
     }
 
-    const pinnedSelect = document.getElementById('pinned_filter');
-    if (pinnedSelect) {
-        pinnedSelect.addEventListener('change', updateFilters);
+    const pinnedFilter = document.getElementById('pinned_filter');
+    if (pinnedFilter) {
+        pinnedFilter.addEventListener('change', updateFilters);
     }
 
     const locationIdSelect = document.getElementById('location_id_filter');

@@ -11,6 +11,8 @@ test.describe('Notifiers Management', () => {
 
     test('User can create, edit, and delete a webhook notifier', async ({ page }) => {
         const browserFailures = collectBrowserFailures(page);
+        page.on('console', msg => console.log('BROWSER_CONSOLE:', msg.type(), msg.text()));
+        page.on('pageerror', err => console.error('BROWSER_PAGEERROR:', err.message, err.stack));
 
         // 1. Navigate to Notifiers
         await page.goto('/notifiers');
@@ -26,6 +28,7 @@ test.describe('Notifiers Management', () => {
         await page.locator('#select_all_events').click();
         
         await page.locator('#save_notifier_btn').click();
+        await expect(page.locator('#notifier_modal')).not.toBeVisible();
 
         // 3. Verify it appears in the list
         await expect(page.locator('#notifiers_table_body')).toContainText(notifierName, { timeout: 15000 });
@@ -37,6 +40,7 @@ test.describe('Notifiers Management', () => {
         const newNotifierName = `${notifierName} Edited`;
         await page.locator('#notifier_name').fill(newNotifierName);
         await page.locator('#save_notifier_btn').click();
+        await expect(page.locator('#notifier_modal')).not.toBeVisible();
 
         // 5. Verify update
         await expect(page.locator('#notifiers_table_body')).toContainText(newNotifierName, { timeout: 15000 });
