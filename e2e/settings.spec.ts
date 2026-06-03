@@ -34,10 +34,7 @@ test.describe('Settings and Security', () => {
     test('P2P Network settings section is accessible', async ({ page }) => {
         const browserFailures = collectBrowserFailures(page);
 
-        await page.goto('/settings');
-        
-        // Click on Remote Connections in nav
-        await page.locator('#nav-remote-connections').click();
+        await page.goto('/p2p');
         
         // Check P2P setup wizard heading and primary actions
         await expect(page.getByRole('heading', { name: /P2P Setup Wizard/i })).toBeVisible();

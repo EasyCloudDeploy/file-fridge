@@ -140,6 +140,7 @@ function renderTags() {
     const tableBody = document.getElementById('tags_table_body');
 
     if (allTags.length === 0) {
+        tableBody.innerHTML = '';
         tableContainer.style.display = 'none';
         setRegionState({
             loading: '#tags_loading',
@@ -450,6 +451,7 @@ function renderTagRules() {
     const tableBody = document.getElementById('rules_table_body');
 
     if (allRules.length === 0) {
+        tableBody.innerHTML = '';
         tableContainer.style.display = 'none';
         setRegionState({
             loading: '#rules_loading',

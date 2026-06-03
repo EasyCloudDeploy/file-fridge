@@ -157,6 +157,7 @@ function renderNotifiers() {
     const tbody = document.getElementById('notifiers_table_body');
 
     if (allNotifiers.length === 0) {
+        tbody.innerHTML = '';
         tableContainer.style.display = 'none';
         setRegionState({
             loading: '#notifiers_loading',

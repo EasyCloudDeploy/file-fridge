@@ -1,7 +1,6 @@
 """Service to reverse file operations when criteria are removed or paths are deleted."""
 
 import logging
-import shutil
 from pathlib import Path
 from typing import Dict, Optional
 

@@ -7,9 +7,9 @@ from sqlalchemy import inspect
 from app.database import Base, engine, has_schema_objects, init_db
 from app.database_migrations import (
     ALLOW_OFFLINE_REVISION,
-    HEAD_REVISION,
     MAX_CONCURRENT_MIGRATIONS_REVISION,
     NORMALIZE_COLD_STORAGE_ENUM_VALUES_REVISION,
+    P2P_V2_REVISION,
     _create_sqlite_backup,
     _determine_schema_revision,
     run_startup_migrations,
@@ -174,7 +174,7 @@ def test_determine_schema_revision_returns_head_for_full_head_schema():
 
     revision = _determine_schema_revision(inspector, db)
 
-    assert revision == HEAD_REVISION
+    assert revision == P2P_V2_REVISION
     db.execute.assert_not_called()
 
 

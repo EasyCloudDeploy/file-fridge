@@ -183,6 +183,7 @@ class InstanceConfigService:
         metadata = db.query(InstanceMetadata).first()
         if not metadata:
             import uuid
+
             metadata = InstanceMetadata(instance_uuid=str(uuid.uuid4()))
             db.add(metadata)
 
@@ -237,41 +238,67 @@ class InstanceConfigService:
             "smtp": {
                 "smtp_host": {
                     "value": self.get_smtp_host(db),
-                    "source": "environment" if settings.smtp_host else "database" if metadata and metadata.smtp_host else "not_set",
+                    "source": (
+                        "environment"
+                        if settings.smtp_host
+                        else "database" if metadata and metadata.smtp_host else "not_set"
+                    ),
                     "env_value": settings.smtp_host,
                     "db_value": metadata.smtp_host if metadata else None,
                     "can_edit": not bool(settings.smtp_host),
                 },
                 "smtp_port": {
                     "value": self.get_smtp_port(db),
-                    "source": "environment" if settings.smtp_host else "database" if metadata and metadata.smtp_port is not None else "not_set",
+                    "source": (
+                        "environment"
+                        if settings.smtp_host
+                        else (
+                            "database" if metadata and metadata.smtp_port is not None else "not_set"
+                        )
+                    ),
                     "env_value": settings.smtp_port,
                     "db_value": metadata.smtp_port if metadata else None,
                     "can_edit": not bool(settings.smtp_host),
                 },
                 "smtp_user": {
                     "value": self.get_smtp_user(db),
-                    "source": "environment" if settings.smtp_host else "database" if metadata and metadata.smtp_user else "not_set",
+                    "source": (
+                        "environment"
+                        if settings.smtp_host
+                        else "database" if metadata and metadata.smtp_user else "not_set"
+                    ),
                     "env_value": settings.smtp_user,
                     "db_value": metadata.smtp_user if metadata else None,
                     "can_edit": not bool(settings.smtp_host),
                 },
                 "smtp_sender": {
                     "value": self.get_smtp_sender(db),
-                    "source": "environment" if settings.smtp_sender else "database" if metadata and metadata.smtp_sender else "not_set",
+                    "source": (
+                        "environment"
+                        if settings.smtp_sender
+                        else "database" if metadata and metadata.smtp_sender else "not_set"
+                    ),
                     "env_value": settings.smtp_sender,
                     "db_value": metadata.smtp_sender if metadata else None,
                     "can_edit": not bool(settings.smtp_sender),
                 },
                 "smtp_use_tls": {
                     "value": self.get_smtp_use_tls(db),
-                    "source": "environment" if settings.smtp_host else "database" if metadata and metadata.smtp_use_tls is not None else "not_set",
+                    "source": (
+                        "environment"
+                        if settings.smtp_host
+                        else (
+                            "database"
+                            if metadata and metadata.smtp_use_tls is not None
+                            else "not_set"
+                        )
+                    ),
                     "env_value": settings.smtp_use_tls,
                     "db_value": metadata.smtp_use_tls if metadata else None,
                     "can_edit": not bool(settings.smtp_host),
                 },
                 "is_env_configured": bool(settings.smtp_host),
-            }
+            },
         }
 
 

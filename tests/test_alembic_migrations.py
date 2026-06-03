@@ -9,7 +9,12 @@ from alembic.config import Config
 from sqlalchemy.orm import sessionmaker
 
 from alembic import command
-from app.database_migrations import HEAD_REVISION, run_startup_migrations
+from alembic.script import ScriptDirectory
+from app.database_migrations import run_startup_migrations
+
+alembic_cfg = Config("alembic.ini")
+script = ScriptDirectory.from_config(alembic_cfg)
+HEAD_REVISION = script.get_current_head()
 
 SNAPSHOT_DIR = Path("tests/fixtures/db_snapshots")
 

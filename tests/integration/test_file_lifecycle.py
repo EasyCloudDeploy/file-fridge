@@ -7,6 +7,7 @@ from app.models import (
     ColdStorageLocation,
     Criteria,
     FileInventory,
+    FileRecord,
     FileStatus,
     MonitoredPath,
     StorageType,
@@ -430,3 +431,366 @@ def test_symlink_to_copy_migration(monitored_path_with_locations, db_session):
     assert test_file.read_text() == original_content
     assert expected_cold.exists()
     assert expected_cold.read_text() == original_content
+
+
+def test_file_lifecycle_encrypted_local_backend(monitored_path_with_locations, db_session):
+    """
+    Test end-to-end file lifecycle with encryption enabled on a local backend.
+    
+    1. Freeze a file: It should be encrypted and renamed to ffenc_<id>.ffenc.
+    2. Simulate moving the encrypted file on disk (self-healing test).
+    3. Re-scan: The database should heal the paths.
+    4. Thaw: The file should be thawed, decrypted, and restored with its original name.
+    """
+    monitored_path, hot_path, cold_path = monitored_path_with_locations
+    monitored_path.operation_type = "move"
+    
+    # Enable encryption on the cold storage location
+    location = monitored_path.storage_locations[0]
+    location.is_encrypted = True
+    db_session.commit()
+
+    # ---- Phase 1: Freeze ----
+    test_file = hot_path / "important_secrets.txt"
+    test_file.write_text("This is highly confidential plaintext data.")
+    original_size = test_file.stat().st_size
+
+    criteria = _never_match_criterion(monitored_path.id)
+    db_session.add(criteria)
+    db_session.commit()
+
+    results = file_workflow_service.process_path(monitored_path, db_session)
+    print("DEBUG process_path results:", results)
+    print("DEBUG all inventories:", [(i.id, i.file_path, i.storage_type, i.status) for i in db_session.query(FileInventory).all()])
+    assert results["files_moved"] == 1, f"errors: {results['errors']}"
+
+    # Get the file inventory to find its ID
+    db_session.expire_all()
+    inv_entry = db_session.query(FileInventory).filter(
+        FileInventory.path_id == monitored_path.id,
+        FileInventory.storage_type == StorageType.COLD,
+    ).first()
+    assert inv_entry is not None
+    assert inv_entry.is_encrypted is True
+    
+    # Verify file name on disk is ffenc_<id>.ffenc
+    expected_cold_name = f"ffenc_{inv_entry.id}.ffenc"
+    expected_cold_path = cold_path / expected_cold_name
+    assert expected_cold_path.exists()
+    assert inv_entry.file_path == str(expected_cold_path)
+    
+    # The file contents should be encrypted (not readable as plaintext)
+    encrypted_contents = expected_cold_path.read_bytes()
+    assert b"confidential" not in encrypted_contents
+
+    # ---- Phase 2: Self-Healing / Moving on disk ----
+    # Manually move the file to a subfolder on disk (simulating movement/renaming)
+    subfolder = cold_path / "archive"
+    subfolder.mkdir(exist_ok=True)
+    new_cold_path = subfolder / expected_cold_name
+    expected_cold_path.rename(new_cold_path)
+    
+    assert not expected_cold_path.exists()
+    assert new_cold_path.exists()
+
+    # Run scan. The scanner should detect the file at the new path, match the ID from the filename,
+    # and update the DB paths.
+    results_heal = file_workflow_service.process_path(monitored_path, db_session)
+    assert results_heal["errors"] == []
+
+    # Verify DB references have been healed
+    db_session.expire_all()
+    inv_healed = db_session.query(FileInventory).filter(FileInventory.id == inv_entry.id).first()
+    assert inv_healed.file_path == str(new_cold_path)
+    assert inv_healed.status == FileStatus.ACTIVE
+
+    rec_healed = db_session.query(FileRecord).filter(
+        FileRecord.path_id == monitored_path.id,
+        FileRecord.cold_storage_path == str(new_cold_path),
+    ).first()
+    assert rec_healed is not None
+    assert rec_healed.original_path == str(test_file)
+
+    # ---- Phase 3: Thaw & Decrypt ----
+    # Swap criteria to trigger thaw
+    criteria.operator = ">"
+    criteria.value = "-1"
+    db_session.commit()
+
+    results_thaw = file_workflow_service.process_path(monitored_path, db_session)
+    assert results_thaw["files_moved"] == 1
+    assert results_thaw["errors"] == []
+
+    # Verify that the decrypted file is back in hot storage with original name and content
+    assert test_file.exists()
+    assert test_file.read_text() == "This is highly confidential plaintext data."
+    assert not new_cold_path.exists()
+
+
+def test_file_lifecycle_encrypted_gdrive_backend(monitored_path_with_locations, db_session, monkeypatch):
+    """
+    Test end-to-end file lifecycle with encryption enabled on a Google Drive backend.
+    
+    1. Freeze a file: It should be encrypted and uploaded to GDrive as ffenc_<id>.ffenc.
+    2. Simulate a file ID change on Google Drive (self-healing test).
+    3. Re-scan: Google Drive listing is scanned, and the DB heals references to the new file ID.
+    4. Thaw: The file should be thawed, decrypted, and restored in hot storage with original name and content.
+    """
+    from app.models import ColdStorageBackendType, OperationType
+    monitored_path, hot_path, cold_path = monitored_path_with_locations
+    monitored_path.operation_type = "move"
+    
+    # Change the storage location to be GDrive
+    location = monitored_path.storage_locations[0]
+    location.backend_type = ColdStorageBackendType.GDRIVE
+    location.path = "gdrive://test-folder"
+    location.is_encrypted = True
+    db_session.commit()
+
+    files_dict = {}
+
+    class MockGDriveBackend:
+        def backend_name(self) -> str:
+            return "gdrive"
+
+        def validate_location(self, location):
+            return True, None
+
+        def capabilities(self):
+            from app.services.cold_storage_backends.base import ColdStorageCapabilities
+            return ColdStorageCapabilities(
+                supports_move=True,
+                supports_copy=True,
+                supports_symlink=False,
+                supports_local_path_stats=False,
+            )
+
+        def build_reference(self, location, path) -> str:
+            return f"gdrive://{location.id}/{path}"
+
+        def freeze_file(self, source_path, relative_path, location, operation_mode, progress_callback=None):
+            file_id = f"file-{relative_path.name}"
+            ref = self.build_reference(location, file_id)
+            files_dict[ref] = {
+                "content": source_path.read_bytes(),
+                "name": relative_path.name,
+                "id": file_id,
+            }
+            if operation_mode == OperationType.MOVE:
+                source_path.unlink()
+            return True, None, ref, None
+
+        def thaw_file(self, storage_reference, destination_path, location, operation_mode):
+            if storage_reference not in files_dict:
+                return False, f"File not found: {storage_reference}"
+            destination_path.write_bytes(files_dict[storage_reference]["content"])
+            if operation_mode in (OperationType.MOVE, OperationType.SYMLINK):
+                del files_dict[storage_reference]
+            return True, None
+
+        def exists(self, storage_reference, location) -> bool:
+            return storage_reference in files_dict
+
+        def list_all_folder_files(self, location, page_size=1000, page_token=None):
+            files = []
+            for ref, info in files_dict.items():
+                if ref.startswith(f"gdrive://{location.id}/"):
+                    files.append({
+                        "id": info["id"],
+                        "name": info["name"],
+                        "size": len(info["content"]),
+                        "modified_time": "2026-06-01T15:00:00Z",
+                        "created_time": "2026-06-01T15:00:00Z",
+                        "is_managed": False,
+                        "ff_location_id": None,
+                    })
+            return {"files": files}
+
+        def list_managed_files(self, location, page_size=1000, page_token=None):
+            return self.list_all_folder_files(location, page_size, page_token)
+
+    mock_backend = MockGDriveBackend()
+    
+    # Patch get_backend
+    monkeypatch.setattr("app.services.file_workflow_service.get_backend", lambda loc: mock_backend)
+    monkeypatch.setattr("app.services.file_freezer.get_backend", lambda loc: mock_backend)
+    monkeypatch.setattr("app.services.file_thawer.get_backend", lambda loc: mock_backend)
+    monkeypatch.setattr("app.services.file_cleanup.get_backend", lambda loc: mock_backend)
+    monkeypatch.setattr("app.services.storage_routing_service.get_backend", lambda loc: mock_backend)
+
+    # ---- Phase 1: Freeze ----
+    test_file = hot_path / "gdrive_secrets.txt"
+    test_file.write_text("Top secret GDrive plaintext.")
+    original_size = test_file.stat().st_size
+
+    criteria = _never_match_criterion(monitored_path.id)
+    db_session.add(criteria)
+    db_session.commit()
+
+    results = file_workflow_service.process_path(monitored_path, db_session)
+    assert results["files_moved"] == 1, f"errors: {results['errors']}"
+
+    db_session.expire_all()
+    inv_entry = db_session.query(FileInventory).filter(
+        FileInventory.path_id == monitored_path.id,
+        FileInventory.storage_type == StorageType.COLD,
+    ).first()
+    assert inv_entry is not None
+    assert inv_entry.is_encrypted is True
+    
+    expected_cold_name = f"ffenc_{inv_entry.id}.ffenc"
+    expected_file_id = f"file-{expected_cold_name}"
+    expected_ref = f"gdrive://{location.id}/{expected_file_id}"
+    assert inv_entry.file_path == expected_ref
+    
+    assert expected_ref in files_dict
+    assert b"secrets" not in files_dict[expected_ref]["content"]
+
+    # ---- Phase 2: Self-Healing / File ID change on remote ----
+    # Simulate the file being re-uploaded to GDrive, changing its file ID on the remote
+    new_file_id = "file-id-changed-999"
+    new_ref = f"gdrive://{location.id}/{new_file_id}"
+    
+    # Update our mock storage with the new file reference
+    file_info = files_dict.pop(expected_ref)
+    file_info["id"] = new_file_id
+    files_dict[new_ref] = file_info
+
+    # Run scan to trigger self-healing
+    results_heal = file_workflow_service.process_path(monitored_path, db_session)
+    assert results_heal["errors"] == []
+
+    # Verify DB references have been healed to the new ref
+    db_session.expire_all()
+    inv_healed = db_session.query(FileInventory).filter(FileInventory.id == inv_entry.id).first()
+    assert inv_healed.file_path == new_ref
+    assert inv_healed.status == FileStatus.ACTIVE
+
+    rec_healed = db_session.query(FileRecord).filter(
+        FileRecord.path_id == monitored_path.id,
+        FileRecord.cold_storage_path == new_ref,
+    ).first()
+    assert rec_healed is not None
+
+    # ---- Phase 3: Thaw & Decrypt ----
+    criteria.operator = ">"
+    criteria.value = "-1"
+    db_session.commit()
+
+    results_thaw = file_workflow_service.process_path(monitored_path, db_session)
+    assert results_thaw["files_moved"] == 1
+    assert results_thaw["errors"] == []
+
+    # Verify that the decrypted file is back in hot storage
+    assert test_file.exists()
+    assert test_file.read_text() == "Top secret GDrive plaintext."
+    assert new_ref not in files_dict
+
+
+def test_file_lifecycle_encrypted_s3_backend(monitored_path_with_locations, db_session, monkeypatch):
+    """
+    Test end-to-end file lifecycle with encryption enabled on an S3 backend.
+    
+    1. Freeze a file: It should be encrypted and uploaded to S3 as ffenc_<id>.ffenc.
+    2. Thaw: The file should be thawed, decrypted, and restored in hot storage with original name and content.
+    """
+    from app.models import ColdStorageBackendType, OperationType
+    monitored_path, hot_path, _ = monitored_path_with_locations
+    monitored_path.operation_type = "move"
+    
+    # Change the storage location to be S3
+    location = monitored_path.storage_locations[0]
+    location.backend_type = ColdStorageBackendType.S3
+    location.path = "s3://my-bucket/prefix"
+    location.is_encrypted = True
+    db_session.commit()
+
+    files_dict = {}
+
+    class MockS3Backend:
+        def backend_name(self) -> str:
+            return "s3"
+
+        def validate_location(self, location):
+            return True, None
+
+        def capabilities(self):
+            from app.services.cold_storage_backends.base import ColdStorageCapabilities
+            return ColdStorageCapabilities(
+                supports_move=True,
+                supports_copy=True,
+                supports_symlink=False,
+                supports_local_path_stats=False,
+            )
+
+        def build_reference(self, location, path) -> str:
+            return f"s3://my-bucket/prefix/{path}"
+
+        def freeze_file(self, source_path, relative_path, location, operation_mode, progress_callback=None):
+            ref = self.build_reference(location, relative_path)
+            files_dict[ref] = {
+                "content": source_path.read_bytes(),
+            }
+            if operation_mode == OperationType.MOVE:
+                source_path.unlink()
+            return True, None, ref, None
+
+        def thaw_file(self, storage_reference, destination_path, location, operation_mode):
+            if storage_reference not in files_dict:
+                return False, f"File not found: {storage_reference}"
+            destination_path.write_bytes(files_dict[storage_reference]["content"])
+            if operation_mode in (OperationType.MOVE, OperationType.SYMLINK):
+                del files_dict[storage_reference]
+            return True, None
+
+        def exists(self, storage_reference, location) -> bool:
+            return storage_reference in files_dict
+
+    mock_backend = MockS3Backend()
+    
+    # Patch get_backend
+    monkeypatch.setattr("app.services.file_workflow_service.get_backend", lambda loc: mock_backend)
+    monkeypatch.setattr("app.services.file_freezer.get_backend", lambda loc: mock_backend)
+    monkeypatch.setattr("app.services.file_thawer.get_backend", lambda loc: mock_backend)
+    monkeypatch.setattr("app.services.file_cleanup.get_backend", lambda loc: mock_backend)
+    monkeypatch.setattr("app.services.storage_routing_service.get_backend", lambda loc: mock_backend)
+
+    # ---- Phase 1: Freeze ----
+    test_file = hot_path / "s3_secrets.txt"
+    test_file.write_text("Top secret S3 plaintext.")
+
+    criteria = _never_match_criterion(monitored_path.id)
+    db_session.add(criteria)
+    db_session.commit()
+
+    results = file_workflow_service.process_path(monitored_path, db_session)
+    assert results["files_moved"] == 1, f"errors: {results['errors']}"
+
+    db_session.expire_all()
+    inv_entry = db_session.query(FileInventory).filter(
+        FileInventory.path_id == monitored_path.id,
+        FileInventory.storage_type == StorageType.COLD,
+    ).first()
+    assert inv_entry is not None
+    assert inv_entry.is_encrypted is True
+    
+    expected_cold_name = f"ffenc_{inv_entry.id}.ffenc"
+    expected_ref = f"s3://my-bucket/prefix/{expected_cold_name}"
+    assert inv_entry.file_path == expected_ref
+    
+    assert expected_ref in files_dict
+    assert b"secrets" not in files_dict[expected_ref]["content"]
+
+    # ---- Phase 2: Thaw & Decrypt ----
+    criteria.operator = ">"
+    criteria.value = "-1"
+    db_session.commit()
+
+    results_thaw = file_workflow_service.process_path(monitored_path, db_session)
+    assert results_thaw["files_moved"] == 1
+    assert results_thaw["errors"] == []
+
+    # Verify that the decrypted file is back in hot storage
+    assert test_file.exists()
+    assert test_file.read_text() == "Top secret S3 plaintext."
+    assert expected_ref not in files_dict

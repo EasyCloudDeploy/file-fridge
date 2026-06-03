@@ -1,0 +1,267 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0 -- /Users/martino/repos/file-fridge/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /Users/martino/repos/file-fridge
+configfile: pyproject.toml
+plugins: respx-0.22.0, mock-3.15.1, anyio-4.12.0, timeout-2.4.0, asyncio-1.3.0, factoryboy-2.8.1, Faker-40.1.2, cov-7.0.0
+timeout: 300.0s
+timeout method: signal
+timeout func_only: False
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 7 items / 6 deselected / 1 selected
+
+tests/integration/test_file_lifecycle.py::test_file_lifecycle_encrypted_local_backend DEBUG process_path results: {'path_id': 1, 'files_found': 1, 'files_moved': 1, 'files_cleaned': 0, 'files_skipped': 0, 'total_scanned': 1, 'errors': []}
+DEBUG all inventories: [(1, '/private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/cold_data/ffenc_1.ffenc', <StorageType.COLD: 'cold'>, <FileStatus.ACTIVE: 'active'>)]
+FAILED
+
+=================================== FAILURES ===================================
+_________________ test_file_lifecycle_encrypted_local_backend __________________
+
+monitored_path_with_locations = (<app.models.MonitoredPath object at 0x10cb84350>, PosixPath('/private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T...ar/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/cold_data'))
+db_session = <sqlalchemy.orm.session.Session object at 0x10ce8a9d0>
+
+    def test_file_lifecycle_encrypted_local_backend(monitored_path_with_locations, db_session):
+        """
+        Test end-to-end file lifecycle with encryption enabled on a local backend.
+    
+        1. Freeze a file: It should be encrypted and renamed to ffenc_<id>.ffenc.
+        2. Simulate moving the encrypted file on disk (self-healing test).
+        3. Re-scan: The database should heal the paths.
+        4. Thaw: The file should be thawed, decrypted, and restored with its original name.
+        """
+        monitored_path, hot_path, cold_path = monitored_path_with_locations
+        monitored_path.operation_type = "move"
+    
+        # Enable encryption on the cold storage location
+        location = monitored_path.storage_locations[0]
+        location.is_encrypted = True
+        db_session.commit()
+    
+        # ---- Phase 1: Freeze ----
+        test_file = hot_path / "important_secrets.txt"
+        test_file.write_text("This is highly confidential plaintext data.")
+        original_size = test_file.stat().st_size
+    
+        criteria = _never_match_criterion(monitored_path.id)
+        db_session.add(criteria)
+        db_session.commit()
+    
+        results = file_workflow_service.process_path(monitored_path, db_session)
+        print("DEBUG process_path results:", results)
+        print("DEBUG all inventories:", [(i.id, i.file_path, i.storage_type, i.status) for i in db_session.query(FileInventory).all()])
+        assert results["files_moved"] == 1, f"errors: {results['errors']}"
+    
+        # Get the file inventory to find its ID
+        db_session.expire_all()
+        inv_entry = db_session.query(FileInventory).filter(
+            FileInventory.path_id == monitored_path.id,
+            FileInventory.storage_type == StorageType.COLD,
+        ).first()
+        assert inv_entry is not None
+        assert inv_entry.is_encrypted is True
+    
+        # Verify file name on disk is ffenc_<id>.ffenc
+        expected_cold_name = f"ffenc_{inv_entry.id}.ffenc"
+        expected_cold_path = cold_path / expected_cold_name
+        assert expected_cold_path.exists()
+        assert inv_entry.file_path == str(expected_cold_path)
+    
+        # The file contents should be encrypted (not readable as plaintext)
+        encrypted_contents = expected_cold_path.read_bytes()
+        assert b"confidential" not in encrypted_contents
+    
+        # ---- Phase 2: Self-Healing / Moving on disk ----
+        # Manually move the file to a subfolder on disk (simulating movement/renaming)
+        subfolder = cold_path / "archive"
+        subfolder.mkdir(exist_ok=True)
+        new_cold_path = subfolder / expected_cold_name
+        expected_cold_path.rename(new_cold_path)
+    
+        assert not expected_cold_path.exists()
+        assert new_cold_path.exists()
+    
+        # Run scan. The scanner should detect the file at the new path, match the ID from the filename,
+        # and update the DB paths.
+        results_heal = file_workflow_service.process_path(monitored_path, db_session)
+        assert results_heal["errors"] == []
+    
+        # Verify DB references have been healed
+        db_session.expire_all()
+        inv_healed = db_session.query(FileInventory).filter(FileInventory.id == inv_entry.id).first()
+        assert inv_healed.file_path == str(new_cold_path)
+        assert inv_healed.status == FileStatus.ACTIVE
+    
+        rec_healed = db_session.query(FileRecord).filter(
+            FileRecord.path_id == monitored_path.id,
+            FileRecord.cold_storage_path == str(new_cold_path),
+        ).first()
+>       assert rec_healed is not None
+E       assert None is not None
+
+tests/integration/test_file_lifecycle.py:511: AssertionError
+------------------------------ Captured log call -------------------------------
+INFO     app.services.scan_progress:scan_progress.py:206 Started scan tracking: 9943ce28-45f3-4a8a-8a3e-a65d0d62bf7f for path 1, 0 files
+INFO     app.services.file_workflow_service:file_workflow_service.py:92 Started scan 9943ce28-45f3-4a8a-8a3e-a65d0d62bf7f for path 1
+INFO     app.services.file_cleanup:file_cleanup.py:216 No missing FileInventory entries to clean up.
+INFO     app.services.file_cleanup:file_cleanup.py:176 FileRecord cleanup complete: checked 0, removed 0
+INFO     app.services.file_cleanup:file_cleanup.py:288 Duplicate cleanup complete: checked 0, removed 0
+INFO     app.services.file_cleanup:file_cleanup.py:380 Symlink cleanup complete: checked 0, removed 0
+INFO     app.services.file_workflow_service:file_workflow_service.py:215 Processing 1 files to cold storage
+INFO     app.services.storage_routing_service:storage_routing_service.py:83 Selected storage location: TestColdLoc (path=/private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/cold_data) score=80.00, free_space=28.41GB
+INFO     app.services.file_freezer:file_freezer.py:106 Preparing manual freeze: file_id=1 source=/private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/hot_data/important_secrets.txt destination=/private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/cold_data/important_secrets.txt operation=OperationType.MOVE storage_location=/private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/cold_data
+INFO     app.services.identity_service:identity_service.py:35 No instance metadata found, creating a new identity.
+INFO     app.services.identity_service:identity_service.py:95 Successfully generated and saved new instance key pairs.
+INFO     app.services.encryption_service:encryption_service.py:63 Generated new persistent file encryption root key
+INFO     app.services.file_freezer:file_freezer.py:292 Froze file: /private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/hot_data/important_secrets.txt -> /private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/cold_data/ffenc_1.ffenc (location: TestColdLoc, pinned: False)
+INFO     app.services.scan_progress:scan_progress.py:460 Scan 9943ce28-45f3-4a8a-8a3e-a65d0d62bf7f finished with status: completed
+INFO     app.services.scan_progress:scan_progress.py:206 Started scan tracking: ce319f13-01e4-4f8f-ad92-31f71c04c12a for path 1, 0 files
+INFO     app.services.file_workflow_service:file_workflow_service.py:92 Started scan ce319f13-01e4-4f8f-ad92-31f71c04c12a for path 1
+INFO     app.services.file_cleanup:file_cleanup.py:216 No missing FileInventory entries to clean up.
+INFO     app.services.file_cleanup:file_cleanup.py:105 File not found in cold storage (move): /private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/cold_data/ffenc_1.ffenc
+INFO     app.services.file_cleanup:file_cleanup.py:168 Removed FileRecord 1 for missing file
+INFO     app.services.file_cleanup:file_cleanup.py:176 FileRecord cleanup complete: checked 1, removed 1
+INFO     app.services.file_cleanup:file_cleanup.py:288 Duplicate cleanup complete: checked 0, removed 0
+INFO     app.services.file_cleanup:file_cleanup.py:380 Symlink cleanup complete: checked 1, removed 0
+INFO     app.services.file_workflow_service:file_workflow_service.py:1580 Self-healing (Local/S3): file ID 1 moved (new path=/private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/cold_data/archive/ffenc_1.ffenc, old path=/private/var/folders/6v/222dp8t522zg2wyx_vly7jsw0000gn/T/pytest-of-martino/pytest-33/test_file_lifecycle_encrypted_0/cold_data/ffenc_1.ffenc)
+INFO     app.services.scan_progress:scan_progress.py:460 Scan ce319f13-01e4-4f8f-ad92-31f71c04c12a finished with status: completed
+=============================== warnings summary ===============================
+app/config.py:14
+  /Users/martino/repos/file-fridge/app/config.py:14: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class Settings(BaseSettings):
+
+app/database.py:52
+  /Users/martino/repos/file-fridge/app/database.py:52: MovedIn20Warning: The ``declarative_base()`` function is now available as sqlalchemy.orm.declarative_base(). (deprecated since: 2.0) (Background on SQLAlchemy 2.0 at: https://sqlalche.me/e/b8d9)
+    Base = declarative_base()
+
+app/schemas.py:54
+  /Users/martino/repos/file-fridge/app/schemas.py:54: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class Criteria(CriteriaBase):
+
+app/schemas.py:100
+  /Users/martino/repos/file-fridge/app/schemas.py:100: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("critical_threshold_percent")
+
+app/schemas.py:150
+  /Users/martino/repos/file-fridge/app/schemas.py:150: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class ColdStorageLocation(ColdStorageLocationBase):
+
+app/schemas.py:200
+  /Users/martino/repos/file-fridge/app/schemas.py:200: PydanticDeprecatedSince20: `min_items` is deprecated and will be removed, use `min_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    storage_location_ids: List[int] = Field(
+
+app/schemas.py:215
+  /Users/martino/repos/file-fridge/app/schemas.py:215: PydanticDeprecatedSince20: `min_items` is deprecated and will be removed, use `min_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    storage_location_ids: Optional[List[int]] = Field(
+
+app/schemas.py:220
+  /Users/martino/repos/file-fridge/app/schemas.py:220: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class MonitoredPath(MonitoredPathBase):
+
+app/schemas.py:235
+  /Users/martino/repos/file-fridge/app/schemas.py:235: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class MonitoredPathSummary(MonitoredPathBase):
+
+app/schemas.py:252
+  /Users/martino/repos/file-fridge/app/schemas.py:252: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class PathScanErrors(BaseModel):
+
+app/schemas.py:275
+  /Users/martino/repos/file-fridge/app/schemas.py:275: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class FileRecord(FileRecordBase):
+
+app/schemas.py:322
+  /Users/martino/repos/file-fridge/app/schemas.py:322: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class FileInventory(FileInventoryBase):
+
+app/schemas.py:461
+  /Users/martino/repos/file-fridge/app/schemas.py:461: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("color")
+
+app/schemas.py:473
+  /Users/martino/repos/file-fridge/app/schemas.py:473: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("color")
+
+app/schemas.py:478
+  /Users/martino/repos/file-fridge/app/schemas.py:478: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class Tag(BaseModel):
+
+app/schemas.py:504
+  /Users/martino/repos/file-fridge/app/schemas.py:504: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class FileTagResponse(BaseModel):
+
+app/schemas.py:538
+  /Users/martino/repos/file-fridge/app/schemas.py:538: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class TagRule(BaseModel):
+
+app/schemas.py:585
+  /Users/martino/repos/file-fridge/app/schemas.py:585: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("address")
+
+app/schemas.py:610
+  /Users/martino/repos/file-fridge/app/schemas.py:610: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("subscribed_events")
+
+app/schemas.py:628
+  /Users/martino/repos/file-fridge/app/schemas.py:628: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("smtp_sender")
+
+app/schemas.py:657
+  /Users/martino/repos/file-fridge/app/schemas.py:657: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("subscribed_events")
+
+app/schemas.py:675
+  /Users/martino/repos/file-fridge/app/schemas.py:675: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class Notifier(NotifierBase):
+
+app/schemas.py:697
+  /Users/martino/repos/file-fridge/app/schemas.py:697: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class Notification(NotificationBase):
+
+app/schemas.py:707
+  /Users/martino/repos/file-fridge/app/schemas.py:707: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class NotificationDispatch(BaseModel):
+
+app/schemas.py:721
+  /Users/martino/repos/file-fridge/app/schemas.py:721: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class NotificationWithDispatches(Notification):
+
+app/schemas.py:816
+  /Users/martino/repos/file-fridge/app/schemas.py:816: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class UserOut(BaseModel):
+
+app/schemas.py:882
+  /Users/martino/repos/file-fridge/app/schemas.py:882: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class P2PNetworkConfigResponse(P2PNetworkConfigBase):
+
+app/schemas.py:909
+  /Users/martino/repos/file-fridge/app/schemas.py:909: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class P2PPeerResponse(BaseModel):
+
+app/schemas.py:925
+  /Users/martino/repos/file-fridge/app/schemas.py:925: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class P2PRemoteFileCacheResponse(BaseModel):
+
+app/schemas.py:1022
+  /Users/martino/repos/file-fridge/app/schemas.py:1022: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    @validator("ed25519_public_key", "x25519_public_key")
+
+app/schemas.py:1077
+  /Users/martino/repos/file-fridge/app/schemas.py:1077: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class RemoteConnection(RemoteConnectionBase):
+
+app/schemas.py:1105
+  /Users/martino/repos/file-fridge/app/schemas.py:1105: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class RemoteConnectionPathPermissionResponse(RemoteConnectionPathPermissionBase):
+
+app/schemas.py:1214
+  /Users/martino/repos/file-fridge/app/schemas.py:1214: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
+    class RemoteTransferJob(RemoteTransferJobBase):
+
+.venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6
+  /Users/martino/repos/file-fridge/.venv/lib/python3.11/site-packages/websockets/legacy/__init__.py:6: DeprecationWarning: websockets.legacy is deprecated; see https://websockets.readthedocs.io/en/stable/howto/upgrade.html for upgrade instructions
+    warnings.warn(  # deprecated in 14.0 - 2024-11-09
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/integration/test_file_lifecycle.py::test_file_lifecycle_encrypted_local_backend - assert None is not None
+================= 1 failed, 6 deselected, 34 warnings in 0.27s =================

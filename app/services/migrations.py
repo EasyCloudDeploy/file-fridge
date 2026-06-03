@@ -14,9 +14,9 @@ from app.models import (
     FileTransactionHistory,
     MonitoredPath,
     P2PPeer,
-    RemoteSharedFileCache,
     RelocationTask,
     RelocationTaskStatus,
+    RemoteSharedFileCache,
     StorageType,
     TransactionType,
 )
@@ -235,7 +235,9 @@ def _serialize_p2p_sync_event(remote_file: RemoteSharedFileCache, peer: P2PPeer)
         "target_location_id": 0,
         "target_location_name": "Local P2P Cache",
         "status": "p2p_synced",
-        "created_at": (sync_time.isoformat() if sync_time else datetime.now(timezone.utc).isoformat()),
+        "created_at": (
+            sync_time.isoformat() if sync_time else datetime.now(timezone.utc).isoformat()
+        ),
         "started_at": None,
         "completed_at": sync_time.isoformat() if sync_time else None,
         "bytes_total": file_size,

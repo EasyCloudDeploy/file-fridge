@@ -107,8 +107,7 @@ test.describe.serial('P2P sharing v2 end-to-end (two instances)', () => {
                 const pageB = await browser.newPage();
                 await seedAuthToken(pageB, bAuth.token);
 
-                await pageB.goto(`${instanceB.baseUrl}/settings`);
-                await pageB.locator('#nav-remote-connections').click();
+                await pageB.goto(`${instanceB.baseUrl}/p2p`);
                 await expect(pageB.locator('#p2p-peers-list')).toContainText(`127.0.0.1:${instanceA.port}`);
 
                 await pageB.goto(`${instanceB.baseUrl}/files`);

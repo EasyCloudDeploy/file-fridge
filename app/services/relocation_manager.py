@@ -410,7 +410,9 @@ class RelocationTaskManager:
                 db.add(task)
                 db.commit()
 
-                logger.info(f"Created relocation task {task_id}: {file_path} -> {target_location_name}")
+                logger.info(
+                    f"Created relocation task {task_id}: {file_path} -> {target_location_name}"
+                )
                 return task_id
             finally:
                 db.close()
