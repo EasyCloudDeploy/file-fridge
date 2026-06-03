@@ -1,6 +1,5 @@
 """Pydantic schemas for API validation."""
 
-import base64
 import re
 from datetime import datetime
 from typing import Any, List, Optional

@@ -1,5 +1,7 @@
 import pytest
+
 from app.config import settings
+
 
 @pytest.mark.unit
 class TestSettingsRouter:

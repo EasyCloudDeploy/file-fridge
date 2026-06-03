@@ -90,8 +90,9 @@ class TestStorageRoutingService:
 
     def test_get_location_health_with_transactions(self, db_session, storage_location):
         """Test that only failed transactions are counted as errors in health/routing, verifying C1 fix."""
-        from app.models import FileTransactionHistory, FileInventory
         from datetime import datetime, timezone
+
+        from app.models import FileInventory, FileTransactionHistory
 
         Path(storage_location.path).mkdir(parents=True, exist_ok=True)
 

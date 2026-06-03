@@ -1,12 +1,12 @@
 """Unified file workflow service - scanning, moving, and inventory management."""
 
 import fnmatch
-from contextlib import suppress
 import json
 import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import ClassVar, Dict, Iterator, List, Optional, Set, Tuple
@@ -37,14 +37,14 @@ from app.services.checksum_verifier import (
 from app.services.cold_storage_backends import get_backend
 from app.services.criteria_matcher import CriteriaMatcher
 from app.services.file_cleanup import FileCleanup
-from app.services.file_metadata import FileMetadataExtractor
-from app.services.tag_rule_service import TagRuleService
 from app.services.file_freezer import FileFreezer
+from app.services.file_metadata import FileMetadataExtractor
 from app.services.file_mover import FileMover  # Backward-compatible test patch target
 from app.services.file_reconciliation import FileReconciliation
 from app.services.file_thawer import FileThawer
 from app.services.scan_progress import scan_progress_manager
 from app.services.storage_routing_service import storage_routing_service
+from app.services.tag_rule_service import TagRuleService
 from app.utils.network_detection import check_atime_availability
 
 logger = logging.getLogger(__name__)

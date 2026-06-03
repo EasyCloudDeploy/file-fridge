@@ -444,7 +444,7 @@ def test_file_lifecycle_encrypted_local_backend(monitored_path_with_locations, d
     """
     monitored_path, hot_path, cold_path = monitored_path_with_locations
     monitored_path.operation_type = "move"
-    
+
     # Enable encryption on the cold storage location
     location = monitored_path.storage_locations[0]
     location.is_encrypted = True
@@ -472,13 +472,13 @@ def test_file_lifecycle_encrypted_local_backend(monitored_path_with_locations, d
     ).first()
     assert inv_entry is not None
     assert inv_entry.is_encrypted is True
-    
+
     # Verify file name on disk is ffenc_<id>.ffenc
     expected_cold_name = f"ffenc_{inv_entry.id}.ffenc"
     expected_cold_path = cold_path / expected_cold_name
     assert expected_cold_path.exists()
     assert inv_entry.file_path == str(expected_cold_path)
-    
+
     # The file contents should be encrypted (not readable as plaintext)
     encrypted_contents = expected_cold_path.read_bytes()
     assert b"confidential" not in encrypted_contents
@@ -489,7 +489,7 @@ def test_file_lifecycle_encrypted_local_backend(monitored_path_with_locations, d
     subfolder.mkdir(exist_ok=True)
     new_cold_path = subfolder / expected_cold_name
     expected_cold_path.rename(new_cold_path)
-    
+
     assert not expected_cold_path.exists()
     assert new_cold_path.exists()
 
@@ -539,7 +539,7 @@ def test_file_lifecycle_encrypted_gdrive_backend(monitored_path_with_locations, 
     from app.models import ColdStorageBackendType, OperationType
     monitored_path, hot_path, cold_path = monitored_path_with_locations
     monitored_path.operation_type = "move"
-    
+
     # Change the storage location to be GDrive
     location = monitored_path.storage_locations[0]
     location.backend_type = ColdStorageBackendType.GDRIVE
@@ -610,7 +610,7 @@ def test_file_lifecycle_encrypted_gdrive_backend(monitored_path_with_locations, 
             return self.list_all_folder_files(location, page_size, page_token)
 
     mock_backend = MockGDriveBackend()
-    
+
     # Patch get_backend
     monkeypatch.setattr("app.services.file_workflow_service.get_backend", lambda loc: mock_backend)
     monkeypatch.setattr("app.services.file_freezer.get_backend", lambda loc: mock_backend)
@@ -637,12 +637,12 @@ def test_file_lifecycle_encrypted_gdrive_backend(monitored_path_with_locations, 
     ).first()
     assert inv_entry is not None
     assert inv_entry.is_encrypted is True
-    
+
     expected_cold_name = f"ffenc_{inv_entry.id}.ffenc"
     expected_file_id = f"file-{expected_cold_name}"
     expected_ref = f"gdrive://{location.id}/{expected_file_id}"
     assert inv_entry.file_path == expected_ref
-    
+
     assert expected_ref in files_dict
     assert b"secrets" not in files_dict[expected_ref]["content"]
 
@@ -650,7 +650,7 @@ def test_file_lifecycle_encrypted_gdrive_backend(monitored_path_with_locations, 
     # Simulate the file being re-uploaded to GDrive, changing its file ID on the remote
     new_file_id = "file-id-changed-999"
     new_ref = f"gdrive://{location.id}/{new_file_id}"
-    
+
     # Update our mock storage with the new file reference
     file_info = files_dict.pop(expected_ref)
     file_info["id"] = new_file_id
@@ -697,7 +697,7 @@ def test_file_lifecycle_encrypted_s3_backend(monitored_path_with_locations, db_s
     from app.models import ColdStorageBackendType, OperationType
     monitored_path, hot_path, _ = monitored_path_with_locations
     monitored_path.operation_type = "move"
-    
+
     # Change the storage location to be S3
     location = monitored_path.storage_locations[0]
     location.backend_type = ColdStorageBackendType.S3
@@ -747,7 +747,7 @@ def test_file_lifecycle_encrypted_s3_backend(monitored_path_with_locations, db_s
             return storage_reference in files_dict
 
     mock_backend = MockS3Backend()
-    
+
     # Patch get_backend
     monkeypatch.setattr("app.services.file_workflow_service.get_backend", lambda loc: mock_backend)
     monkeypatch.setattr("app.services.file_freezer.get_backend", lambda loc: mock_backend)
@@ -773,11 +773,11 @@ def test_file_lifecycle_encrypted_s3_backend(monitored_path_with_locations, db_s
     ).first()
     assert inv_entry is not None
     assert inv_entry.is_encrypted is True
-    
+
     expected_cold_name = f"ffenc_{inv_entry.id}.ffenc"
     expected_ref = f"s3://my-bucket/prefix/{expected_cold_name}"
     assert inv_entry.file_path == expected_ref
-    
+
     assert expected_ref in files_dict
     assert b"secrets" not in files_dict[expected_ref]["content"]
 

@@ -1,7 +1,6 @@
 import pytest
 
 
-
 @pytest.mark.unit
 class TestIdentityRouter:
     def test_export_public_keys_success(self, authenticated_client):

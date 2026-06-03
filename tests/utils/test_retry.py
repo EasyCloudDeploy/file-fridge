@@ -1,6 +1,6 @@
-import time
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import patch, MagicMock
 
 from app.utils.retry import retry_with_backoff
 

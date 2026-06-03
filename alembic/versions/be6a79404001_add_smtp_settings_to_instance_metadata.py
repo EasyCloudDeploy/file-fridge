@@ -7,13 +7,13 @@ Create Date: 2026-06-03 14:54:54.822526
 """
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision: str = 'be6a79404001'
-down_revision: Union[str, None] = 'f1a2b3c4d5e6'
+revision: str = "be6a79404001"
+down_revision: Union[str, None] = "f1a2b3c4d5e6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -32,7 +32,7 @@ def upgrade() -> None:
         if "smtp_host" not in columns:
             batch_op.add_column(sa.Column("smtp_host", sa.String(), nullable=True))
         if "smtp_port" not in columns:
-            batch_op.add_column(sa.Column("smtp_port", sa.Integer(), nullable=True, server_default='587'))
+            batch_op.add_column(sa.Column("smtp_port", sa.Integer(), nullable=True, server_default="587"))
         if "smtp_user" not in columns:
             batch_op.add_column(sa.Column("smtp_user", sa.String(), nullable=True))
         if "smtp_password" not in columns:
@@ -40,7 +40,7 @@ def upgrade() -> None:
         if "smtp_sender" not in columns:
             batch_op.add_column(sa.Column("smtp_sender", sa.String(), nullable=True))
         if "smtp_use_tls" not in columns:
-            batch_op.add_column(sa.Column("smtp_use_tls", sa.Boolean(), nullable=True, server_default='1'))
+            batch_op.add_column(sa.Column("smtp_use_tls", sa.Boolean(), nullable=True, server_default="1"))
     # ### end Alembic commands ###
 
 

@@ -1,4 +1,5 @@
 import os
+
 # Set TESTING and DATABASE_PATH environment variables before any app imports
 os.environ["TESTING"] = "true"
 os.environ["DATABASE_PATH"] = ":memory:"
@@ -11,12 +12,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.config import settings
+
 # Override settings before other imports
 settings.secret_key = "test-secret-key"
 settings.encryption_key_file = "./test_encryption.key"
 settings.require_fingerprint_verification = False
 
-from app.database import Base, get_db, engine, SessionLocal as TestingSessionLocal
+from app.database import Base, get_db
+from app.database import SessionLocal as TestingSessionLocal
 from app.main import app
 from app.models import (
     ColdStorageLocation,
@@ -56,9 +59,9 @@ def reset_rate_limiters():
 @pytest.fixture(scope="session", autouse=True)
 def db_migration_setup():
     # Initialize the database and run migrations exactly like production startup
-    from app.database import init_db, has_schema_objects
+    from app.database import has_schema_objects, init_db
     from app.database_migrations import run_startup_migrations
-    
+
     if not has_schema_objects():
         init_db()
     run_startup_migrations()
@@ -70,7 +73,7 @@ def db_session():
     session = TestingSessionLocal()
     yield session
     session.close()
-    
+
     # Clean up all tables to prevent cross-test pollution
     import sqlalchemy as sa
     cleanup_session = TestingSessionLocal()

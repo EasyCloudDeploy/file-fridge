@@ -14,9 +14,9 @@ from app.models import (
     FileTransactionHistory,
     P2PPeer,
     P2PPeerStatus,
-    RemoteSharedFileCache,
     RelocationTask,
     RelocationTaskStatus,
+    RemoteSharedFileCache,
     StorageType,
     TransactionType,
 )

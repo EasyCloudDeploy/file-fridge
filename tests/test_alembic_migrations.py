@@ -1,15 +1,15 @@
-import sqlite3
 import importlib.util
+import sqlite3
 from pathlib import Path
 from unittest.mock import PropertyMock, patch
 
 import pytest
 import sqlalchemy as sa
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy.orm import sessionmaker
 
 from alembic import command
-from alembic.script import ScriptDirectory
 from app.database_migrations import run_startup_migrations
 
 alembic_cfg = Config("alembic.ini")

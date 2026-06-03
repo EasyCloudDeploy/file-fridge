@@ -1,12 +1,10 @@
 import asyncio
 import hashlib
+import json
 import os
 import shutil
 import sys
-import json
-import re
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 
 import aiofiles
@@ -19,15 +17,12 @@ BASE_DIR = Path(__file__).parent.parent.absolute()
 sys.path.insert(0, str(BASE_DIR))
 
 from app.models import (
-    FileInventory,
+    ColdStorageLocation,
+    InstanceMetadata,
     MonitoredPath,
     RemoteConnection,
-    ColdStorageLocation,
-    StorageType,
     TrustStatus,
-    FileStatus,
     User,
-    InstanceMetadata,
 )
 from app.security import hash_password
 
@@ -47,12 +42,12 @@ def parse_api_json(resp):
     text = resp.text.strip()
     if not text:
         return []
-        
+
     lines = text.splitlines()
     results = []
     for line in lines:
-        start = line.find('{')
-        end = line.rfind('}')
+        start = line.find("{")
+        end = line.rfind("}")
         if start != -1 and end != -1:
             try:
                 results.append(json.loads(line[start:end+1]))
@@ -82,7 +77,7 @@ async def cleanup():
     if TEST_DIR.exists():
         shutil.rmtree(TEST_DIR)
     TEST_DIR.mkdir(parents=True)
-    
+
     for inst_dir in [INSTANCE_A_DIR, INSTANCE_B_DIR]:
         inst_dir.mkdir()
         (inst_dir / "data").mkdir()
@@ -95,7 +90,7 @@ async def create_test_file(path: Path, size_mb: int = 10):
     async with aiofiles.open(path, "wb") as f:
         for _ in range(size_mb):
             await f.write(chunk)
-    
+
     sha256_hash = hashlib.sha256()
     async with aiofiles.open(path, "rb") as f:
         while True:
@@ -115,7 +110,7 @@ async def run_identity_setup(db_path):
     if proc.returncode != 0:
         print(f"Setup failed for {db_path}: {stderr.decode()}")
         return None
-        
+
     result = stdout.decode()
     data = {}
     for line in result.splitlines():
@@ -155,9 +150,9 @@ async def start_instance(name, port, inst_dir):
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
-    
+
     log_task = asyncio.create_task(stream_logs(proc.stdout, f"[{name}]"))
-    
+
     ready = False
     for _ in range(30):
         try:
@@ -169,13 +164,13 @@ async def start_instance(name, port, inst_dir):
         except Exception:
             pass
         await asyncio.sleep(1)
-        
+
     if not ready:
         print(f"Instance {name} failed to start.")
         proc.terminate()
         await proc.wait()
         return None, None
-        
+
     return proc, log_task
 
 async def run_test():
@@ -195,7 +190,7 @@ async def run_test():
     if not id_a or not id_b: return
 
     print("\n--- Step 2: Setting up Trust, Paths, and User ---")
-    
+
     engine_a = create_engine(f"sqlite:///{db_a_path}")
     SessionA = sessionmaker(bind=engine_a)
     with SessionA() as session:
@@ -269,16 +264,16 @@ async def run_test():
                         break
                 if file_id_a: break
                 await asyncio.sleep(1)
-            
+
             if not file_id_a:
                 print("FAILURE: File not found in A's inventory.")
             else:
                 print(f"Triggering push of file {file_id_a} to B...")
-                push_resp = await client.post(f"http://localhost:{PORT_A}/api/v1/remote/migrate", 
+                push_resp = await client.post(f"http://localhost:{PORT_A}/api/v1/remote/migrate",
                                              json={"file_inventory_id": file_id_a, "remote_connection_id": conn_b_id, "remote_monitored_path_id": path_b_id},
                                              headers=headers_a)
                 job_id = parse_api_json(push_resp)[0]["id"]
-                
+
                 print(f"Manually triggering transfer on A for job {job_id}...")
                 trigger_script = TEST_DIR / "run_transfer_a.py"
                 with open(trigger_script, "w") as f:
@@ -289,7 +284,7 @@ async def run_test():
                 # Verify on B
                 expected_file_b = INSTANCE_B_DIR / "hot" / "push_test.dat"
                 if expected_file_b.exists():
-                    print(f"SUCCESS: File verified on B.")
+                    print("SUCCESS: File verified on B.")
                 else:
                     print("FAILURE: File not found on B.")
 
@@ -307,16 +302,16 @@ async def run_test():
                         break
                 if file_id_b: break
                 await asyncio.sleep(1)
-            
+
             if not file_id_b:
                 print("FAILURE: File not found in B's inventory.")
             else:
-                print(f"Triggering pull request from A...")
-                pull_resp = await client.post(f"http://localhost:{PORT_A}/api/v1/remote/pull", 
+                print("Triggering pull request from A...")
+                pull_resp = await client.post(f"http://localhost:{PORT_A}/api/v1/remote/pull",
                                              json={"remote_file_inventory_id": file_id_b, "remote_connection_id": conn_b_id, "local_monitored_path_id": path_a_id, "strategy": "COPY"},
                                              headers=headers_a)
-                print(f"Pull request accepted.")
-                
+                print("Pull request accepted.")
+
                 # The remote instance (B) will automatically start pushing chunks to A.
                 # We just need to wait for the file to appear on A.
                 print("Waiting for file to appear on A (pulling)...")
@@ -327,9 +322,9 @@ async def run_test():
                         success = True
                         break
                     await asyncio.sleep(2)
-                
+
                 if success:
-                    print(f"SUCCESS: File verified on A.")
+                    print("SUCCESS: File verified on A.")
                 else:
                     print("FAILURE: File not found on A.")
 

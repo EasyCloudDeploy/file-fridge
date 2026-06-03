@@ -4,7 +4,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.config import settings

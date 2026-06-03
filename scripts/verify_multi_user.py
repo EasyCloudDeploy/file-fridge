@@ -1,5 +1,4 @@
 
-import os
 import sys
 import time
 from pathlib import Path
@@ -52,8 +51,8 @@ def test_multi_user():
     print("\nStep 3: Verifying Admin JWT roles...")
     # Securely verify and decode the token using the application's secret key and algorithm
     decoded = jwt.decode(
-        admin_token, 
-        settings.secret_key, 
+        admin_token,
+        settings.secret_key,
         algorithms=[settings.algorithm]
     )
     if "admin" in decoded.get("roles", []):

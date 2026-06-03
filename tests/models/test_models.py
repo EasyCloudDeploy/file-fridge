@@ -37,7 +37,6 @@ from app.models import (
     TagRule,
     TagRuleCriterionType,
     TransactionType,  # Added TransactionType here
-    TrustStatus,
     User,
 )
 

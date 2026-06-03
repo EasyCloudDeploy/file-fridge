@@ -16,8 +16,8 @@ from app.models import (
     FileRecord,
     FileStatus,
     MonitoredPath,
-    Operator,
     OperationType,
+    Operator,
     ScanStatus,
     StorageType,
 )
@@ -976,9 +976,10 @@ def test_process_path_integration_real_files(db_session, tmp_path):
 
 def test_thaw_single_file_no_file_record_success(monitored_path, file_inventory, db_session, tmp_path):
     """Test thawing a file when no FileRecord exists, verifying the H3 fix with FileMover.move_with_rollback."""
-    from app.services.file_workflow_service import FileWorkflowService
-    from app.models import StorageType, FileStatus
     from unittest.mock import patch
+
+    from app.models import FileStatus, StorageType
+    from app.services.file_workflow_service import FileWorkflowService
 
     hot_path = tmp_path / "hot"
     hot_path.mkdir(exist_ok=True)
@@ -1018,9 +1019,9 @@ def test_thaw_single_file_no_file_record_success(monitored_path, file_inventory,
 
 def test_collect_cold_thaw_candidates_with_duplicates(monitored_path, file_inventory, db_session, tmp_path):
     """Test that _collect_cold_thaw_candidates handles duplicate FileRecords without throwing a key collision error (M3 fix)."""
+
+    from app.models import FileRecord, FileStatus, OperationType, StorageType
     from app.services.file_workflow_service import FileWorkflowService
-    from app.models import FileRecord, OperationType, StorageType, FileStatus
-    import logging
 
     hot_path = tmp_path / "hot"
     hot_path.mkdir(exist_ok=True)
@@ -1058,7 +1059,7 @@ def test_collect_cold_thaw_candidates_with_duplicates(monitored_path, file_inven
     db_session.commit()
 
     service = FileWorkflowService()
-    
+
     # Run _collect_cold_thaw_candidates and verify it completes without raising KeyError or other exceptions
     candidates, skipped = service._collect_cold_thaw_candidates(
         monitored_path, db_session, pinned_paths=set(), pinned_path_strings=set()
@@ -1072,8 +1073,8 @@ def test_collect_cold_thaw_candidates_with_duplicates(monitored_path, file_inven
 
 def test_concurrent_process_single_file(monitored_path, file_inventory, db_session, tmp_path):
     """Test that sequential/concurrent executions of _record_file_in_db serialize correctly and deduplicate using with_for_update."""
+    from app.models import FileRecord, FileStatus, StorageType
     from app.services.file_workflow_service import FileWorkflowService
-    from app.models import FileRecord, OperationType, StorageType, FileStatus
 
     hot_path = tmp_path / "hot"
     hot_path.mkdir(exist_ok=True)
@@ -1125,9 +1126,10 @@ def test_concurrent_process_single_file(monitored_path, file_inventory, db_sessi
 
 def test_match_inventory_criteria_fallback(monitored_path, file_inventory, db_session):
     """Test _match_inventory_criteria with unsupported criterion type returning False."""
-    from app.services.file_workflow_service import FileWorkflowService
-    from app.models import Criteria, Operator, StorageType, FileStatus
     from unittest.mock import MagicMock
+
+    from app.models import Operator
+    from app.services.file_workflow_service import FileWorkflowService
 
     service = FileWorkflowService()
     entry = MagicMock(spec=FileInventory)
@@ -1152,8 +1154,8 @@ def test_match_inventory_criteria_fallback(monitored_path, file_inventory, db_se
 
 def test_record_file_in_db_legacy_path(monitored_path, db_session, tmp_path):
     """Test _record_file_in_db when no FileInventory record exists in DB (legacy path)."""
-    from app.services.file_workflow_service import FileWorkflowService
     from app.models import FileRecord
+    from app.services.file_workflow_service import FileWorkflowService
 
     hot_file = tmp_path / "hot.txt"
     dest_file = tmp_path / "cold.txt"
@@ -1449,7 +1451,7 @@ def test_sync_local_cold_inventory_self_healing(monitored_path, db_session) -> N
     # 1. Pre-create database records for a file that was originally frozen
     # Original local cold storage path was /old/path/ffenc_99999.ffenc
     old_cold_path = str(Path(monitored_path.storage_locations[0].path) / "old" / "ffenc_99999.ffenc")
-    
+
     inventory_entry = FileInventory(
         id=99999,
         path_id=monitored_path.id,
@@ -1476,7 +1478,7 @@ def test_sync_local_cold_inventory_self_healing(monitored_path, db_session) -> N
 
     # 2. Simulate finding the file at a new path on disk: /new/path/ffenc_99999.ffenc
     new_cold_path = str(Path(monitored_path.storage_locations[0].path) / "new" / "ffenc_99999.ffenc")
-    
+
     cold_files = [
         {
             "path": new_cold_path,
@@ -1489,7 +1491,7 @@ def test_sync_local_cold_inventory_self_healing(monitored_path, db_session) -> N
     ]
 
     service = FileWorkflowService()
-    
+
     # Run bulk database entries synchronization for COLD tier
     updated_count = service._update_db_entries_batch(
         monitored_path, cold_files, StorageType.COLD, db_session

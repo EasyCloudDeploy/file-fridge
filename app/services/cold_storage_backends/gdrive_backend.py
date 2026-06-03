@@ -1,11 +1,11 @@
 """Google Drive cold storage backend."""
 
 import json
-from http import HTTPStatus
 import logging
 import threading
 import time
 import uuid
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import quote, unquote, urlparse
