@@ -1188,5 +1188,69 @@ def test_list_files_google_search_syntax(
     assert "Quarterly Report Final.pdf" in files[0]["file_path"]
 
 
+def test_bulk_delete_files(
+    authenticated_client: TestClient, file_inventory_factory, db_session, tmp_path
+):
+    """Test bulk deleting/cleaning up files."""
+    file1 = file_inventory_factory(str(tmp_path / "bulk_del_1.txt"))
+    file2 = file_inventory_factory(str(tmp_path / "bulk_del_2.txt"))
+
+    # Add matching FileRecord for file1 to test FileRecord cleanup too
+    record1 = FileRecord(
+        original_path=str(file1.file_path),
+        cold_storage_path=str(file1.file_path),
+        file_size=file1.file_size,
+        operation_type=OperationType.MOVE,
+    )
+    db_session.add(record1)
+    db_session.commit()
+
+    response = authenticated_client.post(
+        "/api/v1/files/bulk/delete",
+        json={"file_ids": [file1.id, file2.id]},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["successful"] == 2
+    assert data["failed"] == 0
+
+    # Verify both deleted from DB
+    db_session.expire_all()
+    assert db_session.query(FileInventory).filter(FileInventory.id.in_([file1.id, file2.id])).count() == 0
+    assert db_session.query(FileRecord).filter(FileRecord.id == record1.id).count() == 0
+
+
+def test_list_files_filter_by_missing_cold(
+    authenticated_client: TestClient, file_inventory_factory, db_session, tmp_path
+):
+    """Test filtering by status=missing_cold."""
+    # 1. Hot missing file (cold_storage_location_id = None)
+    file_inventory_factory(str(tmp_path / "hot_missing.txt"), status=FileStatus.MISSING)
+
+    # 2. Cold missing file (cold_storage_location_id is not None)
+    location = ColdStorageLocation(name="GDrive Test", path="file_fridge")
+    db_session.add(location)
+    db_session.commit()
+    db_session.refresh(location)
+
+    cold_missing = file_inventory_factory(
+        str(tmp_path / "cold_missing.txt"),
+        status=FileStatus.MISSING,
+        cold_storage_location_id=location.id,
+    )
+
+    response = authenticated_client.get("/api/v1/files?status=missing_cold")
+    assert response.status_code == 200
+    lines = response.content.decode().strip().split("\n")
+    metadata = json.loads(lines[0])
+    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+
+    assert metadata["total"] == 1
+    assert len(files) == 1
+    assert files[0]["id"] == cold_missing.id
+
+
+
+
 
 

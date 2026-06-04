@@ -33,6 +33,79 @@
         return div.innerHTML;
     }
 
+    function promptForPassword(title = 'Enter Password', message = 'Please enter your account password to verify your identity.') {
+        return new Promise((resolve) => {
+            const modalId = 'passwordPromptModal-' + Date.now();
+            const modal = document.createElement('div');
+            modal.className = 'modal fade';
+            modal.id = modalId;
+            modal.setAttribute('tabindex', '-1');
+            modal.setAttribute('aria-hidden', 'true');
+
+            modal.innerHTML = `
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">
+                                <i class="bi bi-shield-lock text-primary me-2"></i>
+                                ${escapeHtml(title)}
+                            </h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="mb-3">${escapeHtml(message)}</p>
+                            <div class="mb-3">
+                                <label for="${modalId}-password" class="form-label">Password</label>
+                                <input type="password" class="form-control" id="${modalId}-password" autocomplete="current-password" required>
+                                <div class="invalid-feedback" id="${modalId}-feedback">Password is required.</div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" id="${modalId}-confirm">Submit</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            document.body.appendChild(modal);
+
+            const bsModal = new bootstrap.Modal(modal);
+            const input = modal.querySelector(`#${modalId}-password`);
+            const confirmBtn = modal.querySelector(`#${modalId}-confirm`);
+
+            modal.addEventListener('shown.bs.modal', () => {
+                input.focus();
+            });
+
+            const submitPassword = () => {
+                const password = input.value;
+                if (!password) {
+                    input.classList.add('is-invalid');
+                    return;
+                }
+                bsModal.hide();
+                resolve(password);
+            };
+
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    submitPassword();
+                }
+            });
+
+            confirmBtn.addEventListener('click', submitPassword);
+
+            modal.addEventListener('hidden.bs.modal', () => {
+                modal.remove();
+                resolve(null);
+            });
+
+            bsModal.show();
+        });
+    }
+
     function showWizardMode() {
         document.getElementById('p2p-setup-wizard')?.classList.remove('d-none');
         document.getElementById('p2p-management')?.classList.add('d-none');
@@ -176,24 +249,73 @@
 
     async function loadCurrentPsk() {
         const pskInput = document.getElementById('p2p-current-psk');
-        const unavailableNote = document.getElementById('p2p-psk-unavailable-note');
+        const exportBtn = document.getElementById('p2p-export-psk-btn');
+        const revealBtn = document.getElementById('p2p-reveal-psk-btn');
+        const copyBtn = document.getElementById('p2p-copy-current-psk-btn');
         if (!pskInput) return;
 
+        pskInput.value = '';
+        pskInput.type = 'password';
+        pskInput.placeholder = 'Password required to view PSK';
+
+        exportBtn?.classList.remove('d-none');
+        revealBtn?.classList.add('d-none');
+        copyBtn?.classList.add('d-none');
+
+        const icon = revealBtn?.querySelector('i');
+        if (icon) {
+            icon.className = 'bi bi-eye';
+        }
+    }
+
+    async function exportPsk() {
+        const password = await promptForPassword('Export Pre-Shared Key', 'Enter your account password to decrypt and copy the P2P network Pre-Shared Key.');
+        if (!password) return;
+
+        const pskInput = document.getElementById('p2p-current-psk');
+        const exportBtn = document.getElementById('p2p-export-psk-btn');
+        const revealBtn = document.getElementById('p2p-reveal-psk-btn');
+        const copyBtn = document.getElementById('p2p-copy-current-psk-btn');
+        if (!pskInput) return;
+
+        const originalText = exportBtn ? exportBtn.innerHTML : '';
         try {
-            const data = await apiJson('/api/v1/p2p/network/psk');
+            if (exportBtn) {
+                exportBtn.disabled = true;
+                exportBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Verifying...';
+            }
+
+            const data = await apiJson('/api/v1/p2p/network/psk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            });
+
             if (data.available && data.psk) {
                 pskInput.value = data.psk;
                 pskInput.placeholder = '';
-                if (unavailableNote) unavailableNote.style.display = 'none';
+                
+                exportBtn?.classList.add('d-none');
+                revealBtn?.classList.remove('d-none');
+                copyBtn?.classList.remove('d-none');
+
+                try {
+                    await navigator.clipboard.writeText(data.psk);
+                    toastSuccess('PSK decrypted and copied to clipboard');
+                } catch (copyErr) {
+                    toastSuccess('PSK decrypted successfully');
+                }
             } else {
-                pskInput.value = '';
-                pskInput.placeholder = 'Not available';
-                if (unavailableNote) unavailableNote.style.display = '';
+                toastError('PSK not available.');
             }
         } catch (error) {
-            console.error('Failed to load current PSK:', error);
-            pskInput.value = '';
-            pskInput.placeholder = 'Failed to load';
+            console.error('Failed to export PSK:', error);
+            toastError(error.message || 'Invalid password');
+        } finally {
+            if (exportBtn) {
+                exportBtn.disabled = false;
+                exportBtn.innerHTML = originalText;
+            }
         }
     }
 
@@ -498,6 +620,7 @@
         document.getElementById('p2p-copy-generated-psk-btn')?.addEventListener('click', () => { void copyGeneratedPsk(); });
         document.getElementById('p2p-copy-connect-host-btn')?.addEventListener('click', () => { void copyValue('p2p-connect-host', 'Host'); });
         document.getElementById('p2p-copy-connect-port-btn')?.addEventListener('click', () => { void copyValue('p2p-connect-port', 'Port'); });
+        document.getElementById('p2p-export-psk-btn')?.addEventListener('click', () => { void exportPsk(); });
         document.getElementById('p2p-copy-current-psk-btn')?.addEventListener('click', () => { void copyValue('p2p-current-psk', 'PSK'); });
         document.getElementById('p2p-reveal-psk-btn')?.addEventListener('click', () => {
             const input = document.getElementById('p2p-current-psk');

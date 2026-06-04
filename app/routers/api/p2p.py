@@ -12,11 +12,12 @@ from sqlalchemy.orm import Session
 
 from app.constants import RESOURCE_REMOTE_CONNECTIONS
 from app.database import get_db
-from app.models import FileInventory, FileStatus, P2PPeer, P2PPeerStatus, RemoteSharedFileCache
+from app.models import FileInventory, FileStatus, P2PPeer, P2PPeerStatus, RemoteSharedFileCache, User
 from app.schemas import (
     P2PCurrentPskResponse,
     P2PManifestPushRequest,
     P2PNetworkConfigCreate,
+    PskExportRequest,
     P2PNetworkConfigResponse,
     P2PNetworkConfigSetupResponse,
     P2PNetworkConfigUpdate,
@@ -114,12 +115,16 @@ def destroy_network_config(
     return {"status": "destroyed", **removed}
 
 
-@router.get("/network/psk", response_model=P2PCurrentPskResponse)
+@router.post("/network/psk", response_model=P2PCurrentPskResponse)
 def get_network_psk(
+    payload: PskExportRequest,
     db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
+    current_user: Annotated[User, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
-    _ = current_user
+    from app.security import verify_password
+    if not verify_password(payload.password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
     config = p2p_service.get_network_config(db)
     if not config:
         raise HTTPException(status_code=404, detail="P2P network is not configured")

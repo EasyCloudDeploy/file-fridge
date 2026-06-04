@@ -849,6 +849,12 @@ class PasswordChange(BaseModel):
     new_password: str = Field(..., min_length=8, description="New password (minimum 8 characters)")
 
 
+class PskExportRequest(BaseModel):
+    """Request for exporting P2P PSK (requires password)."""
+
+    password: str = Field(..., min_length=1, description="Account password")
+
+
 # ========================================
 # P2P Schemas
 # ========================================

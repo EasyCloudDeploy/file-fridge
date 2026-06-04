@@ -32,6 +32,7 @@ from app.models import (
     StorageType,
     User,
 )
+from app.security import PermissionChecker
 from app.schemas import (
     BulkActionResponse,
     BulkActionResult,
@@ -195,9 +196,10 @@ def _serialize_file(
         "remote_peer_name": None,
         "also_available_on_peer_count": 0,
         "also_available_on_peers": [],
+        "cold_storage_location_id": file.cold_storage_location_id,
     }
 
-    if file.storage_type == StorageType.COLD:
+    if file.storage_type == StorageType.COLD or file.cold_storage_location_id is not None:
         monitored_path = paths_map.get(file.path_id)
         storage_loc = _get_storage_location_for_file(
             file.file_path, monitored_path, storage_location_id=file.cold_storage_location_id
@@ -491,7 +493,13 @@ def _apply_filters(
     if criteria.storage_type:
         query = query.filter(FileInventory.storage_type == criteria.storage_type)
     if criteria.file_status:
-        query = query.filter(FileInventory.status == criteria.file_status)
+        if criteria.file_status == "missing_cold":
+            query = query.filter(
+                FileInventory.status == FileStatus.MISSING,
+                FileInventory.cold_storage_location_id.isnot(None)
+            )
+        else:
+            query = query.filter(FileInventory.status == criteria.file_status)
     if criteria.search:
         search_params = parse_google_search(criteria.search)
 
@@ -517,7 +525,13 @@ def _apply_filters(
             query = query.filter(FileInventory.mime_type.ilike(f"%{escaped_mime}%", escape="\\"))
 
         if search_params.get("status"):
-            query = query.filter(FileInventory.status == search_params["status"])
+            if search_params["status"] == "missing_cold":
+                query = query.filter(
+                    FileInventory.status == FileStatus.MISSING,
+                    FileInventory.cold_storage_location_id.isnot(None)
+                )
+            else:
+                query = query.filter(FileInventory.status == search_params["status"])
 
         if search_params.get("pinned") is not None:
             pinned_subquery = db.query(PinnedFile.file_path)
@@ -2424,6 +2438,79 @@ def bulk_unpin_files(request: BulkFileActionRequest, db: Annotated[Session, Depe
 
     return BulkActionResponse(
         total=len(request.file_ids), successful=successful, failed=failed, results=results
+    )
+
+
+@router.post("/bulk/delete", response_model=BulkActionResponse)
+def bulk_delete_files(
+    request: BulkFileActionRequest,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(PermissionChecker("admin"))],
+):
+    """
+    Bulk delete files from DB (cleanup).
+    """
+    results = []
+    successful = 0
+    failed = 0
+
+    for file_id in request.file_ids:
+        try:
+            # Get the file from inventory
+            inventory_entry = (
+                db.query(FileInventory)
+                .filter(FileInventory.id == file_id)
+                .first()
+            )
+
+            if not inventory_entry:
+                results.append(
+                    BulkActionResult(
+                        file_id=file_id, success=False, message="File not found in inventory"
+                    )
+                )
+                failed += 1
+                continue
+
+            # Find and delete matching FileRecord if one exists
+            file_record = (
+                db.query(FileRecord)
+                .filter(
+                    (FileRecord.cold_storage_path == inventory_entry.file_path)
+                    | (
+                        (FileRecord.path_id == inventory_entry.path_id)
+                        & (FileRecord.original_path == inventory_entry.file_path)
+                    )
+                )
+                .first()
+            )
+            if file_record:
+                db.delete(file_record)
+
+            db.delete(inventory_entry)
+            db.commit()
+            
+            results.append(
+                BulkActionResult(
+                    file_id=file_id, success=True, message="File deleted successfully"
+                )
+            )
+            successful += 1
+
+        except Exception as e:
+            db.rollback()
+            results.append(
+                BulkActionResult(
+                    file_id=file_id, success=False, message=f"Error deleting file: {str(e)}"
+                )
+            )
+            failed += 1
+
+    return BulkActionResponse(
+        total=len(request.file_ids),
+        successful=successful,
+        failed=failed,
+        results=results,
     )
 
 

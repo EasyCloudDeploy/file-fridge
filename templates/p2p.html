@@ -90,11 +90,14 @@
                         <div class="col-12">
                             <label for="p2p-current-psk" class="form-label small mb-1">Pre-Shared Key (PSK)</label>
                             <div class="input-group input-group-sm">
-                                <input type="password" class="form-control font-monospace" id="p2p-current-psk" readonly placeholder="Loading...">
-                                <button type="button" class="btn btn-outline-secondary" id="p2p-reveal-psk-btn" title="Show/hide PSK">
+                                <input type="password" class="form-control font-monospace" id="p2p-current-psk" readonly placeholder="Password required to view PSK">
+                                <button type="button" class="btn btn-outline-primary" id="p2p-export-psk-btn" title="Export PSK">
+                                    <i class="bi bi-key-fill me-1"></i>Export PSK
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary d-none" id="p2p-reveal-psk-btn" title="Show/hide PSK">
                                     <i class="bi bi-eye"></i>
                                 </button>
-                                <button type="button" class="btn btn-outline-secondary" id="p2p-copy-current-psk-btn">Copy</button>
+                                <button type="button" class="btn btn-outline-secondary d-none" id="p2p-copy-current-psk-btn">Copy</button>
                             </div>
                             <div class="text-muted small mt-1" id="p2p-psk-unavailable-note" style="display:none;">PSK not stored — generate a new PSK to retrieve it.</div>
                         </div>

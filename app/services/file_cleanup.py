@@ -7,7 +7,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models import ColdStorageLocation, FileInventory, FileRecord, OperationType
+from app.models import ColdStorageLocation, FileInventory, FileRecord, OperationType, FileStatus, StorageType
 from app.services.cold_storage_backends import get_backend
 
 logger = logging.getLogger(__name__)
@@ -164,6 +164,44 @@ class FileCleanup:
                             )
 
                     if should_remove:
+                        # Find corresponding inventory entry
+                        inventory_entry = (
+                            db.query(FileInventory)
+                            .filter(
+                                FileInventory.path_id == file_record.path_id,
+                                (FileInventory.file_path == file_record.cold_storage_path) |
+                                (FileInventory.file_path == file_record.original_path)
+                            )
+                            .first()
+                        )
+                        if inventory_entry:
+                            inventory_entry.status = FileStatus.MISSING
+                            inventory_entry.storage_type = StorageType.HOT
+                            inventory_entry.file_path = file_record.original_path
+                            # Keep cold_storage_location_id to identify that it went missing from cold storage
+                            logger.info(
+                                "Marked FileInventory %s as missing and moved out of cold storage: %s",
+                                inventory_entry.id,
+                                inventory_entry.file_path,
+                            )
+                        else:
+                            # Create new missing inventory entry
+                            new_entry = FileInventory(
+                                path_id=file_record.path_id,
+                                file_path=file_record.original_path,
+                                storage_type=StorageType.HOT,
+                                file_size=file_record.file_size,
+                                file_mtime=datetime.now(timezone.utc) if file_record.moved_at is None else file_record.moved_at,
+                                status=FileStatus.MISSING,
+                                cold_storage_location_id=file_record.cold_storage_location_id,
+                            )
+                            db.add(new_entry)
+                            logger.info(
+                                "Created missing FileInventory entry for %s (from cold storage location %s)",
+                                file_record.original_path,
+                                file_record.cold_storage_location_id,
+                            )
+
                         db.delete(file_record)
                         results["removed"] += 1
                         logger.info(f"Removed FileRecord {file_record.id} for missing file")
@@ -205,8 +243,11 @@ class FileCleanup:
         """
         results = {"checked": 0, "removed": 0, "errors": []}
         try:
-            # Query for missing FileInventory entries
-            query = db.query(FileInventory).filter(FileInventory.status == "missing")
+            # Query for missing FileInventory entries (exclude files missing from cold storage)
+            query = db.query(FileInventory).filter(
+                FileInventory.status == "missing",
+                FileInventory.cold_storage_location_id.is_(None)
+            )
             if path_id:
                 query = query.filter(FileInventory.path_id == path_id)
 

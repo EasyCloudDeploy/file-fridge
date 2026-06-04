@@ -298,7 +298,12 @@ function statusCellRenderer(params) {
         ? '<i class="bi bi-eye-slash text-danger me-1" title="Not shared to peers"></i>'
         : '';
 
-    return `${pinIndicator}${shareIndicator}<span class="badge ${statusBadgeClass}">${escapeHtml(file.status)}</span>`;
+    let statusText = file.status;
+    if (file.status === 'missing' && file.cold_storage_location_id) {
+        statusText = 'missing (cold)';
+    }
+
+    return `${pinIndicator}${shareIndicator}<span class="badge ${statusBadgeClass}">${escapeHtml(statusText)}</span>`;
 }
 
 function tagsCellRenderer(params) {
@@ -2834,6 +2839,42 @@ async function executeBulkUnpin() {
     }
 }
 
+// Execute bulk delete/cleanup
+async function executeBulkDelete() {
+    const fileIds = getSelectedFileIds();
+    if (fileIds.length === 0) return;
+
+    if (!confirm(`Are you sure you want to clean up (permanently remove from database) the ${fileIds.length} selected files?`)) {
+        return;
+    }
+
+    try {
+        const response = await authenticatedFetch(`${API_BASE_URL}/files/bulk/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_ids: fileIds })
+        });
+
+        if (!response.ok) {
+            if (response.status === 403) {
+                throw new Error('Permission denied. Only administrators can perform this action.');
+            }
+            throw new Error('Bulk delete request failed');
+        }
+
+        const result = await response.json();
+        showNotification(`Cleaned up ${result.successful} of ${result.total} files` +
+            (result.failed > 0 ? ` (${result.failed} failed)` : ''));
+
+        clearSelection();
+        loadFilesList();
+
+    } catch (error) {
+        console.error('Bulk delete error:', error);
+        showNotification(`Bulk cleanup failed: ${error.message}`, 'error');
+    }
+}
+
 async function executeBulkShareSet(fileIds, isShareable) {
     if (!Array.isArray(fileIds) || fileIds.length === 0) {
         return { successful: 0, failed: 0, total: 0 };
@@ -3087,6 +3128,7 @@ async function initFilesPage() {
     loadPathsForFilter();
     loadTagsForFilter();
     loadStorageLocationsForFilter();
+    void loadMonitoredPathsForPull();
 
     // Setup event handlers
     const confirmBtn = document.getElementById('confirmThawBtn');
@@ -3280,6 +3322,11 @@ async function initFilesPage() {
     const bulkUnpinBtn = document.getElementById('bulk-unpin-btn');
     if (bulkUnpinBtn) {
         bulkUnpinBtn.addEventListener('click', executeBulkUnpin);
+    }
+
+    const bulkDeleteBtn = document.getElementById('bulk-delete-btn');
+    if (bulkDeleteBtn) {
+        bulkDeleteBtn.addEventListener('click', executeBulkDelete);
     }
 
     const clearSelectionBtn = document.getElementById('clear-selection-btn');

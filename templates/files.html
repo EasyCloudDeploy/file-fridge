@@ -245,6 +245,7 @@
                     <option value="active">Active</option>
                     <option value="migrating">Migrating</option>
                     <option value="missing">Missing</option>
+                    <option value="missing_cold">Missing from Cold Storage</option>
                     <option value="deleted">Deleted</option>
                 </select>
             </div>
@@ -490,6 +491,9 @@
         </button>
         <button type="button" class="btn btn-outline-secondary btn-sm" id="bulk-unpin-btn" title="Unpin selected files">
             <i class="bi bi-pin-angle"></i> Unpin
+        </button>
+        <button type="button" class="btn btn-danger btn-sm" id="bulk-delete-btn" title="Delete selected files from database">
+            <i class="bi bi-trash"></i> Clean up
         </button>
     </div>
     <!-- Shown only in remote P2P mode -->
