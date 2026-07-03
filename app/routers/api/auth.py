@@ -349,23 +349,14 @@ async def oidc_login(
     return response
 
 
-@router.get("/oidc/callback", response_class=HTMLResponse)
-async def oidc_callback(
+def _verify_oidc_callback_state(
     request: Request,
-    db: Annotated[Session, Depends(get_db)],
-    code: Optional[str] = None,
-    state: Optional[str] = None,
-    error: Optional[str] = None,
-    error_description: Optional[str] = None,
-):
-    """
-    Handle the OIDC authorization code callback.
-    """
-    from fastapi.responses import HTMLResponse
-    import httpx
-    from app.services.instance_config_service import instance_config_service
-
-    # Handle error query parameters from provider
+    state: Optional[str],
+    code: Optional[str],
+    error: Optional[str],
+    error_description: Optional[str],
+) -> str:
+    """Validate query parameters and state cookie for OIDC callback."""
     if error:
         error_desc = error_description or error
         raise HTTPException(
@@ -379,7 +370,6 @@ async def oidc_callback(
             detail="Missing required OIDC query parameters (code/state)",
         )
 
-    # Verify state parameter to prevent CSRF
     cookie_state = request.cookies.get("oidc_state")
     if not cookie_state or cookie_state != state:
         logger.warning(f"OIDC state mismatch. cookie: {cookie_state}, query: {state}")
@@ -387,21 +377,12 @@ async def oidc_callback(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="State verification failed (CSRF check failed). Please try logging in again.",
         )
+    return code
 
-    # Get configuration settings
-    issuer = instance_config_service.get_oidc_issuer(db)
-    client_id = instance_config_service.get_oidc_client_id(db)
-    client_secret = instance_config_service.get_oidc_client_secret(db)
 
-    if not issuer or not client_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="OIDC is not fully configured on the server",
-        )
-
-    issuer = issuer.rstrip("/")
-    discovery_url = f"{issuer}/.well-known/openid-configuration"
-
+async def _get_oidc_endpoints(discovery_url: str) -> tuple[str, str]:
+    """Fetch OIDC endpoints from discovery URL."""
+    import httpx
     try:
         async with httpx.AsyncClient() as client:
             r = await client.get(discovery_url, timeout=10.0)
@@ -422,15 +403,18 @@ async def oidc_callback(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="OIDC provider does not expose token/userinfo endpoints",
         )
+    return token_endpoint, userinfo_endpoint
 
-    # Re-determine redirect URI exactly as we did in login
-    redirect_uri = instance_config_service.get_oidc_redirect_uri(db)
-    if not redirect_uri:
-        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-        host = request.headers.get("x-forwarded-host", request.url.netloc)
-        redirect_uri = f"{proto}://{host}/api/v1/auth/oidc/callback"
 
-    # Exchange code for tokens
+async def _exchange_code_for_tokens(
+    token_endpoint: str,
+    code: str,
+    redirect_uri: str,
+    client_id: str,
+    client_secret: Optional[str],
+) -> dict:
+    """Exchange authorization code for access/ID tokens."""
+    import httpx
     token_data = {
         "grant_type": "authorization_code",
         "code": code,
@@ -452,14 +436,17 @@ async def oidc_callback(
             detail=f"OIDC token exchange failed: {e!s}",
         ) from None
 
-    access_token = tokens.get("access_token")
-    if not access_token:
+    if not tokens.get("access_token"):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="OIDC provider did not return access_token",
         )
+    return tokens
 
-    # Fetch user info
+
+async def _fetch_userinfo(userinfo_endpoint: str, access_token: str) -> dict:
+    """Fetch user information from OIDC provider userinfo endpoint."""
+    import httpx
     try:
         async with httpx.AsyncClient() as client:
             r = await client.get(
@@ -468,7 +455,7 @@ async def oidc_callback(
                 timeout=10.0,
             )
             r.raise_for_status()
-            userinfo = r.json()
+            return r.json()
     except Exception as e:
         logger.exception("Failed to fetch userinfo from OIDC provider")
         raise HTTPException(
@@ -476,61 +463,55 @@ async def oidc_callback(
             detail=f"Failed to fetch user info from OIDC provider: {e!s}",
         ) from None
 
-    # Determine username
-    username = (
-        userinfo.get("preferred_username")
-        or userinfo.get("nickname")
-        or userinfo.get("name")
-        or userinfo.get("email")
-        or userinfo.get("sub")
-    )
-    if not username:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to extract a valid username from userinfo claims",
-        )
 
-    username = username.strip().lower()
-
-    # Extract roles/groups
-    roles_claim = instance_config_service.get_oidc_roles_claim(db)
+def _extract_oidc_roles(userinfo: dict, tokens: dict, roles_claim: str) -> list[str]:
+    """Extract OIDC roles/groups from userinfo or ID token payload (safe from signature warnings)."""
     oidc_roles = userinfo.get(roles_claim)
 
-    # Try decoding id_token as fallback if roles not in userinfo
     if not oidc_roles and "id_token" in tokens:
         try:
-            from jose import jwt
+            import base64
+            import json
 
-            id_token_payload = jwt.decode(tokens["id_token"], "", options={"verify_signature": False})
-            oidc_roles = id_token_payload.get(roles_claim)
+            parts = tokens["id_token"].split(".")
+            if len(parts) >= 2:
+                payload_b64 = parts[1]
+                # Fix base64 padding
+                payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+                payload_bytes = base64.urlsafe_b64decode(payload_b64.encode("utf-8"))
+                payload = json.loads(payload_bytes.decode("utf-8"))
+                oidc_roles = payload.get(roles_claim)
         except Exception:
-            logger.warning("Failed to decode id_token to look up roles")
+            logger.warning("Failed to decode id_token payload to extract roles")
 
-    # Normalize roles to a list of strings
+    # Normalize roles
     if oidc_roles is None:
-        oidc_roles = []
-    elif isinstance(oidc_roles, str):
-        oidc_roles = [r.strip() for r in oidc_roles.split(",") if r.strip()]
-    elif not isinstance(oidc_roles, list):
-        oidc_roles = []
+        return []
+    if isinstance(oidc_roles, str):
+        return [r.strip() for r in oidc_roles.split(",") if r.strip()]
+    if isinstance(oidc_roles, list):
+        return [str(r) for r in oidc_roles]
+    return []
 
-    # Map groups to roles
-    admin_group = instance_config_service.get_oidc_admin_group(db)
-    manager_group = instance_config_service.get_oidc_manager_group(db)
-    viewer_group = instance_config_service.get_oidc_viewer_group(db)
-    default_roles_str = instance_config_service.get_oidc_default_roles(db)
 
+def _map_roles(
+    oidc_roles: list[str],
+    admin_group: str,
+    manager_group: str,
+    viewer_group: str,
+    default_roles_str: str,
+) -> list[str]:
+    """Map OIDC groups to File Fridge local roles."""
     mapped_roles = set()
     for r in oidc_roles:
         r_lower = str(r).lower()
-        if r_lower == admin_group.lower():
+        if admin_group and r_lower == admin_group.lower():
             mapped_roles.add("admin")
-        if r_lower == manager_group.lower():
+        if manager_group and r_lower == manager_group.lower():
             mapped_roles.add("manager")
-        if r_lower == viewer_group.lower():
+        if viewer_group and r_lower == viewer_group.lower():
             mapped_roles.add("viewer")
 
-    # Fallback to default roles if no mappings matched
     if not mapped_roles:
         defaults = [r.strip() for r in default_roles_str.split(",") if r.strip()]
         for d in defaults:
@@ -539,27 +520,26 @@ async def oidc_callback(
         if not mapped_roles:
             mapped_roles.add("viewer")
 
-    final_roles = list(mapped_roles)
+    return list(mapped_roles)
 
-    # Find or create user
+
+def _sync_local_user(db: Session, username: str, roles: list[str]) -> User:
+    """Find or create local user and update their roles."""
     user = db.query(User).filter(User.username == username).first()
     if not user:
-        # Create new user
         import secrets
-
         random_password = secrets.token_urlsafe(32)
         user = User(
             username=username,
             password_hash=hash_password(random_password),
             is_active=True,
-            roles=final_roles,
+            roles=roles,
         )
         db.add(user)
-        logger.info(f"OIDC: Created new user '{username}' with roles {final_roles}")
+        logger.info(f"OIDC: Created new user '{username}' with roles {roles}")
     else:
-        # Sync roles
-        user.roles = final_roles
-        logger.info(f"OIDC: Updated user '{username}' roles to {final_roles}")
+        user.roles = roles
+        logger.info(f"OIDC: Updated user '{username}' roles to {roles}")
 
     try:
         db.commit()
@@ -572,17 +552,98 @@ async def oidc_callback(
             detail="Failed to save user account",
         ) from None
 
-    # Check if user is active
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User account is inactive",
         )
+    return user
 
-    # Generate access token
+
+@router.get("/oidc/callback", response_class=HTMLResponse)
+async def oidc_callback(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
+    """
+    Handle the OIDC authorization code callback.
+    """
+    from fastapi.responses import HTMLResponse
+    from app.services.instance_config_service import instance_config_service
+
+    # 1. Verify callback parameters and state cookie
+    code = _verify_oidc_callback_state(request, state, code, error, error_description)
+
+    # 2. Get server OIDC configurations
+    issuer = instance_config_service.get_oidc_issuer(db)
+    client_id = instance_config_service.get_oidc_client_id(db)
+    client_secret = instance_config_service.get_oidc_client_secret(db)
+
+    if not issuer or not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OIDC is not fully configured on the server",
+        )
+
+    # 3. Retrieve provider endpoints
+    issuer = issuer.rstrip("/")
+    discovery_url = f"{issuer}/.well-known/openid-configuration"
+    token_endpoint, userinfo_endpoint = await _get_oidc_endpoints(discovery_url)
+
+    # 4. Determine redirect URI
+    redirect_uri = instance_config_service.get_oidc_redirect_uri(db)
+    if not redirect_uri:
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host", request.url.netloc)
+        redirect_uri = f"{proto}://{host}/api/v1/auth/oidc/callback"
+
+    # 5. Exchange code for tokens
+    tokens = await _exchange_code_for_tokens(
+        token_endpoint, code, redirect_uri, client_id, client_secret
+    )
+
+    # 6. Fetch user info claims
+    userinfo = await _fetch_userinfo(userinfo_endpoint, tokens["access_token"])
+
+    # 7. Extract username
+    username = (
+        userinfo.get("preferred_username")
+        or userinfo.get("nickname")
+        or userinfo.get("name")
+        or userinfo.get("email")
+        or userinfo.get("sub")
+    )
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to extract a valid username from userinfo claims",
+        )
+    username = username.strip().lower()
+
+    # 8. Extract roles and map to local roles
+    roles_claim = instance_config_service.get_oidc_roles_claim(db)
+    oidc_roles = _extract_oidc_roles(userinfo, tokens, roles_claim)
+
+    admin_group = instance_config_service.get_oidc_admin_group(db)
+    manager_group = instance_config_service.get_oidc_manager_group(db)
+    viewer_group = instance_config_service.get_oidc_viewer_group(db)
+    default_roles_str = instance_config_service.get_oidc_default_roles(db)
+
+    mapped_roles = _map_roles(
+        oidc_roles, admin_group, manager_group, viewer_group, default_roles_str
+    )
+
+    # 9. Sync or provision user in local database
+    user = _sync_local_user(db, username, mapped_roles)
+
+    # 10. Generate access token
     local_access_token = create_access_token(data={"sub": user.username, "roles": user.roles})
 
-    # Render landing script page
+    # 11. Render landing page response
     html_content = f"""<!DOCTYPE html>
 <html>
 <head>
