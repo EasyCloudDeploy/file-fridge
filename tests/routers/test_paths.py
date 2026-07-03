@@ -281,6 +281,57 @@ def test_create_path(
     mock_add_job.assert_called_once()
 
 
+@patch("app.services.scheduler.scheduler_service.add_path_job")
+def test_create_path_no_storage_locations(
+    mock_add_job, authenticated_client: TestClient, tmp_path
+):
+    """Test creating a new monitored path without storage locations."""
+    source_path = tmp_path / "no_storage_hot"
+    source_path.mkdir()
+
+    path_data = {
+        "name": "No Storage Path",
+        "source_path": str(source_path),
+        "operation_type": "move",
+        "check_interval_seconds": 3600,
+        "max_concurrent_migrations": 5,
+        "storage_location_ids": [],
+    }
+
+    response = authenticated_client.post("/api/v1/paths", json=path_data)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "No Storage Path"
+    assert data["source_path"] == str(source_path)
+    assert data["storage_locations"] == []
+    mock_add_job.assert_called_once()
+
+
+@patch("app.services.scheduler.scheduler_service.add_path_job")
+def test_create_path_omitted_storage_locations(
+    mock_add_job, authenticated_client: TestClient, tmp_path
+):
+    """Test creating a new monitored path with omitted storage locations."""
+    source_path = tmp_path / "omitted_storage_hot"
+    source_path.mkdir()
+
+    path_data = {
+        "name": "Omitted Storage Path",
+        "source_path": str(source_path),
+        "operation_type": "move",
+        "check_interval_seconds": 3600,
+        "max_concurrent_migrations": 5,
+    }
+
+    response = authenticated_client.post("/api/v1/paths", json=path_data)
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "Omitted Storage Path"
+    assert data["source_path"] == str(source_path)
+    assert data["storage_locations"] == []
+    mock_add_job.assert_called_once()
+
+
 def test_create_path_invalid_source(
     authenticated_client: TestClient, storage_location: ColdStorageLocation
 ):

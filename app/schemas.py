@@ -192,7 +192,7 @@ class MonitoredPathCreate(MonitoredPathBase):
     """Schema for creating monitored path."""
 
     storage_location_ids: List[int] = Field(
-        ..., min_items=1, description="List of cold storage location IDs (at least one required)"
+        default_factory=list, description="List of cold storage location IDs"
     )
 
 
@@ -207,7 +207,7 @@ class MonitoredPathUpdate(BaseModel):
     prevent_indexing: Optional[bool] = None
     max_concurrent_migrations: Optional[int] = Field(None, ge=1)
     storage_location_ids: Optional[List[int]] = Field(
-        None, min_items=1, description="List of cold storage location IDs"
+        None, description="List of cold storage location IDs"
     )
 
 
@@ -840,6 +840,24 @@ class AuthCheckResponse(BaseModel):
 
     setup_required: bool = Field(..., description="Whether initial setup is required")
     user_count: int = Field(..., description="Number of users in the system")
+    oidc_enabled: bool = Field(False, description="Whether OIDC authentication is enabled")
+    oidc_provider_name: Optional[str] = Field("Authentik", description="Name of the OIDC provider")
+
+
+class OIDCSettingsUpdate(BaseModel):
+    """Schema for updating OIDC settings."""
+
+    oidc_enabled: bool = Field(..., description="Whether OIDC is enabled")
+    oidc_client_id: Optional[str] = Field(None, description="OIDC client ID")
+    oidc_client_secret: Optional[str] = Field(None, description="OIDC client secret")
+    oidc_issuer: Optional[str] = Field(None, description="OIDC issuer URL")
+    oidc_redirect_uri: Optional[str] = Field(None, description="OIDC redirect URI")
+    oidc_provider_name: Optional[str] = Field("Authentik", description="Custom name for the OIDC provider")
+    oidc_roles_claim: Optional[str] = Field("roles", description="Claim name for user roles")
+    oidc_admin_group: Optional[str] = Field("admin", description="OIDC group to map to admin role")
+    oidc_manager_group: Optional[str] = Field("manager", description="OIDC group to map to manager role")
+    oidc_viewer_group: Optional[str] = Field("viewer", description="OIDC group to map to viewer role")
+    oidc_default_roles: Optional[str] = Field("viewer", description="Comma-separated list of default roles")
 
 
 class PasswordChange(BaseModel):
@@ -849,10 +867,7 @@ class PasswordChange(BaseModel):
     new_password: str = Field(..., min_length=8, description="New password (minimum 8 characters)")
 
 
-class PskExportRequest(BaseModel):
-    """Request for exporting P2P PSK (requires password)."""
 
-    password: str = Field(..., min_length=1, description="Account password")
 
 
 # ========================================
@@ -897,12 +912,14 @@ class P2PPeerJoinRequest(BaseModel):
     port: int = Field(..., ge=1, le=65535)
     psk: str = Field(..., min_length=8, max_length=512)
     peer_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    scheme: str = Field("http")
 
 
 class P2PManifestPushRequest(BaseModel):
     host: str = Field(..., min_length=1, max_length=255)
     port: int = Field(..., ge=1, le=65535)
     peer_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    scheme: str = Field("http")
     files: List[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -912,11 +929,13 @@ class P2PPeerResponse(BaseModel):
     peer_id: str
     host: str
     port: int
+    scheme: str
     status: P2PPeerStatus
     last_seen_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     file_count: int = 0
+
 
     class Config:
         from_attributes = True
@@ -960,9 +979,7 @@ class P2PNetworkPskResponse(BaseModel):
     note: str
 
 
-class P2PCurrentPskResponse(BaseModel):
-    psk: Optional[str] = None
-    available: bool
+
 
 
 class P2PPskAcceptRequest(BaseModel):

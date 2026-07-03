@@ -113,3 +113,20 @@ class LocalColdStorageBackend(ColdStorageBackend):
             return True, None
         except Exception as exc:
             return False, str(exc)
+
+    def download_file(
+        self,
+        storage_reference: str,
+        destination_path: Path,
+        location: ColdStorageLocation,
+    ) -> Tuple[bool, Optional[str]]:
+        try:
+            import shutil
+            ref = Path(storage_reference)
+            if not ref.exists():
+                return False, f"File not found: {storage_reference}"
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ref, destination_path)
+            return True, None
+        except Exception as exc:
+            return False, str(exc)

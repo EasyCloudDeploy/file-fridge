@@ -156,3 +156,18 @@ class S3ColdStorageBackend(ColdStorageBackend):
             return True, None
         except Exception as exc:
             return False, str(exc)
+
+    def download_file(
+        self,
+        storage_reference: str,
+        destination_path: Path,
+        location: ColdStorageLocation,
+    ) -> Tuple[bool, Optional[str]]:
+        try:
+            bucket, key = self._parse_reference(storage_reference)
+            client = self._client(location)
+            destination_path.parent.mkdir(parents=True, exist_ok=True)
+            client.download_file(bucket, key, str(destination_path))
+            return True, None
+        except Exception as exc:
+            return False, str(exc)

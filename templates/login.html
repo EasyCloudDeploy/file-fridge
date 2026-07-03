@@ -112,6 +112,20 @@
                     </div>
                 </form>
 
+                <div id="oidc-login-container" class="d-none">
+                    <div class="d-flex align-items-center my-3">
+                        <hr class="flex-grow-1">
+                        <span class="mx-2 text-muted small">or</span>
+                        <hr class="flex-grow-1">
+                    </div>
+                    <div class="d-grid">
+                        <a href="/api/v1/auth/oidc/login" class="btn btn-outline-dark d-flex align-items-center justify-content-center py-2" id="oidc-login-btn">
+                            <i class="bi bi-shield-lock-fill me-2 text-primary"></i>
+                            <span>Sign in with <span id="oidc-provider-name">Authentik</span></span>
+                        </a>
+                    </div>
+                </div>
+
                 <div id="error-message" class="alert alert-danger mt-3 d-none" role="alert">
                     <i class="bi bi-exclamation-triangle me-2"></i>
                     <span id="error-text"></span>
@@ -150,6 +164,14 @@
                     // Show login mode UI
                     document.getElementById('submit-text').innerHTML = '<i class="bi bi-box-arrow-in-right me-2"></i>Login';
                     document.getElementById('login-subtitle').textContent = 'Intelligent Cold Storage Management';
+                }
+
+                // Handle OIDC Button visibility (only when not in first-time setup mode)
+                if (data.oidc_enabled && !isSetupMode) {
+                    document.getElementById('oidc-login-container').classList.remove('d-none');
+                    document.getElementById('oidc-provider-name').textContent = data.oidc_provider_name || 'OIDC';
+                } else {
+                    document.getElementById('oidc-login-container').classList.add('d-none');
                 }
             } catch (error) {
                 console.error('Failed to check auth status:', error);

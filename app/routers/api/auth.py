@@ -2,9 +2,10 @@
 
 import logging
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -37,7 +38,17 @@ def check_auth_status(db: Annotated[Session, Depends(get_db)]):
     user_count = db.query(func.count(User.id)).scalar()
     setup_required = user_count == 0
 
-    return schemas.AuthCheckResponse(setup_required=setup_required, user_count=user_count)
+    from app.services.instance_config_service import instance_config_service
+
+    oidc_enabled = instance_config_service.get_oidc_enabled(db)
+    oidc_provider_name = instance_config_service.get_oidc_provider_name(db)
+
+    return schemas.AuthCheckResponse(
+        setup_required=setup_required,
+        user_count=user_count,
+        oidc_enabled=oidc_enabled,
+        oidc_provider_name=oidc_provider_name,
+    )
 
 
 @router.post(
@@ -244,3 +255,354 @@ def generate_api_token(
         expires_delta=expires_delta,
     )
     return schemas.Token(access_token=access_token, token_type="bearer")
+
+
+@router.get("/oidc/login")
+async def oidc_login(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+):
+    """
+    Initiate the OIDC authorization code flow.
+    """
+    import secrets
+    from urllib.parse import urlencode
+    from fastapi.responses import RedirectResponse
+    from app.services.instance_config_service import instance_config_service
+
+    # Check if OIDC is enabled
+    if not instance_config_service.get_oidc_enabled(db):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OIDC authentication is not enabled",
+        )
+
+    # Get issuer URL
+    issuer = instance_config_service.get_oidc_issuer(db)
+    if not issuer:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OIDC Issuer URL is not configured",
+        )
+
+    # Fetch discovery configuration
+    import httpx
+    issuer = issuer.rstrip("/")
+    discovery_url = f"{issuer}/.well-known/openid-configuration"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(discovery_url, timeout=10.0)
+            r.raise_for_status()
+            config = r.json()
+    except Exception as e:
+        logger.exception("Failed to fetch OIDC configuration from provider")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch OIDC discovery document: {e!s}",
+        ) from None
+
+    authorization_endpoint = config.get("authorization_endpoint")
+    if not authorization_endpoint:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="OIDC provider does not expose authorization_endpoint",
+        )
+
+    # Get client ID
+    client_id = instance_config_service.get_oidc_client_id(db)
+    if not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OIDC Client ID is not configured",
+        )
+
+    # Determine redirect URI
+    redirect_uri = instance_config_service.get_oidc_redirect_uri(db)
+    if not redirect_uri:
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host", request.url.netloc)
+        redirect_uri = f"{proto}://{host}/api/v1/auth/oidc/callback"
+
+    # Generate state for CSRF protection
+    state = secrets.token_hex(16)
+
+    # Construct redirect URL
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "scope": "openid profile email",
+        "redirect_uri": redirect_uri,
+        "state": state,
+    }
+    auth_url = f"{authorization_endpoint}?{urlencode(params)}"
+
+    response = RedirectResponse(auth_url)
+    response.set_cookie(
+        key="oidc_state",
+        value=state,
+        httponly=True,
+        secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
+        samesite="lax",
+        max_age=300,  # 5 minutes
+    )
+    return response
+
+
+@router.get("/oidc/callback", response_class=HTMLResponse)
+async def oidc_callback(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
+    """
+    Handle the OIDC authorization code callback.
+    """
+    from fastapi.responses import HTMLResponse
+    import httpx
+    from app.services.instance_config_service import instance_config_service
+
+    # Handle error query parameters from provider
+    if error:
+        error_desc = error_description or error
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"OIDC authentication failed: {error_desc}",
+        )
+
+    if not code or not state:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing required OIDC query parameters (code/state)",
+        )
+
+    # Verify state parameter to prevent CSRF
+    cookie_state = request.cookies.get("oidc_state")
+    if not cookie_state or cookie_state != state:
+        logger.warning(f"OIDC state mismatch. cookie: {cookie_state}, query: {state}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="State verification failed (CSRF check failed). Please try logging in again.",
+        )
+
+    # Get configuration settings
+    issuer = instance_config_service.get_oidc_issuer(db)
+    client_id = instance_config_service.get_oidc_client_id(db)
+    client_secret = instance_config_service.get_oidc_client_secret(db)
+
+    if not issuer or not client_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OIDC is not fully configured on the server",
+        )
+
+    issuer = issuer.rstrip("/")
+    discovery_url = f"{issuer}/.well-known/openid-configuration"
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(discovery_url, timeout=10.0)
+            r.raise_for_status()
+            config = r.json()
+    except Exception as e:
+        logger.exception("Failed to fetch OIDC discovery document")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reach OIDC provider: {e!s}",
+        ) from None
+
+    token_endpoint = config.get("token_endpoint")
+    userinfo_endpoint = config.get("userinfo_endpoint")
+
+    if not token_endpoint or not userinfo_endpoint:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="OIDC provider does not expose token/userinfo endpoints",
+        )
+
+    # Re-determine redirect URI exactly as we did in login
+    redirect_uri = instance_config_service.get_oidc_redirect_uri(db)
+    if not redirect_uri:
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        host = request.headers.get("x-forwarded-host", request.url.netloc)
+        redirect_uri = f"{proto}://{host}/api/v1/auth/oidc/callback"
+
+    # Exchange code for tokens
+    token_data = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+    }
+    if client_secret:
+        token_data["client_secret"] = client_secret
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(token_endpoint, data=token_data, timeout=10.0)
+            r.raise_for_status()
+            tokens = r.json()
+    except Exception as e:
+        logger.exception("Failed to exchange code for OIDC tokens")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"OIDC token exchange failed: {e!s}",
+        ) from None
+
+    access_token = tokens.get("access_token")
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="OIDC provider did not return access_token",
+        )
+
+    # Fetch user info
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(
+                userinfo_endpoint,
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10.0,
+            )
+            r.raise_for_status()
+            userinfo = r.json()
+    except Exception as e:
+        logger.exception("Failed to fetch userinfo from OIDC provider")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to fetch user info from OIDC provider: {e!s}",
+        ) from None
+
+    # Determine username
+    username = (
+        userinfo.get("preferred_username")
+        or userinfo.get("nickname")
+        or userinfo.get("name")
+        or userinfo.get("email")
+        or userinfo.get("sub")
+    )
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to extract a valid username from userinfo claims",
+        )
+
+    username = username.strip().lower()
+
+    # Extract roles/groups
+    roles_claim = instance_config_service.get_oidc_roles_claim(db)
+    oidc_roles = userinfo.get(roles_claim)
+
+    # Try decoding id_token as fallback if roles not in userinfo
+    if not oidc_roles and "id_token" in tokens:
+        try:
+            from jose import jwt
+
+            id_token_payload = jwt.decode(tokens["id_token"], "", options={"verify_signature": False})
+            oidc_roles = id_token_payload.get(roles_claim)
+        except Exception:
+            logger.warning("Failed to decode id_token to look up roles")
+
+    # Normalize roles to a list of strings
+    if oidc_roles is None:
+        oidc_roles = []
+    elif isinstance(oidc_roles, str):
+        oidc_roles = [r.strip() for r in oidc_roles.split(",") if r.strip()]
+    elif not isinstance(oidc_roles, list):
+        oidc_roles = []
+
+    # Map groups to roles
+    admin_group = instance_config_service.get_oidc_admin_group(db)
+    manager_group = instance_config_service.get_oidc_manager_group(db)
+    viewer_group = instance_config_service.get_oidc_viewer_group(db)
+    default_roles_str = instance_config_service.get_oidc_default_roles(db)
+
+    mapped_roles = set()
+    for r in oidc_roles:
+        r_lower = str(r).lower()
+        if r_lower == admin_group.lower():
+            mapped_roles.add("admin")
+        if r_lower == manager_group.lower():
+            mapped_roles.add("manager")
+        if r_lower == viewer_group.lower():
+            mapped_roles.add("viewer")
+
+    # Fallback to default roles if no mappings matched
+    if not mapped_roles:
+        defaults = [r.strip() for r in default_roles_str.split(",") if r.strip()]
+        for d in defaults:
+            if d in ["admin", "manager", "viewer"]:
+                mapped_roles.add(d)
+        if not mapped_roles:
+            mapped_roles.add("viewer")
+
+    final_roles = list(mapped_roles)
+
+    # Find or create user
+    user = db.query(User).filter(User.username == username).first()
+    if not user:
+        # Create new user
+        import secrets
+
+        random_password = secrets.token_urlsafe(32)
+        user = User(
+            username=username,
+            password_hash=hash_password(random_password),
+            is_active=True,
+            roles=final_roles,
+        )
+        db.add(user)
+        logger.info(f"OIDC: Created new user '{username}' with roles {final_roles}")
+    else:
+        # Sync roles
+        user.roles = final_roles
+        logger.info(f"OIDC: Updated user '{username}' roles to {final_roles}")
+
+    try:
+        db.commit()
+        db.refresh(user)
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to save OIDC user to database")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to save user account",
+        ) from None
+
+    # Check if user is active
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive",
+        )
+
+    # Generate access token
+    local_access_token = create_access_token(data={"sub": user.username, "roles": user.roles})
+
+    # Render landing script page
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Authenticating...</title>
+    <script>
+        try {{
+            sessionStorage.setItem('auth_token', '{local_access_token}');
+            window.location.href = '/';
+        }} catch (e) {{
+            console.error('Failed to save auth token:', e);
+            document.body.innerHTML = '<p style="color: red;">Failed to complete login. Please enable session storage.</p>';
+        }}
+    </script>
+</head>
+<body>
+    <p style="font-family: sans-serif; text-align: center; margin-top: 50px;">Logging in, please wait...</p>
+</body>
+</html>"""
+
+    response = HTMLResponse(content=html_content)
+    response.delete_cookie(key="oidc_state")
+    return response

@@ -14,10 +14,8 @@ from app.constants import RESOURCE_REMOTE_CONNECTIONS
 from app.database import get_db
 from app.models import FileInventory, FileStatus, P2PPeer, P2PPeerStatus, RemoteSharedFileCache, User
 from app.schemas import (
-    P2PCurrentPskResponse,
     P2PManifestPushRequest,
     P2PNetworkConfigCreate,
-    PskExportRequest,
     P2PNetworkConfigResponse,
     P2PNetworkConfigSetupResponse,
     P2PNetworkConfigUpdate,
@@ -115,21 +113,7 @@ def destroy_network_config(
     return {"status": "destroyed", **removed}
 
 
-@router.post("/network/psk", response_model=P2PCurrentPskResponse)
-def get_network_psk(
-    payload: PskExportRequest,
-    db: Annotated[Session, Depends(get_db)],
-    current_user: Annotated[User, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
-):
-    from app.security import verify_password
-    if not verify_password(payload.password, current_user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid password")
 
-    config = p2p_service.get_network_config(db)
-    if not config:
-        raise HTTPException(status_code=404, detail="P2P network is not configured")
-    psk = config.get_psk()
-    return P2PCurrentPskResponse(psk=psk, available=psk is not None)
 
 
 @router.post("/network/psk/regenerate", response_model=P2PPskRotationResponse)
@@ -195,6 +179,7 @@ def list_peers(
             "peer_id": peer.peer_id,
             "host": peer.host,
             "port": peer.port,
+            "scheme": peer.scheme or "http",
             "status": peer.status,
             "last_seen_at": peer.last_seen_at,
             "created_at": peer.created_at,
@@ -220,6 +205,7 @@ def join_peer(
             port=payload.port,
             psk=payload.psk,
             peer_name=payload.peer_name,
+            scheme=payload.scheme,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -232,10 +218,11 @@ def join_peer(
             psk_hash=config.psk_hash,
             local_host=request.url.hostname,
             local_port=request.url.port,
+            local_scheme=request.url.scheme,
         )
         db.refresh(peer)
         if peer.status != P2PPeerStatus.CONNECTED:
-            endpoint = f"http://{peer.host}:{peer.port}/api/v1/p2p/manifest"
+            endpoint = f"{peer.scheme}://{peer.host}:{peer.port}/api/v1/p2p/manifest"
             db.delete(peer)
             db.commit()
             raise HTTPException(
@@ -248,6 +235,7 @@ def join_peer(
         # Best-effort reciprocal registration so the target peer can also discover this node.
         local_host = request.url.hostname
         local_port = request.url.port
+        local_scheme = request.url.scheme
         if local_host and local_port:
             local_peer_name = instance_config_service.get_instance_name(db) or "File Fridge"
             try:
@@ -258,6 +246,7 @@ def join_peer(
                     local_host=local_host,
                     local_port=local_port,
                     local_peer_name=local_peer_name,
+                    local_scheme=local_scheme,
                 )
             except Exception:
                 # Do not fail join when callback registration is unavailable.
@@ -332,6 +321,7 @@ def get_manifest_for_peers(
     x_ff_peer_id: Annotated[str | None, Header(alias="X-FF-PEER-ID")] = None,
     x_ff_local_host: Annotated[str | None, Header(alias="X-FF-LOCAL-HOST")] = None,
     x_ff_local_port: Annotated[str | None, Header(alias="X-FF-LOCAL-PORT")] = None,
+    x_ff_local_scheme: Annotated[str | None, Header(alias="X-FF-LOCAL-SCHEME")] = None,
 ):
     config = p2p_service.get_network_config(db)
     if not config or not config.enabled:
@@ -351,6 +341,7 @@ def get_manifest_for_peers(
                     port=port_int,
                     psk_hash=config.psk_hash,
                     peer_name=None,
+                    scheme=x_ff_local_scheme or "http",
                 )
         except (ValueError, TypeError):
             pass
@@ -384,6 +375,7 @@ def push_manifest_from_peer(
         port=payload.port,
         psk_hash=config.psk_hash,
         peer_name=payload.peer_name,
+        scheme=payload.scheme,
     )
     p2p_service.replace_peer_manifest(
         db,

@@ -39,11 +39,18 @@
 
             <div id="p2p-wizard-join-pane" class="d-none">
                 <form id="p2p-wizard-join-form" class="row g-3">
-                    <div class="col-md-4">
+                    <div class="col-md-2">
+                        <label for="p2p-wizard-peer-scheme" class="form-label">Protocol</label>
+                        <select class="form-select" id="p2p-wizard-peer-scheme">
+                            <option value="http" selected>HTTP</option>
+                            <option value="https">HTTPS</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
                         <label for="p2p-wizard-peer-host" class="form-label">Peer IP/Host</label>
                         <input class="form-control" id="p2p-wizard-peer-host" placeholder="192.168.1.25" required>
                     </div>
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <label for="p2p-wizard-peer-port" class="form-label">Peer Port</label>
                         <input class="form-control" id="p2p-wizard-peer-port" type="number" min="1" max="65535" placeholder="8000" required>
                     </div>
@@ -87,20 +94,7 @@
                                 <button type="button" class="btn btn-outline-secondary" id="p2p-copy-connect-port-btn">Copy</button>
                             </div>
                         </div>
-                        <div class="col-12">
-                            <label for="p2p-current-psk" class="form-label small mb-1">Pre-Shared Key (PSK)</label>
-                            <div class="input-group input-group-sm">
-                                <input type="password" class="form-control font-monospace" id="p2p-current-psk" readonly placeholder="Password required to view PSK">
-                                <button type="button" class="btn btn-outline-primary" id="p2p-export-psk-btn" title="Export PSK">
-                                    <i class="bi bi-key-fill me-1"></i>Export PSK
-                                </button>
-                                <button type="button" class="btn btn-outline-secondary d-none" id="p2p-reveal-psk-btn" title="Show/hide PSK">
-                                    <i class="bi bi-eye"></i>
-                                </button>
-                                <button type="button" class="btn btn-outline-secondary d-none" id="p2p-copy-current-psk-btn">Copy</button>
-                            </div>
-                            <div class="text-muted small mt-1" id="p2p-psk-unavailable-note" style="display:none;">PSK not stored — generate a new PSK to retrieve it.</div>
-                        </div>
+
                     </div>
                 </div>
                 <div id="p2p-rotation-result-panel" class="alert d-none mb-3" role="alert">

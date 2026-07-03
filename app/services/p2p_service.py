@@ -31,6 +31,8 @@ from app.models import (
 
 logger = logging.getLogger(__name__)
 
+P2P_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
+
 
 class P2PService:
     """Manage private-network configuration, peers, and manifest sync."""
@@ -182,11 +184,15 @@ class P2PService:
     def _push_rotation_to_peer(self, peer: P2PPeer, current_psk_hash: str, new_psk: str) -> None:
         """Send the encrypted new PSK to a single peer."""
         encrypted = self.encrypt_new_psk(new_psk, current_psk_hash)
-        url = f"http://{peer.host}:{peer.port}/api/v1/p2p/network/psk/accept"
+        url = f"{peer.scheme}://{peer.host}:{peer.port}/api/v1/p2p/network/psk/accept"
         with httpx.Client(timeout=10.0) as client:
             response = client.post(
                 url,
-                headers={"X-FF-PSK": current_psk_hash, "Content-Type": "application/json"},
+                headers={
+                    "X-FF-PSK": current_psk_hash,
+                    "Content-Type": "application/json",
+                    "User-Agent": P2P_USER_AGENT,
+                },
                 json={"encrypted_new_psk": encrypted},
             )
             response.raise_for_status()
@@ -268,6 +274,7 @@ class P2PService:
         port: int,
         psk: str,
         peer_name: Optional[str],
+        scheme: str = "http",
     ) -> P2PPeer:
         config = self._validate_join_psk(db, psk)
 
@@ -287,6 +294,7 @@ class P2PService:
                 peer_id=peer_id,
                 host=host,
                 port=port,
+                scheme=scheme,
                 psk_hash=config.psk_hash,
                 status=status,
                 last_seen_at=now,
@@ -296,6 +304,7 @@ class P2PService:
             peer.peer_name = peer_name or peer.peer_name
             peer.host = host
             peer.port = port
+            peer.scheme = scheme
             peer.psk_hash = config.psk_hash
             peer.status = status
             peer.last_seen_at = now
@@ -315,6 +324,7 @@ class P2PService:
         port: int,
         psk_hash: str,
         peer_name: Optional[str],
+        scheme: str = "http",
     ) -> P2PPeer:
         peer_id = f"{host}:{port}"
         now = datetime.now(timezone.utc)
@@ -325,6 +335,7 @@ class P2PService:
                 peer_id=peer_id,
                 host=host,
                 port=port,
+                scheme=scheme,
                 psk_hash=psk_hash,
                 status=P2PPeerStatus.CONNECTED,
                 last_seen_at=now,
@@ -334,6 +345,7 @@ class P2PService:
             peer.peer_name = peer_name or peer.peer_name
             peer.host = host
             peer.port = port
+            peer.scheme = scheme
             peer.psk_hash = psk_hash
             peer.status = P2PPeerStatus.CONNECTED
             peer.last_seen_at = now
@@ -434,14 +446,17 @@ class P2PService:
         psk_hash: str,
         local_host: Optional[str] = None,
         local_port: Optional[int] = None,
+        local_scheme: Optional[str] = None,
     ) -> None:
-        url = f"http://{peer.host}:{peer.port}/api/v1/p2p/manifest"
-        headers: dict[str, str] = {"X-FF-PSK": psk_hash}
+        url = f"{peer.scheme}://{peer.host}:{peer.port}/api/v1/p2p/manifest"
+        headers: dict[str, str] = {"X-FF-PSK": psk_hash, "User-Agent": P2P_USER_AGENT}
         # Advertise our own address so the remote can auto-register us as a peer,
         # making discovery self-healing when the initial reciprocal push failed.
         if local_host and local_port:
             headers["X-FF-LOCAL-HOST"] = local_host
             headers["X-FF-LOCAL-PORT"] = str(local_port)
+            if local_scheme:
+                headers["X-FF-LOCAL-SCHEME"] = local_scheme
 
         try:
             with httpx.Client(timeout=10.0) as client:
@@ -467,6 +482,7 @@ class P2PService:
         *,
         local_host: Optional[str] = None,
         local_port: Optional[int] = None,
+        local_scheme: Optional[str] = None,
     ) -> int:
         config = self.get_network_config(db)
         if not config or not config.enabled:
@@ -481,6 +497,7 @@ class P2PService:
                 psk_hash=config.psk_hash,
                 local_host=local_host,
                 local_port=local_port,
+                local_scheme=local_scheme,
             )
             synced += 1
         return synced
@@ -494,6 +511,7 @@ class P2PService:
         local_host: str,
         local_port: int,
         local_peer_name: str,
+        local_scheme: str = "http",
     ) -> None:
         """Push this node's manifest to a peer so they can register us symmetrically."""
         manifest = self.generate_manifest(db, instance_name=local_peer_name)
@@ -501,10 +519,11 @@ class P2PService:
             "host": local_host,
             "port": local_port,
             "peer_name": local_peer_name,
+            "scheme": local_scheme,
             "files": manifest.get("files") or [],
         }
-        url = f"http://{peer.host}:{peer.port}/api/v1/p2p/manifest/push"
-        headers = {"X-FF-PSK": psk_hash}
+        url = f"{peer.scheme}://{peer.host}:{peer.port}/api/v1/p2p/manifest/push"
+        headers = {"X-FF-PSK": psk_hash, "User-Agent": P2P_USER_AGENT}
         with httpx.Client(timeout=10.0) as client:
             response = client.post(url, headers=headers, json=payload)
             response.raise_for_status()
@@ -552,8 +571,8 @@ class P2PService:
                 continue
 
             encoded_id = quote(cache_entry.remote_file_id, safe="")
-            url = f"http://{peer.host}:{peer.port}/api/v1/p2p/files/{encoded_id}/content"
-            headers = {"X-FF-PSK": psk_hash}
+            url = f"{peer.scheme}://{peer.host}:{peer.port}/api/v1/p2p/files/{encoded_id}/content"
+            headers = {"X-FF-PSK": psk_hash, "User-Agent": P2P_USER_AGENT}
 
             try:
                 with httpx.Client(timeout=300.0) as client:

@@ -132,6 +132,19 @@ class Settings(BaseSettings):
     # Require manual fingerprint verification before trusting connections
     require_fingerprint_verification: bool = True
 
+    # OIDC settings (optional environment overrides)
+    oidc_enabled: Optional[bool] = None
+    oidc_client_id: Optional[str] = None
+    oidc_client_secret: Optional[str] = None
+    oidc_issuer: Optional[str] = None
+    oidc_redirect_uri: Optional[str] = None
+    oidc_provider_name: Optional[str] = None
+    oidc_roles_claim: Optional[str] = None
+    oidc_admin_group: Optional[str] = None
+    oidc_manager_group: Optional[str] = None
+    oidc_viewer_group: Optional[str] = None
+    oidc_default_roles: Optional[str] = None
+
     # Authentication
     # Override via SECRET_KEY environment variable
     # Secret key for JWT signing - required for production

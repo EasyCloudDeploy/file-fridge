@@ -747,6 +747,11 @@ class InstanceMetadata(Base):
     file_encryption_root_key_encrypted = Column(
         Text, nullable=True
     )  # Persistent master key for file encryption
+    previous_file_encryption_root_key_encrypted = Column(
+        Text, nullable=True
+    )  # Historical master key for file encryption (during migration)
+    file_migration_total = Column(Integer, nullable=True)  # Total files to migrate
+    file_migration_progress = Column(Integer, nullable=True)  # Current files migrated
     current_key_version = Column(Integer, nullable=False, default=1)  # For key rotation
     instance_url = Column(
         String, nullable=True
@@ -760,6 +765,19 @@ class InstanceMetadata(Base):
     smtp_password_encrypted = Column("smtp_password", String, nullable=True)
     smtp_sender = Column(String, nullable=True)
     smtp_use_tls = Column(Boolean, default=True, nullable=True)
+
+    # Global OIDC settings (database fallback)
+    oidc_enabled = Column(Boolean, default=False, nullable=True)
+    oidc_client_id = Column(String, nullable=True)
+    oidc_client_secret_encrypted = Column("oidc_client_secret", String, nullable=True)
+    oidc_issuer = Column(String, nullable=True)
+    oidc_redirect_uri = Column(String, nullable=True)
+    oidc_provider_name = Column(String, nullable=True, default="Authentik")
+    oidc_roles_claim = Column(String, nullable=True, default="roles")
+    oidc_admin_group = Column(String, nullable=True, default="admin")
+    oidc_manager_group = Column(String, nullable=True, default="manager")
+    oidc_viewer_group = Column(String, nullable=True, default="viewer")
+    oidc_default_roles = Column(String, nullable=True, default="viewer")
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -780,6 +798,25 @@ class InstanceMetadata(Base):
             self.smtp_password_encrypted = encryption_manager.encrypt(value)
         else:
             self.smtp_password_encrypted = None
+
+    @property
+    def oidc_client_secret(self) -> Optional[str]:
+        """Decrypt and return OIDC client secret."""
+        if self.oidc_client_secret_encrypted:
+            try:
+                return encryption_manager.decrypt(self.oidc_client_secret_encrypted)
+            except InvalidToken:
+                return self.oidc_client_secret_encrypted
+        return None
+
+    @oidc_client_secret.setter
+    def oidc_client_secret(self, value: Optional[str]):
+        """Encrypt and store OIDC client secret."""
+        if value:
+            self.oidc_client_secret_encrypted = encryption_manager.encrypt(value)
+        else:
+            self.oidc_client_secret_encrypted = None
+
 
 
 class P2PPeerStatus(str, enum.Enum):
@@ -839,6 +876,9 @@ class P2PPeer(Base):
     shared_files = relationship(
         "RemoteSharedFileCache", back_populates="peer", cascade="all, delete-orphan"
     )
+
+    scheme = Column(String, nullable=False, default="http", server_default="http")
+
 
 
 class RemoteSharedFileCache(Base):
