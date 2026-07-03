@@ -21,6 +21,9 @@
             <a href="#smtp" class="list-group-item list-group-item-action notifiers-only d-none" data-section="smtp">
                 <i class="bi bi-envelope-at me-2"></i>SMTP Server
             </a>
+            <a href="#oidc" class="list-group-item list-group-item-action admin-only d-none" data-section="oidc">
+                <i class="bi bi-shield-lock-fill me-2"></i>OIDC Auth
+            </a>
         </div>
     </div>
 
@@ -214,6 +217,47 @@
                     </div>
                 </div>
             </div>
+
+            <!-- File Encryption Key Migration Card -->
+            <div id="file-encryption" class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        <i class="bi bi-file-earmark-lock me-2"></i>Cold Storage File Encryption
+                    </h5>
+                    <button class="btn btn-sm btn-primary" id="btn-rotate-file-key">
+                        <i class="bi bi-arrow-repeat me-1"></i>Rotate File Key &amp; Migrate
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-info d-flex align-items-center" role="alert">
+                        <i class="bi bi-info-circle-fill me-3 fs-4"></i>
+                        <div>
+                            Files in cold storage (local, Google Drive, S3) are encrypted using keys derived from a master file encryption root key. 
+                            Rotating this key will generate a new root key and trigger a background task to decrypt and re-encrypt all existing cold storage files under the new key.
+                        </div>
+                    </div>
+
+                    <!-- Migration Progress Banner -->
+                    <div id="file-migration-status-banner" class="alert alert-warning d-none" role="alert">
+                        <div class="d-flex align-items-center mb-2">
+                            <div class="spinner-border spinner-border-sm text-warning me-2" role="status"></div>
+                            <strong>File Key Migration in Progress...</strong>
+                        </div>
+                        <p class="small mb-2">Migrating cold storage files to the new root key. Old files remain readable during this process.</p>
+                        <div class="progress" style="height: 20px;">
+                            <div id="file-migration-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                        </div>
+                        <div class="text-end small mt-1" id="file-migration-progress-text">0 / 0 files migrated</div>
+                    </div>
+
+                    <div id="file-migration-idle-banner" class="alert alert-success d-flex align-items-center" role="alert">
+                        <i class="bi bi-check-circle-fill me-3 fs-4"></i>
+                        <div>
+                            All cold storage files are encrypted and secured with the active master file encryption root key.
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Users Section -->
@@ -358,6 +402,119 @@
                     <div id="smtp-error-message" class="alert alert-danger mt-3 d-none" role="alert">
                         <i class="bi bi-exclamation-triangle me-2"></i>
                         <span id="smtp-error-text"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- OIDC Authentication Section -->
+        <div id="oidc-section" class="settings-section d-none">
+            <div id="oidc" class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="bi bi-shield-lock-fill me-2"></i>OIDC Authentication Settings
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div id="oidc-env-warning" class="alert alert-warning d-none" role="alert">
+                        <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
+                        <strong>Overridden by Environment Variables:</strong> OIDC settings are currently configured via system environment variables. Local modifications via this UI are disabled.
+                    </div>
+
+                    <form id="oidc-config-form">
+                        <div class="form-check form-switch mb-4">
+                            <input class="form-check-input" type="checkbox" id="oidc-enabled" name="oidc_enabled">
+                            <label class="form-check-label fw-bold" for="oidc-enabled">Enable OIDC Single Sign-On (SSO)</label>
+                            <div class="form-text">Allow users to log in using Authentik or any standard OpenID Connect provider.</div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="oidc-provider-name-input" class="form-label">Provider Name</label>
+                                <input type="text" class="form-control" id="oidc-provider-name-input" name="oidc_provider_name" placeholder="Authentik">
+                                <div class="form-text">Custom name displayed on the login page button (e.g. "Authentik", "Keycloak", "Okta").</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="oidc-issuer" class="form-label">OIDC Issuer URL</label>
+                                <input type="url" class="form-control" id="oidc-issuer" name="oidc_issuer" placeholder="https://authentik.company.com/application/o/file-fridge/">
+                                <div class="form-text">Base URL of the provider. Must support <code>.well-known/openid-configuration</code>.</div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="oidc-client-id" class="form-label">Client ID</label>
+                                <input type="text" class="form-control" id="oidc-client-id" name="oidc_client_id" placeholder="Enter your Client ID">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="oidc-client-secret" class="form-label">Client Secret</label>
+                                <input type="password" class="form-control" id="oidc-client-secret" name="oidc_client_secret" placeholder="Enter your Client Secret">
+                                <div class="form-text">Leave blank to keep existing database secret.</div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="oidc-redirect-uri" class="form-label">Redirect URI (Optional)</label>
+                            <input type="url" class="form-control" id="oidc-redirect-uri" name="oidc_redirect_uri" placeholder="https://fridge.local/api/v1/auth/oidc/callback">
+                            <div class="form-text">Must match the Redirect URI configured in your OIDC provider. Leave blank to compute automatically from the browser request.</div>
+                        </div>
+
+                        <hr class="my-4">
+                        <h6 class="mb-3"><i class="bi bi-people me-2"></i>Group & Role Mapping</h6>
+                        <p class="text-muted small">Map groups or roles sent by your OIDC provider to File Fridge roles.</p>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="oidc-roles-claim" class="form-label">Roles Claim Name</label>
+                                <input type="text" class="form-control" id="oidc-roles-claim" name="oidc_roles_claim" placeholder="roles">
+                                <div class="form-text">Claim key name containing user roles/groups in the token/userinfo (usually <code>roles</code> or <code>groups</code>).</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="oidc-default-roles" class="form-label">Default Local Roles</label>
+                                <input type="text" class="form-control" id="oidc-default-roles" name="oidc_default_roles" placeholder="viewer">
+                                <div class="form-text">Comma-separated list of default roles assigned to new users (e.g. <code>viewer</code>, <code>manager</code>).</div>
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-4">
+                                <label for="oidc-admin-group" class="form-label">Admin Group Mapping</label>
+                                <input type="text" class="form-control" id="oidc-admin-group" name="oidc_admin_group" placeholder="admin">
+                                <div class="form-text">OIDC group matching local <code>admin</code> role.</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="oidc-manager-group" class="form-label">Manager Group Mapping</label>
+                                <input type="text" class="form-control" id="oidc-manager-group" name="oidc_manager_group" placeholder="manager">
+                                <div class="form-text">OIDC group matching local <code>manager</code> role.</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label for="oidc-viewer-group" class="form-label">Viewer Group Mapping</label>
+                                <input type="text" class="form-control" id="oidc-viewer-group" name="oidc_viewer_group" placeholder="viewer">
+                                <div class="form-text">OIDC group matching local <code>viewer</code> role.</div>
+                            </div>
+                        </div>
+
+                        <div class="d-grid gap-2 d-md-flex justify-content-md-end mt-4">
+                            <button type="submit" class="btn btn-primary" id="save-oidc-btn">
+                                <span id="save-oidc-text">
+                                    <i class="bi bi-check-circle me-2"></i>Save OIDC Settings
+                                </span>
+                                <span id="save-oidc-spinner" class="d-none">
+                                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                    Saving...
+                                </span>
+                            </button>
+                        </div>
+                    </form>
+
+                    <div id="oidc-success-message" class="alert alert-success mt-3 d-none" role="alert">
+                        <i class="bi bi-check-circle me-2"></i>
+                        <span id="oidc-success-text"></span>
+                    </div>
+
+                    <div id="oidc-error-message" class="alert alert-danger mt-3 d-none" role="alert">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <span id="oidc-error-text"></span>
                     </div>
                 </div>
             </div>

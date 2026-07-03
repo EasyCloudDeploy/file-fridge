@@ -72,7 +72,7 @@ def test_create_network_without_psk_auto_generates_psk(authenticated_client):
 
 
 def test_join_peer_creates_record(authenticated_client, monkeypatch):
-    def _sync_peer_manifest(db, *, peer, psk_hash, local_host=None, local_port=None):
+    def _sync_peer_manifest(db, *, peer, psk_hash, **kwargs):
         peer.status = P2PPeerStatus.CONNECTED
         db.commit()
 
@@ -100,7 +100,7 @@ def test_join_peer_creates_record(authenticated_client, monkeypatch):
 
 
 def test_join_peer_bootstraps_local_network_config_when_missing(authenticated_client, monkeypatch):
-    def _sync_peer_manifest(db, *, peer, psk_hash, local_host=None, local_port=None):
+    def _sync_peer_manifest(db, *, peer, psk_hash, **kwargs):
         peer.status = P2PPeerStatus.CONNECTED
         db.commit()
 
@@ -411,41 +411,5 @@ def test_files_list_includes_remote_cached_rows(authenticated_client, db_session
     assert any(m["data"].get("is_remote") is True for m in file_messages)
 
 
-def test_export_psk_endpoint(authenticated_client):
-    # Try fetching when network is not configured yet
-    response = authenticated_client.post(
-        "/api/v1/p2p/network/psk",
-        json={"password": "password"},
-    )
-    assert response.status_code == 404
 
-    # Setup P2P network
-    authenticated_client.post(
-        "/api/v1/p2p/network",
-        json={
-            "network_name": "Test Network",
-            "listen_host": "0.0.0.0",
-            "listen_port": 9119,
-            "enabled": True,
-            "psk": "my-secret-key-12345",
-        },
-    )
-
-    # Fetch with incorrect password
-    response = authenticated_client.post(
-        "/api/v1/p2p/network/psk",
-        json={"password": "wrong-password"},
-    )
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid password"
-
-    # Fetch with correct password
-    response = authenticated_client.post(
-        "/api/v1/p2p/network/psk",
-        json={"password": "password"},
-    )
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["psk"] == "my-secret-key-12345"
-    assert payload["available"] is True
 

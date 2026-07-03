@@ -221,6 +221,9 @@ class FileReconciliation:
         """
         stats = {"files_checked": 0, "files_tracked": 0, "files_untracked": 0}
 
+        if not path.storage_locations:
+            return stats
+
         dest_base = Path(path.cold_storage_path)
 
         if not dest_base.exists():

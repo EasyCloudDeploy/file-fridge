@@ -43,6 +43,11 @@ function initSettingsPage() {
                 loadSmtpConfig();
             }
 
+            // Initial load for OIDC if clicked
+            if (sectionId === 'oidc') {
+                loadOidcConfig();
+            }
+
             // Update URL hash without jumping
             history.pushState(null, null, '#' + sectionId);
         });
@@ -249,6 +254,9 @@ function initSettingsPage() {
         const list = document.getElementById('encryption-keys-list');
         if (!list) return;
 
+        // Check file migration status
+        checkFileKeyMigrationStatus();
+
         try {
             const response = await authenticatedFetch('/api/v1/encryption/keys');
             if (response.ok) {
@@ -373,6 +381,99 @@ function initSettingsPage() {
         });
     }
 
+    let migrationTimeoutId = null;
+
+    async function checkFileKeyMigrationStatus() {
+        const banner = document.getElementById('file-migration-status-banner');
+        const idleBanner = document.getElementById('file-migration-idle-banner');
+        const progressBar = document.getElementById('file-migration-progress-bar');
+        const progressText = document.getElementById('file-migration-progress-text');
+        const btnRotate = document.getElementById('btn-rotate-file-key');
+
+        if (!banner || !idleBanner || !progressBar || !progressText || !btnRotate) {
+            return;
+        }
+
+        try {
+            const response = await authenticatedFetch('/api/v1/encryption/keys/migration-status');
+            if (response.ok) {
+                const data = await response.json();
+                if (data.in_progress) {
+                    banner.classList.remove('d-none');
+                    idleBanner.classList.add('d-none');
+                    btnRotate.disabled = true;
+
+                    const total = data.total || 0;
+                    const progress = data.progress || 0;
+                    const percent = total > 0 ? Math.round((progress / total) * 100) : 0;
+
+                    progressBar.style.width = `${percent}%`;
+                    progressBar.setAttribute('aria-valuenow', percent);
+                    progressBar.textContent = `${percent}%`;
+                    progressText.textContent = `${progress} / ${total} files migrated`;
+
+                    // Poll again in 2 seconds
+                    if (migrationTimeoutId) {
+                        clearTimeout(migrationTimeoutId);
+                    }
+                    migrationTimeoutId = setTimeout(checkFileKeyMigrationStatus, 2000);
+                } else {
+                    banner.classList.add('d-none');
+                    idleBanner.classList.remove('d-none');
+                    btnRotate.disabled = false;
+                    if (migrationTimeoutId) {
+                        clearTimeout(migrationTimeoutId);
+                        migrationTimeoutId = null;
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error checking file migration status:', error);
+        }
+    }
+
+    const btnRotateFileKey = document.getElementById('btn-rotate-file-key');
+    if (btnRotateFileKey) {
+        btnRotateFileKey.addEventListener('click', async function () {
+            const confirmed = await showConfirmModal({
+                title: 'Rotate File Encryption Key',
+                message: 'Are you sure you want to rotate the file encryption root key and migrate all cold storage files? This will generate a new root key and trigger a background task to decrypt and re-encrypt all existing cold storage files. Files remain readable using the fallback key during this process.',
+                confirmText: 'Rotate & Migrate',
+                dangerous: false
+            });
+
+            if (!confirmed) {
+                return;
+            }
+
+            const originalContent = this.innerHTML;
+            this.disabled = true;
+            this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Starting...';
+
+            try {
+                const response = await authenticatedFetch('/api/v1/encryption/keys/rotate-file-key', {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    showToast('File encryption key rotated and migration started', 'success');
+                    // Trigger immediate status check to update UI & start polling
+                    await checkFileKeyMigrationStatus();
+                } else {
+                    const errorData = await response.json();
+                    showToast(errorData.detail || 'Failed to rotate file encryption key', 'error');
+                    this.disabled = false;
+                    this.innerHTML = originalContent;
+                }
+            } catch (error) {
+                console.error('Error rotating file encryption key:', error);
+                showToast('Failed to connect to server', 'error');
+                this.disabled = false;
+                this.innerHTML = originalContent;
+            }
+        });
+    }
+
     // --- User Management ---
 
     /**
@@ -406,6 +507,11 @@ function initSettingsPage() {
             // If the hash is #users, load the users list
             if (globalThis.location.hash === '#users') {
                 loadUsers();
+            }
+
+            // If the hash is #oidc, load the OIDC config
+            if (globalThis.location.hash === '#oidc') {
+                loadOidcConfig();
             }
         }
 
@@ -766,6 +872,158 @@ function initSettingsPage() {
                 showToast('Failed to connect to server', 'error');
             } finally {
                 setFormButtonLoading('save-smtp', false);
+            }
+        });
+    }
+
+    async function loadOidcConfig() {
+        const warningBanner = document.getElementById('oidc-env-warning');
+        const form = document.getElementById('oidc-config-form');
+        if (!form) return;
+
+        const inputs = [
+            document.getElementById('oidc-enabled'),
+            document.getElementById('oidc-provider-name-input'),
+            document.getElementById('oidc-issuer'),
+            document.getElementById('oidc-client-id'),
+            document.getElementById('oidc-client-secret'),
+            document.getElementById('oidc-redirect-uri'),
+            document.getElementById('oidc-roles-claim'),
+            document.getElementById('oidc-default-roles'),
+            document.getElementById('oidc-admin-group'),
+            document.getElementById('oidc-manager-group'),
+            document.getElementById('oidc-viewer-group')
+        ];
+        const saveBtn = document.getElementById('save-oidc-btn');
+
+        try {
+            const response = await authenticatedFetch('/api/v1/settings/config');
+            if (response.ok) {
+                const config = await response.json();
+                const oidc = config.oidc || {};
+
+                // Hydrate inputs
+                document.getElementById('oidc-enabled').checked = oidc.oidc_enabled?.value === true;
+                document.getElementById('oidc-provider-name-input').value = oidc.oidc_provider_name?.value || '';
+                document.getElementById('oidc-issuer').value = oidc.oidc_issuer?.value || '';
+                document.getElementById('oidc-client-id').value = oidc.oidc_client_id?.value || '';
+                document.getElementById('oidc-redirect-uri').value = oidc.oidc_redirect_uri?.value || '';
+                document.getElementById('oidc-roles-claim').value = oidc.oidc_roles_claim?.value || '';
+                document.getElementById('oidc-default-roles').value = oidc.oidc_default_roles?.value || '';
+                document.getElementById('oidc-admin-group').value = oidc.oidc_admin_group?.value || '';
+                document.getElementById('oidc-manager-group').value = oidc.oidc_manager_group?.value || '';
+                document.getElementById('oidc-viewer-group').value = oidc.oidc_viewer_group?.value || '';
+
+                // Handle client secret placeholder
+                const secretInput = document.getElementById('oidc-client-secret');
+                if (secretInput) {
+                    if (oidc.oidc_client_id?.value) {
+                        secretInput.placeholder = '••••••••';
+                    } else {
+                        secretInput.placeholder = 'Enter your Client Secret';
+                    }
+                    secretInput.value = '';
+                }
+
+                // Handle environment lock
+                if (oidc.is_env_configured) {
+                    warningBanner?.classList.remove('d-none');
+                    inputs.forEach(input => {
+                        if (input) input.disabled = true;
+                    });
+                    if (saveBtn) saveBtn.disabled = true;
+                } else {
+                    warningBanner?.classList.add('d-none');
+                    inputs.forEach(input => {
+                        if (input) input.disabled = false;
+                    });
+                    if (saveBtn) saveBtn.disabled = false;
+                }
+            } else {
+                showToast('Failed to load global OIDC configuration', 'error');
+            }
+        } catch (error) {
+            console.error('Error loading OIDC config:', error);
+            showToast('Failed to connect to server for OIDC settings', 'error');
+        }
+    }
+
+    const oidcConfigForm = document.getElementById('oidc-config-form');
+    if (oidcConfigForm) {
+        oidcConfigForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const oidcEnabled = document.getElementById('oidc-enabled').checked;
+            const oidcProviderName = document.getElementById('oidc-provider-name-input').value || null;
+            const oidcIssuer = document.getElementById('oidc-issuer').value || null;
+            const oidcClientId = document.getElementById('oidc-client-id').value || null;
+            const secretInputVal = document.getElementById('oidc-client-secret').value;
+            const oidcClientSecret = secretInputVal === '' ? null : secretInputVal;
+            const oidcRedirectUri = document.getElementById('oidc-redirect-uri').value || null;
+            const oidcRolesClaim = document.getElementById('oidc-roles-claim').value || null;
+            const oidcDefaultRoles = document.getElementById('oidc-default-roles').value || null;
+            const oidcAdminGroup = document.getElementById('oidc-admin-group').value || null;
+            const oidcManagerGroup = document.getElementById('oidc-manager-group').value || null;
+            const oidcViewerGroup = document.getElementById('oidc-viewer-group').value || null;
+
+            const payload = {
+                oidc_enabled: oidcEnabled,
+                oidc_provider_name: oidcProviderName,
+                oidc_issuer: oidcIssuer,
+                oidc_client_id: oidcClientId,
+                oidc_redirect_uri: oidcRedirectUri,
+                oidc_roles_claim: oidcRolesClaim,
+                oidc_default_roles: oidcDefaultRoles,
+                oidc_admin_group: oidcAdminGroup,
+                oidc_manager_group: oidcManagerGroup,
+                oidc_viewer_group: oidcViewerGroup
+            };
+
+            if (oidcClientSecret !== null) {
+                payload.oidc_client_secret = oidcClientSecret;
+            }
+
+            const successMsg = document.getElementById('oidc-success-message');
+            const successText = document.getElementById('oidc-success-text');
+            const errorMsg = document.getElementById('oidc-error-message');
+            const errorText = document.getElementById('oidc-error-text');
+
+            successMsg?.classList.add('d-none');
+            errorMsg?.classList.add('d-none');
+
+            setFormButtonLoading('save-oidc', true);
+
+            try {
+                const response = await authenticatedFetch('/api/v1/settings/oidc', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    if (successMsg && successText) {
+                        successText.textContent = 'Global OIDC configuration updated successfully!';
+                        successMsg.classList.remove('d-none');
+                    }
+                    showToast('Global OIDC settings saved successfully', 'success');
+                    await loadOidcConfig();
+                } else {
+                    const data = await response.json();
+                    if (errorMsg && errorText) {
+                        errorText.textContent = data.detail || 'Failed to update OIDC settings.';
+                        errorMsg.classList.remove('d-none');
+                    }
+                    showToast(data.detail || 'Failed to update OIDC settings', 'error');
+                }
+            } catch (error) {
+                console.error('OIDC configuration error:', error);
+                if (errorMsg && errorText) {
+                    errorText.textContent = 'Connection error. Please try again.';
+                    errorMsg.classList.remove('d-none');
+                }
+                showToast('Failed to connect to server', 'error');
+            } finally {
+                setFormButtonLoading('save-oidc', false);
             }
         });
     }
