@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import logging
 import os
 import secrets
@@ -28,6 +29,7 @@ from app.models import (
     RemoteSharedFileCache,
     StorageType,
 )
+from app.utils.p2p_auth import sign_request
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,36 @@ class P2PService:
     @staticmethod
     def generate_psk() -> str:
         return secrets.token_urlsafe(32)
+
+    @staticmethod
+    def peer_base_url(host: str, port: int) -> str:
+        scheme = settings.p2p_transport_scheme.rstrip(":/")
+        return f"{scheme}://{host}:{port}"
+
+    @staticmethod
+    def peer_request_path(path: str) -> str:
+        return path if path.startswith("/") else f"/{path}"
+
+    def build_peer_auth_headers(
+        self,
+        psk: str,
+        method: str,
+        path: str,
+        body: bytes = b"",
+    ) -> dict[str, str]:
+        return sign_request(psk, method, self.peer_request_path(path), body)
+
+    def get_network_psk(self, config: P2PNetworkConfig) -> str:
+        psk = config.get_psk()
+        if not psk:
+            raise ValueError(
+                "P2P authentication key is unavailable; regenerate or reconfigure the network PSK"
+            )
+        return psk
+
+    @staticmethod
+    def _httpx_verify() -> bool | str:
+        return settings.p2p_tls_verify
 
     @staticmethod
     def _rotation_fernet(psk_hash: str) -> Fernet:
@@ -150,7 +182,7 @@ class P2PService:
         if config is None:
             raise ValueError("P2P network is not configured")
 
-        current_psk_hash = config.psk_hash
+        current_psk = self.get_network_psk(config)
         peers = self.list_peers(db)
 
         updated: list[str] = []
@@ -158,7 +190,7 @@ class P2PService:
 
         for peer in peers:
             try:
-                self._push_rotation_to_peer(peer, current_psk_hash, new_psk)
+                self._push_rotation_to_peer(peer, current_psk, new_psk)
                 updated.append(peer.peer_name)
             except Exception:
                 logger.warning("PSK rotation push failed for peer %s", peer.peer_id)
@@ -179,16 +211,19 @@ class P2PService:
             "offline_peers": offline,
         }
 
-    def _push_rotation_to_peer(self, peer: P2PPeer, current_psk_hash: str, new_psk: str) -> None:
+    def _push_rotation_to_peer(self, peer: P2PPeer, current_psk: str, new_psk: str) -> None:
         """Send the encrypted new PSK to a single peer."""
+        current_psk_hash = self.hash_psk(current_psk)
         encrypted = self.encrypt_new_psk(new_psk, current_psk_hash)
-        url = f"http://{peer.host}:{peer.port}/api/v1/p2p/network/psk/accept"
-        with httpx.Client(timeout=10.0) as client:
-            response = client.post(
-                url,
-                headers={"X-FF-PSK": current_psk_hash, "Content-Type": "application/json"},
-                json={"encrypted_new_psk": encrypted},
-            )
+        path = "/api/v1/p2p/network/psk/accept"
+        body = json.dumps({"encrypted_new_psk": encrypted}).encode("utf-8")
+        url = f"{self.peer_base_url(peer.host, peer.port)}{path}"
+        headers = {
+            **self.build_peer_auth_headers(current_psk, "POST", path, body),
+            "Content-Type": "application/json",
+        }
+        with httpx.Client(timeout=10.0, verify=self._httpx_verify()) as client:
+            response = client.post(url, headers=headers, content=body)
             response.raise_for_status()
 
     def destroy_network(self, db: Session) -> dict[str, int]:
@@ -431,12 +466,13 @@ class P2PService:
         db: Session,
         *,
         peer: P2PPeer,
-        psk_hash: str,
+        psk: str,
         local_host: Optional[str] = None,
         local_port: Optional[int] = None,
     ) -> None:
-        url = f"http://{peer.host}:{peer.port}/api/v1/p2p/manifest"
-        headers: dict[str, str] = {"X-FF-PSK": psk_hash}
+        path = "/api/v1/p2p/manifest"
+        url = f"{self.peer_base_url(peer.host, peer.port)}{path}"
+        headers = self.build_peer_auth_headers(psk, "GET", path)
         # Advertise our own address so the remote can auto-register us as a peer,
         # making discovery self-healing when the initial reciprocal push failed.
         if local_host and local_port:
@@ -444,7 +480,7 @@ class P2PService:
             headers["X-FF-LOCAL-PORT"] = str(local_port)
 
         try:
-            with httpx.Client(timeout=10.0) as client:
+            with httpx.Client(timeout=10.0, verify=self._httpx_verify()) as client:
                 response = client.get(url, headers=headers)
                 response.raise_for_status()
                 payload = response.json()
@@ -472,13 +508,14 @@ class P2PService:
         if not config or not config.enabled:
             return 0
 
+        psk = self.get_network_psk(config)
         peers = self.list_peers(db)
         synced = 0
         for peer in peers:
             self.sync_peer_manifest(
                 db,
                 peer=peer,
-                psk_hash=config.psk_hash,
+                psk=psk,
                 local_host=local_host,
                 local_port=local_port,
             )
@@ -490,7 +527,7 @@ class P2PService:
         db: Session,
         *,
         peer: P2PPeer,
-        psk_hash: str,
+        psk: str,
         local_host: str,
         local_port: int,
         local_peer_name: str,
@@ -503,10 +540,15 @@ class P2PService:
             "peer_name": local_peer_name,
             "files": manifest.get("files") or [],
         }
-        url = f"http://{peer.host}:{peer.port}/api/v1/p2p/manifest/push"
-        headers = {"X-FF-PSK": psk_hash}
-        with httpx.Client(timeout=10.0) as client:
-            response = client.post(url, headers=headers, json=payload)
+        path = "/api/v1/p2p/manifest/push"
+        body = json.dumps(payload).encode("utf-8")
+        url = f"{self.peer_base_url(peer.host, peer.port)}{path}"
+        headers = {
+            **self.build_peer_auth_headers(psk, "POST", path, body),
+            "Content-Type": "application/json",
+        }
+        with httpx.Client(timeout=10.0, verify=self._httpx_verify()) as client:
+            response = client.post(url, headers=headers, content=body)
             response.raise_for_status()
 
     def pull_files(
@@ -515,7 +557,7 @@ class P2PService:
         *,
         remote_file_cache_ids: list[int],
         local_path_id: int,
-        psk_hash: str,
+        psk: str,
     ) -> dict[str, Any]:
         local_path = db.query(MonitoredPath).filter(MonitoredPath.id == local_path_id).first()
         if not local_path:
@@ -552,11 +594,12 @@ class P2PService:
                 continue
 
             encoded_id = quote(cache_entry.remote_file_id, safe="")
-            url = f"http://{peer.host}:{peer.port}/api/v1/p2p/files/{encoded_id}/content"
-            headers = {"X-FF-PSK": psk_hash}
+            path = f"/api/v1/p2p/files/{encoded_id}/content"
+            url = f"{self.peer_base_url(peer.host, peer.port)}{path}"
+            headers = self.build_peer_auth_headers(psk, "GET", path)
 
             try:
-                with httpx.Client(timeout=300.0) as client:
+                with httpx.Client(timeout=300.0, verify=self._httpx_verify()) as client:
                     with client.stream("GET", url, headers=headers) as response:
                         response.raise_for_status()
                         with open(dest_path, "wb") as fh:

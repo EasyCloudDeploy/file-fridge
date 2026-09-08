@@ -12,12 +12,20 @@ from sqlalchemy.orm import Session
 
 from app.constants import RESOURCE_REMOTE_CONNECTIONS
 from app.database import get_db
-from app.models import FileInventory, FileStatus, P2PPeer, P2PPeerStatus, RemoteSharedFileCache, User
+from app.dependencies.p2p_auth import verify_p2p_request_auth
+from app.models import (
+    FileInventory,
+    FileStatus,
+    P2PNetworkConfig,
+    P2PPeer,
+    P2PPeerStatus,
+    RemoteSharedFileCache,
+    User,
+)
 from app.schemas import (
     P2PCurrentPskResponse,
     P2PManifestPushRequest,
     P2PNetworkConfigCreate,
-    PskExportRequest,
     P2PNetworkConfigResponse,
     P2PNetworkConfigSetupResponse,
     P2PNetworkConfigUpdate,
@@ -29,6 +37,7 @@ from app.schemas import (
     P2PPullRequest,
     P2PPullResponse,
     P2PRemoteFileCacheResponse,
+    PskExportRequest,
 )
 from app.security import PermissionChecker
 from app.services.instance_config_service import instance_config_service
@@ -122,6 +131,7 @@ def get_network_psk(
     current_user: Annotated[User, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     from app.security import verify_password
+
     if not verify_password(payload.password, current_user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid password")
 
@@ -151,18 +161,12 @@ def regenerate_network_psk(
 
 
 @router.post("/network/psk/accept")
-def accept_psk_rotation(
+async def accept_psk_rotation(
     payload: P2PPskAcceptRequest,
+    config: Annotated[P2PNetworkConfig, Depends(verify_p2p_request_auth)],
     db: Annotated[Session, Depends(get_db)],
-    x_ff_psk: Annotated[str, Header(alias="X-FF-PSK")],
 ):
     """Receive a coordinated PSK rotation from a peer node."""
-    config = p2p_service.get_network_config(db)
-    if not config or not config.enabled:
-        raise HTTPException(status_code=503, detail="P2P network is disabled")
-    if x_ff_psk != config.psk_hash:
-        raise HTTPException(status_code=403, detail="Invalid PSK")
-
     try:
         new_psk = p2p_service.decrypt_new_psk(payload.encrypted_new_psk, config.psk_hash)
     except Exception as exc:
@@ -226,16 +230,20 @@ def join_peer(
 
     config = p2p_service.get_network_config(db)
     if config:
+        try:
+            psk = p2p_service.get_network_psk(config)
+        except ValueError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         p2p_service.sync_peer_manifest(
             db,
             peer=peer,
-            psk_hash=config.psk_hash,
+            psk=psk,
             local_host=request.url.hostname,
             local_port=request.url.port,
         )
         db.refresh(peer)
         if peer.status != P2PPeerStatus.CONNECTED:
-            endpoint = f"http://{peer.host}:{peer.port}/api/v1/p2p/manifest"
+            endpoint = f"{p2p_service.peer_base_url(peer.host, peer.port)}/api/v1/p2p/manifest"
             db.delete(peer)
             db.commit()
             raise HTTPException(
@@ -254,7 +262,7 @@ def join_peer(
                 p2p_service.push_local_manifest_to_peer(
                     db,
                     peer=peer,
-                    psk_hash=config.psk_hash,
+                    psk=psk,
                     local_host=local_host,
                     local_port=local_port,
                     local_peer_name=local_peer_name,
@@ -326,19 +334,13 @@ def list_remote_cached_files(
 
 
 @router.get("/manifest")
-def get_manifest_for_peers(
+async def get_manifest_for_peers(
     db: Annotated[Session, Depends(get_db)],
-    x_ff_psk: Annotated[str, Header(alias="X-FF-PSK")],
+    config: Annotated[P2PNetworkConfig, Depends(verify_p2p_request_auth)],
     x_ff_peer_id: Annotated[str | None, Header(alias="X-FF-PEER-ID")] = None,
     x_ff_local_host: Annotated[str | None, Header(alias="X-FF-LOCAL-HOST")] = None,
     x_ff_local_port: Annotated[str | None, Header(alias="X-FF-LOCAL-PORT")] = None,
 ):
-    config = p2p_service.get_network_config(db)
-    if not config or not config.enabled:
-        raise HTTPException(status_code=503, detail="P2P network is disabled")
-    if x_ff_psk != config.psk_hash:
-        raise HTTPException(status_code=403, detail="Invalid PSK")
-
     # Auto-register the caller as a peer when they advertise their address.
     # This makes discovery self-healing: any successful manifest fetch also registers the caller.
     if x_ff_local_host and x_ff_local_port:
@@ -367,17 +369,11 @@ def get_manifest_for_peers(
 
 
 @router.post("/manifest/push")
-def push_manifest_from_peer(
+async def push_manifest_from_peer(
     payload: P2PManifestPushRequest,
     db: Annotated[Session, Depends(get_db)],
-    x_ff_psk: Annotated[str, Header(alias="X-FF-PSK")],
+    config: Annotated[P2PNetworkConfig, Depends(verify_p2p_request_auth)],
 ):
-    config = p2p_service.get_network_config(db)
-    if not config or not config.enabled:
-        raise HTTPException(status_code=503, detail="P2P network is disabled")
-    if x_ff_psk != config.psk_hash:
-        raise HTTPException(status_code=403, detail="Invalid PSK")
-
     peer = p2p_service.upsert_peer_from_manifest(
         db,
         host=payload.host,
@@ -395,18 +391,12 @@ def push_manifest_from_peer(
 
 
 @router.get("/files/{remote_file_id}/content")
-def get_peer_file_content(
+async def get_peer_file_content(
     remote_file_id: str,
     db: Annotated[Session, Depends(get_db)],
-    x_ff_psk: Annotated[str, Header(alias="X-FF-PSK")],
+    _: Annotated[P2PNetworkConfig, Depends(verify_p2p_request_auth)],
 ):
     """Serve a shared file's content to an authenticated peer."""
-    config = p2p_service.get_network_config(db)
-    if not config or not config.enabled:
-        raise HTTPException(status_code=503, detail="P2P network is disabled")
-    if x_ff_psk != config.psk_hash:
-        raise HTTPException(status_code=403, detail="Invalid PSK")
-
     if not remote_file_id.startswith("local:"):
         raise HTTPException(status_code=404, detail="File not found")
     try:
@@ -450,7 +440,7 @@ def pull_p2p_files(
             db,
             remote_file_cache_ids=payload.remote_file_cache_ids,
             local_path_id=payload.local_path_id,
-            psk_hash=config.psk_hash,
+            psk=p2p_service.get_network_psk(config),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -108,10 +108,14 @@ class Settings(BaseSettings):
     remote_transfer_max_concurrent: int = 2
 
     # P2P private-network defaults.
-    # Override via P2P_LISTEN_HOST (default binds all interfaces; restrict via firewall for LAN-only use).
-    p2p_listen_host: str = "0.0.0.0"
+    # Override via P2P_LISTEN_HOST. Default binds loopback only; set 0.0.0.0 explicitly for LAN/WAN.
+    p2p_listen_host: str = "127.0.0.1"
     # Override via P2P_LISTEN_PORT.
     p2p_listen_port: int = 9119
+    # Override via P2P_TRANSPORT_SCHEME. Use "http" only for trusted LAN lab setups.
+    p2p_transport_scheme: str = "https"
+    # Override via P2P_TLS_VERIFY. Disable only when using self-signed certs on a trusted LAN.
+    p2p_tls_verify: bool = True
 
     ff_instance_url: Optional[str] = None
 

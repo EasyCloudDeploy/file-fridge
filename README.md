@@ -47,6 +47,27 @@ This release includes a **hard protocol cutover**:
 - Existing legacy remote connections/transfers are dropped during migration.
 - Older File Fridge versions using the legacy remote protocol cannot connect to updated instances.
 
+### P2P security model
+
+Peer-to-peer endpoints authenticate with **request-bound HMAC signatures** derived from the shared PSK. Each request includes `X-FF-PSK-TIMESTAMP` and `X-FF-PSK-SIGNATURE` headers; static `X-FF-PSK` bearer tokens (SHA256 of the PSK) are rejected.
+
+**Defaults (production-oriented):**
+
+- `P2P_TRANSPORT_SCHEME=https` — peers call each other over TLS.
+- `P2P_LISTEN_HOST=127.0.0.1` — bind loopback unless you explicitly set `0.0.0.0` or a LAN address.
+- `P2P_TLS_VERIFY=true` — verify peer TLS certificates.
+
+**LAN-only cleartext (lab / trusted network only):**
+
+If you intentionally run P2P over HTTP on a trusted LAN, set:
+
+```bash
+export P2P_TRANSPORT_SCHEME=http
+export P2P_LISTEN_HOST=0.0.0.0   # or your LAN interface IP
+```
+
+**Threat model:** cleartext HTTP exposes manifests and file content to anyone on the network path who can observe traffic or replay captured requests within the signature time window (~5 minutes). HMAC auth prevents offline reuse of a single captured hash, but does not encrypt payloads. Use HTTPS and restrict listen/bind addresses for production deployments.
+
 ## User Interface
 
 Here is a glimpse of what File Fridge looks like:
