@@ -11,7 +11,7 @@ import secrets
 import socket
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 from urllib.parse import quote
 
 import httpx
@@ -78,8 +78,15 @@ class P2PService:
         method: str,
         path: str,
         body: bytes = b"",
+        request_headers: Mapping[str, str] | None = None,
     ) -> dict[str, str]:
-        return sign_request(psk, method, self.peer_request_path(path), body)
+        return sign_request(
+            psk,
+            method,
+            self.peer_request_path(path),
+            body,
+            request_headers=request_headers,
+        )
 
     def get_network_psk(self, config: P2PNetworkConfig) -> str:
         psk = config.get_psk()
@@ -472,12 +479,16 @@ class P2PService:
     ) -> None:
         path = "/api/v1/p2p/manifest"
         url = f"{self.peer_base_url(peer.host, peer.port)}{path}"
-        headers = self.build_peer_auth_headers(psk, "GET", path)
+        request_headers: dict[str, str] = {}
         # Advertise our own address so the remote can auto-register us as a peer,
         # making discovery self-healing when the initial reciprocal push failed.
         if local_host and local_port:
-            headers["X-FF-LOCAL-HOST"] = local_host
-            headers["X-FF-LOCAL-PORT"] = str(local_port)
+            request_headers["X-FF-LOCAL-HOST"] = local_host
+            request_headers["X-FF-LOCAL-PORT"] = str(local_port)
+        headers = {
+            **request_headers,
+            **self.build_peer_auth_headers(psk, "GET", path, request_headers=request_headers),
+        }
 
         try:
             with httpx.Client(timeout=10.0, verify=self._httpx_verify()) as client:
@@ -594,9 +605,10 @@ class P2PService:
                 continue
 
             encoded_id = quote(cache_entry.remote_file_id, safe="")
-            path = f"/api/v1/p2p/files/{encoded_id}/content"
-            url = f"{self.peer_base_url(peer.host, peer.port)}{path}"
-            headers = self.build_peer_auth_headers(psk, "GET", path)
+            # URL path is percent-encoded; auth signs the decoded path via canonical_auth_path().
+            request_path = f"/api/v1/p2p/files/{encoded_id}/content"
+            url = f"{self.peer_base_url(peer.host, peer.port)}{request_path}"
+            headers = self.build_peer_auth_headers(psk, "GET", request_path)
 
             try:
                 with httpx.Client(timeout=300.0, verify=self._httpx_verify()) as client:

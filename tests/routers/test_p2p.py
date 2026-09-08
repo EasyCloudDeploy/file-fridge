@@ -429,6 +429,39 @@ def test_manifest_push_registers_peer_and_caches_files(authenticated_client, db_
     assert cached[0].checksum == "abc123"
 
 
+def test_file_content_accepts_signature_for_encoded_remote_file_id(
+    authenticated_client, file_inventory_factory, tmp_path
+):
+    psk = "file-content-secret"
+    authenticated_client.post(
+        "/api/v1/p2p/network",
+        json={
+            "network_name": "Main",
+            "listen_host": "127.0.0.1",
+            "listen_port": 9119,
+            "enabled": True,
+            "psk": psk,
+        },
+    )
+
+    file_path = tmp_path / "shared.txt"
+    content = b"p2p payload"
+    file_path.write_bytes(content)
+    file_inv = file_inventory_factory(
+        path=str(file_path),
+        size=len(content),
+        create_physical_file=False,
+        is_shareable=True,
+    )
+
+    encoded_path = f"/api/v1/p2p/files/local%3A{file_inv.id}/content"
+    headers = sign_request(psk, "GET", encoded_path)
+
+    response = authenticated_client.get(encoded_path, headers=headers)
+    assert response.status_code == 200
+    assert response.content == content
+
+
 def test_files_list_includes_remote_cached_rows(
     authenticated_client, db_session, monitored_path_factory
 ):
