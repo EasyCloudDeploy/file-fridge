@@ -17,6 +17,8 @@ from app.config import settings
 settings.secret_key = "test-secret-key"
 settings.encryption_key_file = "./test_encryption.key"
 settings.require_fingerprint_verification = False
+settings.p2p_transport_scheme = "http"
+settings.p2p_tls_verify = False
 
 from app.database import Base, get_db
 from app.database import SessionLocal as TestingSessionLocal
@@ -76,6 +78,7 @@ def db_session():
 
     # Clean up all tables to prevent cross-test pollution
     import sqlalchemy as sa
+
     cleanup_session = TestingSessionLocal()
     try:
         cleanup_session.execute(sa.text("PRAGMA foreign_keys = OFF;"))
@@ -142,6 +145,7 @@ def storage_location(db_session: Session):
 @pytest.fixture
 def monitored_path_factory(db_session: Session, storage_location: ColdStorageLocation):
     """Factory fixture to create MonitoredPath objects."""
+
     def _factory(name: str, source_path: str):
         path = MonitoredPath(
             name=name,
@@ -154,12 +158,14 @@ def monitored_path_factory(db_session: Session, storage_location: ColdStorageLoc
         # Create the directory
         Path(path.source_path).mkdir(exist_ok=True, parents=True)
         return path
+
     return _factory
 
 
 @pytest.fixture
 def file_inventory_factory(db_session: Session, monitored_path_factory):
     """Fixture for creating FileInventory objects."""
+
     def _create_file(
         path="/tmp/test.txt",
         size=1024,
@@ -209,6 +215,7 @@ def file_inventory_factory(db_session: Session, monitored_path_factory):
 
         if is_pinned:
             from app.models import PinnedFile
+
             pin = PinnedFile(path_id=file_inv.path_id, file_path=file_inv.file_path)
             db_session.add(pin)
             db_session.commit()
@@ -221,6 +228,7 @@ def file_inventory_factory(db_session: Session, monitored_path_factory):
 @pytest.fixture
 def create_tag(db_session: Session):
     """Fixture for creating tags."""
+
     def _create_tag(name: str, color: str = "#000000"):
         tag = Tag(name=name, color=color)
         db_session.add(tag)
@@ -229,4 +237,3 @@ def create_tag(db_session: Session):
         return tag
 
     return _create_tag
-

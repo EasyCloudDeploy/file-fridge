@@ -799,8 +799,8 @@ class P2PNetworkConfig(Base):
     network_name = Column(String, nullable=False, default="File Fridge P2P")
     psk_hash = Column(String, nullable=False, unique=True, index=True)
     psk_encrypted = Column(Text, nullable=True)  # PSK stored encrypted; null for pre-feature nodes
-    # Accepts connections from arbitrary peers on the LAN/Internet; restrict via firewall or config.
-    listen_host = Column(String, nullable=False, default="0.0.0.0")
+    # Loopback by default; set 0.0.0.0 explicitly to accept LAN/WAN peers.
+    listen_host = Column(String, nullable=False, default="127.0.0.1")
     listen_port = Column(Integer, nullable=False, default=9119)
     enabled = Column(Boolean, nullable=False, default=True, server_default=sa.text("'1'"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -907,8 +907,6 @@ class ConflictResolution(str, enum.Enum):
     OVERWRITE = "OVERWRITE"  # Replace existing file
     RENAME = "RENAME"  # Add suffix to filename (_1, _2, etc)
     COMPARE = "COMPARE"  # Compare checksums, skip if identical, otherwise fail
-
-
 
 
 class SecurityAuditLog(Base):

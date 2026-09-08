@@ -862,7 +862,7 @@ class PskExportRequest(BaseModel):
 
 class P2PNetworkConfigBase(BaseModel):
     network_name: str = Field("File Fridge P2P", min_length=1, max_length=255)
-    listen_host: str = Field("0.0.0.0", min_length=1, max_length=255)
+    listen_host: str = Field("127.0.0.1", min_length=1, max_length=255)
     listen_port: int = Field(9119, ge=1, le=65535)
     enabled: bool = True
 
@@ -998,10 +998,6 @@ class P2PPullResponse(BaseModel):
     errors: List[P2PPullErrorItem]
 
 
-
-
-
-
 class RelocationTaskBase(BaseModel):
     """Base schema for relocation tasks."""
 
@@ -1048,8 +1044,6 @@ class FreezingFileSchema(BaseModel):
     eta_seconds: Optional[int] = None
     percent_complete: int = 0
     error_message: Optional[str] = None
-
-
 
 
 class ConflictCheckRequest(BaseModel):

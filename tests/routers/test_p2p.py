@@ -1,13 +1,19 @@
 """P2P API tests."""
 
 import json
+import time
 
 from app.models import P2PPeer, P2PPeerStatus, RemoteSharedFileCache, StorageType
 from app.services.p2p_service import p2p_service
+from app.utils.p2p_auth import sign_request
 
 
 def _parse_ndjson(text: str):
     return [json.loads(line) for line in text.splitlines() if line.strip()]
+
+
+def _p2p_auth_headers(psk: str, method: str, path: str, body: bytes = b"") -> dict[str, str]:
+    return sign_request(psk, method, path, body)
 
 
 def test_p2p_network_create_and_get(authenticated_client):
@@ -72,7 +78,7 @@ def test_create_network_without_psk_auto_generates_psk(authenticated_client):
 
 
 def test_join_peer_creates_record(authenticated_client, monkeypatch):
-    def _sync_peer_manifest(db, *, peer, psk_hash, local_host=None, local_port=None):
+    def _sync_peer_manifest(db, *, peer, psk, local_host=None, local_port=None):
         peer.status = P2PPeerStatus.CONNECTED
         db.commit()
 
@@ -100,7 +106,7 @@ def test_join_peer_creates_record(authenticated_client, monkeypatch):
 
 
 def test_join_peer_bootstraps_local_network_config_when_missing(authenticated_client, monkeypatch):
-    def _sync_peer_manifest(db, *, peer, psk_hash, local_host=None, local_port=None):
+    def _sync_peer_manifest(db, *, peer, psk, local_host=None, local_port=None):
         peer.status = P2PPeerStatus.CONNECTED
         db.commit()
 
@@ -189,9 +195,7 @@ def test_destroy_network_clears_config_and_state(authenticated_client, db_sessio
     assert peers.json() == []
 
 
-def test_unjoin_network_clears_peers_and_removes_local_network(
-    authenticated_client, db_session
-):
+def test_unjoin_network_clears_peers_and_removes_local_network(authenticated_client, db_session):
     authenticated_client.post(
         "/api/v1/p2p/network",
         json={
@@ -300,12 +304,40 @@ def test_regenerate_psk_returns_new_psk_and_clears_peers(authenticated_client, d
     assert peers.json() == []
 
 
-def test_manifest_requires_psk_header(authenticated_client):
+def test_manifest_requires_hmac_signature(authenticated_client):
     authenticated_client.post(
         "/api/v1/p2p/network",
         json={
             "network_name": "Main",
-            "listen_host": "0.0.0.0",
+            "listen_host": "127.0.0.1",
+            "listen_port": 9119,
+            "enabled": True,
+            "psk": "manifest-secret",
+        },
+    )
+    psk = "manifest-secret"
+    path = "/api/v1/p2p/manifest"
+
+    denied = authenticated_client.get(path, headers={"X-FF-PSK-SIGNATURE": "bad"})
+    assert denied.status_code == 403
+
+    ok = authenticated_client.get(
+        path,
+        headers={
+            **_p2p_auth_headers(psk, "GET", path),
+            "X-FF-PEER-ID": "peer-1",
+        },
+    )
+    assert ok.status_code == 200
+    assert "files" in ok.json()
+
+
+def test_manifest_rejects_static_psk_bearer(authenticated_client):
+    authenticated_client.post(
+        "/api/v1/p2p/network",
+        json={
+            "network_name": "Main",
+            "listen_host": "127.0.0.1",
             "listen_port": 9119,
             "enabled": True,
             "psk": "manifest-secret",
@@ -313,15 +345,33 @@ def test_manifest_requires_psk_header(authenticated_client):
     )
     psk_hash = p2p_service.hash_psk("manifest-secret")
 
-    denied = authenticated_client.get("/api/v1/p2p/manifest", headers={"X-FF-PSK": "wrong"})
-    assert denied.status_code == 403
-
-    ok = authenticated_client.get(
+    response = authenticated_client.get(
         "/api/v1/p2p/manifest",
-        headers={"X-FF-PSK": psk_hash, "X-FF-PEER-ID": "peer-1"},
+        headers={"X-FF-PSK": psk_hash},
     )
-    assert ok.status_code == 200
-    assert "files" in ok.json()
+    assert response.status_code == 403
+    assert "Static PSK bearer authentication is no longer accepted" in response.json()["detail"]
+
+
+def test_manifest_rejects_expired_hmac_signature(authenticated_client):
+    authenticated_client.post(
+        "/api/v1/p2p/network",
+        json={
+            "network_name": "Main",
+            "listen_host": "127.0.0.1",
+            "listen_port": 9119,
+            "enabled": True,
+            "psk": "manifest-secret",
+        },
+    )
+    psk = "manifest-secret"
+    path = "/api/v1/p2p/manifest"
+    stale_timestamp = int(time.time()) - 3600
+    headers = sign_request(psk, "GET", path, timestamp=stale_timestamp)
+
+    response = authenticated_client.get(path, headers=headers)
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Invalid P2P request signature"
 
 
 def test_manifest_push_registers_peer_and_caches_files(authenticated_client, db_session):
@@ -335,27 +385,33 @@ def test_manifest_push_registers_peer_and_caches_files(authenticated_client, db_
             "psk": "push-secret",
         },
     )
-    psk_hash = p2p_service.hash_psk("push-secret")
+    psk = "push-secret"
+    path = "/api/v1/p2p/manifest/push"
+    payload = {
+        "host": "127.0.0.1",
+        "port": 8001,
+        "peer_name": "Peer B",
+        "files": [
+            {
+                "remote_file_id": "remote-1",
+                "path_id": 1,
+                "file_path": "/tmp/p2p-a.bin",
+                "display_file_path": "/tmp/p2p-a.bin",
+                "storage_type": "hot",
+                "file_size": 42,
+                "checksum": "abc123",
+            }
+        ],
+    }
+    body = json.dumps(payload).encode("utf-8")
 
     response = authenticated_client.post(
-        "/api/v1/p2p/manifest/push",
-        headers={"X-FF-PSK": psk_hash},
-        json={
-            "host": "127.0.0.1",
-            "port": 8001,
-            "peer_name": "Peer B",
-            "files": [
-                {
-                    "remote_file_id": "remote-1",
-                    "path_id": 1,
-                    "file_path": "/tmp/p2p-a.bin",
-                    "display_file_path": "/tmp/p2p-a.bin",
-                    "storage_type": "hot",
-                    "file_size": 42,
-                    "checksum": "abc123",
-                }
-            ],
+        path,
+        headers={
+            **_p2p_auth_headers(psk, "POST", path, body),
+            "Content-Type": "application/json",
         },
+        content=body,
     )
     assert response.status_code == 200
 
@@ -373,7 +429,42 @@ def test_manifest_push_registers_peer_and_caches_files(authenticated_client, db_
     assert cached[0].checksum == "abc123"
 
 
-def test_files_list_includes_remote_cached_rows(authenticated_client, db_session, monitored_path_factory):
+def test_file_content_accepts_signature_for_encoded_remote_file_id(
+    authenticated_client, file_inventory_factory, tmp_path
+):
+    psk = "file-content-secret"
+    authenticated_client.post(
+        "/api/v1/p2p/network",
+        json={
+            "network_name": "Main",
+            "listen_host": "127.0.0.1",
+            "listen_port": 9119,
+            "enabled": True,
+            "psk": psk,
+        },
+    )
+
+    file_path = tmp_path / "shared.txt"
+    content = b"p2p payload"
+    file_path.write_bytes(content)
+    file_inv = file_inventory_factory(
+        path=str(file_path),
+        size=len(content),
+        create_physical_file=False,
+        is_shareable=True,
+    )
+
+    encoded_path = f"/api/v1/p2p/files/local%3A{file_inv.id}/content"
+    headers = sign_request(psk, "GET", encoded_path)
+
+    response = authenticated_client.get(encoded_path, headers=headers)
+    assert response.status_code == 200
+    assert response.content == content
+
+
+def test_files_list_includes_remote_cached_rows(
+    authenticated_client, db_session, monitored_path_factory
+):
     monitored_path = monitored_path_factory(name="Remote Path", source_path="/tmp/remote-path")
 
     peer = P2PPeer(
@@ -448,4 +539,3 @@ def test_export_psk_endpoint(authenticated_client):
     payload = response.json()
     assert payload["psk"] == "my-secret-key-12345"
     assert payload["available"] is True
-
