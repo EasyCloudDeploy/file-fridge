@@ -47,17 +47,13 @@ def _schema_has_p2p_v2_markers(inspector) -> bool:
 
 def _cold_storage_values_need_normalization(db) -> bool:
     """Return True when lowercase legacy enum values are still present."""
-    result = db.execute(
-        text(
-            """
+    result = db.execute(text("""
             SELECT 1
             FROM cold_storage_locations
             WHERE TRIM(backend_type) IN ('local', 's3', 'gdrive')
                OR TRIM(operation_mode) IN ('move', 'copy', 'symlink')
             LIMIT 1
-            """
-        )
-    ).fetchone()
+            """)).fetchone()
     return result is not None
 
 
@@ -183,7 +179,8 @@ def run_startup_migrations() -> None:
     backup_path: Path | None = None
     try:
         alembic_cfg = Config("alembic.ini")
-        alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url))
+        # ConfigParser treats % as interpolation; escape for URLs like sqlite:///:memory:
+        alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url).replace("%", "%%"))
 
         # Stamp legacy databases that have tables but no alembic_version yet.
         # This happens when init_db() (create_all) was used before Alembic was introduced.

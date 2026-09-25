@@ -86,6 +86,7 @@ dev = [
     "responses>=0.25.0",
     "factory-boy>=3.3.0",
     "pytest-mock>=3.0.0",
+    "respx>=0.23.1",
 ]
 
 [tool.black]
