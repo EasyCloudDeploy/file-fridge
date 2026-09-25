@@ -9,11 +9,7 @@ class TestTagRulesRouter:
         """Test listing all tag rules."""
         tag = create_tag("Rule List Tag")
         rule = TagRule(
-            tag_id=tag.id,
-            criterion_type="extension",
-            operator="=",
-            value="txt",
-            priority=5
+            tag_id=tag.id, criterion_type="extension", operator="=", value="txt", priority=5
         )
         db_session.add(rule)
         db_session.commit()
@@ -33,7 +29,7 @@ class TestTagRulesRouter:
             "operator": "=",
             "value": "pdf",
             "enabled": True,
-            "priority": 10
+            "priority": 10,
         }
         response = authenticated_client.post("/api/v1/tag-rules", json=payload)
         assert response.status_code == 201
@@ -42,12 +38,7 @@ class TestTagRulesRouter:
 
     def test_create_tag_rule_tag_not_found(self, authenticated_client):
         """Test creating a rule for non-existent tag."""
-        payload = {
-            "tag_id": 9999,
-            "criterion_type": "extension",
-            "operator": "=",
-            "value": "pdf"
-        }
+        payload = {"tag_id": 9999, "criterion_type": "extension", "operator": "=", "value": "pdf"}
         response = authenticated_client.post("/api/v1/tag-rules", json=payload)
         assert response.status_code == 404
 
@@ -92,6 +83,7 @@ class TestTagRulesRouter:
     def test_apply_tag_rules_success(self, authenticated_client, monkeypatch):
         """Test triggering rule application to all files."""
         from app.services.tag_rule_service import TagRuleService
+
         mock_apply = lambda self: {"files_processed": 10, "tags_added": 5}
         monkeypatch.setattr(TagRuleService, "apply_all_rules", mock_apply)
 

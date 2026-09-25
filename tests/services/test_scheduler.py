@@ -262,9 +262,7 @@ class TestCheckStoragePermissionsJob:
         monkeypatch.setattr(
             "app.services.scheduler.SchedulerSessionLocal", MagicMock(return_value=db_session)
         )
-        monkeypatch.setattr(
-            "app.services.scheduler.shutil.disk_usage", lambda path: (100, 50, 50)
-        )
+        monkeypatch.setattr("app.services.scheduler.shutil.disk_usage", lambda path: (100, 50, 50))
 
     def _make_cold_location(
         self, db_session, path: str, name: str = "Cold Storage"

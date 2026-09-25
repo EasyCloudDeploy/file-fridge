@@ -9,7 +9,9 @@ from app.services.file_reconciliation import FileReconciliation
 
 @pytest.mark.unit
 class TestFileReconciliation:
-    def test_reconcile_missing_symlinks_success(self, db_session, tmp_path, file_inventory_factory, storage_location):
+    def test_reconcile_missing_symlinks_success(
+        self, db_session, tmp_path, file_inventory_factory, storage_location
+    ):
         """Test recreating missing symlinks for cold storage files."""
         hot_dir = tmp_path / "hot_recon"
         hot_dir.mkdir()
@@ -28,7 +30,7 @@ class TestFileReconciliation:
         inv = file_inventory_factory(
             path=str(cold_file),
             storage_type=StorageType.COLD,
-            cold_storage_location=storage_location
+            cold_storage_location=storage_location,
         )
         path = db_session.get(MonitoredPath, inv.path_id)
         path.operation_type = OperationType.SYMLINK
@@ -54,7 +56,9 @@ class TestFileReconciliation:
         stats = FileReconciliation.reconcile_missing_symlinks(path, db_session)
         assert stats["symlinks_checked"] == 0
 
-    def test_reconcile_symlinks_already_exists(self, db_session, tmp_path, file_inventory_factory, storage_location):
+    def test_reconcile_symlinks_already_exists(
+        self, db_session, tmp_path, file_inventory_factory, storage_location
+    ):
         """Test skipping reconciliation if symlink already exists and is correct."""
         hot_dir = tmp_path / "hot_exists"
         hot_dir.mkdir()
@@ -75,7 +79,7 @@ class TestFileReconciliation:
         inv = file_inventory_factory(
             path=str(cold_file),
             storage_type=StorageType.COLD,
-            cold_storage_location=storage_location
+            cold_storage_location=storage_location,
         )
         path = db_session.get(MonitoredPath, inv.path_id)
         path.operation_type = OperationType.SYMLINK
@@ -86,7 +90,9 @@ class TestFileReconciliation:
         assert stats["symlinks_skipped"] == 1
         assert stats["symlinks_created"] == 0
 
-    def test_verify_cold_storage_tracking_success(self, db_session, tmp_path, monitored_path_factory):
+    def test_verify_cold_storage_tracking_success(
+        self, db_session, tmp_path, monitored_path_factory
+    ):
         """Test verifying that files in cold storage are tracked in DB."""
         cold_dir = tmp_path / "cold_track"
         cold_dir.mkdir()
@@ -106,7 +112,7 @@ class TestFileReconciliation:
             file_size=1,
             file_mtime=datetime.fromtimestamp(os.path.getmtime(f1), tz=timezone.utc),
             storage_type=StorageType.COLD,
-            status="active"
+            status="active",
         )
         db_session.add(inv)
         db_session.commit()

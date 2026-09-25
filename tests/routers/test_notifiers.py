@@ -43,7 +43,7 @@ class TestNotifiersRouter:
             "subscribed_events": ["SCAN_COMPLETED", "SCAN_ERROR"],
             "smtp_host": "smtp.example.com",
             "smtp_sender": "fridge@example.com",
-            "enabled": True
+            "enabled": True,
         }
         response = authenticated_client.post("/api/v1/notifiers", json=payload)
         assert response.status_code == 201
@@ -56,7 +56,7 @@ class TestNotifiersRouter:
             "name": "Secure Webhook",
             "type": "generic_webhook",
             "address": "https://hooks.slack.com/services/xxx",
-            "subscribed_events": ["DISK_SPACE_CRITICAL"]
+            "subscribed_events": ["DISK_SPACE_CRITICAL"],
         }
         response = authenticated_client.post("/api/v1/notifiers", json=payload)
         assert response.status_code == 201
@@ -68,7 +68,7 @@ class TestNotifiersRouter:
             "name": "Insecure Webhook",
             "type": "generic_webhook",
             "address": "http://insecure-site.com/hook",
-            "subscribed_events": ["SCAN_ERROR"]
+            "subscribed_events": ["SCAN_ERROR"],
         }
         response = authenticated_client.post("/api/v1/notifiers", json=payload)
         # Pydantic validator in NotifierBase raises ValueError for non-https,
@@ -88,7 +88,7 @@ class TestNotifiersRouter:
             "address": "c2@ex.com",
             "smtp_host": "smtp.example.com",
             "smtp_sender": "fridge@example.com",
-            "subscribed_events": []
+            "subscribed_events": [],
         }
         response = authenticated_client.post("/api/v1/notifiers", json=payload)
         assert response.status_code == 400
@@ -125,6 +125,7 @@ class TestNotifiersRouter:
         db_session.commit()
 
         from app.services.notification_service import notification_service
+
         mock_test = AsyncMock(return_value=(True, "Test successful"))
         monkeypatch.setattr(notification_service, "test_notifier", mock_test)
 

@@ -179,7 +179,7 @@ def make_png_file(path: Path) -> Path:
         return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", crc)
 
     ihdr = chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
-    raw = b"\x00\xFF\x00\x00"  # no-filter + RGB pixel
+    raw = b"\x00\xff\x00\x00"  # no-filter + RGB pixel
     idat = chunk(b"IDAT", zlib.compress(raw))
     iend = chunk(b"IEND", b"")
 
@@ -378,7 +378,9 @@ def _age_file(path: Path, minutes: float) -> None:
     os.utime(str(path), (t, t))
 
 
-def _make_inventory(db, path_id: int, file_path: Path, storage_type=StorageType.HOT) -> FileInventory:
+def _make_inventory(
+    db, path_id: int, file_path: Path, storage_type=StorageType.HOT
+) -> FileInventory:
     """Insert a FileInventory record so the workflow service can lock it."""
     st = file_path.stat()
     entry = FileInventory(
@@ -409,10 +411,10 @@ class TestMtimeCriteria:
         "age_min, op, value, expected",
         [
             # GT: keep if older than N minutes
-            (120, Operator.GT, "60", True),   # 2 h old > 60 min → keep
-            (30, Operator.GT, "60", False),   # 30 min old > 60 min → False → cold
+            (120, Operator.GT, "60", True),  # 2 h old > 60 min → keep
+            (30, Operator.GT, "60", False),  # 30 min old > 60 min → False → cold
             # LT: keep if newer than N minutes
-            (5, Operator.LT, "60", True),     # 5 min old < 60 min → keep
+            (5, Operator.LT, "60", True),  # 5 min old < 60 min → keep
             (120, Operator.LT, "60", False),  # 2 h old < 60 min → False → cold
             # GTE: keep if age >= N  (use 65 min old ≥ 60 to avoid boundary timing drift)
             (65, Operator.GTE, "60", True),
@@ -481,7 +483,9 @@ class TestAtimeCriteria:
             (10, Operator.LTE, "5", False),
         ],
     )
-    def test_atime_operators(self, mock_platform, hot_storage, make_criterion, age_min, op, value, expected):
+    def test_atime_operators(
+        self, mock_platform, hot_storage, make_criterion, age_min, op, value, expected
+    ):
         f = make_text_file(hot_storage / "file.txt")
         _age_file(f, age_min)
         c = make_criterion(CriterionType.ATIME, op, value)
@@ -524,6 +528,7 @@ class TestAtimeCriteria:
 
         # Let's mock Path.stat to return a controlled ctime as well
         original_stat = f.stat()
+
         class MockStat:
             def __init__(self, orig, atime, mtime, ctime):
                 self._orig = orig
@@ -532,6 +537,7 @@ class TestAtimeCriteria:
                 self.st_ctime = ctime
                 self.st_size = orig.st_size
                 self.st_mode = orig.st_mode
+
             def __getattr__(self, name):
                 return getattr(self._orig, name)
 
@@ -740,7 +746,12 @@ class TestInameCriteria:
             ("warning.log", Operator.CONTAINS, "error", False),
             # MATCHES: case-insensitive glob
             ("Photo.JPG", Operator.MATCHES, "*.jpg", True),
-            ("photo.jpeg", Operator.MATCHES, "*.JPG", False),  # INAME lowercases both → "jpeg" vs "jpg"
+            (
+                "photo.jpeg",
+                Operator.MATCHES,
+                "*.JPG",
+                False,
+            ),  # INAME lowercases both → "jpeg" vs "jpg"
             ("BACKUP_01.TAR", Operator.MATCHES, "backup_*.tar", True),
             # REGEX: case-insensitive regex
             ("Document_Final.PDF", Operator.REGEX, r"\.(pdf|doc)$", True),
@@ -962,7 +973,7 @@ class TestMultipleCriteria:
         # SIZE > 1M will fail for a tiny file
         criteria = [
             make_criterion(CriterionType.MTIME, Operator.LT, "60"),  # True
-            make_criterion(CriterionType.SIZE, Operator.GT, "1M"),   # False → short-circuit
+            make_criterion(CriterionType.SIZE, Operator.GT, "1M"),  # False → short-circuit
             make_criterion(CriterionType.NAME, Operator.EQ, "tiny.txt"),  # would be True
         ]
         result, matched_ids = CriteriaMatcher.match_file(f, criteria)
@@ -1085,9 +1096,9 @@ class TestEdgeCases:
         """Returned matched_ids list contains IDs of all matching criteria."""
         f = make_binary_file(hot_storage / "data.bin", 4096)
         criteria = [
-            make_criterion(CriterionType.SIZE, Operator.GT, "1k"),      # id 1
-            make_criterion(CriterionType.MTIME, Operator.LT, "60"),      # id 2
-            make_criterion(CriterionType.TYPE, Operator.EQ, "f"),         # id 3
+            make_criterion(CriterionType.SIZE, Operator.GT, "1k"),  # id 1
+            make_criterion(CriterionType.MTIME, Operator.LT, "60"),  # id 2
+            make_criterion(CriterionType.TYPE, Operator.EQ, "f"),  # id 3
         ]
         result, ids = CriteriaMatcher.match_file(f, criteria)
         assert result is True
@@ -1744,8 +1755,8 @@ class TestCriteriaSemanticsWithHotColdStorage:
         # Rename with .log suffix (make_large_file doesn't set name)
         f = f.rename(hot_storage / "system.log")
         criteria = [
-            make_criterion(CriterionType.MTIME, Operator.LT, "60"),   # fresh
-            make_criterion(CriterionType.SIZE, Operator.GT, "1M"),    # large
+            make_criterion(CriterionType.MTIME, Operator.LT, "60"),  # fresh
+            make_criterion(CriterionType.SIZE, Operator.GT, "1M"),  # large
             make_criterion(CriterionType.NAME, Operator.MATCHES, "*.log"),
         ]
         assert self._check(f, criteria) is True
@@ -1755,8 +1766,8 @@ class TestCriteriaSemanticsWithHotColdStorage:
         f = make_csv_file(hot_storage / "report.csv")
         _age_file(f, 120)
         criteria = [
-            make_criterion(CriterionType.MTIME, Operator.LT, "60"),   # False → cold
-            make_criterion(CriterionType.SIZE, Operator.LT, "10M"),   # True (doesn't matter)
+            make_criterion(CriterionType.MTIME, Operator.LT, "60"),  # False → cold
+            make_criterion(CriterionType.SIZE, Operator.LT, "10M"),  # True (doesn't matter)
         ]
         assert self._check(f, criteria) is False
 

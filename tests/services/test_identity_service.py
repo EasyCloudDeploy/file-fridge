@@ -80,9 +80,7 @@ class TestIdentityService:
 
         # Import (should overwrite)
         identity_service.import_keys_pem(
-            db_session,
-            pems["signing_private_key"],
-            pems["kx_private_key"]
+            db_session, pems["signing_private_key"], pems["kx_private_key"]
         )
 
         # Verify public key matches what was imported

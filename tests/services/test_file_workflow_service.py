@@ -428,6 +428,7 @@ def test_thaw_single_file(
 
     inventory = file_inventory(cold_file, StorageType.COLD, FileStatus.ACTIVE)
     from app.models import FileRecord
+
     file_rec = FileRecord(
         path_id=monitored_path.id,
         original_path=str(symlink_path),
@@ -517,6 +518,7 @@ def test_thaw_single_file_uses_callable_progress_callback_for_fallback_move(
 
     inventory = file_inventory(cold_file, StorageType.COLD, FileStatus.ACTIVE)
     from app.models import FileRecord
+
     file_rec = FileRecord(
         path_id=monitored_path.id,
         original_path=str(symlink_path),
@@ -603,6 +605,7 @@ def test_recursive_scandir(tmp_path):
 # ---------------------------------------------------------------------------
 # Orphaned symlink handling when operation_type changes away from SYMLINK
 # ---------------------------------------------------------------------------
+
 
 @patch("app.services.file_workflow_service.CriteriaMatcher.match_file")
 @patch("app.services.file_workflow_service.FileWorkflowService._recursive_scandir")
@@ -821,7 +824,9 @@ def test_scan_path_move_op_unlink_failure_does_not_abort_scan(
 
     service = FileWorkflowService()
 
-    with patch.object(orphaned_symlink.__class__, "unlink", side_effect=OSError("permission denied")):
+    with patch.object(
+        orphaned_symlink.__class__, "unlink", side_effect=OSError("permission denied")
+    ):
         # Should not raise — OSError is caught internally
         result = service._scan_path(monitored_path, db_session)
 
@@ -944,8 +949,9 @@ def test_process_path_integration_real_files(db_session, tmp_path):
     # By returning the same db_session (wrapped in a lambda), we ensure it sees
     # the tables created by the db_session fixture.
     # We also mock SessionLocal used by some other services if any.
-    with patch("app.services.file_workflow_service.SessionFactory", side_effect=lambda: db_session), \
-         patch("app.services.file_workflow_service.scan_progress_manager") as mock_progress:
+    with patch(
+        "app.services.file_workflow_service.SessionFactory", side_effect=lambda: db_session
+    ), patch("app.services.file_workflow_service.scan_progress_manager") as mock_progress:
         # We also need to mock scan_progress_manager to avoid singleton state issues
         mock_progress.start_scan.return_value = ("scan-123", True)
         mock_progress.is_stop_requested.return_value = False
@@ -964,17 +970,23 @@ def test_process_path_integration_real_files(db_session, tmp_path):
 
     # Verify database inventory
     db_session.expire_all()
-    inv_old = db_session.query(FileInventory).filter(FileInventory.file_path.contains("old.txt")).first()
+    inv_old = (
+        db_session.query(FileInventory).filter(FileInventory.file_path.contains("old.txt")).first()
+    )
     assert inv_old is not None
     assert inv_old.storage_type == StorageType.COLD
     assert inv_old.file_path == str(cold_dir / "old.txt")
 
-    inv_new = db_session.query(FileInventory).filter(FileInventory.file_path.contains("new.txt")).first()
+    inv_new = (
+        db_session.query(FileInventory).filter(FileInventory.file_path.contains("new.txt")).first()
+    )
     assert inv_new is not None
     assert inv_new.storage_type == StorageType.HOT
 
 
-def test_thaw_single_file_no_file_record_success(monitored_path, file_inventory, db_session, tmp_path):
+def test_thaw_single_file_no_file_record_success(
+    monitored_path, file_inventory, db_session, tmp_path
+):
     """Test thawing a file when no FileRecord exists, verifying the H3 fix with FileMover.move_with_rollback."""
     from unittest.mock import patch
 
@@ -1001,8 +1013,9 @@ def test_thaw_single_file_no_file_record_success(monitored_path, file_inventory,
     original_close = db_session.close
     db_session.close = lambda: None
     try:
-        with patch("app.services.file_workflow_service.SessionFactory", side_effect=lambda: db_session), \
-             patch("app.services.file_workflow_service.scan_progress_manager") as mock_progress:
+        with patch(
+            "app.services.file_workflow_service.SessionFactory", side_effect=lambda: db_session
+        ), patch("app.services.file_workflow_service.scan_progress_manager") as mock_progress:
             mock_progress.start_file_operation.return_value = "thaw-op-1"
 
             # Note: file_record is None in DB since we haven't created one!
@@ -1017,7 +1030,9 @@ def test_thaw_single_file_no_file_record_success(monitored_path, file_inventory,
     assert symlink_path.read_text() == "content"
 
 
-def test_collect_cold_thaw_candidates_with_duplicates(monitored_path, file_inventory, db_session, tmp_path):
+def test_collect_cold_thaw_candidates_with_duplicates(
+    monitored_path, file_inventory, db_session, tmp_path
+):
     """Test that _collect_cold_thaw_candidates handles duplicate FileRecords without throwing a key collision error (M3 fix)."""
 
     from app.models import FileRecord, FileStatus, OperationType, StorageType
@@ -1041,7 +1056,7 @@ def test_collect_cold_thaw_candidates_with_duplicates(monitored_path, file_inven
         cold_storage_path=str(f1),
         file_size=8,
         operation_type=OperationType.MOVE,
-        cold_storage_location_id=monitored_path.storage_locations[0].id
+        cold_storage_location_id=monitored_path.storage_locations[0].id,
     )
     record2 = FileRecord(
         path_id=monitored_path.id,
@@ -1049,7 +1064,7 @@ def test_collect_cold_thaw_candidates_with_duplicates(monitored_path, file_inven
         cold_storage_path=str(f1),
         file_size=8,
         operation_type=OperationType.MOVE,
-        cold_storage_location_id=monitored_path.storage_locations[0].id
+        cold_storage_location_id=monitored_path.storage_locations[0].id,
     )
     db_session.add(record1)
     db_session.add(record2)
@@ -1102,7 +1117,7 @@ def test_concurrent_process_single_file(monitored_path, file_inventory, db_sessi
         dest_path=dest,
         file_size=18,
         matched_criteria_ids=[1],
-        storage_location_id=monitored_path.storage_locations[0].id
+        storage_location_id=monitored_path.storage_locations[0].id,
     )
 
     record_id2 = service._record_file_in_db(
@@ -1112,7 +1127,7 @@ def test_concurrent_process_single_file(monitored_path, file_inventory, db_sessi
         dest_path=dest,
         file_size=18,
         matched_criteria_ids=[1],
-        storage_location_id=monitored_path.storage_locations[0].id
+        storage_location_id=monitored_path.storage_locations[0].id,
     )
 
     assert record_id1 == record_id2
@@ -1143,9 +1158,7 @@ def test_match_inventory_criteria_fallback(monitored_path, file_inventory, db_se
     unsupported_criterion.id = 999
 
     res, matched_ids = service._match_inventory_criteria(
-        hot_path=Path("/tmp/hot.txt"),
-        inventory_entry=entry,
-        criteria=[unsupported_criterion]
+        hot_path=Path("/tmp/hot.txt"), inventory_entry=entry, criteria=[unsupported_criterion]
     )
 
     assert res is False
@@ -1170,7 +1183,7 @@ def test_record_file_in_db_legacy_path(monitored_path, db_session, tmp_path):
         dest_path=dest_file,
         file_size=100,
         matched_criteria_ids=[1],
-        storage_location_id=monitored_path.storage_locations[0].id
+        storage_location_id=monitored_path.storage_locations[0].id,
     )
 
     # FileRecord should still be successfully created
@@ -1402,7 +1415,7 @@ def test_sync_remote_cold_inventory_self_healing(monitored_path, db_session, mon
                         "size": 1000,
                         "modified_time": "2026-06-01T15:00:00Z",
                         "created_time": "2026-06-01T15:00:00Z",
-                        "is_managed": False, # Strip managed attributes (simulating manual upload)
+                        "is_managed": False,  # Strip managed attributes (simulating manual upload)
                         "ff_location_id": None,
                         "relative_path": None,
                     }
@@ -1426,11 +1439,7 @@ def test_sync_remote_cold_inventory_self_healing(monitored_path, db_session, mon
     # Query entries from database to check that reference has been healed
     db_session.expire_all()
 
-    healed_inventory = (
-        db_session.query(FileInventory)
-        .filter(FileInventory.id == 99999)
-        .first()
-    )
+    healed_inventory = db_session.query(FileInventory).filter(FileInventory.id == 99999).first()
     assert healed_inventory is not None
     # Verify the reference has been updated to the new file_id
     assert healed_inventory.file_path == "gdrive://test-folder/new-file-id"
@@ -1443,14 +1452,18 @@ def test_sync_remote_cold_inventory_self_healing(monitored_path, db_session, mon
         .first()
     )
     assert healed_record is not None
-    assert healed_record.original_path == str(Path(monitored_path.source_path) / "important_document.pdf")
+    assert healed_record.original_path == str(
+        Path(monitored_path.source_path) / "important_document.pdf"
+    )
 
 
 def test_sync_local_cold_inventory_self_healing(monitored_path, db_session) -> None:
     """Test self-healing database reconciliation when a local/file-based encrypted cold storage file is moved to a new path on disk."""
     # 1. Pre-create database records for a file that was originally frozen
     # Original local cold storage path was /old/path/ffenc_99999.ffenc
-    old_cold_path = str(Path(monitored_path.storage_locations[0].path) / "old" / "ffenc_99999.ffenc")
+    old_cold_path = str(
+        Path(monitored_path.storage_locations[0].path) / "old" / "ffenc_99999.ffenc"
+    )
 
     inventory_entry = FileInventory(
         id=99999,
@@ -1477,7 +1490,9 @@ def test_sync_local_cold_inventory_self_healing(monitored_path, db_session) -> N
     db_session.commit()
 
     # 2. Simulate finding the file at a new path on disk: /new/path/ffenc_99999.ffenc
-    new_cold_path = str(Path(monitored_path.storage_locations[0].path) / "new" / "ffenc_99999.ffenc")
+    new_cold_path = str(
+        Path(monitored_path.storage_locations[0].path) / "new" / "ffenc_99999.ffenc"
+    )
 
     cold_files = [
         {
@@ -1502,22 +1517,15 @@ def test_sync_local_cold_inventory_self_healing(monitored_path, db_session) -> N
     # Query database and assert references were healed
     db_session.expire_all()
 
-    healed_inventory = (
-        db_session.query(FileInventory)
-        .filter(FileInventory.id == 99999)
-        .first()
-    )
+    healed_inventory = db_session.query(FileInventory).filter(FileInventory.id == 99999).first()
     assert healed_inventory is not None
     assert healed_inventory.file_path == new_cold_path
     assert healed_inventory.status == FileStatus.ACTIVE
 
     healed_record = (
-        db_session.query(FileRecord)
-        .filter(FileRecord.cold_storage_path == new_cold_path)
-        .first()
+        db_session.query(FileRecord).filter(FileRecord.cold_storage_path == new_cold_path).first()
     )
     assert healed_record is not None
-    assert healed_record.original_path == str(Path(monitored_path.source_path) / "local_secrets.pdf")
-
-
-
+    assert healed_record.original_path == str(
+        Path(monitored_path.source_path) / "local_secrets.pdf"
+    )

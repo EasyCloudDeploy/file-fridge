@@ -1,7 +1,7 @@
 import contextlib
 import os
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -217,11 +217,12 @@ def test_match_type(tmp_path, file_creator, criterion_value, expected):
     """Test TYPE criteria for file, directory, and symlink using real entities."""
     file_path = tmp_path / f"test_entity_{criterion_value}_{expected}"
     if file_path.exists():
-         import shutil
-         if file_path.is_dir() and not file_path.is_symlink():
-             shutil.rmtree(file_path)
-         else:
-             file_path.unlink()
+        import shutil
+
+        if file_path.is_dir() and not file_path.is_symlink():
+            shutil.rmtree(file_path)
+        else:
+            file_path.unlink()
 
     file_creator(file_path)
 
@@ -376,3 +377,103 @@ def test_match_atime_macos_fallback_m1(mock_get_last_open, mock_platform, real_f
         criterion = Criteria(criterion_type=CriterionType.ATIME, operator=Operator.LT, value="120")
         assert CriteriaMatcher._match_criterion(file_path, stat_info, criterion) is True
 
+
+def test_match_ctime(real_file):
+    with real_file() as file_path:
+        stat_info = file_path.stat()
+        criterion = Criteria(
+            criterion_type=CriterionType.CTIME, operator=Operator.LT, value="100000"
+        )
+        assert CriteriaMatcher._match_criterion(file_path, stat_info, criterion) is True
+
+
+def test_match_user_and_group_by_id(real_file):
+    with real_file() as file_path:
+        stat_info = file_path.stat()
+        user_criterion = Criteria(
+            criterion_type=CriterionType.USER, operator=Operator.EQ, value=str(stat_info.st_uid)
+        )
+        group_criterion = Criteria(
+            criterion_type=CriterionType.GROUP, operator=Operator.EQ, value=str(stat_info.st_gid)
+        )
+        assert CriteriaMatcher._match_criterion(file_path, stat_info, user_criterion) is True
+        assert CriteriaMatcher._match_criterion(file_path, stat_info, group_criterion) is True
+
+
+def test_match_name_regex_invalid_returns_false(real_file):
+    with real_file(filename="sample.txt") as file_path:
+        stat_info = file_path.stat()
+        criterion = Criteria(
+            criterion_type=CriterionType.NAME,
+            operator=Operator.REGEX,
+            value="[invalid",
+            enabled=True,
+        )
+        assert CriteriaMatcher._match_criterion(file_path, stat_info, criterion) is False
+
+
+def test_match_perm_octal(real_file):
+    with real_file() as file_path:
+        stat_info = file_path.stat()
+        mode = stat_info.st_mode & 0o777
+        criterion = Criteria(
+            criterion_type=CriterionType.PERM,
+            operator=Operator.EQ,
+            value=f"{mode:o}",
+            enabled=True,
+        )
+        assert CriteriaMatcher._match_criterion(file_path, stat_info, criterion) is True
+
+
+@patch("platform.system", return_value="Linux")
+def test_get_macos_last_open_time_non_darwin(mock_platform, tmp_path):
+    path = tmp_path / "file.txt"
+    path.write_text("x")
+    assert CriteriaMatcher._get_macos_last_open_time(path) is None
+
+
+@patch("platform.system", return_value="Darwin")
+def test_get_macos_last_open_time_from_mdls(mock_platform, tmp_path):
+    path = tmp_path / "mac_file.txt"
+    path.write_text("x")
+    mdls_result = MagicMock()
+    mdls_result.returncode = 0
+    mdls_result.stdout = "kMDItemLastUsedDate = 2024-01-15 10:30:00 +0000\n"
+
+    with patch("subprocess.run", return_value=mdls_result):
+        ts = CriteriaMatcher._get_macos_last_open_time(path)
+    assert ts is not None
+
+
+@patch("platform.system", return_value="Darwin")
+def test_get_macos_last_open_time_xattr_parse_error(mock_platform, tmp_path):
+    path = tmp_path / "xattr_bad.txt"
+    path.write_text("x")
+    mdls_result = MagicMock(returncode=1, stdout="")
+    xattr_result = MagicMock(returncode=0, stdout=b"not-a-plist")
+
+    with patch("subprocess.run", side_effect=[mdls_result, xattr_result]):
+        assert CriteriaMatcher._get_macos_last_open_time(path) is None
+
+
+@patch("platform.system", return_value="Darwin")
+def test_get_macos_last_open_time_from_xattr_plist(mock_platform, tmp_path):
+    from datetime import datetime, timezone
+    import plistlib
+
+    path = tmp_path / "xattr_file.txt"
+    path.write_text("x")
+    mdls_result = MagicMock(returncode=1, stdout="")
+    used_at = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+    xattr_result = MagicMock(returncode=0, stdout=plistlib.dumps({"kMDItemLastUsedDate": used_at}))
+
+    with patch("subprocess.run", side_effect=[mdls_result, xattr_result]):
+        ts = CriteriaMatcher._get_macos_last_open_time(path)
+    assert ts == used_at.timestamp()
+
+
+def test_parse_mdls_date_variants():
+    ts = CriteriaMatcher._parse_mdls_date("2024-01-15 10:30:00 +0000")
+    assert ts is not None
+    assert CriteriaMatcher._parse_mdls_date("(null)") is None
+    assert CriteriaMatcher._parse_mdls_date("bad-date") is None

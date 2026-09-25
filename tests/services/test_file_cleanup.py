@@ -17,18 +17,14 @@ class TestFileCleanupService:
         link.symlink_to(target)
 
         inv_link = file_inventory_factory(
-            path=str(link),
-            storage_type=StorageType.HOT,
-            status=FileStatus.ACTIVE
+            path=str(link), storage_type=StorageType.HOT, status=FileStatus.ACTIVE
         )
 
         # 2. A normal active file (exists, not a symlink)
         normal_file = tmp_path / "normal.txt"
         normal_file.write_text("hello world")
         inv_normal = file_inventory_factory(
-            path=str(normal_file),
-            storage_type=StorageType.HOT,
-            status=FileStatus.ACTIVE
+            path=str(normal_file), storage_type=StorageType.HOT, status=FileStatus.ACTIVE
         )
 
         # 3. A stale suspected symlink (missing, tiny size < 200, has checksum, last_seen > 24 hours ago)
@@ -41,7 +37,7 @@ class TestFileCleanupService:
             file_size=50,
             checksum="some_hash",
             last_seen=stale_time,
-            file_mtime=datetime.now(tz=timezone.utc)
+            file_mtime=datetime.now(tz=timezone.utc),
         )
         db_session.add(inv_stale_suspect)
 
@@ -55,7 +51,7 @@ class TestFileCleanupService:
             file_size=50,
             checksum="some_hash",
             last_seen=fresh_time,
-            file_mtime=datetime.now(tz=timezone.utc)
+            file_mtime=datetime.now(tz=timezone.utc),
         )
         db_session.add(inv_fresh_suspect)
         db_session.commit()

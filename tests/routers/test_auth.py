@@ -1,4 +1,3 @@
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -14,6 +13,7 @@ def test_check_auth_status_no_users(client: TestClient):
     data = response.json()
     assert data["setup_required"] is True
     assert data["user_count"] == 0
+
 
 def test_check_auth_status_with_users(client: TestClient, db_session: Session):
     """Test the /check endpoint when users exist."""
@@ -41,6 +41,7 @@ def test_setup_first_user(client: TestClient, db_session: Session):
     user = db_session.query(User).filter_by(username="admin").first()
     assert user is not None
     assert user.roles == ["admin"]
+
 
 def test_setup_first_user_already_exists(client: TestClient, db_session: Session):
     """Test that /setup fails if a user already exists."""
@@ -126,6 +127,7 @@ def test_login_failure_wrong_password(client: TestClient, db_session: Session):
     assert response.status_code == 401
     assert "Incorrect username or password" in response.json()["detail"]
 
+
 def test_login_failure_wrong_username(client: TestClient):
     """Test login failure with a non-existent username."""
     response = client.post(
@@ -182,6 +184,7 @@ def test_generate_api_token_default_expiration(authenticated_client: TestClient)
     assert "access_token" in data
     assert data["token_type"] == "bearer"
 
+
 def test_generate_api_token_custom_expiration(authenticated_client: TestClient):
     """Test generating an API token with custom expiration."""
     response = authenticated_client.post(
@@ -191,6 +194,7 @@ def test_generate_api_token_custom_expiration(authenticated_client: TestClient):
     assert response.status_code == 200
     data = response.json()
     assert "access_token" in data
+
 
 def test_generate_api_token_no_expiration(authenticated_client: TestClient):
     """Test generating an API token with no expiration."""

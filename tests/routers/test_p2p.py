@@ -189,9 +189,7 @@ def test_destroy_network_clears_config_and_state(authenticated_client, db_sessio
     assert peers.json() == []
 
 
-def test_unjoin_network_clears_peers_and_removes_local_network(
-    authenticated_client, db_session
-):
+def test_unjoin_network_clears_peers_and_removes_local_network(authenticated_client, db_session):
     authenticated_client.post(
         "/api/v1/p2p/network",
         json={
@@ -373,7 +371,9 @@ def test_manifest_push_registers_peer_and_caches_files(authenticated_client, db_
     assert cached[0].checksum == "abc123"
 
 
-def test_files_list_includes_remote_cached_rows(authenticated_client, db_session, monitored_path_factory):
+def test_files_list_includes_remote_cached_rows(
+    authenticated_client, db_session, monitored_path_factory
+):
     monitored_path = monitored_path_factory(name="Remote Path", source_path="/tmp/remote-path")
 
     peer = P2PPeer(
@@ -409,6 +409,55 @@ def test_files_list_includes_remote_cached_rows(authenticated_client, db_session
     messages = _parse_ndjson(response.text)
     file_messages = [m for m in messages if m.get("type") == "file"]
     assert any(m["data"].get("is_remote") is True for m in file_messages)
+
+
+def test_patch_network_updates_fields(authenticated_client):
+    authenticated_client.post(
+        "/api/v1/p2p/network",
+        json={
+            "network_name": "Patch Mesh",
+            "listen_host": "0.0.0.0",
+            "listen_port": 9119,
+            "enabled": True,
+            "psk": "patch-secret",
+        },
+    )
+    response = authenticated_client.patch(
+        "/api/v1/p2p/network",
+        json={"network_name": "Renamed Mesh", "listen_port": 9120},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["network_name"] == "Renamed Mesh"
+    assert payload["listen_port"] == 9120
+
+
+def test_accept_psk_rotation_endpoint(authenticated_client, db_session):
+    created = authenticated_client.post(
+        "/api/v1/p2p/network",
+        json={
+            "network_name": "Rotation Mesh",
+            "listen_host": "127.0.0.1",
+            "listen_port": 8000,
+            "enabled": True,
+            "psk": "current-secret",
+        },
+    )
+    assert created.status_code == 200
+    psk_hash = p2p_service.hash_psk("current-secret")
+    encrypted = p2p_service.encrypt_new_psk("next-secret", psk_hash)
+
+    response = authenticated_client.post(
+        "/api/v1/p2p/network/psk/accept",
+        headers={"X-FF-PSK": psk_hash},
+        json={"encrypted_new_psk": encrypted},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+
+    config = p2p_service.get_network_config(db_session)
+    assert config is not None
+    assert config.psk_hash == p2p_service.hash_psk("next-secret")
 
 
 def test_export_psk_endpoint(authenticated_client):
@@ -448,4 +497,3 @@ def test_export_psk_endpoint(authenticated_client):
     payload = response.json()
     assert payload["psk"] == "my-secret-key-12345"
     assert payload["available"] is True
-

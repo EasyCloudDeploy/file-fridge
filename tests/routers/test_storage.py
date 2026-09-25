@@ -21,10 +21,7 @@ class TestStorageRouter:
     def test_create_storage_location_success(self, authenticated_client, tmp_path):
         """Test successful creation of a storage location."""
         new_path = tmp_path / "new_storage_api"
-        payload = {
-            "name": "New API Storage",
-            "path": str(new_path)
-        }
+        payload = {"name": "New API Storage", "path": str(new_path)}
         response = authenticated_client.post("/api/v1/storage/locations", json=payload)
         assert response.status_code == 201
         assert response.json()["name"] == "New API Storage"
@@ -65,13 +62,14 @@ class TestStorageRouter:
         """Test updating a storage location."""
         payload = {"name": "Newly Updated Name"}
         response = authenticated_client.put(
-            f"/api/v1/storage/locations/{storage_location.id}",
-            json=payload
+            f"/api/v1/storage/locations/{storage_location.id}", json=payload
         )
         assert response.status_code == 200
         assert response.json()["name"] == "Newly Updated Name"
 
-    def test_update_storage_location_allow_offline_toggle(self, authenticated_client, storage_location):
+    def test_update_storage_location_allow_offline_toggle(
+        self, authenticated_client, storage_location
+    ):
         """Test enabling allow_offline on a local storage location."""
         payload = {"allow_offline": True}
         response = authenticated_client.put(
@@ -93,7 +91,9 @@ class TestStorageRouter:
         assert response.status_code == 200
         assert db_session.get(ColdStorageLocation, loc.id) is None
 
-    def test_delete_storage_location_in_use(self, authenticated_client, db_session, monitored_path_factory, storage_location):
+    def test_delete_storage_location_in_use(
+        self, authenticated_client, db_session, monitored_path_factory, storage_location
+    ):
         """Test deleting a storage location that is in use (should fail without force)."""
         # monitored_path_factory uses the storage_location fixture
         monitored_path_factory("In Use Path", "/tmp/hot_in_use")
@@ -102,7 +102,9 @@ class TestStorageRouter:
         assert response.status_code == 400
         assert "still associated" in response.json()["detail"].lower()
 
-    def test_force_delete_storage_location(self, authenticated_client, db_session, tmp_path, storage_location):
+    def test_force_delete_storage_location(
+        self, authenticated_client, db_session, tmp_path, storage_location
+    ):
         """Test force deleting a storage location."""
         # Setup files in location
         loc_path = Path(storage_location.path)
@@ -110,7 +112,9 @@ class TestStorageRouter:
         test_file = loc_path / "to_be_purged.txt"
         test_file.write_text("goodbye world")
 
-        response = authenticated_client.delete(f"/api/v1/storage/locations/{storage_location.id}?force=true")
+        response = authenticated_client.delete(
+            f"/api/v1/storage/locations/{storage_location.id}?force=true"
+        )
         assert response.status_code == 200
         assert not test_file.exists()
         assert not loc_path.exists()
@@ -120,22 +124,25 @@ class TestStorageRouter:
         """Test enabling encryption for a storage location."""
         # Mock scheduler to avoid actual background job triggering errors
         from app.services.scheduler import scheduler_service
+
         monkeypatch.setattr(scheduler_service, "trigger_encryption_job", lambda x: None)
 
         payload = {"is_encrypted": True}
         response = authenticated_client.put(
-            f"/api/v1/storage/locations/{storage_location.id}",
-            json=payload
+            f"/api/v1/storage/locations/{storage_location.id}", json=payload
         )
         assert response.status_code == 200
         data = response.json()
         assert data["is_encrypted"] is True
         assert data["encryption_status"] == "pending"
 
-    def test_toggle_encryption_off(self, authenticated_client, db_session, storage_location, monkeypatch):
+    def test_toggle_encryption_off(
+        self, authenticated_client, db_session, storage_location, monkeypatch
+    ):
         """Test disabling encryption for a storage location."""
         # Mock scheduler
         from app.services.scheduler import scheduler_service
+
         monkeypatch.setattr(scheduler_service, "trigger_decryption_job", lambda x: None)
 
         # Manually set to encrypted state first
@@ -146,8 +153,7 @@ class TestStorageRouter:
 
         payload = {"is_encrypted": False}
         response = authenticated_client.put(
-            f"/api/v1/storage/locations/{storage_location.id}",
-            json=payload
+            f"/api/v1/storage/locations/{storage_location.id}", json=payload
         )
         assert response.status_code == 200
         data = response.json()
@@ -158,7 +164,10 @@ class TestStorageRouter:
         """Google OAuth callback should not require API authentication."""
         response = client.get("/api/v1/storage/gdrive/oauth/callback", follow_redirects=False)
         assert response.status_code in (302, 307)
-        assert response.headers["location"] == "/storage-locations?gdrive_oauth=error&reason=missing_code"
+        assert (
+            response.headers["location"]
+            == "/storage-locations?gdrive_oauth=error&reason=missing_code"
+        )
 
     def test_google_oauth_callback_returns_network_unreachable_on_connect_error(
         self, client, db_session, monkeypatch

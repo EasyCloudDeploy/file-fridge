@@ -1,4 +1,3 @@
-
 import pytest
 
 from app.utils.remote_auth import RemoteAuth, remote_auth

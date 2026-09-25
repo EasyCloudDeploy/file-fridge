@@ -268,10 +268,12 @@ def test_admin_access_root(client: TestClient, db_session: Session):
     data = response.json()
     assert len(data["items"]) > 0
 
+
 def test_list_directory_not_found(authenticated_client: TestClient):
     """Test listing a non-existent directory."""
     response = authenticated_client.get("/api/v1/browser/list?path=/non/existent/path")
     assert response.status_code == 404
+
 
 def test_list_directory_is_file(authenticated_client: TestClient, tmp_path):
     """Test listing a path that is a file, not a directory."""

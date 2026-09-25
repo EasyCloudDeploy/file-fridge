@@ -11,9 +11,17 @@ class TestTransferRetryStrategy:
     def test_classify_error_types(self):
         """Test error classification for various exception types."""
         # 1. Transient: Timeouts and Network errors
-        assert retry_strategy.classify_error(httpx.ConnectTimeout("Error")) == TransferErrorType.TRANSIENT
-        assert retry_strategy.classify_error(httpx.ReadTimeout("Error")) == TransferErrorType.TRANSIENT
-        assert retry_strategy.classify_error(httpx.NetworkError("Error")) == TransferErrorType.TRANSIENT
+        assert (
+            retry_strategy.classify_error(httpx.ConnectTimeout("Error"))
+            == TransferErrorType.TRANSIENT
+        )
+        assert (
+            retry_strategy.classify_error(httpx.ReadTimeout("Error")) == TransferErrorType.TRANSIENT
+        )
+        assert (
+            retry_strategy.classify_error(httpx.NetworkError("Error"))
+            == TransferErrorType.TRANSIENT
+        )
 
         # 2. Transient: 5xx Server Errors (except 503 handled below)
         mock_500 = MagicMock(status_code=500)
@@ -42,13 +50,16 @@ class TestTransferRetryStrategy:
         # Attempt 1 (transient)
         retry, delay, reason = strategy.should_retry(1, httpx.ConnectTimeout("T"))
         assert retry is True
-        assert 1.0 <= delay <= 2.2 # base * 2^1 + 10% jitter
+        assert 1.0 <= delay <= 2.2  # base * 2^1 + 10% jitter
         assert "retrying" in reason.lower()
 
         # Attempt 1 (rate limited)
-        retry, delay, reason = strategy.should_retry(1, httpx.HTTPStatusError("429", request=MagicMock(), response=MagicMock(status_code=429)))
+        retry, delay, reason = strategy.should_retry(
+            1,
+            httpx.HTTPStatusError("429", request=MagicMock(), response=MagicMock(status_code=429)),
+        )
         assert retry is True
-        assert delay >= 6.0 # base * 2^1 * 3
+        assert delay >= 6.0  # base * 2^1 * 3
 
         # Attempt 1 (permanent)
         mock_400 = MagicMock(status_code=400)

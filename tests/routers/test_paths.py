@@ -261,11 +261,13 @@ def test_create_path(
     mock_add_job, authenticated_client: TestClient, storage_location: ColdStorageLocation, tmp_path
 ):
     """Test creating a new monitored path."""
+    import uuid
+
     source_path = tmp_path / "new_hot"
     source_path.mkdir()
 
     path_data = {
-        "name": "New Path",
+        "name": f"New Path {uuid.uuid4().hex[:8]}",
         "source_path": str(source_path),
         "operation_type": "move",
         "check_interval_seconds": 3600,
@@ -276,7 +278,7 @@ def test_create_path(
     response = authenticated_client.post("/api/v1/paths", json=path_data)
     assert response.status_code == 201
     data = response.json()
-    assert data["name"] == "New Path"
+    assert data["name"] == path_data["name"]
     assert data["source_path"] == str(source_path)
     mock_add_job.assert_called_once()
 

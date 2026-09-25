@@ -34,6 +34,7 @@ from app.services.notification_events import (
     PathUpdatedData,
     ScanCompletedData,
     ScanErrorData,
+    StoragePermissionErrorData,
 )
 
 logger = logging.getLogger(__name__)

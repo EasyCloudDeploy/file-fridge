@@ -1,4 +1,3 @@
-
 import pytest
 
 from app.models import FileRecord, OperationType, StorageType
@@ -31,7 +30,7 @@ class TestPathMigrationService:
             original_path="/tmp/hot/file1.txt",
             cold_storage_path=str(f1),
             file_size=8,
-            operation_type=OperationType.MOVE
+            operation_type=OperationType.MOVE,
         )
         db_session.add(record1)
         db_session.commit()
@@ -63,7 +62,7 @@ class TestPathMigrationService:
             original_path="/tmp/hot/file1.txt",
             cold_storage_path=str(f1),
             file_size=8,
-            operation_type=OperationType.MOVE
+            operation_type=OperationType.MOVE,
         )
         db_session.add(record1)
         db_session.commit()
@@ -119,6 +118,7 @@ class TestPathMigrationService:
             return False, "Permission denied", None
 
         from app.services.file_mover import FileMover
+
         monkeypatch.setattr(FileMover, "move_with_rollback", mock_move_with_rollback)
 
         success, error, stats = PathMigrationService.migrate_files(

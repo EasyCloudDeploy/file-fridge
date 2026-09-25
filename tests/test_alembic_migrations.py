@@ -20,10 +20,9 @@ SNAPSHOT_DIR = Path("tests/fixtures/db_snapshots")
 
 
 def _load_a1_migration_module():
-    migration_path = (
-        Path("alembic/versions/a1b2c3d4e5f6_add_remote_connection_health_and_audit.py")
-        .absolute()
-    )
+    migration_path = Path(
+        "alembic/versions/a1b2c3d4e5f6_add_remote_connection_health_and_audit.py"
+    ).absolute()
     spec = importlib.util.spec_from_file_location("a1_migration_module", migration_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"Unable to load migration module from {migration_path}")
@@ -62,9 +61,7 @@ def test_migrations_up_and_down(alembic_config):
 
         # Create the old 'monitored_paths' table explicitly using raw SQL.
         with engine.begin() as connection:
-            connection.execute(
-                sa.text(
-                    """
+            connection.execute(sa.text("""
                 CREATE TABLE monitored_paths (
                     id INTEGER PRIMARY KEY,
                     name VARCHAR2(255) NOT NULL,
@@ -80,12 +77,8 @@ def test_migrations_up_and_down(alembic_config):
                     created_at DATETIME,
                     updated_at DATETIME
                 )
-            """
-                )
-            )
-            connection.execute(
-                sa.text(
-                    """
+            """))
+            connection.execute(sa.text("""
                 CREATE TABLE cold_storage_locations (
                     id INTEGER PRIMARY KEY,
                     name VARCHAR2(255) NOT NULL,
@@ -97,13 +90,9 @@ def test_migrations_up_and_down(alembic_config):
                     created_at DATETIME,
                     updated_at DATETIME
                 )
-            """
-                )
-            )
+            """))
             # Add file_inventory for relocation_tasks foreign key
-            connection.execute(
-                sa.text(
-                    """
+            connection.execute(sa.text("""
                 CREATE TABLE file_inventory (
                     id INTEGER PRIMARY KEY,
                     path_id INTEGER NOT NULL,
@@ -113,9 +102,7 @@ def test_migrations_up_and_down(alembic_config):
                     file_mtime DATETIME NOT NULL,
                     is_encrypted BOOLEAN NOT NULL
                 )
-            """
-                )
-            )
+            """))
 
         # Apply initial empty migration explicitly or stamp it
         command.stamp(cfg, "726412e8862d")
@@ -160,9 +147,7 @@ def test_permissions_error_upgrade_is_idempotent(alembic_config):
         engine = sa.create_engine(db_url)
 
         with engine.begin() as connection:
-            connection.execute(
-                sa.text(
-                    """
+            connection.execute(sa.text("""
                 CREATE TABLE monitored_paths (
                     id INTEGER PRIMARY KEY,
                     name VARCHAR NOT NULL,
@@ -171,12 +156,8 @@ def test_permissions_error_upgrade_is_idempotent(alembic_config):
                     permissions_error TEXT,
                     max_concurrent_migrations INTEGER NOT NULL DEFAULT 3
                 )
-            """
-                )
-            )
-            connection.execute(
-                sa.text(
-                    """
+            """))
+            connection.execute(sa.text("""
                 CREATE TABLE cold_storage_locations (
                     id INTEGER PRIMARY KEY,
                     name VARCHAR NOT NULL,
@@ -187,13 +168,9 @@ def test_permissions_error_upgrade_is_idempotent(alembic_config):
                     encryption_status VARCHAR(10) NOT NULL,
                     permissions_error TEXT
                 )
-            """
-                )
-            )
+            """))
             # Add file_inventory for relocation_tasks foreign key
-            connection.execute(
-                sa.text(
-                    """
+            connection.execute(sa.text("""
                 CREATE TABLE file_inventory (
                     id INTEGER PRIMARY KEY,
                     path_id INTEGER NOT NULL,
@@ -203,16 +180,18 @@ def test_permissions_error_upgrade_is_idempotent(alembic_config):
                     file_mtime DATETIME NOT NULL,
                     is_encrypted BOOLEAN NOT NULL
                 )
-            """
-                )
-            )
+            """))
 
         command.stamp(cfg, "726412e8862d")
         command.upgrade(cfg, "head")
 
         inspector = sa.inspect(engine)
-        assert "permissions_error" in [col["name"] for col in inspector.get_columns("monitored_paths")]
-        assert "permissions_error" in [col["name"] for col in inspector.get_columns("cold_storage_locations")]
+        assert "permissions_error" in [
+            col["name"] for col in inspector.get_columns("monitored_paths")
+        ]
+        assert "permissions_error" in [
+            col["name"] for col in inspector.get_columns("cold_storage_locations")
+        ]
 
 
 def test_cold_storage_backend_values_normalize_on_upgrade(alembic_config):
@@ -223,9 +202,7 @@ def test_cold_storage_backend_values_normalize_on_upgrade(alembic_config):
         engine = sa.create_engine(db_url)
 
         with engine.begin() as connection:
-            connection.execute(
-                sa.text(
-                    """
+            connection.execute(sa.text("""
                 CREATE TABLE cold_storage_locations (
                     id INTEGER PRIMARY KEY,
                     name VARCHAR NOT NULL,
@@ -239,35 +216,25 @@ def test_cold_storage_backend_values_normalize_on_upgrade(alembic_config):
                     created_at DATETIME,
                     updated_at DATETIME
                 )
-            """
-                )
-            )
-            connection.execute(
-                sa.text(
-                    """
+            """))
+            connection.execute(sa.text("""
                 INSERT INTO cold_storage_locations (
                     id, name, path, caution_threshold_percent, critical_threshold_percent,
                     is_encrypted, encryption_status, backend_type, operation_mode
                 ) VALUES
                     (1, 'legacy-lower', '/tmp/legacy-lower', 20, 10, 0, 'none', 'local', 'move'),
                     (2, 'already-upper', '/tmp/already-upper', 20, 10, 0, 'none', 'S3', 'COPY')
-            """
-                )
-            )
+            """))
 
         command.stamp(cfg, "c3e1d8f7aa42")
         command.upgrade(cfg, "head")
 
         with engine.connect() as connection:
-            rows = connection.execute(
-                sa.text(
-                    """
+            rows = connection.execute(sa.text("""
                     SELECT id, backend_type, operation_mode
                     FROM cold_storage_locations
                     ORDER BY id
-                    """
-                )
-            ).fetchall()
+                    """)).fetchall()
 
         assert rows[0] == (1, "LOCAL", "MOVE")
         assert rows[1] == (2, "S3", "COPY")
@@ -282,37 +249,25 @@ def test_remote_audit_and_permissions_revision_downgrades_cleanly(alembic_config
         engine = sa.create_engine(db_url)
 
         with engine.begin() as connection:
-            connection.execute(
-                sa.text(
-                    """
+            connection.execute(sa.text("""
                     CREATE TABLE monitored_paths (
                         id INTEGER PRIMARY KEY,
                         name VARCHAR NOT NULL
                     )
-                    """
-                )
-            )
-            connection.execute(
-                sa.text(
-                    """
+                    """))
+            connection.execute(sa.text("""
                     CREATE TABLE remote_connections (
                         id INTEGER PRIMARY KEY,
                         name VARCHAR NOT NULL,
                         url VARCHAR NOT NULL
                     )
-                    """
-                )
-            )
-            connection.execute(
-                sa.text(
-                    """
+                    """))
+            connection.execute(sa.text("""
                     CREATE TABLE remote_transfer_jobs (
                         id INTEGER PRIMARY KEY,
                         remote_connection_id INTEGER NOT NULL
                     )
-                    """
-                )
-            )
+                    """))
 
         command.stamp(cfg, "d4f9b8a1c2e3")
         command.upgrade(cfg, "a1b2c3d4e5f6")
@@ -360,9 +315,7 @@ def _restore_snapshot(snapshot_name: str, tmp_path: Path) -> tuple[sa.Engine, st
 
 
 @pytest.mark.parametrize("snapshot_name", ["pre_max_concurrent.sql", "drifted_max_concurrent.sql"])
-def test_run_startup_migrations_against_real_world_snapshots(
-    tmp_path, snapshot_name
-):
+def test_run_startup_migrations_against_real_world_snapshots(tmp_path, snapshot_name):
     """Upgrade persisted legacy snapshots all the way to head without errors."""
     engine, db_url = _restore_snapshot(snapshot_name, tmp_path)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

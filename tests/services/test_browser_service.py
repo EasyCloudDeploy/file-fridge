@@ -36,7 +36,9 @@ class TestBrowserService:
     def test_check_path_permission_invalid_db_paths(self, db_session, tmp_path):
         """Test resilience against invalid paths in database."""
         # Add invalid path containing null byte (illegal in most filesystems)
-        db_session.add(MonitoredPath(name="BadPath", source_path="\0invalid", operation_type="move"))
+        db_session.add(
+            MonitoredPath(name="BadPath", source_path="\0invalid", operation_type="move")
+        )
         db_session.add(ColdStorageLocation(name="BadCold", path="\0invalid_cold"))
         db_session.commit()
 
