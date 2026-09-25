@@ -1,14 +1,21 @@
 {
+  "_rolldown-runtime-DK3Fl9T5.js": {
+    "file": "assets/rolldown-runtime-DK3Fl9T5.js",
+    "name": "rolldown-runtime"
+  },
   "frontend/entries/app.js": {
-    "file": "assets/app-BwScWvi0.js",
+    "file": "assets/app-D0tF8-Ad.js",
     "name": "app",
     "src": "frontend/entries/app.js",
     "isEntry": true,
+    "imports": [
+      "_rolldown-runtime-DK3Fl9T5.js"
+    ],
     "dynamicImports": [
       "static/js/app.js"
     ],
     "css": [
-      "assets/app-BnVJpm56.css"
+      "assets/app-AjUPN8ae.css"
     ],
     "assets": [
       "assets/bootstrap-icons-mSm7cUeB.woff2",
@@ -16,18 +23,21 @@
     ]
   },
   "frontend/entries/charts.js": {
-    "file": "assets/charts-Ct78DFbm.js",
+    "file": "assets/charts-CtUx7YPw.js",
     "name": "charts",
     "src": "frontend/entries/charts.js",
     "isEntry": true
   },
   "frontend/entries/grid.js": {
-    "file": "assets/grid-DrII7V-U.js",
+    "file": "assets/grid-raf-LO2j.js",
     "name": "grid",
     "src": "frontend/entries/grid.js",
     "isEntry": true,
+    "imports": [
+      "_rolldown-runtime-DK3Fl9T5.js"
+    ],
     "css": [
-      "assets/grid-bOOJsxkm.css"
+      "assets/grid-BcVNm-gk.css"
     ]
   },
   "node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff": {
@@ -39,7 +49,7 @@
     "src": "node_modules/bootstrap-icons/font/fonts/bootstrap-icons.woff2"
   },
   "static/js/app.js": {
-    "file": "assets/app-CyJiTTVT.js",
+    "file": "assets/app-CVyjCpaQ.js",
     "name": "app",
     "src": "static/js/app.js",
     "isDynamicEntry": true
