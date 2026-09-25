@@ -172,4 +172,6 @@ def test_populated_flow_endpoints_return_consistent_data(
     assert detailed_stats_response.status_code == 200
     detailed_stats = detailed_stats_response.json()
     assert detailed_stats["total_files_hot"] >= 1
-    assert any(item["path_name"] == monitored_path_name for item in detailed_stats["top_paths_by_files"])
+    assert any(
+        item["path_name"] == monitored_path_name for item in detailed_stats["top_paths_by_files"]
+    )

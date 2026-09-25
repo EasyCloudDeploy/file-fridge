@@ -68,7 +68,9 @@ class TestTagsRouter:
         assert response.json()["tag"]["id"] == tag_id
         assert response.json()["file_id"] == file_id
 
-    def test_remove_tag_from_file(self, authenticated_client, db_session, file_inventory_factory, create_tag):
+    def test_remove_tag_from_file(
+        self, authenticated_client, db_session, file_inventory_factory, create_tag
+    ):
         """Test removing a tag from a file."""
         inv = file_inventory_factory(path="/tmp/untagged_file.txt")
         file_id = inv.id
@@ -96,7 +98,9 @@ class TestTagsRouter:
         assert response.json()["successful"] == 2
         assert response.json()["total"] == 2
 
-    def test_bulk_remove_tags(self, authenticated_client, db_session, file_inventory_factory, create_tag):
+    def test_bulk_remove_tags(
+        self, authenticated_client, db_session, file_inventory_factory, create_tag
+    ):
         """Test bulk removing a tag from multiple files."""
         inv1 = file_inventory_factory(path="/tmp/bulk_rem1.txt")
         inv2 = file_inventory_factory(path="/tmp/bulk_rem2.txt", path_name="other_p2")
@@ -128,7 +132,9 @@ class TestTagsRouter:
         response = authenticated_client.post(f"/api/v1/tags/files/{inv.id}/tags", json=payload)
         assert response.status_code == 404
 
-    def test_remove_tag_from_file_not_found(self, authenticated_client, file_inventory_factory, create_tag):
+    def test_remove_tag_from_file_not_found(
+        self, authenticated_client, file_inventory_factory, create_tag
+    ):
         """Test removing tag from file when association doesn't exist."""
         inv = file_inventory_factory()
         tag = create_tag("T2")
@@ -144,6 +150,43 @@ class TestTagsRouter:
         """Test bulk adding a non-existent tag."""
         payload = {"tag_id": 9999, "file_ids": [1, 2]}
         response = authenticated_client.post("/api/v1/tags/bulk/add", json=payload)
-        assert response.status_code == 200 # Endpoint returns 200 even if tag not found, with results
+        assert (
+            response.status_code == 200
+        )  # Endpoint returns 200 even if tag not found, with results
         assert response.json()["failed"] == 2
         assert "not found" in response.json()["results"][0]["message"].lower()
+
+    def test_bulk_add_tag_already_tagged(
+        self, authenticated_client, db_session, file_inventory_factory, create_tag
+    ):
+        tag = create_tag("Already Tagged")
+        inv = file_inventory_factory(path="/tmp/already_tagged.txt")
+        db_session.add(FileTag(file_id=inv.id, tag_id=tag.id))
+        db_session.commit()
+        response = authenticated_client.post(
+            "/api/v1/tags/bulk/add",
+            json={"tag_id": tag.id, "file_ids": [inv.id, 999999]},
+        )
+        body = response.json()
+        assert body["successful"] >= 1
+        assert body["failed"] >= 1
+
+    def test_bulk_remove_tag_missing_file_and_untagged(
+        self, authenticated_client, file_inventory_factory, create_tag
+    ):
+        tag = create_tag("Bulk Remove Mixed")
+        inv = file_inventory_factory(path="/tmp/never_tagged.txt")
+        response = authenticated_client.post(
+            "/api/v1/tags/bulk/remove",
+            json={"tag_id": tag.id, "file_ids": [inv.id, 999999]},
+        )
+        body = response.json()
+        assert body["successful"] >= 1
+        assert body["failed"] == 1
+
+    def test_get_update_delete_tag_not_found(self, authenticated_client):
+        assert authenticated_client.get("/api/v1/tags/999999").status_code == 404
+        assert (
+            authenticated_client.patch("/api/v1/tags/999999", json={"name": "X"}).status_code == 404
+        )
+        assert authenticated_client.delete("/api/v1/tags/999999").status_code == 404

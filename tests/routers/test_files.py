@@ -1135,7 +1135,9 @@ def test_list_files_local_only_and_remote_only(
     response = authenticated_client.get("/api/v1/files?local_only=true")
     assert response.status_code == 200
     lines = response.content.decode().strip().split("\n")
-    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    files = [
+        json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"
+    ]
     assert len(files) == 1
     assert files[0]["id"] == local_file.id
     assert files[0].get("is_remote") is not True
@@ -1144,7 +1146,9 @@ def test_list_files_local_only_and_remote_only(
     response = authenticated_client.get("/api/v1/files?remote_only=true")
     assert response.status_code == 200
     lines = response.content.decode().strip().split("\n")
-    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    files = [
+        json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"
+    ]
     assert len(files) == 1
     assert files[0]["id"] == f"remote-{remote_row_id}"
     assert files[0].get("is_remote") is True
@@ -1155,16 +1159,21 @@ def test_list_files_google_search_syntax(
 ):
     """Test Google-style search operators in files listing."""
     # Create files with different extensions, sizes, and keywords
-    file_inventory_factory(str(tmp_path / "Quarterly_Report_Draft.pdf"), file_extension=".pdf", size=100)
-    file_inventory_factory(str(tmp_path / "Quarterly_Report_Final.pdf"), file_extension=".pdf", size=5000000) # 5MB
+    file_inventory_factory(
+        str(tmp_path / "Quarterly_Report_Draft.pdf"), file_extension=".pdf", size=100
+    )
+    file_inventory_factory(
+        str(tmp_path / "Quarterly_Report_Final.pdf"), file_extension=".pdf", size=5000000
+    )  # 5MB
     file_inventory_factory(str(tmp_path / "Report_Final.docx"), file_extension=".docx", size=1000)
-
 
     # 1. Search with ext operator and exclusion: "Report" ext:pdf -Draft
     response = authenticated_client.get("/api/v1/files?search=Report+ext:pdf+-Draft")
     assert response.status_code == 200
     lines = response.content.decode().strip().split("\n")
-    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    files = [
+        json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"
+    ]
     # Should only match Quarterly_Report_Final.pdf (has "Report", extension pdf, does not contain "Draft")
     assert len(files) == 1
     assert "Quarterly_Report_Final.pdf" in files[0]["file_path"]
@@ -1173,7 +1182,9 @@ def test_list_files_google_search_syntax(
     response = authenticated_client.get("/api/v1/files?search=size:>1mb")
     assert response.status_code == 200
     lines = response.content.decode().strip().split("\n")
-    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    files = [
+        json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"
+    ]
     # Should only match Quarterly_Report_Final.pdf (5MB > 1MB)
     assert len(files) == 1
     assert "Quarterly_Report_Final.pdf" in files[0]["file_path"]
@@ -1183,7 +1194,9 @@ def test_list_files_google_search_syntax(
     response = authenticated_client.get('/api/v1/files?search="Quarterly+Report"')
     assert response.status_code == 200
     lines = response.content.decode().strip().split("\n")
-    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    files = [
+        json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"
+    ]
     assert len(files) == 1
     assert "Quarterly Report Final.pdf" in files[0]["file_path"]
 
@@ -1197,6 +1210,7 @@ def test_bulk_delete_files(
 
     # Add matching FileRecord for file1 to test FileRecord cleanup too
     record1 = FileRecord(
+        path_id=file1.path_id,
         original_path=str(file1.file_path),
         cold_storage_path=str(file1.file_path),
         file_size=file1.file_size,
@@ -1216,7 +1230,10 @@ def test_bulk_delete_files(
 
     # Verify both deleted from DB
     db_session.expire_all()
-    assert db_session.query(FileInventory).filter(FileInventory.id.in_([file1.id, file2.id])).count() == 0
+    assert (
+        db_session.query(FileInventory).filter(FileInventory.id.in_([file1.id, file2.id])).count()
+        == 0
+    )
     assert db_session.query(FileRecord).filter(FileRecord.id == record1.id).count() == 0
 
 
@@ -1243,14 +1260,10 @@ def test_list_files_filter_by_missing_cold(
     assert response.status_code == 200
     lines = response.content.decode().strip().split("\n")
     metadata = json.loads(lines[0])
-    files = [json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"]
+    files = [
+        json.loads(line)["data"] for line in lines[1:-1] if json.loads(line).get("type") == "file"
+    ]
 
     assert metadata["total"] == 1
     assert len(files) == 1
     assert files[0]["id"] == cold_missing.id
-
-
-
-
-
-

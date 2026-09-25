@@ -25,7 +25,9 @@ class TestRetryWithBackoff:
         """Test that a function that fails initially but succeeds later is retried and succeeds."""
         calls = 0
 
-        @retry_with_backoff(max_attempts=3, initial_delay=0.1, backoff_factor=2.0, allowed_exceptions=(ValueError,))
+        @retry_with_backoff(
+            max_attempts=3, initial_delay=0.1, backoff_factor=2.0, allowed_exceptions=(ValueError,)
+        )
         def func():
             nonlocal calls
             calls += 1
@@ -46,7 +48,9 @@ class TestRetryWithBackoff:
         """Test that allowed exceptions raise the original error after max_attempts."""
         calls = 0
 
-        @retry_with_backoff(max_attempts=3, initial_delay=0.1, backoff_factor=2.0, allowed_exceptions=(ValueError,))
+        @retry_with_backoff(
+            max_attempts=3, initial_delay=0.1, backoff_factor=2.0, allowed_exceptions=(ValueError,)
+        )
         def func():
             nonlocal calls
             calls += 1
@@ -62,7 +66,9 @@ class TestRetryWithBackoff:
         """Test that exceptions not listed in allowed_exceptions raise immediately without retries."""
         calls = 0
 
-        @retry_with_backoff(max_attempts=3, initial_delay=0.1, backoff_factor=2.0, allowed_exceptions=(ValueError,))
+        @retry_with_backoff(
+            max_attempts=3, initial_delay=0.1, backoff_factor=2.0, allowed_exceptions=(ValueError,)
+        )
         def func():
             nonlocal calls
             calls += 1
@@ -73,3 +79,11 @@ class TestRetryWithBackoff:
                 func()
             assert calls == 1
             mock_sleep.assert_not_called()
+
+    def test_zero_max_attempts_raises_runtime_error(self):
+        @retry_with_backoff(max_attempts=0)
+        def func():
+            return "ok"
+
+        with pytest.raises(RuntimeError, match="Unexpected end of retry loop"):
+            func()

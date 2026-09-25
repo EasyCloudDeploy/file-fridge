@@ -1,3 +1,4 @@
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -13,11 +14,17 @@ class TestMetadataBackfillService:
         f1.write_text("content1")
         f2 = tmp_path / "test2.jpg"
         # Minimum JPEG header to be recognized
-        f2.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00")
+        f2.write_bytes(
+            b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00H\x00H\x00\x00\xff\xdb\x00C\x00"
+        )
 
         # Create inventory entries missing metadata
-        inv1 = file_inventory_factory(path=str(f1), file_extension=None, mime_type=None, checksum=None)
-        inv2 = file_inventory_factory(path=str(f2), file_extension=None, mime_type=None, checksum=None)
+        inv1 = file_inventory_factory(
+            path=str(f1), file_extension=None, mime_type=None, checksum=None
+        )
+        inv2 = file_inventory_factory(
+            path=str(f2), file_extension=None, mime_type=None, checksum=None
+        )
 
         service = MetadataBackfillService(db_session)
         stats = service.backfill_all()
@@ -78,7 +85,7 @@ class TestMetadataBackfillService:
             path=str(f1),
             file_extension=".txt",
             mime_type="text/plain",
-            checksum="existing-checksum"
+            checksum="existing-checksum",
         )
 
         service = MetadataBackfillService(db_session)
@@ -102,7 +109,9 @@ class TestMetadataBackfillService:
         assert inv1.file_extension == ".txt"
         assert inv1.checksum is None  # Should still be None
 
-    def test_backfill_batch_commit_failure(self, db_session, tmp_path, file_inventory_factory, monkeypatch):
+    def test_backfill_batch_commit_failure(
+        self, db_session, tmp_path, file_inventory_factory, monkeypatch
+    ):
         """Test handling of commit failure during backfill."""
         f1 = tmp_path / "test1.txt"
         f1.write_text("content1")
@@ -112,8 +121,10 @@ class TestMetadataBackfillService:
 
         # Mock commit to fail
         original_commit = db_session.commit
+
         def mock_commit():
             raise Exception("Database error")
+
         monkeypatch.setattr(db_session, "commit", mock_commit)
 
         stats = service.backfill_all(batch_size=1)
@@ -121,3 +132,36 @@ class TestMetadataBackfillService:
         assert stats["files_failed"] == 1
         # The service currently increments processed before committing
         assert stats["files_processed"] == 1
+
+    def test_backfill_metadata_extract_failure(
+        self, db_session, tmp_path, file_inventory_factory, monkeypatch
+    ):
+        f1 = tmp_path / "bad_meta.txt"
+        f1.write_text("content")
+        file_inventory_factory(path=str(f1), file_extension=None, mime_type=None)
+
+        monkeypatch.setattr(
+            "app.services.metadata_backfill.FileMetadataExtractor.extract_metadata",
+            MagicMock(side_effect=RuntimeError("extract failed")),
+        )
+
+        service = MetadataBackfillService(db_session)
+        stats = service.backfill_all(batch_size=1)
+
+        assert stats["files_failed"] == 1
+
+    def test_backfill_per_file_exception(
+        self, db_session, tmp_path, file_inventory_factory, monkeypatch
+    ):
+        f1 = tmp_path / "loop_err.txt"
+        f1.write_text("content")
+        file_inventory_factory(path=str(f1), file_extension=None)
+
+        service = MetadataBackfillService(db_session)
+        monkeypatch.setattr(
+            service,
+            "_update_file_metadata",
+            MagicMock(side_effect=RuntimeError("loop boom")),
+        )
+        stats = service.backfill_all(batch_size=1)
+        assert stats["files_failed"] == 1

@@ -50,6 +50,7 @@ class TestNetworkDetection:
 
         # Default: not allowed
         from app.config import settings
+
         monkeypatch.setattr(settings, "allow_atime_over_network_mounts", False)
 
         available, msg = check_atime_availability("/Volumes/RemoteData")
@@ -61,6 +62,7 @@ class TestNetworkDetection:
         monkeypatch.setattr(platform, "system", lambda: "Darwin")
 
         from app.config import settings
+
         monkeypatch.setattr(settings, "allow_atime_over_network_mounts", True)
 
         available, msg = check_atime_availability("/Volumes/RemoteData")
@@ -70,8 +72,29 @@ class TestNetworkDetection:
     def test_is_network_mount_exception_handling(self, monkeypatch):
         """Test exception handling in is_network_mount."""
         from pathlib import Path
+
         def mock_resolve(self):
             raise RuntimeError("Filesystem error")
+
         monkeypatch.setattr(Path, "resolve", mock_resolve)
 
         assert is_network_mount("/some/path") is False
+
+    def test_is_network_mount_macos_statvfs_differs(self, monkeypatch):
+        import os
+
+        monkeypatch.setattr(platform, "system", lambda: "Darwin")
+
+        class StatVfs:
+            def __init__(self, fsid):
+                self.f_fsid = fsid
+
+        monkeypatch.setattr(os, "statvfs", lambda p: StatVfs(1 if p == "/" else 2))
+        assert is_network_mount("/Volumes/RemoteShare/data") is True
+
+    def test_is_network_mount_macos_statvfs_failure(self, monkeypatch):
+        import os
+
+        monkeypatch.setattr(platform, "system", lambda: "Darwin")
+        monkeypatch.setattr(os, "statvfs", lambda _p: (_ for _ in ()).throw(OSError("no statvfs")))
+        assert is_network_mount("/Volumes/RemoteShare/data") is True

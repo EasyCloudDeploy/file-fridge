@@ -284,9 +284,7 @@ def _seed_live_freeze_state(
     from app.services.file_mover import FileMover
 
     def progress_callback(transferred: int) -> None:
-        scan_progress_manager.update_file_progress(
-            monitored_path.id, operation_id, transferred
-        )
+        scan_progress_manager.update_file_progress(monitored_path.id, operation_id, transferred)
         if transferred >= pause_bytes:
             raise RuntimeError("Paused for test")
 
@@ -294,8 +292,10 @@ def _seed_live_freeze_state(
     # to force OSError on rename inside _move if necessary, or just force the copy code path.
     # We will use monkeypatching to ensure `rename` fails and it uses `_copy_with_progress`.
     original_rename = Path.rename
+
     def mock_rename(self, target):
         raise OSError("Cross-device link")
+
     Path.rename = mock_rename
 
     try:
@@ -304,7 +304,7 @@ def _seed_live_freeze_state(
             destination_file,
             OperationType.MOVE,
             verify_checksum=False,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
         )
     except RuntimeError as e:
         if str(e) != "Paused for test":
@@ -382,22 +382,20 @@ def _seed_live_thaw_state(
     from app.services.file_thawer import FileThawer
 
     def progress_callback(transferred: int) -> None:
-        scan_progress_manager.update_file_progress(
-            monitored_path.id, operation_id, transferred
-        )
+        scan_progress_manager.update_file_progress(monitored_path.id, operation_id, transferred)
         if transferred >= pause_bytes:
             raise RuntimeError("Paused for test")
 
     original_rename = Path.rename
+
     def mock_rename(self, target):
         raise OSError("Cross-device link")
+
     Path.rename = mock_rename
 
     try:
         FileThawer._move_preserving_timestamps(
-            cold_file,
-            destination_file,
-            progress_callback=progress_callback
+            cold_file, destination_file, progress_callback=progress_callback
         )
     except RuntimeError as e:
         if str(e) != "Paused for test":

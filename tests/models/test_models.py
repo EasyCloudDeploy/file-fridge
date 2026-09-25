@@ -138,7 +138,6 @@ class UserFactory(factory.alchemy.SQLAlchemyModelFactory):
     roles = ["user"]
 
 
-
 # ==================================
 # Fixtures
 # ==================================
@@ -257,7 +256,6 @@ def test_user_creation(db_session: Session):
     assert user.id is not None
     assert user.username == "admin_user"
     assert user.roles == ["admin"]
-
 
 
 @patch("app.models.encryption_manager")

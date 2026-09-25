@@ -58,8 +58,10 @@ class TestIdentityRouter:
     def test_import_identity_unexpected_error(self, authenticated_client, monkeypatch):
         """Test handling of unexpected errors during identity import."""
         from app.services.identity_service import identity_service
+
         def mock_fail(*args, **kwargs):
             raise Exception("Unexpected error")
+
         monkeypatch.setattr(identity_service, "import_keys_pem", mock_fail)
 
         import_payload = {

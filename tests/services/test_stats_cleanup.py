@@ -24,20 +24,33 @@ class TestStatsCleanupService:
 
         # 1. FileRecords
         old_record = FileRecord(
-            original_path="/tmp/old", cold_storage_path="/tmp/cold/old",
-            file_size=100, operation_type=OperationType.MOVE, moved_at=cutoff
+            original_path="/tmp/old",
+            cold_storage_path="/tmp/cold/old",
+            file_size=100,
+            operation_type=OperationType.MOVE,
+            moved_at=cutoff,
         )
         new_record = FileRecord(
-            original_path="/tmp/new", cold_storage_path="/tmp/cold/new",
-            file_size=100, operation_type=OperationType.MOVE, moved_at=recent
+            original_path="/tmp/new",
+            cold_storage_path="/tmp/cold/new",
+            file_size=100,
+            operation_type=OperationType.MOVE,
+            moved_at=recent,
         )
 
         # 2. FileInventory (MISSING/DELETED)
         # Use factory to ensure all required fields are set
-        old_inv = file_inventory_factory(path="/tmp/missing", status=FileStatus.MISSING, storage_type=StorageType.COLD)
+        old_inv = file_inventory_factory(
+            path="/tmp/missing", status=FileStatus.MISSING, storage_type=StorageType.COLD
+        )
         old_inv.last_seen = cutoff
 
-        new_inv = file_inventory_factory(path="/tmp/active", status=FileStatus.ACTIVE, storage_type=StorageType.HOT, path_name="active_path")
+        new_inv = file_inventory_factory(
+            path="/tmp/active",
+            status=FileStatus.ACTIVE,
+            storage_type=StorageType.HOT,
+            path_name="active_path",
+        )
         new_inv.last_seen = recent
 
         db_session.add_all([old_record, new_record])
@@ -53,7 +66,9 @@ class TestStatsCleanupService:
         assert db_session.query(FileRecord).count() == 1
         assert db_session.query(FileInventory).filter_by(status=FileStatus.ACTIVE).count() == 1
 
-    def test_cleanup_orphaned_temp_files_success(self, db_session, tmp_path, monitored_path_factory):
+    def test_cleanup_orphaned_temp_files_success(
+        self, db_session, tmp_path, monitored_path_factory
+    ):
         """Test cleaning up orphaned .fftmp files."""
         hot_dir = tmp_path / "hot_tmp"
         hot_dir.mkdir()
@@ -79,6 +94,61 @@ class TestStatsCleanupService:
 
     def test_cleanup_temp_files_in_dir_nonexistent(self):
         """Test cleanup in non-existent directory."""
-        deleted, size = stats_cleanup_service._cleanup_temp_files_in_dir(Path("/non/existent/path"), datetime.now(timezone.utc))
+        deleted, size = stats_cleanup_service._cleanup_temp_files_in_dir(
+            Path("/non/existent/path"), datetime.now(timezone.utc)
+        )
         assert deleted == 0
         assert size == 0
+
+    def test_cleanup_temp_file_stat_failure(self, tmp_path, monkeypatch):
+        bad = tmp_path / "bad.fftmp"
+        bad.write_text("x")
+        old_time = (datetime.now(timezone.utc) - timedelta(hours=30)).timestamp()
+        os.utime(str(bad), (old_time, old_time))
+
+        original_stat = Path.stat
+
+        def patched_stat(self, *args, **kwargs):
+            if self.name == "bad.fftmp":
+                raise OSError("stat fail")
+            return original_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", patched_stat)
+        deleted, size = stats_cleanup_service._cleanup_temp_files_in_dir(
+            tmp_path, datetime.now(timezone.utc)
+        )
+        assert deleted == 0
+        assert size == 0
+
+    def test_cleanup_orphaned_temp_files_handles_errors(self, db_session, monkeypatch):
+        monkeypatch.setattr(
+            db_session,
+            "query",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("db down")),
+        )
+        stats = stats_cleanup_service.cleanup_orphaned_temp_files(db_session)
+        assert stats["success"] is False
+
+    def test_cleanup_old_records_failure(self, db_session, monkeypatch):
+        monkeypatch.setattr(
+            db_session, "commit", lambda: (_ for _ in ()).throw(RuntimeError("commit fail"))
+        )
+        stats = stats_cleanup_service.cleanup_old_records(db_session)
+        assert stats["success"] is False
+
+    def test_cleanup_old_stats_job_func(self, monkeypatch, db_session):
+        from app.services.stats_cleanup import cleanup_old_stats_job_func
+
+        monkeypatch.setattr(db_session, "close", lambda: None)
+        monkeypatch.setattr("app.services.stats_cleanup.SessionLocal", lambda: db_session)
+        monkeypatch.setattr(
+            stats_cleanup_service,
+            "cleanup_orphaned_temp_files",
+            lambda _db: {"success": True, "files_deleted": 0, "bytes_freed": 0},
+        )
+        monkeypatch.setattr(
+            stats_cleanup_service,
+            "cleanup_old_records",
+            lambda _db: {"success": True, "records_deleted": 0, "inventory_deleted": 0},
+        )
+        cleanup_old_stats_job_func()

@@ -25,7 +25,7 @@ class TestSettingsRouter:
                 "smtp_user": "test-user",
                 "smtp_password": "test-password",
                 "smtp_sender": "test@test-server.com",
-                "smtp_use_tls": True
+                "smtp_use_tls": True,
             }
             response = authenticated_client.put("/api/v1/settings/smtp", json=payload)
             assert response.status_code == 200
@@ -54,7 +54,7 @@ class TestSettingsRouter:
                 "smtp_user": "another-user",
                 "smtp_password": "another-password",
                 "smtp_sender": "another@another-server.com",
-                "smtp_use_tls": True
+                "smtp_use_tls": True,
             }
             response = authenticated_client.put("/api/v1/settings/smtp", json=payload)
             assert response.status_code == 400

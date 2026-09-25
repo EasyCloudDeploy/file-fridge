@@ -54,8 +54,10 @@ class TestIndexingManager:
     def test_create_noindex_file_failure(self, monkeypatch):
         """Test handling failure during .noindex creation."""
         from pathlib import Path
+
         def mock_mkdir(self, **kwargs):
             raise PermissionError("Permission denied")
+
         monkeypatch.setattr(Path, "mkdir", mock_mkdir)
 
         assert IndexingManager.create_noindex_file("/root/path") is False
@@ -69,6 +71,17 @@ class TestIndexingManager:
 
         def mock_unlink(self):
             raise PermissionError("Locked")
+
         monkeypatch.setattr(Path, "unlink", mock_unlink)
 
         assert IndexingManager.remove_noindex_file(str(dir_path)) is False
+
+    def test_manage_noindex_files_partial_failure(self, tmp_path, monkeypatch):
+        hot = tmp_path / "hot_partial"
+        cold = tmp_path / "cold_partial"
+
+        def mock_create(path: str) -> bool:
+            return str(path).endswith("hot_partial")
+
+        monkeypatch.setattr(IndexingManager, "create_noindex_file", mock_create)
+        assert IndexingManager.manage_noindex_files(str(hot), str(cold), True) is False

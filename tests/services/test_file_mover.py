@@ -275,9 +275,7 @@ def test_move_with_rollback_creates_destination_parent(mock_move, mock_verifier,
 
 @patch("app.services.file_mover.checksum_verifier")
 @patch("app.services.file_mover._move")
-def test_move_with_rollback_checksum_mismatch(
-    mock_move, mock_verifier, source_and_dest
-):
+def test_move_with_rollback_checksum_mismatch(mock_move, mock_verifier, source_and_dest):
     """Test move_with_rollback with checksum mismatch triggers rollback."""
     source, dest = source_and_dest
     mock_move.return_value = (True, None)
@@ -315,6 +313,7 @@ def test_move_with_rollback_cleans_partial_destination_on_operation_failure(
     assert dest.exists() is False
     mock_verifier.calculate_checksum.assert_called_once_with(source)
 
+
 def test_move_symlink_direct(tmp_path):
     """Test _move_symlink when it points to an absolute path."""
     target = tmp_path / "actual_target.txt"
@@ -324,12 +323,14 @@ def test_move_symlink_direct(tmp_path):
     dest = tmp_path / "final_dest.txt"
 
     from app.services.file_mover import _move_symlink
+
     success, error = _move_symlink(link, dest)
 
     assert success is True
     assert not link.exists()
     assert dest.exists()
     assert dest.read_text() == "data"
+
 
 def test_move_symlink_relative(tmp_path):
     """Test _move_symlink when it points to a relative path."""
@@ -342,6 +343,7 @@ def test_move_symlink_relative(tmp_path):
     dest = tmp_path / "moved_relative.txt"
 
     from app.services.file_mover import _move_symlink
+
     success, error = _move_symlink(link, dest)
 
     assert success is True
@@ -349,12 +351,155 @@ def test_move_symlink_relative(tmp_path):
     assert dest.exists()
     assert dest.read_text() == "relative data"
 
+
+def test_cleanup_partial_destination_symlink_and_missing(tmp_path):
+    from app.services.file_mover import _cleanup_partial_destination
+
+    link = tmp_path / "partial_link"
+    link.symlink_to(tmp_path / "missing_target.txt")
+    _cleanup_partial_destination(tmp_path / "src.txt", link, "err", "test")
+    assert not link.exists()
+
+    missing_dest = tmp_path / "never_created.txt"
+    _cleanup_partial_destination(tmp_path / "src.txt", missing_dest, "err", "test")
+
+
+def test_cleanup_partial_destination_file(tmp_path):
+    from app.services.file_mover import _cleanup_partial_destination
+
+    dest = tmp_path / "partial.bin"
+    dest.write_bytes(b"partial")
+    _cleanup_partial_destination(tmp_path / "src.bin", dest, "failed", "rollback")
+    assert not dest.exists()
+
+
+def test_resilient_copy_replaces_existing_destination(tmp_path):
+    from app.services.file_mover import resilient_copy
+
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"new")
+    dest = tmp_path / "dest.bin"
+    dest.write_bytes(b"old")
+    resilient_copy(source, dest, None)
+    assert dest.read_bytes() == b"new"
+
+
 @patch("app.services.file_mover.shutil.copy2")
 @patch("app.services.file_mover.os.utime")
 def test_copy_no_progress(mock_utime, mock_copy2, source_and_dest):
     """Test _copy_with_progress without callback (uses shutil.copy2)."""
     source, dest = source_and_dest
     from app.services.file_mover import _copy_with_progress
+
     _copy_with_progress(source, dest, None)
     mock_copy2.assert_called_once()
     mock_utime.assert_called_once()
+
+
+def test_move_file_unknown_operation(source_and_dest):
+    source, dest = source_and_dest
+    success, error = move_file(source, dest, "invalid")  # type: ignore[arg-type]
+    assert success is False
+    assert "Unknown operation type" in (error or "")
+
+
+@patch("app.services.file_mover.shutil.disk_usage", side_effect=RuntimeError("disk check failed"))
+def test_move_file_disk_check_warning(mock_disk_usage, source_and_dest):
+    source, dest = source_and_dest
+    with patch("app.services.file_mover._move", return_value=(True, None)):
+        success, error = move_file(source, dest, OperationType.MOVE)
+    assert success is True
+
+
+def test_move_symlink_already_points_to_destination(tmp_path):
+    from app.services.file_mover import _move_symlink
+
+    target = tmp_path / "target.txt"
+    target.write_text("same")
+    link = tmp_path / "link.txt"
+    link.symlink_to(target)
+    success, error = _move_symlink(link, target)
+    assert success is True
+    assert not link.exists()
+
+
+def test_cleanup_partial_destination_directory(tmp_path):
+    from app.services.file_mover import _cleanup_partial_destination
+
+    dest_dir = tmp_path / "partial_dir"
+    dest_dir.mkdir()
+    (dest_dir / "nested.txt").write_text("x")
+    _cleanup_partial_destination(tmp_path / "src.txt", dest_dir, "err", "ctx")
+    assert not dest_dir.exists()
+
+
+@patch("app.services.file_mover.os.remove", side_effect=OSError("remove failed"))
+def test_cleanup_partial_destination_logs_failure(mock_remove, tmp_path):
+    from app.services.file_mover import _cleanup_partial_destination
+
+    dest = tmp_path / "partial_remove_fail.bin"
+    dest.write_bytes(b"x")
+    _cleanup_partial_destination(tmp_path / "src.bin", dest, "failed", "ctx")
+    assert dest.exists()
+
+
+def test_copy_with_progress_reports_callback(source_and_dest):
+    from app.services.file_mover import _copy_with_progress
+
+    source, dest = source_and_dest
+    seen = []
+
+    def _progress(n):
+        seen.append(n)
+
+    _copy_with_progress(source, dest, _progress)
+    assert seen[0] == 0
+    assert seen[-1] >= source.stat().st_size
+
+
+@patch("app.services.file_mover.shutil.disk_usage")
+def test_move_file_insufficient_disk_space(mock_disk_usage, source_and_dest):
+    source, dest = source_and_dest
+    mock_disk_usage.return_value = (1000, 900, 10)
+    success, error = move_file(source, dest, OperationType.MOVE)
+    assert success is False
+    assert "Not enough space" in (error or "")
+
+
+@patch("app.services.file_mover.shutil.disk_usage", side_effect=FileNotFoundError("gone"))
+def test_move_file_disk_check_source_disappeared(mock_disk_usage, tmp_path):
+    source = tmp_path / "missing.txt"
+    dest = tmp_path / "dest.txt"
+    success, error = move_file(source, dest, OperationType.MOVE)
+    assert success is False
+    assert "no longer exists" in (error or "").lower()
+
+
+def test_move_cross_filesystem_uses_deferred_unlinks(tmp_path):
+    from app.services.file_mover import _move
+
+    source = tmp_path / "cross_src.bin"
+    source.write_bytes(b"1234")
+    dest = tmp_path / "cross_dest.bin"
+    deferred = []
+
+    with patch.object(Path, "rename", side_effect=OSError("cross device")):
+        success, error = _move(source, dest, deferred_unlinks=deferred)
+    assert success is True
+    assert dest.exists()
+    assert source in deferred
+
+
+def test_move_symlink_deferred_unlinks(tmp_path):
+    from app.services.file_mover import _move_symlink
+
+    data = tmp_path / "data.txt"
+    data.write_text("payload")
+    link = tmp_path / "link.txt"
+    link.symlink_to(data)
+    dest = tmp_path / "moved.txt"
+    deferred = []
+    success, error = _move_symlink(link, dest, deferred_unlinks=deferred)
+    assert success is True
+    assert dest.exists()
+    assert link in deferred or data in deferred

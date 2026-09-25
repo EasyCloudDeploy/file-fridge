@@ -17,7 +17,7 @@ class TestAuditTrailService:
             file=inv,
             transaction_type=TransactionType.FREEZE,
             initiated_by="test_user",
-            operation_metadata={"key": "value"}
+            operation_metadata={"key": "value"},
         )
 
         assert tx.id is not None
@@ -47,9 +47,7 @@ class TestAuditTrailService:
         src = Path("/tmp/cold/f.txt")
         dst = Path("/tmp/hot/f.txt")
 
-        tx = audit_trail_service.log_thaw_operation(
-            db_session, inv, src, dst
-        )
+        tx = audit_trail_service.log_thaw_operation(db_session, inv, src, dst)
 
         assert tx.transaction_type == TransactionType.THAW
         assert tx.old_storage_type == StorageType.COLD
@@ -58,9 +56,7 @@ class TestAuditTrailService:
     def test_log_remote_migration(self, db_session, file_inventory_factory):
         """Test the remote migration convenience method."""
         inv = file_inventory_factory()
-        tx = audit_trail_service.log_remote_migration(
-            db_session, inv, "http://remote-server"
-        )
+        tx = audit_trail_service.log_remote_migration(db_session, inv, "http://remote-server")
         assert tx.transaction_type == TransactionType.REMOTE_MIGRATE
         assert "remote-server" in tx.operation_metadata
 
@@ -80,6 +76,7 @@ class TestAuditTrailService:
         # Add 2 entries with a gap larger than 1s for stable timestamp-based ordering in SQLite
         audit_trail_service.log_transaction(db_session, inv, TransactionType.FREEZE)
         import time
+
         time.sleep(1.1)
         audit_trail_service.log_transaction(db_session, inv, TransactionType.THAW)
 
@@ -94,7 +91,9 @@ class TestAuditTrailService:
         # Success
         audit_trail_service.log_transaction(db_session, inv, TransactionType.FREEZE, success=True)
         # Failure
-        audit_trail_service.log_transaction(db_session, inv, TransactionType.FREEZE, success=False, error_message="Disk full")
+        audit_trail_service.log_transaction(
+            db_session, inv, TransactionType.FREEZE, success=False, error_message="Disk full"
+        )
 
         failed = audit_trail_service.get_failed_transactions(db_session)
         assert len(failed) == 1

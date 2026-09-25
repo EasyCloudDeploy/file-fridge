@@ -80,3 +80,94 @@ class TestRateLimiter:
         with pytest.raises(HTTPException) as exc:
             check_rate_limit(mock_request)
         assert exc.value.status_code == 429
+
+    def test_check_login_rate_limit_raises(self, monkeypatch):
+        from fastapi import HTTPException, Request
+
+        from app.utils import rate_limiter
+
+        mock_limiter = MagicMock()
+        mock_limiter.is_allowed.return_value = False
+        monkeypatch.setattr(rate_limiter, "_login_rate_limiter", mock_limiter)
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/login",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+        }
+        request = Request(scope)
+        with pytest.raises(HTTPException) as exc:
+            rate_limiter.check_login_rate_limit(request)
+        assert exc.value.status_code == 429
+        assert "login" in exc.value.detail.lower()
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_decorator_finds_request_in_kwargs(self, monkeypatch):
+        from fastapi import Request
+
+        from app.utils.rate_limiter import rate_limit
+
+        monkeypatch.setenv("TESTING", "false")
+        monkeypatch.setenv("DISABLE_RATE_LIMIT", "false")
+
+        @rate_limit(requests_per_minute=5)
+        async def handler(*, request: Request):
+            return "ok"
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+        }
+        request = Request(scope)
+        assert await handler(request=request) == "ok"
+
+    @pytest.mark.asyncio
+    async def test_rate_limit_decorator_allows_and_blocks(self, monkeypatch):
+        from fastapi import HTTPException, Request
+
+        from app.utils.rate_limiter import rate_limit
+
+        monkeypatch.setenv("TESTING", "false")
+        monkeypatch.setenv("DISABLE_RATE_LIMIT", "false")
+
+        @rate_limit(requests_per_minute=1)
+        async def handler(request: Request):
+            return "ok"
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+        }
+        request = Request(scope)
+        assert await handler(request) == "ok"
+        with pytest.raises(HTTPException) as exc:
+            await handler(request)
+        assert exc.value.status_code == 429
+
+    def test_rate_limit_dependency_factory(self, monkeypatch):
+        from fastapi import HTTPException, Request
+
+        from app.utils.rate_limiter import rate_limit_dependency
+
+        monkeypatch.setenv("TESTING", "false")
+        monkeypatch.setenv("DISABLE_RATE_LIMIT", "false")
+        check = rate_limit_dependency(requests_per_minute=1)
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+        }
+        request = Request(scope)
+        check(request)
+        with pytest.raises(HTTPException):
+            check(request)

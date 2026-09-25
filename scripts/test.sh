@@ -38,7 +38,7 @@ case "${1:-all}" in
     ;;
   coverage)
     echo "Running all tests with coverage report..."
-    "$UV_CMD" run pytest --cov=app --cov-report=html --cov-fail-under=80
+    "$UV_CMD" run pytest --cov=app --cov-report=html --cov-fail-under=90
     echo "Coverage report generated at htmlcov/index.html"
     ;;
   *)

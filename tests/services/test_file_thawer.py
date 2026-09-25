@@ -1,4 +1,3 @@
-
 import pytest
 
 from app.models import (
@@ -32,7 +31,7 @@ class TestFileThawer:
             original_path=str(hot_file),
             cold_storage_path=str(cold_file),
             file_size=7,
-            operation_type=OperationType.MOVE
+            operation_type=OperationType.MOVE,
         )
         db_session.add(record)
         db_session.commit()
@@ -62,18 +61,21 @@ class TestFileThawer:
 
         # Actually encrypt it
         from app.services.encryption_service import file_encryption_service
+
         temp_src = tmp_path / "temp_src"
         temp_src.write_text("encrypted content")
         file_encryption_service.encrypt_file(db_session, temp_src, cold_file)
 
-        inv = file_inventory_factory(path=str(cold_file), storage_type=StorageType.COLD, is_encrypted=True)
+        inv = file_inventory_factory(
+            path=str(cold_file), storage_type=StorageType.COLD, is_encrypted=True
+        )
 
         record = FileRecord(
             path_id=inv.path_id,
             original_path=str(hot_file),
             cold_storage_path=str(cold_file),
             file_size=17,
-            operation_type=OperationType.MOVE
+            operation_type=OperationType.MOVE,
         )
         db_session.add(record)
         db_session.commit()
@@ -94,7 +96,7 @@ class TestFileThawer:
         hot_dir = tmp_path / "hot"
         hot_dir.mkdir(parents=True, exist_ok=True)
         hot_file = hot_dir / "test.txt"
-        hot_file.write_text("content") # Still exists for COPY
+        hot_file.write_text("content")  # Still exists for COPY
 
         cold_dir = tmp_path / "cold"
         cold_dir.mkdir(parents=True, exist_ok=True)
@@ -107,7 +109,7 @@ class TestFileThawer:
             original_path=str(hot_file),
             cold_storage_path=str(cold_file),
             file_size=7,
-            operation_type=OperationType.COPY
+            operation_type=OperationType.COPY,
         )
         db_session.add(record)
         db_session.commit()
@@ -136,7 +138,7 @@ class TestFileThawer:
             original_path=str(hot_file),
             cold_storage_path=str(cold_file),
             file_size=7,
-            operation_type=OperationType.SYMLINK
+            operation_type=OperationType.SYMLINK,
         )
         db_session.add(record)
         db_session.commit()
@@ -160,7 +162,7 @@ class TestFileThawer:
             original_path=str(hot_file),
             cold_storage_path=str(cold_file),
             file_size=7,
-            operation_type=OperationType.MOVE
+            operation_type=OperationType.MOVE,
         )
         db_session.add(record)
         db_session.commit()
@@ -178,7 +180,7 @@ class TestFileThawer:
             original_path="/tmp/hot.txt",
             cold_storage_path="/tmp/missing_cold.txt",
             file_size=0,
-            operation_type=OperationType.MOVE
+            operation_type=OperationType.MOVE,
         )
         db_session.add(record)
         db_session.commit()
@@ -237,7 +239,9 @@ class TestFileThawer:
                 file_encryption_service.encrypt_file(db_session, temp_plain, destination_path)
                 return True, None
 
-        monkeypatch.setattr("app.services.file_thawer.get_backend", lambda _location: DummyBackend())
+        monkeypatch.setattr(
+            "app.services.file_thawer.get_backend", lambda _location: DummyBackend()
+        )
 
         success, error = FileThawer.thaw_file(record, db=db_session)
 

@@ -1,4 +1,3 @@
-
 import os
 from unittest.mock import patch
 
@@ -10,11 +9,14 @@ from app.utils.rate_limiter import _login_rate_limiter, check_login_rate_limit
 # Create a dummy app for testing
 app = FastAPI()
 
+
 @app.get("/login_test", dependencies=[Depends(check_login_rate_limit)])
 def login_test():
     return {"message": "ok"}
 
+
 client = TestClient(app)
+
 
 @patch.dict(os.environ, {"DISABLE_RATE_LIMIT": "false"})
 def test_rate_limit_bypass_x_forwarded_for():
@@ -44,6 +46,7 @@ def test_rate_limit_bypass_x_forwarded_for():
     # The 6th request (with different XFF) should still count against "ip:testclient" and be blocked.
 
     assert response.status_code == 429, "Rate limit bypassed via X-Forwarded-For spoofing"
+
 
 @patch.dict(os.environ, {"DISABLE_RATE_LIMIT": "false"})
 def test_rate_limit_bypass_x_instance_uuid():

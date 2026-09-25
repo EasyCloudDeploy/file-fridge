@@ -33,9 +33,7 @@ def _create_route_handler(template: str, active_page: str):
     """Create a route handler for a template."""
 
     async def handler(request: Request):
-        return templates.TemplateResponse(
-            template, {"request": request, "active_page": active_page}
-        )
+        return templates.TemplateResponse(request, template, {"active_page": active_page})
 
     return handler
 
@@ -49,57 +47,46 @@ for path, template, active_page in TEMPLATE_ROUTES:
 @router.get("/paths/{path_id}", response_class=HTMLResponse)
 async def get_path(request: Request, path_id: int):
     """Path details page."""
-    return templates.TemplateResponse(
-        "paths/detail.html", {"request": request, "active_page": "paths"}
-    )
+    return templates.TemplateResponse(request, "paths/detail.html", {"active_page": "paths"})
 
 
 @router.get("/paths/{path_id}/edit", response_class=HTMLResponse)
 async def edit_path_form(request: Request, path_id: int):
     """Edit path form."""
-    return templates.TemplateResponse(
-        "paths/form.html", {"request": request, "active_page": "paths"}
-    )
+    return templates.TemplateResponse(request, "paths/form.html", {"active_page": "paths"})
 
 
 @router.get("/paths/{path_id}/criteria/new", response_class=HTMLResponse)
 async def create_criteria_form(request: Request, path_id: int):
     """Create criteria form."""
-    return templates.TemplateResponse(
-        "criteria/form.html", {"request": request, "active_page": "paths"}
-    )
+    return templates.TemplateResponse(request, "criteria/form.html", {"active_page": "paths"})
 
 
 @router.get("/criteria/{criteria_id}/edit", response_class=HTMLResponse)
 async def edit_criteria_form(request: Request, criteria_id: int):
     """Edit criteria form."""
-    return templates.TemplateResponse(
-        "criteria/form.html", {"request": request, "active_page": "paths"}
-    )
+    return templates.TemplateResponse(request, "criteria/form.html", {"active_page": "paths"})
 
 
 @router.get("/storage-locations/{location_id}", response_class=HTMLResponse)
 async def get_storage_location(request: Request, location_id: int):
     """Storage location details page."""
-    return templates.TemplateResponse(
-        "storage/detail.html", {"request": request, "active_page": "storage"}
-    )
+    return templates.TemplateResponse(request, "storage/detail.html", {"active_page": "storage"})
 
 
 @router.get("/storage-locations/{location_id}/edit", response_class=HTMLResponse)
 async def edit_storage_location_form(request: Request, location_id: int):
     """Edit storage location form."""
-    return templates.TemplateResponse(
-        "storage/form.html", {"request": request, "active_page": "storage"}
-    )
+    return templates.TemplateResponse(request, "storage/form.html", {"active_page": "storage"})
 
 
 @router.get("/files/{inventory_id}", response_class=HTMLResponse)
 async def get_file_details(request: Request, inventory_id: int):
     """File details page."""
     return templates.TemplateResponse(
+        request,
         "files/detail.html",
-        {"request": request, "active_page": "files", "inventory_id": inventory_id},
+        {"active_page": "files", "inventory_id": inventory_id},
     )
 
 
