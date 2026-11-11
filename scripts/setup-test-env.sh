@@ -22,8 +22,8 @@ else
 fi
 
 echo "Installing test dependencies using uv..."
-# Install the dev optional dependencies from pyproject.toml
-"$UV_CMD" pip install -e ".[dev]"
+# Sync project + [dependency-groups].dev from pyproject.toml / uv.lock
+"$UV_CMD" sync --group dev
 
 echo "Creating necessary test directories..."
 # Create data directory if it doesn't exist, as app/database.py expects it

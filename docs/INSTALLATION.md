@@ -5,7 +5,7 @@ File Fridge can be installed using Docker (recommended) or manually on a Linux/U
 ## System Requirements
 
 - **Operating System**: Linux or Unix-like system (required for certain file operations and atime tracking)
-- **Python**: 3.8+ (3.11+ recommended) if installing manually
+- **Python**: 3.11+ if installing manually
 - **Package Manager**: [uv](https://astral.sh/uv) (recommended) or pip
 
 ## Docker Installation (Recommended)
