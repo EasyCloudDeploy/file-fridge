@@ -17,7 +17,7 @@ elif [ -f ".venv/bin/uv" ]; then
 else
     echo "uv not found in PATH or .venv. Attempting to install to .venv/bin/uv."
     # Install uv locally if not found
-    curl -LsSf https://astral.sh/uv/install.sh | sh - --target .venv/bin
+    curl --proto '=https' --tlsv1.2 -LsSf https://astral.sh/uv/install.sh | sh - --target .venv/bin
     UV_CMD=".venv/bin/uv"
 fi
 
