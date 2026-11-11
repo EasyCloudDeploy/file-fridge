@@ -177,6 +177,7 @@ class CriterionType(str, enum.Enum):
     PERM = "perm"
     USER = "user"
     GROUP = "group"
+    PLEX_LAST_PLAYED = "plex_last_played"  # Minutes since last Plex play (keep-hot)
 
 
 class Operator(str, enum.Enum):
@@ -454,6 +455,9 @@ class FileInventory(Base):
         server_default=sa.text("'1'"),
         index=True,
     )
+    last_plex_played_at = Column(DateTime(timezone=True), nullable=True, index=True)
+    plex_rating_key = Column(String, nullable=True, index=True)
+    plex_play_count = Column(Integer, nullable=False, default=0, server_default=sa.text("0"))
 
     # Composite indexes for common query patterns
     __table_args__ = (
@@ -909,8 +913,6 @@ class ConflictResolution(str, enum.Enum):
     COMPARE = "COMPARE"  # Compare checksums, skip if identical, otherwise fail
 
 
-
-
 class SecurityAuditLog(Base):
     """Security audit log for compliance and incident response."""
 
@@ -981,3 +983,89 @@ class RelocationTask(Base):
     file_inventory = relationship("FileInventory")
     source_location = relationship("ColdStorageLocation", foreign_keys=[source_location_id])
     target_location = relationship("ColdStorageLocation", foreign_keys=[target_location_id])
+
+
+class PlexLibraryMode(str, enum.Enum):
+    """How a mapped Plex library is served."""
+
+    SYMLINK_WEBHOOK = "symlink_webhook"
+    FRIDGEFS = "fridgefs"
+
+
+class PlexIntegrationConfig(Base):
+    """Singleton-ish Plex integration settings for this File Fridge instance."""
+
+    __tablename__ = "plex_integration_config"
+
+    id = Column(Integer, primary_key=True, index=True)
+    enabled = Column(Boolean, nullable=False, default=False, server_default=sa.text("'0'"))
+    base_url = Column(String, nullable=True)  # e.g. http://plex:32400
+    token_encrypted = Column(Text, nullable=True)
+    webhook_token = Column(String, nullable=True, index=True)  # query/header auth for inbound
+    server_uuid = Column(String, nullable=True)  # optional filter
+    tautulli_enabled = Column(Boolean, nullable=False, default=False, server_default=sa.text("'0'"))
+    # JSON: [{"section_id": "1", "path_id": 3, "mode": "symlink_webhook"}]
+    library_maps_json = Column(Text, nullable=True)
+    # JSON: [{"plex_prefix": "/data/media", "fridge_prefix": "/hot/media"}]
+    path_maps_json = Column(Text, nullable=True)
+    thaw_on_play = Column(Boolean, nullable=False, default=True, server_default=sa.text("'1'"))
+    refresh_on_freeze = Column(Boolean, nullable=False, default=True, server_default=sa.text("'1'"))
+    refresh_on_thaw = Column(Boolean, nullable=False, default=True, server_default=sa.text("'1'"))
+    apply_cold_label = Column(Boolean, nullable=False, default=False, server_default=sa.text("'0'"))
+    cold_label = Column(String, nullable=True, default="Cold Storage")
+    prethaw_on_deck = Column(Boolean, nullable=False, default=True, server_default=sa.text("'1'"))
+    poll_watch_state = Column(Boolean, nullable=False, default=True, server_default=sa.text("'1'"))
+    fridgefs_enabled = Column(Boolean, nullable=False, default=False, server_default=sa.text("'0'"))
+    fridgefs_mount_path = Column(String, nullable=True, default="/mnt/fridgefs")
+    fridgefs_cache_dir = Column(String, nullable=True)
+    fridgefs_cache_max_gb = Column(
+        Integer, nullable=False, default=20, server_default=sa.text("20")
+    )
+    fridgefs_allow_other = Column(
+        Boolean, nullable=False, default=True, server_default=sa.text("'1'")
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def get_token(self) -> str | None:
+        if not self.token_encrypted:
+            return None
+        return encryption_manager.decrypt(self.token_encrypted) or None
+
+    def set_token(self, token: str | None) -> None:
+        if token:
+            self.token_encrypted = encryption_manager.encrypt(token)
+        else:
+            self.token_encrypted = None
+
+    def get_library_maps(self) -> list[dict]:
+        if not self.library_maps_json:
+            return []
+        try:
+            import json
+
+            data = json.loads(self.library_maps_json)
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def set_library_maps(self, maps: list[dict]) -> None:
+        import json
+
+        self.library_maps_json = json.dumps(maps)
+
+    def get_path_maps(self) -> list[dict]:
+        if not self.path_maps_json:
+            return []
+        try:
+            import json
+
+            data = json.loads(self.path_maps_json)
+            return data if isinstance(data, list) else []
+        except Exception:
+            return []
+
+    def set_path_maps(self, maps: list[dict]) -> None:
+        import json
+
+        self.path_maps_json = json.dumps(maps)

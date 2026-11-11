@@ -52,9 +52,7 @@ class FileThawer:
             os.utime(str(final_destination), ns=(stat_info.st_atime_ns, stat_info.st_mtime_ns))
             source.unlink()
         except Exception:
-            logger.exception(
-                "Failed to copy metadata or remove source in staged thaw finalization"
-            )
+            logger.exception("Failed to copy metadata or remove source in staged thaw finalization")
             raise
 
     @staticmethod
@@ -207,6 +205,12 @@ class FileThawer:
                         initiated_by=initiated_by or "manual",
                     )
                     db.commit()
+                    try:
+                        from app.services.plex_policy import PlexPolicy
+
+                        PlexPolicy.after_thaw(db, file_inventory)
+                    except Exception:
+                        logger.debug("Plex after_thaw hook failed", exc_info=True)
 
                 return True, None
 
@@ -376,6 +380,12 @@ class FileThawer:
                 )
 
                 db.commit()
+                try:
+                    from app.services.plex_policy import PlexPolicy
+
+                    PlexPolicy.after_thaw(db, file_inventory)
+                except Exception:
+                    logger.debug("Plex after_thaw hook failed", exc_info=True)
 
             logger.info(f"Thawed file: {cold_path} -> {original_path} (pinned: {pin})")
             return True, None

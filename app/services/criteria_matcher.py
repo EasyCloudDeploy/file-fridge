@@ -9,9 +9,8 @@ import re
 import stat
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import List, Optional
 
 from app.models import Criteria, CriterionType, Operator
 
@@ -23,8 +22,11 @@ class CriteriaMatcher:
 
     @staticmethod
     def match_file(
-        file_path: Path, criteria: List[Criteria], actual_file_path: Optional[Path] = None
-    ) -> tuple[bool, List[int]]:
+        file_path: Path,
+        criteria: list[Criteria],
+        actual_file_path: Path | None = None,
+        inventory_meta: dict | None = None,
+    ) -> tuple[bool, list[int]]:
         """
         Evaluates if a file matches the criteria (is ACTIVE and should be kept in HOT storage).
 
@@ -52,15 +54,25 @@ class CriteriaMatcher:
             stat_info = stat_path.stat()
 
             # Simple, direct criteria evaluation
-            return CriteriaMatcher._check_criteria(file_path, stat_info, enabled_criteria, "file")
+            return CriteriaMatcher._check_criteria(
+                file_path,
+                stat_info,
+                enabled_criteria,
+                "file",
+                inventory_meta=inventory_meta,
+            )
         except (OSError, FileNotFoundError) as e:
             logger.debug(f"File {file_path}: Cannot stat - {e}")
             return False, []
 
     @staticmethod
     def _check_criteria(
-        file_path: Path, stat_info: os.stat_result, criteria: List[Criteria], context: str = "file"
-    ) -> tuple[bool, List[int]]:
+        file_path: Path,
+        stat_info: os.stat_result,
+        criteria: list[Criteria],
+        context: str = "file",
+        inventory_meta: dict | None = None,
+    ) -> tuple[bool, list[int]]:
         """
         Check if a file (or symlink) matches all criteria.
 
@@ -69,6 +81,7 @@ class CriteriaMatcher:
             stat_info: The stat result to check
             criteria: List of enabled criteria to match
             context: Context string for logging (e.g., "symlink", "actual file", "file")
+            inventory_meta: Optional inventory fields for non-filesystem criteria
 
         Returns:
             (matches: bool, matched_criteria_ids: List[int])
@@ -77,7 +90,9 @@ class CriteriaMatcher:
         logger.debug(f"File {file_path}: Evaluating {len(criteria)} enabled criteria ({context})")
 
         for criterion in criteria:
-            matches = CriteriaMatcher._match_criterion(file_path, stat_info, criterion)
+            matches = CriteriaMatcher._match_criterion(
+                file_path, stat_info, criterion, inventory_meta=inventory_meta
+            )
             if matches:
                 logger.debug(
                     f"File {file_path}: ✓ Criterion {criterion.id} ({criterion.criterion_type.value} {criterion.operator.value} {criterion.value}) MATCHED ({context})"
@@ -116,12 +131,17 @@ class CriteriaMatcher:
 
         logger.debug(
             f"File {file_path}: Final atime for criteria check: "
-            f"{datetime.fromtimestamp(atime, tz=timezone.utc)} (source: {used_source})"
+            f"{datetime.fromtimestamp(atime, tz=UTC)} (source: {used_source})"
         )
         return CriteriaMatcher._match_time(atime, operator, value, "atime")
 
     @staticmethod
-    def _match_criterion(file_path: Path, stat_info: os.stat_result, criterion: Criteria) -> bool:
+    def _match_criterion(
+        file_path: Path,
+        stat_info: os.stat_result,
+        criterion: Criteria,
+        inventory_meta: dict | None = None,
+    ) -> bool:
         """Match a single criterion."""
         criterion_type = criterion.criterion_type
         operator = criterion.operator
@@ -149,7 +169,44 @@ class CriteriaMatcher:
             return CriteriaMatcher._match_user(stat_info.st_uid, value)
         if criterion_type == CriterionType.GROUP:
             return CriteriaMatcher._match_group(stat_info.st_gid, value)
+        if criterion_type == CriterionType.PLEX_LAST_PLAYED:
+            return CriteriaMatcher._match_plex_last_played(
+                operator, value, inventory_meta, fallback_mtime=stat_info.st_mtime
+            )
         return False
+
+    @staticmethod
+    def _match_plex_last_played(
+        operator: Operator,
+        value: str,
+        inventory_meta: dict | None,
+        fallback_mtime: float | None = None,
+    ) -> bool:
+        """
+        Keep-hot criterion based on last Plex play time (minutes).
+
+        If last_plex_played_at is missing, fall back to mtime/created so brand-new
+        library additions are not immediately frozen before first play.
+        """
+        played_at = None
+        if inventory_meta:
+            played_at = inventory_meta.get("last_plex_played_at")
+        timestamp: float | None = None
+        if played_at is not None:
+            if isinstance(played_at, datetime):
+                if played_at.tzinfo is None:
+                    played_at = played_at.replace(tzinfo=UTC)
+                timestamp = played_at.timestamp()
+            else:
+                try:
+                    timestamp = float(played_at)
+                except (TypeError, ValueError):
+                    timestamp = None
+        if timestamp is None:
+            timestamp = fallback_mtime
+        if timestamp is None:
+            return False
+        return CriteriaMatcher._match_time(timestamp, operator, value, "plex_last_played")
 
     @staticmethod
     def _match_time(timestamp: float, operator: Operator, value: str, time_type: str) -> bool:
@@ -302,7 +359,7 @@ class CriteriaMatcher:
                 return False
 
     @staticmethod
-    def _parse_mdls_date(date_str: str) -> Optional[float]:
+    def _parse_mdls_date(date_str: str) -> float | None:
         """Parse macOS mdls date string into Unix timestamp."""
         if not date_str or date_str == "(null)":
             return None
@@ -322,7 +379,7 @@ class CriteriaMatcher:
             else:
                 # No timezone info, assume UTC
                 dt_naive = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").replace(
-                    tzinfo=timezone.utc
+                    tzinfo=UTC
                 )
                 return dt_naive.timestamp()
         except ValueError:
@@ -330,7 +387,7 @@ class CriteriaMatcher:
         return None
 
     @staticmethod
-    def _get_macos_last_open_time(file_path: Path) -> Optional[float]:
+    def _get_macos_last_open_time(file_path: Path) -> float | None:
         """
         Get macOS "Last Open" time from extended attributes or Spotlight metadata.
 

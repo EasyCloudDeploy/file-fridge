@@ -255,7 +255,9 @@ class FileWorkflowService:
                         results["errors"].extend(duplicate_results["errors"])
 
                     # Clean up symlink entries from inventory
-                    symlink_results = FileCleanup.cleanup_symlink_inventory_entries(db, path_id=path_id)
+                    symlink_results = FileCleanup.cleanup_symlink_inventory_entries(
+                        db, path_id=path_id
+                    )
                     results["files_cleaned"] += symlink_results["removed"]
                     if symlink_results["errors"]:
                         results["errors"].extend(symlink_results["errors"])
@@ -454,8 +456,22 @@ class FileWorkflowService:
                 continue
 
             try:
+                inventory_meta = None
+                try:
+                    inv = (
+                        self.db.query(FileInventory)
+                        .filter(FileInventory.file_path == str(file_path))
+                        .first()
+                    )
+                    if inv is not None:
+                        inventory_meta = {
+                            "last_plex_played_at": inv.last_plex_played_at,
+                            "plex_rating_key": inv.plex_rating_key,
+                        }
+                except Exception:
+                    inventory_meta = None
                 is_active, matched_ids = CriteriaMatcher.match_file(
-                    file_path, path.criteria, actual_file_path
+                    file_path, path.criteria, actual_file_path, inventory_meta=inventory_meta
                 )
                 if is_active:
                     if is_symlink_to_cold and actual_file_path:
@@ -463,6 +479,15 @@ class FileWorkflowService:
                     else:
                         files_skipped_hot += 1
                 elif not is_symlink_to_cold:
+                    # Playback lock / active Plex session: do not freeze
+                    try:
+                        from app.services.plex_policy import PlexPolicy
+
+                        if PlexPolicy.sessions_block_freeze(self.db, str(file_path)):
+                            files_skipped_hot += 1
+                            continue
+                    except Exception:
+                        pass
                     matching_files.append((file_path, matched_ids))
                 elif path.operation_type == OperationType.COPY and actual_file_path:
                     # COPY requires a real file in hot storage, not a symlink.
@@ -1066,6 +1091,19 @@ class FileWorkflowService:
                 )
             elif criterion_type == CriterionType.TYPE:
                 matches = value in {"f", "file"}
+            elif criterion_type == CriterionType.PLEX_LAST_PLAYED:
+                fallback = None
+                if inventory_entry.file_mtime:
+                    dt = inventory_entry.file_mtime
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    fallback = dt.timestamp()
+                matches = CriteriaMatcher._match_plex_last_played(
+                    operator,
+                    value,
+                    {"last_plex_played_at": inventory_entry.last_plex_played_at},
+                    fallback_mtime=fallback,
+                )
             else:
                 # Conservative behavior: unsupported criteria cannot prove "hot" eligibility.
                 matches = False
@@ -1612,7 +1650,11 @@ class FileWorkflowService:
                     if leaf_name.startswith("ffenc_") and leaf_name.endswith(".ffenc"):
                         try:
                             db_id = int(leaf_name.removeprefix("ffenc_").removesuffix(".ffenc"))
-                            entry = db.query(FileInventory).filter(FileInventory.id == db_id, FileInventory.path_id == path.id).first()
+                            entry = (
+                                db.query(FileInventory)
+                                .filter(FileInventory.id == db_id, FileInventory.path_id == path.id)
+                                .first()
+                            )
                             if entry:
                                 old_ref = entry.file_path
                                 logger.info(

@@ -9,6 +9,7 @@ from alembic.config import Config
 from sqlalchemy import inspect, text
 
 from alembic import command
+from app.config import settings
 from app.database import SessionLocal, engine
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ LOCAL_DRIVE_IDENTITY_REVISION = "b17d9f43c2aa"
 ALLOW_OFFLINE_REVISION = "c3e1d8f7aa42"
 NORMALIZE_COLD_STORAGE_ENUM_VALUES_REVISION = "d4f9b8a1c2e3"
 P2P_V2_REVISION = "e6f7a8b9c0d1"
+PLEX_INTEGRATION_REVISION = "a7b8c9d0e1f2"
 BACKUP_RETENTION_COUNT = 10
 
 
@@ -45,6 +47,31 @@ def _schema_has_p2p_v2_markers(inspector) -> bool:
     return "is_shareable" in file_inventory_columns
 
 
+def _schema_has_plex_integration(inspector) -> bool:
+    """Return True when schema includes Plex integration tables/columns."""
+    tables = set(inspector.get_table_names())
+    if "plex_integration_config" not in tables or "file_inventory" not in tables:
+        return False
+    columns = _table_columns(inspector, "file_inventory")
+    return {"last_plex_played_at", "plex_rating_key", "plex_play_count"}.issubset(columns)
+
+
+def _run_alembic_with_shared_connection(alembic_cfg: Config, callback) -> None:
+    """
+    Run an Alembic command, reusing the app engine connection for in-memory SQLite.
+
+    NullPool + sqlite:///:memory: would otherwise open an empty database.
+    """
+    db_url = str(engine.url)
+    if settings.database_path == ":memory:" or ":memory:" in db_url:
+        with engine.begin() as connection:
+            alembic_cfg.attributes["connection"] = connection
+            callback()
+            alembic_cfg.attributes.pop("connection", None)
+        return
+    callback()
+
+
 def _cold_storage_values_need_normalization(db) -> bool:
     """Return True when lowercase legacy enum values are still present."""
     result = db.execute(text("""
@@ -60,6 +87,9 @@ def _cold_storage_values_need_normalization(db) -> bool:
 def _determine_schema_revision(inspector, db) -> str:
     """Infer the closest Alembic revision from the live schema."""
     tables = set(inspector.get_table_names())
+
+    if _schema_has_plex_integration(inspector):
+        return PLEX_INTEGRATION_REVISION
 
     if _schema_has_p2p_v2_markers(inspector):
         return P2P_V2_REVISION
@@ -153,20 +183,42 @@ def _ensure_post_migration_schema() -> None:
         return
 
     columns = _table_columns(inspector, "file_inventory")
-    if "is_shareable" in columns:
-        return
-
-    with engine.begin() as connection:
-        connection.execute(
-            text("ALTER TABLE file_inventory ADD COLUMN is_shareable BOOLEAN NOT NULL DEFAULT 1")
-        )
-        connection.execute(
-            text(
-                "CREATE INDEX IF NOT EXISTS ix_file_inventory_is_shareable "
-                "ON file_inventory (is_shareable)"
+    if "is_shareable" not in columns:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "ALTER TABLE file_inventory ADD COLUMN is_shareable BOOLEAN NOT NULL DEFAULT 1"
+                )
             )
-        )
-    logger.warning("Applied fallback schema fix: added file_inventory.is_shareable")
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_file_inventory_is_shareable "
+                    "ON file_inventory (is_shareable)"
+                )
+            )
+        logger.warning("Applied fallback schema fix: added file_inventory.is_shareable")
+        columns = _table_columns(inspect(engine), "file_inventory")
+
+    # Plex inventory fields (additive; safe if Alembic migration already applied)
+    plex_columns = {
+        "last_plex_played_at": "ALTER TABLE file_inventory ADD COLUMN last_plex_played_at DATETIME",
+        "plex_rating_key": "ALTER TABLE file_inventory ADD COLUMN plex_rating_key VARCHAR",
+        "plex_play_count": (
+            "ALTER TABLE file_inventory ADD COLUMN plex_play_count INTEGER NOT NULL DEFAULT 0"
+        ),
+    }
+    with engine.begin() as connection:
+        for name, ddl in plex_columns.items():
+            if name not in columns:
+                connection.execute(text(ddl))
+                logger.warning("Applied fallback schema fix: added file_inventory.%s", name)
+        if "plex_integration_config" not in tables:
+            # create_all will also create this; keep a minimal safety net
+            from app import models
+            from app.database import Base
+
+            Base.metadata.create_all(bind=engine, tables=[models.PlexIntegrationConfig.__table__])
+            logger.warning("Applied fallback schema fix: created plex_integration_config")
 
 
 def run_startup_migrations() -> None:
@@ -214,12 +266,16 @@ def run_startup_migrations() -> None:
                 backup_path = _create_sqlite_backup()
 
             if not has_version and has_app_tables and revision_to_stamp is not None:
-                command.stamp(alembic_cfg, revision_to_stamp)
+                _run_alembic_with_shared_connection(
+                    alembic_cfg, lambda: command.stamp(alembic_cfg, revision_to_stamp)
+                )
                 logger.info("✓ Database stamped with appropriate version")
         finally:
             db.close()
 
-        command.upgrade(alembic_cfg, "head")
+        _run_alembic_with_shared_connection(
+            alembic_cfg, lambda: command.upgrade(alembic_cfg, "head")
+        )
         logger.info("✓ Database migrations complete")
 
         _ensure_post_migration_schema()

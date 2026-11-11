@@ -54,6 +54,7 @@ class SchedulerService:
             engine_options["connect_args"] = {"check_same_thread": False}
             if ":memory:" in jobstore_url or settings.database_path == ":memory:":
                 from sqlalchemy.pool import StaticPool
+
                 engine_options["poolclass"] = StaticPool
 
         jobstore = SQLAlchemyJobStore(url=jobstore_url, engine_options=engine_options)
@@ -84,6 +85,7 @@ class SchedulerService:
                 self._add_storage_permissions_job()
                 self._add_fftmp_cleanup_job()
                 self._add_p2p_manifest_sync_job()
+                self._add_plex_jobs()
             except Exception:
                 logger.exception("Error starting scheduler")
                 # Try to clean up
@@ -316,6 +318,33 @@ class SchedulerService:
         except Exception:
             logger.exception("Error adding P2P manifest sync job")
 
+    def _add_plex_jobs(self):
+        """Add Plex watch-state poll and On Deck pre-thaw jobs."""
+        if not self.scheduler.running:
+            return
+        try:
+            if self.scheduler.get_job("plex_watch_state_sync"):
+                self.scheduler.remove_job("plex_watch_state_sync")
+            self.scheduler.add_job(
+                plex_watch_state_sync_job_func,
+                "interval",
+                minutes=15,
+                id="plex_watch_state_sync",
+                replace_existing=True,
+            )
+            if self.scheduler.get_job("plex_prethaw_on_deck"):
+                self.scheduler.remove_job("plex_prethaw_on_deck")
+            self.scheduler.add_job(
+                plex_prethaw_on_deck_job_func,
+                "interval",
+                minutes=10,
+                id="plex_prethaw_on_deck",
+                replace_existing=True,
+            )
+            logger.info("Added scheduled Plex watch-state and On Deck pre-thaw jobs")
+        except Exception:
+            logger.exception("Error adding Plex scheduled jobs")
+
 
 def _check_and_notify_disk_space(location, db: Session):
     """
@@ -401,6 +430,34 @@ def sync_p2p_manifests_job_func():
         logger.debug("P2P manifest sync processed %s peer(s)", synced)
     except Exception:
         logger.exception("Error in P2P manifest sync job")
+    finally:
+        db.close()
+
+
+def plex_watch_state_sync_job_func():
+    """Pull lastViewedAt / viewCount from mapped Plex libraries into inventory."""
+    from app.services.plex_policy import PlexPolicy
+
+    db = SchedulerSessionLocal()
+    try:
+        result = PlexPolicy.sync_watch_state(db)
+        logger.debug("Plex watch-state sync: %s", result)
+    except Exception:
+        logger.exception("Error in Plex watch-state sync job")
+    finally:
+        db.close()
+
+
+def plex_prethaw_on_deck_job_func():
+    """Pre-thaw Continue Watching / On Deck titles before playback."""
+    from app.services.plex_policy import PlexPolicy
+
+    db = SchedulerSessionLocal()
+    try:
+        result = PlexPolicy.prethaw_on_deck(db)
+        logger.debug("Plex On Deck pre-thaw: %s", result)
+    except Exception:
+        logger.exception("Error in Plex On Deck pre-thaw job")
     finally:
         db.close()
 
@@ -1093,7 +1150,6 @@ def decrypt_location_job_func(location_id: int):
         db.close()
 
 
-
 def cleanup_orphaned_fftmp_job_func():
     """Daily job to clean up orphaned .fftmp files older than 7 days."""
     from datetime import datetime, timedelta
@@ -1146,7 +1202,6 @@ def cleanup_orphaned_fftmp_job_func():
         logger.exception("Error in orphaned .fftmp cleanup job")
     finally:
         db.close()
-
 
 
 def recall_location_job_func(location_id: int):
