@@ -195,6 +195,8 @@ For technical users, homelab enthusiasts, and enterprises, we have detailed guid
 *   **[Notifications](docs/NOTIFICATIONS.md)**: Setting up Email and Webhook alerts.
 *   **[Tagging & Rules](docs/TAGGING.md)**: Organizing your files automatically.
 *   **[REST API](docs/API.md)**: Information for developers and automation.
+*   **[Plex Integration](docs/PLEX.md)**: Bidirectional webhooks, thaw-on-play, and `plex_last_played` criteria.
+*   **[FridgeFS](docs/FRIDGEFS.md)**: FUSE mount for Plex libraries with cold thaw-on-open.
 
 ---
 

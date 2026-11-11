@@ -51,6 +51,18 @@ services:
       # - /mnt/nas/hot:/mnt/hot
       # - /mnt/nas/cold:/mnt/cold
 
+      # FridgeFS (Mode B): host must mark parent shared, e.g. mount --make-rshared /mnt
+      # See docs/FRIDGEFS.md. Uncomment with devices/cap_add below.
+      # - /mnt/fridgefs:/mnt/fridgefs:rshared
+
+    # FridgeFS FUSE (optional — Mode B for Plex library mounts)
+    # devices:
+    #   - /dev/fuse
+    # cap_add:
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - apparmor:unconfined
+
     # Optional: Run as specific user/group (uncomment if needed)
     # user: "1000:1000"
 

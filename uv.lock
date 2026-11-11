@@ -1058,6 +1058,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+fridgefs = [
+    { name = "pyfuse3" },
+    { name = "trio" },
+]
 s3 = [
     { name = "boto3" },
 ]
@@ -1095,15 +1099,17 @@ requires-dist = [
     { name = "passlib", extras = ["bcrypt"], specifier = ">=1.7.4" },
     { name = "pydantic", specifier = ">=2.14.3" },
     { name = "pydantic-settings", specifier = ">=2.16.2" },
+    { name = "pyfuse3", marker = "extra == 'fridgefs'", specifier = ">=3.4.0" },
     { name = "pyjwt", specifier = ">=2.15.1" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.5.0" },
     { name = "python-multipart", specifier = ">=0.0.33" },
     { name = "sqlalchemy", specifier = ">=2.1.8" },
+    { name = "trio", marker = "extra == 'fridgefs'", specifier = ">=0.31.0" },
     { name = "typing-extensions", specifier = ">=4.16.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
     { name = "zstandard", specifier = ">=0.25.0" },
 ]
-provides-extras = ["s3"]
+provides-extras = ["fridgefs", "s3"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2317,6 +2323,15 @@ sdist = { url = "https://files.pythonhosted.org/packages/d0/31/21d21e0e38a8f5f7a
 wheels = [
     { url = "https://files.pythonhosted.org/packages/39/88/4131c51ff87b7cd7f82a1194d0c0a2b7ca68c72d9da04c3b7e69ab91a79f/pydantic_settings-2.16.2-py3-none-any.whl", hash = "sha256:8d523e5c129b097686bde019bd6109bff53f4c8c3f63f1ddf9933ffa42e5ab4f", size = 81994, upload-time = "2026-10-28T11:14:26.716Z" },
 ]
+
+[[package]]
+name = "pyfuse3"
+version = "3.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "trio" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b9/a9/ce2c0513e9611ee2ffeeb482a33d23a210326801d48866df30a989562d43/pyfuse3-3.5.0.tar.gz", hash = "sha256:88399a9494b88603230bba300f4ba9ad63fece5ed514ca3633d555a0c6a42b24", size = 1219614, upload-time = "2026-06-22T19:12:18.117Z" }
 
 [[package]]
 name = "pygments"

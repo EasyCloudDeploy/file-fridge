@@ -162,7 +162,9 @@ class FileFreezer:
                         encrypted_temp_path = None
                         storage_reference = None
                         try:
-                            encrypted_relative_path = relative_path.with_name(f"ffenc_{locked_file.id}.ffenc")
+                            encrypted_relative_path = relative_path.with_name(
+                                f"ffenc_{locked_file.id}.ffenc"
+                            )
                             with tempfile.NamedTemporaryFile(
                                 prefix="file-fridge-", suffix=".ffenc", delete=False
                             ) as encrypted_tmp:
@@ -293,6 +295,12 @@ class FileFreezer:
                     f"Froze file: {source_path} -> {destination_path} "
                     f"(location: {storage_location.name}, pinned: {pin})"
                 )
+                try:
+                    from app.services.plex_policy import PlexPolicy
+
+                    PlexPolicy.after_freeze(db, locked_file)
+                except Exception:
+                    logger.debug("Plex after_freeze hook failed", exc_info=True)
                 return True, None, cold_storage_path
 
             except Exception as move_error:

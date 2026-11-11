@@ -43,6 +43,12 @@ function initSettingsPage() {
                 loadSmtpConfig();
             }
 
+            if (sectionId === 'plex') {
+                void loadPlexConfig().catch((error) => {
+                    console.error('Failed to load Plex settings:', error);
+                });
+            }
+
             // Update URL hash without jumping
             history.pushState(null, null, '#' + sectionId);
         });
@@ -769,6 +775,148 @@ function initSettingsPage() {
             }
         });
     }
+
+    async function loadPlexConfig() {
+        const successMsg = document.getElementById('plex-success-message');
+        const errorMsg = document.getElementById('plex-error-message');
+        successMsg?.classList.add('d-none');
+        errorMsg?.classList.add('d-none');
+        try {
+            const response = await authenticatedFetch('/api/v1/plex/settings');
+            if (!response.ok) {
+                throw new Error('Failed to load Plex settings');
+            }
+            const cfg = await response.json();
+            document.getElementById('plex-enabled').checked = !!cfg.enabled;
+            document.getElementById('plex-base-url').value = cfg.base_url || '';
+            document.getElementById('plex-token').value = '';
+            document.getElementById('plex-token').placeholder = cfg.has_token ? '•••••••• (unchanged)' : 'Plex token';
+            document.getElementById('plex-webhook-token').value = cfg.webhook_token || '';
+            document.getElementById('plex-server-uuid').value = cfg.server_uuid || '';
+            document.getElementById('plex-thaw-on-play').checked = !!cfg.thaw_on_play;
+            document.getElementById('plex-refresh-freeze').checked = !!cfg.refresh_on_freeze;
+            document.getElementById('plex-refresh-thaw').checked = !!cfg.refresh_on_thaw;
+            document.getElementById('plex-cold-label').checked = !!cfg.apply_cold_label;
+            document.getElementById('plex-prethaw').checked = !!cfg.prethaw_on_deck;
+            document.getElementById('plex-poll-watch').checked = !!cfg.poll_watch_state;
+            document.getElementById('plex-tautulli').checked = !!cfg.tautulli_enabled;
+            document.getElementById('plex-path-maps').value = JSON.stringify(cfg.path_maps || [], null, 2);
+            document.getElementById('plex-library-maps').value = JSON.stringify(cfg.library_maps || [], null, 2);
+            document.getElementById('fridgefs-enabled').checked = !!cfg.fridgefs_enabled;
+            document.getElementById('fridgefs-mount-path').value = cfg.fridgefs_mount_path || '/mnt/fridgefs';
+            document.getElementById('fridgefs-cache-gb').value = cfg.fridgefs_cache_max_gb || 20;
+            document.getElementById('fridgefs-allow-other').checked = !!cfg.fridgefs_allow_other;
+            document.getElementById('fridgefs-status-text').textContent = cfg.fridgefs_mounted
+                ? `mounted at ${cfg.fridgefs_mount_path}`
+                : 'not mounted';
+            const webhookEl = document.getElementById('plex-webhook-url');
+            if (webhookEl) {
+                const token = cfg.webhook_token || 'YOUR_TOKEN';
+                webhookEl.textContent = `${globalThis.location.origin}/api/v1/plex/webhook?token=${token}`;
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('Failed to load Plex settings', 'error');
+        }
+    }
+
+    const plexForm = document.getElementById('plex-config-form');
+    if (plexForm) {
+        plexForm.addEventListener('submit', async function (e) {
+            e.preventDefault();
+            const successMsg = document.getElementById('plex-success-message');
+            const errorMsg = document.getElementById('plex-error-message');
+            successMsg?.classList.add('d-none');
+            errorMsg?.classList.add('d-none');
+            let pathMaps = [];
+            let libraryMaps = [];
+            try {
+                pathMaps = JSON.parse(document.getElementById('plex-path-maps').value || '[]');
+                libraryMaps = JSON.parse(document.getElementById('plex-library-maps').value || '[]');
+            } catch {
+                errorMsg.textContent = 'Path maps / library maps must be valid JSON arrays';
+                errorMsg.classList.remove('d-none');
+                return;
+            }
+            const payload = {
+                enabled: document.getElementById('plex-enabled').checked,
+                base_url: document.getElementById('plex-base-url').value || null,
+                webhook_token: document.getElementById('plex-webhook-token').value || null,
+                server_uuid: document.getElementById('plex-server-uuid').value || null,
+                thaw_on_play: document.getElementById('plex-thaw-on-play').checked,
+                refresh_on_freeze: document.getElementById('plex-refresh-freeze').checked,
+                refresh_on_thaw: document.getElementById('plex-refresh-thaw').checked,
+                apply_cold_label: document.getElementById('plex-cold-label').checked,
+                prethaw_on_deck: document.getElementById('plex-prethaw').checked,
+                poll_watch_state: document.getElementById('plex-poll-watch').checked,
+                tautulli_enabled: document.getElementById('plex-tautulli').checked,
+                path_maps: pathMaps,
+                library_maps: libraryMaps,
+                fridgefs_enabled: document.getElementById('fridgefs-enabled').checked,
+                fridgefs_mount_path: document.getElementById('fridgefs-mount-path').value || '/mnt/fridgefs',
+                fridgefs_cache_max_gb: Number.parseInt(document.getElementById('fridgefs-cache-gb').value, 10) || 20,
+                fridgefs_allow_other: document.getElementById('fridgefs-allow-other').checked,
+            };
+            const token = document.getElementById('plex-token').value;
+            if (token) {
+                payload.token = token;
+            }
+            try {
+                const response = await authenticatedFetch('/api/v1/plex/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                });
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.detail || 'Save failed');
+                }
+                successMsg.textContent = 'Plex settings saved.';
+                successMsg.classList.remove('d-none');
+                await loadPlexConfig();
+            } catch (error) {
+                errorMsg.textContent = error.message || 'Failed to save Plex settings';
+                errorMsg.classList.remove('d-none');
+            }
+        });
+    }
+
+    document.getElementById('test-plex-btn')?.addEventListener('click', async () => {
+        try {
+            const response = await authenticatedFetch('/api/v1/plex/test', { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || 'Connection failed');
+            }
+            showToast(`Connected to Plex ${data.identity?.version || ''}`.trim(), 'success');
+        } catch (error) {
+            showToast(error.message || 'Plex test failed', 'error');
+        }
+    });
+
+    document.getElementById('mount-fridgefs-btn')?.addEventListener('click', async () => {
+        try {
+            const response = await authenticatedFetch('/api/v1/plex/fridgefs/mount', { method: 'POST' });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.detail || 'Mount failed');
+            }
+            showToast(data.mounted ? 'FridgeFS mounted' : 'FridgeFS not mounted', 'success');
+            await loadPlexConfig();
+        } catch (error) {
+            showToast(error.message || 'FridgeFS mount failed', 'error');
+        }
+    });
+
+    document.getElementById('unmount-fridgefs-btn')?.addEventListener('click', async () => {
+        try {
+            await authenticatedFetch('/api/v1/plex/fridgefs/unmount', { method: 'POST' });
+            showToast('FridgeFS unmounted', 'success');
+            await loadPlexConfig();
+        } catch (error) {
+            showToast(error.message || 'FridgeFS unmount failed', 'error');
+        }
+    });
 }
 
 window.runWhenFileFridgeReady(initSettingsPage);

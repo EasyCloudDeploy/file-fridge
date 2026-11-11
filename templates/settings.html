@@ -21,6 +21,9 @@
             <a href="#smtp" class="list-group-item list-group-item-action notifiers-only d-none" data-section="smtp">
                 <i class="bi bi-envelope-at me-2"></i>SMTP Server
             </a>
+            <a href="#plex" class="list-group-item list-group-item-action notifiers-only d-none" data-section="plex">
+                <i class="bi bi-play-btn me-2"></i>Plex / FridgeFS
+            </a>
         </div>
     </div>
 
@@ -359,6 +362,127 @@
                         <i class="bi bi-exclamation-triangle me-2"></i>
                         <span id="smtp-error-text"></span>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Plex / FridgeFS Section -->
+        <div id="plex-section" class="settings-section d-none">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">
+                        <i class="bi bi-play-btn me-2"></i>Plex Integration
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small">
+                        Bidirectional Plex integration: play webhooks thaw cold media, freeze/thaw
+                        refreshes Plex metadata, and optional FridgeFS mounts a FUSE view for library paths.
+                        Webhook URL: <code id="plex-webhook-url">/api/v1/plex/webhook?token=...</code>
+                    </p>
+                    <form id="plex-config-form">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="plex-enabled">
+                            <label class="form-check-label" for="plex-enabled">Enable Plex integration</label>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-8 mb-3">
+                                <label class="form-label" for="plex-base-url">Plex base URL</label>
+                                <input type="url" class="form-control" id="plex-base-url" placeholder="http://plex:32400">
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label" for="plex-token">Plex token</label>
+                                <input type="password" class="form-control" id="plex-token" placeholder="Leave blank to keep">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="plex-webhook-token">Webhook token</label>
+                                <input type="text" class="form-control" id="plex-webhook-token">
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="plex-server-uuid">Server UUID filter (optional)</label>
+                                <input type="text" class="form-control" id="plex-server-uuid">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="plex-thaw-on-play" checked>
+                                    <label class="form-check-label" for="plex-thaw-on-play">Thaw on play</label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="plex-refresh-freeze" checked>
+                                    <label class="form-check-label" for="plex-refresh-freeze">Refresh Plex on freeze</label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="plex-refresh-thaw" checked>
+                                    <label class="form-check-label" for="plex-refresh-thaw">Refresh Plex on thaw</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="plex-cold-label">
+                                    <label class="form-check-label" for="plex-cold-label">Apply cold-storage label</label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="plex-prethaw" checked>
+                                    <label class="form-check-label" for="plex-prethaw">Pre-thaw On Deck</label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="plex-poll-watch" checked>
+                                    <label class="form-check-label" for="plex-poll-watch">Poll watch state</label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="plex-tautulli">
+                                    <label class="form-check-label" for="plex-tautulli">Tautulli webhook mode</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="plex-path-maps">Path maps (JSON)</label>
+                            <textarea class="form-control font-monospace" id="plex-path-maps" rows="3"
+                                placeholder='[{"plex_prefix":"/data/media","fridge_prefix":"/hot/media"}]'></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label" for="plex-library-maps">Library maps (JSON)</label>
+                            <textarea class="form-control font-monospace" id="plex-library-maps" rows="3"
+                                placeholder='[{"section_id":"1","path_id":1,"mode":"symlink_webhook"}]'></textarea>
+                        </div>
+                        <hr>
+                        <h6>FridgeFS</h6>
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="fridgefs-enabled">
+                            <label class="form-check-label" for="fridgefs-enabled">Enable FridgeFS mount</label>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label class="form-label" for="fridgefs-mount-path">Mount path</label>
+                                <input type="text" class="form-control" id="fridgefs-mount-path" value="/mnt/fridgefs">
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <label class="form-label" for="fridgefs-cache-gb">Cache max (GB)</label>
+                                <input type="number" class="form-control" id="fridgefs-cache-gb" min="1" value="20">
+                            </div>
+                            <div class="col-md-3 mb-3 d-flex align-items-end">
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" id="fridgefs-allow-other" checked>
+                                    <label class="form-check-label" for="fridgefs-allow-other">allow_other</label>
+                                </div>
+                            </div>
+                        </div>
+                        <p class="small text-muted mb-3">
+                            Status: <span id="fridgefs-status-text">unknown</span>
+                        </p>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button type="submit" class="btn btn-primary" id="save-plex-btn">Save Plex Settings</button>
+                            <button type="button" class="btn btn-outline-secondary" id="test-plex-btn">Test connection</button>
+                            <button type="button" class="btn btn-outline-secondary" id="mount-fridgefs-btn">Mount FridgeFS</button>
+                            <button type="button" class="btn btn-outline-secondary" id="unmount-fridgefs-btn">Unmount</button>
+                        </div>
+                    </form>
+                    <div id="plex-success-message" class="alert alert-success mt-3 d-none" role="alert"></div>
+                    <div id="plex-error-message" class="alert alert-danger mt-3 d-none" role="alert"></div>
                 </div>
             </div>
         </div>

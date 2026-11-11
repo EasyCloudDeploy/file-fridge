@@ -57,6 +57,7 @@ pattern = "(?P<version>.*)"
 
 [project.optional-dependencies]
 s3 = ["boto3>=1.44.0"]
+fridgefs = ["pyfuse3>=3.4.0", "trio>=0.31.0"]
 
 [dependency-groups]
 dev = [

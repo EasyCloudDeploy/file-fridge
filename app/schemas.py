@@ -292,6 +292,9 @@ class FileInventoryBase(BaseModel):
     status: FileStatus = FileStatus.ACTIVE
     is_encrypted: bool = False
     is_shareable: bool = True
+    last_plex_played_at: Optional[datetime] = None
+    plex_rating_key: Optional[str] = None
+    plex_play_count: int = 0
 
 
 class FileInventoryCreate(FileInventoryBase):
@@ -998,10 +1001,6 @@ class P2PPullResponse(BaseModel):
     errors: List[P2PPullErrorItem]
 
 
-
-
-
-
 class RelocationTaskBase(BaseModel):
     """Base schema for relocation tasks."""
 
@@ -1048,8 +1047,6 @@ class FreezingFileSchema(BaseModel):
     eta_seconds: Optional[int] = None
     percent_complete: int = 0
     error_message: Optional[str] = None
-
-
 
 
 class ConflictCheckRequest(BaseModel):
@@ -1179,6 +1176,77 @@ class SMTPSettingsUpdate(BaseModel):
     smtp_password: Optional[str] = Field(None, description="SMTP password")
     smtp_sender: Optional[str] = Field(None, description="SMTP sender address")
     smtp_use_tls: Optional[bool] = Field(True, description="Use TLS encryption")
+
+
+# ========================================
+# Plex Integration Schemas
+# ========================================
+
+
+class PlexLibraryMap(BaseModel):
+    """Map a Plex library section to a monitored path."""
+
+    section_id: str
+    path_id: int
+    mode: str = Field("symlink_webhook", description="symlink_webhook | fridgefs")
+
+
+class PlexPathMap(BaseModel):
+    """Translate Plex-reported paths to File Fridge paths."""
+
+    plex_prefix: str
+    fridge_prefix: str
+
+
+class PlexSettingsUpdate(BaseModel):
+    """Update Plex integration settings."""
+
+    enabled: Optional[bool] = None
+    base_url: Optional[str] = None
+    token: Optional[str] = None
+    webhook_token: Optional[str] = None
+    server_uuid: Optional[str] = None
+    tautulli_enabled: Optional[bool] = None
+    library_maps: Optional[List[PlexLibraryMap]] = None
+    path_maps: Optional[List[PlexPathMap]] = None
+    thaw_on_play: Optional[bool] = None
+    refresh_on_freeze: Optional[bool] = None
+    refresh_on_thaw: Optional[bool] = None
+    apply_cold_label: Optional[bool] = None
+    cold_label: Optional[str] = None
+    prethaw_on_deck: Optional[bool] = None
+    poll_watch_state: Optional[bool] = None
+    fridgefs_enabled: Optional[bool] = None
+    fridgefs_mount_path: Optional[str] = None
+    fridgefs_cache_dir: Optional[str] = None
+    fridgefs_cache_max_gb: Optional[int] = None
+    fridgefs_allow_other: Optional[bool] = None
+
+
+class PlexSettingsResponse(BaseModel):
+    """Plex settings without exposing decrypted secrets in full."""
+
+    enabled: bool
+    base_url: Optional[str] = None
+    has_token: bool = False
+    webhook_token: Optional[str] = None
+    server_uuid: Optional[str] = None
+    tautulli_enabled: bool = False
+    library_maps: List[PlexLibraryMap] = Field(default_factory=list)
+    path_maps: List[PlexPathMap] = Field(default_factory=list)
+    thaw_on_play: bool = True
+    refresh_on_freeze: bool = True
+    refresh_on_thaw: bool = True
+    apply_cold_label: bool = False
+    cold_label: Optional[str] = "Cold Storage"
+    prethaw_on_deck: bool = True
+    poll_watch_state: bool = True
+    fridgefs_enabled: bool = False
+    fridgefs_mount_path: Optional[str] = "/mnt/fridgefs"
+    fridgefs_cache_dir: Optional[str] = None
+    fridgefs_cache_max_gb: int = 20
+    fridgefs_allow_other: bool = True
+    fridgefs_mounted: bool = False
 
 
 # Rebuild models to resolve forward references

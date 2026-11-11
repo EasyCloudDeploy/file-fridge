@@ -49,6 +49,7 @@ from app.routers.api import migrations as api_migrations
 from app.routers.api import notifiers as api_notifiers
 from app.routers.api import p2p as api_p2p
 from app.routers.api import paths as api_paths
+from app.routers.api import plex as api_plex
 from app.routers.api import remote as api_remote
 from app.routers.api import settings as api_settings  # noqa: E402
 from app.routers.api import stats as api_stats
@@ -59,7 +60,9 @@ from app.routers.api import users as api_users
 from app.routers.web.views import router as web_router
 from app.security import PermissionChecker
 from app.services.file_cleanup import FileCleanup
+from app.services.fridgefs.manager import fridgefs_manager
 from app.services.p2p_service import p2p_service
+from app.services.plex_service import get_or_create_plex_config
 from app.services.scheduler import scheduler_service
 
 # Apply filter to uvicorn access logger
@@ -148,11 +151,28 @@ async def lifespan(app: FastAPI):  # noqa: ARG001
     logger.info("Starting scheduler...")
     scheduler_service.start()
 
+    # Optionally mount FridgeFS before dependents (e.g. Plex) start reading libraries
+    try:
+        db = SessionLocal()
+        try:
+            plex_config = get_or_create_plex_config(db)
+            if plex_config.fridgefs_enabled:
+                fridgefs_manager.mount(db, plex_config)
+                logger.info("FridgeFS mount requested at %s", plex_config.fridgefs_mount_path)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("FridgeFS auto-mount skipped: %s", e)
+
     yield
 
     # Shutdown
     logger.info("Stopping scheduler...")
     scheduler_service.stop()
+    try:
+        fridgefs_manager.unmount()
+    except Exception:
+        logger.debug("FridgeFS unmount during shutdown failed", exc_info=True)
     p2p_service.stop_node()
     logger.info("Application shutdown complete")
 
@@ -204,6 +224,8 @@ app.include_router(api_users.router)  # Roles handled inside this router
 app.include_router(api_identity.router)  # Permissions handled inside router
 app.include_router(api_p2p.router)
 app.include_router(api_remote.router)
+app.include_router(api_plex.router, dependencies=[Depends(PermissionChecker("notifiers"))])
+app.include_router(api_plex.webhook_router)
 
 # Include consolidated web router (public - frontend handles auth)
 app.include_router(web_router)
