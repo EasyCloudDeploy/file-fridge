@@ -3,7 +3,7 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import computed_field, model_validator
 from pydantic_settings import BaseSettings
@@ -113,7 +113,7 @@ class Settings(BaseSettings):
     # Override via P2P_LISTEN_PORT.
     p2p_listen_port: int = 9119
     # Override via P2P_TRANSPORT_SCHEME. Use "http" only for trusted LAN lab setups.
-    p2p_transport_scheme: str = "https"
+    p2p_transport_scheme: Literal["https", "http"] = "https"
     # Override via P2P_TLS_VERIFY. Disable only when using self-signed certs on a trusted LAN.
     p2p_tls_verify: bool = True
 

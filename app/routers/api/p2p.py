@@ -233,7 +233,10 @@ def join_peer(
         try:
             psk = p2p_service.get_network_psk(config)
         except ValueError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+            raise HTTPException(
+                status_code=503,
+                detail="P2P authentication key is unavailable",
+            ) from exc
         p2p_service.sync_peer_manifest(
             db,
             peer=peer,
@@ -305,11 +308,17 @@ def sync_peers(
     current_user: Annotated[dict, Depends(PermissionChecker(RESOURCE_REMOTE_CONNECTIONS))],
 ):
     _ = current_user
-    synced = p2p_service.sync_all_peer_manifests(
-        db,
-        local_host=request.url.hostname,
-        local_port=request.url.port,
-    )
+    try:
+        synced = p2p_service.sync_all_peer_manifests(
+            db,
+            local_host=request.url.hostname,
+            local_port=request.url.port,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="P2P authentication key is unavailable",
+        ) from exc
     return {"synced": synced}
 
 

@@ -353,6 +353,25 @@ def test_manifest_rejects_static_psk_bearer(authenticated_client):
     assert "Static PSK bearer authentication is no longer accepted" in response.json()["detail"]
 
 
+def test_manifest_rejects_oversized_body(authenticated_client, monkeypatch):
+    monkeypatch.setattr("app.dependencies.p2p_auth.MAX_P2P_BODY_BYTES", 64)
+    authenticated_client.post(
+        "/api/v1/p2p/network",
+        json={
+            "network_name": "Main",
+            "listen_host": "127.0.0.1",
+            "listen_port": 9119,
+            "enabled": True,
+            "psk": "manifest-secret",
+        },
+    )
+    path = "/api/v1/p2p/manifest"
+    body = b"x" * 128
+    headers = sign_request("manifest-secret", "GET", path, body)
+    response = authenticated_client.request("GET", path, headers=headers, content=body)
+    assert response.status_code == 413
+
+
 def test_manifest_rejects_expired_hmac_signature(authenticated_client):
     authenticated_client.post(
         "/api/v1/p2p/network",
@@ -427,6 +446,27 @@ def test_manifest_push_registers_peer_and_caches_files(authenticated_client, db_
     )
     assert len(cached) == 1
     assert cached[0].checksum == "abc123"
+
+
+def test_sync_returns_503_when_psk_unavailable(authenticated_client, db_session):
+    authenticated_client.post(
+        "/api/v1/p2p/network",
+        json={
+            "network_name": "Main",
+            "listen_host": "127.0.0.1",
+            "listen_port": 9119,
+            "enabled": True,
+            "psk": "sync-secret",
+        },
+    )
+    config = p2p_service.get_network_config(db_session)
+    assert config is not None
+    config.psk_encrypted = None
+    db_session.commit()
+
+    response = authenticated_client.post("/api/v1/p2p/sync")
+    assert response.status_code == 503
+    assert response.json()["detail"] == "P2P authentication key is unavailable"
 
 
 def test_file_content_accepts_signature_for_encoded_remote_file_id(

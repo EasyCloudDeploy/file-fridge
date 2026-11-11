@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import P2PNetworkConfig
 from app.services.p2p_service import p2p_service
-from app.utils.p2p_auth import LEGACY_PSK_HEADER, verify_request
+from app.utils.p2p_auth import LEGACY_PSK_HEADER, MAX_P2P_BODY_BYTES, verify_request
 
 
 def require_p2p_network(db: Session) -> P2PNetworkConfig:
@@ -26,7 +26,27 @@ def require_p2p_psk(config: P2PNetworkConfig) -> str:
     try:
         return p2p_service.get_network_psk(config)
     except ValueError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=503,
+            detail="P2P authentication key is unavailable",
+        ) from exc
+
+
+async def _read_bounded_body(request: Request) -> bytes:
+    """Read the request body with an explicit size bound for peer auth."""
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declared_length = int(content_length)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length") from exc
+        if declared_length > MAX_P2P_BODY_BYTES:
+            raise HTTPException(status_code=413, detail="P2P request body too large")
+
+    body = await request.body()
+    if len(body) > MAX_P2P_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="P2P request body too large")
+    return body
 
 
 async def verify_p2p_request_auth(
@@ -46,7 +66,7 @@ async def verify_p2p_request_auth(
         )
 
     psk = require_p2p_psk(config)
-    body = await request.body()
+    body = await _read_bounded_body(request)
     if not verify_request(psk, request.method, request.url.path, request.headers, body):
         raise HTTPException(status_code=403, detail="Invalid P2P request signature")
 

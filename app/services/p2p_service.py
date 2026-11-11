@@ -611,12 +611,13 @@ class P2PService:
             headers = self.build_peer_auth_headers(psk, "GET", request_path)
 
             try:
-                with httpx.Client(timeout=300.0, verify=self._httpx_verify()) as client:
-                    with client.stream("GET", url, headers=headers) as response:
-                        response.raise_for_status()
-                        with open(dest_path, "wb") as fh:
-                            for chunk in response.iter_bytes(chunk_size=65536):
-                                fh.write(chunk)
+                with httpx.Client(
+                    timeout=300.0, verify=self._httpx_verify()
+                ) as client, client.stream("GET", url, headers=headers) as response:
+                    response.raise_for_status()
+                    with open(dest_path, "wb") as fh:
+                        for chunk in response.iter_bytes(chunk_size=65536):
+                            fh.write(chunk)
                 pulled.append({"id": cache_id, "dest_path": dest_path, "filename": filename})
             except httpx.HTTPStatusError as exc:
                 failed.append(

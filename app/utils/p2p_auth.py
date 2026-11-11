@@ -17,6 +17,8 @@ P2P_SIGNED_REQUEST_HEADERS = (
     "X-FF-LOCAL-HOST",
     "X-FF-LOCAL-PORT",
 )
+# Bound peer request bodies before auth buffering (manifest push can be large).
+MAX_P2P_BODY_BYTES = 16 * 1024 * 1024
 
 
 def canonical_auth_path(path: str) -> str:
@@ -118,4 +120,9 @@ def verify_request(
         ).encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    try:
+        return hmac.compare_digest(expected, signature)
+    except TypeError:
+        # Non-ASCII or otherwise malformed signature headers must fail closed as 403,
+        # not bubble into an unhandled TypeError / HTTP 500.
+        return False

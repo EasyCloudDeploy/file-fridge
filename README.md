@@ -51,6 +51,18 @@ This release includes a **hard protocol cutover**:
 
 Peer-to-peer endpoints authenticate with **request-bound HMAC signatures** derived from the shared PSK. Each request includes `X-FF-PSK-TIMESTAMP` and `X-FF-PSK-SIGNATURE` headers; static `X-FF-PSK` bearer tokens (SHA256 of the PSK) are rejected.
 
+Canonical signed material:
+
+```text
+{timestamp}
+{METHOD}
+{url-decoded path}
+{sha256(body)}
+[optional X-FF-LOCAL-HOST / X-FF-LOCAL-PORT lines]
+```
+
+Path signing uses the **decoded** form (e.g. `/files/local:1/content`), even when the HTTP URL percent-encodes characters such as `:`. Optional discovery headers (`X-FF-LOCAL-HOST`, `X-FF-LOCAL-PORT`) are bound into the signature when present.
+
 **Defaults (production-oriented):**
 
 - `P2P_TRANSPORT_SCHEME=https` — peers call each other over TLS.
