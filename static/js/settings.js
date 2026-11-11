@@ -44,7 +44,9 @@ function initSettingsPage() {
             }
 
             if (sectionId === 'plex') {
-                loadPlexConfig();
+                void loadPlexConfig().catch((error) => {
+                    console.error('Failed to load Plex settings:', error);
+                });
             }
 
             // Update URL hash without jumping
@@ -852,7 +854,7 @@ function initSettingsPage() {
                 library_maps: libraryMaps,
                 fridgefs_enabled: document.getElementById('fridgefs-enabled').checked,
                 fridgefs_mount_path: document.getElementById('fridgefs-mount-path').value || '/mnt/fridgefs',
-                fridgefs_cache_max_gb: parseInt(document.getElementById('fridgefs-cache-gb').value, 10) || 20,
+                fridgefs_cache_max_gb: Number.parseInt(document.getElementById('fridgefs-cache-gb').value, 10) || 20,
                 fridgefs_allow_other: document.getElementById('fridgefs-allow-other').checked,
             };
             const token = document.getElementById('plex-token').value;
