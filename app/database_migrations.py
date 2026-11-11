@@ -2,7 +2,7 @@
 
 import logging
 import sqlite3
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from alembic.config import Config
@@ -47,17 +47,13 @@ def _schema_has_p2p_v2_markers(inspector) -> bool:
 
 def _cold_storage_values_need_normalization(db) -> bool:
     """Return True when lowercase legacy enum values are still present."""
-    result = db.execute(
-        text(
-            """
+    result = db.execute(text("""
             SELECT 1
             FROM cold_storage_locations
             WHERE TRIM(backend_type) IN ('local', 's3', 'gdrive')
                OR TRIM(operation_mode) IN ('move', 'copy', 'symlink')
             LIMIT 1
-            """
-        )
-    ).fetchone()
+            """)).fetchone()
     return result is not None
 
 
@@ -114,14 +110,15 @@ def _create_sqlite_backup() -> Path | None:
 
     backup_dir = source.parent / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup_path = backup_dir / f"{source.name}.pre_migration.{timestamp}.bak"
 
     source_uri = f"file:{source.absolute()}?mode=ro"
     try:
-        with sqlite3.connect(source_uri, uri=True) as src_conn, sqlite3.connect(
-            backup_path
-        ) as backup_conn:
+        with (
+            sqlite3.connect(source_uri, uri=True) as src_conn,
+            sqlite3.connect(backup_path) as backup_conn,
+        ):
             src_conn.backup(backup_conn)
     except (sqlite3.Error, OSError) as exc:
         raise RuntimeError(
@@ -183,7 +180,9 @@ def run_startup_migrations() -> None:
     backup_path: Path | None = None
     try:
         alembic_cfg = Config("alembic.ini")
-        alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url))
+        # ConfigParser interpolates % sequences; SQLAlchemy 2.1+ may encode
+        # URLs like sqlite:///%3Amemory%3A, so escape % for Alembic config.
+        alembic_cfg.set_main_option("sqlalchemy.url", str(engine.url).replace("%", "%%"))
 
         # Stamp legacy databases that have tables but no alembic_version yet.
         # This happens when init_db() (create_all) was used before Alembic was introduced.

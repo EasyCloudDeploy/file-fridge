@@ -17,13 +17,13 @@ elif [ -f ".venv/bin/uv" ]; then
 else
     echo "uv not found in PATH or .venv. Attempting to install to .venv/bin/uv."
     # Install uv locally if not found
-    curl -LsSf https://astral.sh/uv/install.sh | sh - --target .venv/bin
+    curl --proto '=https' --tlsv1.2 -LsSf https://astral.sh/uv/install.sh | sh - --target .venv/bin
     UV_CMD=".venv/bin/uv"
 fi
 
 echo "Installing test dependencies using uv..."
-# Install the dev optional dependencies from pyproject.toml
-"$UV_CMD" pip install -e ".[dev]"
+# Sync project + [dependency-groups].dev from pyproject.toml / uv.lock
+"$UV_CMD" sync --group dev
 
 echo "Creating necessary test directories..."
 # Create data directory if it doesn't exist, as app/database.py expects it
